@@ -8,7 +8,7 @@ required_packages = [
     "pillow",
     "pycocotools",
     "PyYAML",
-    "torch",
+    "torch>=2.0.0",
     "torchvision",
     "tqdm",
 ]

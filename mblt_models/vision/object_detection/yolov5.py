@@ -9,6 +9,9 @@ class YOLOv5n_Set(ModelInfoSet):
             "url": "/",
         },
         pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
             "YoloPre": {
                 "img_size": [640, 640],
             },

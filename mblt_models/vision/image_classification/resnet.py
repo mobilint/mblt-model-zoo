@@ -108,10 +108,6 @@ class ResNet50(MBLT_Engine):
         self,
     ):
         model_cfg = ResNet50_Set.DEFAULT.value.model_cfg
-        model_cfg = {
-            "core_info": None,
-            "trace": False,
-        }
         pre_cfg = ResNet50_Set.DEFAULT.value.pre_cfg
         post_cfg = ResNet50_Set.DEFAULT.value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

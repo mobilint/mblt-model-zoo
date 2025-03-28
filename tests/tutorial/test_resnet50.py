@@ -1,6 +1,5 @@
 from mblt_models.vision import ResNet50
 from argparse import ArgumentParser
-import PIL
 import numpy as np
 
 if __name__ == "__main__":
@@ -10,8 +9,8 @@ if __name__ == "__main__":
     image_path = args.image_path
 
     resnet50 = ResNet50()
-    resnet_pre = resnet50.preprocess
-    resnet_post = resnet50.postprocess
+    resnet_pre = resnet50.get_preprocess()
+    resnet_post = resnet50.get_postprocess()
 
     input = resnet_pre(image_path)
     output = resnet50(input)

@@ -17,6 +17,7 @@ from .utils.postprocess import build_postprocess
 
 # The code below is copied from torch.hub.download_url_to_file
 
+
 class _Faketqdm:  # type: ignore[no-redef]
     def __init__(self, total=None, disable=False, unit=None, *args, **kwargs):
         self.total = total
@@ -61,6 +62,7 @@ except ImportError:
     tqdm = _Faketqdm
 
 READ_DATA_CHUNK = 128 * 1024
+
 
 def download_url_to_file(
     url: str,
@@ -154,11 +156,15 @@ class MBLT_Engine:
         self.post_cfg = post_cfg
 
         self.model = MXQ_Model(**self.model_cfg)
-        self.preprocess = build_preprocess(self.pre_cfg)
-        self.postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
 
     def __call__(self, x):
         return self.model(x)
+
+    def get_preprocess(self):
+        return build_preprocess(self.pre_cfg)
+
+    def get_postprocess(self):
+        return build_postprocess(self.pre_cfg, self.post_cfg)
 
 
 class MXQ_Model:
