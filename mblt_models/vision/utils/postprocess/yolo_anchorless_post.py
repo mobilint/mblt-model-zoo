@@ -3,8 +3,8 @@ from .common import *
 
 
 class YOLOAnchorlessPost(YOLOPostBase):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
+    def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
+        super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
         self.stride = [2 ** (3 + i) for i in range(self.nl)]
         self.make_anchors()
         self.reg_max = 16  # DFL channels
@@ -35,10 +35,10 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
 
 class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
+    def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
+        super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
 
 
 class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
+    def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
+        super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)

@@ -104,10 +104,11 @@ class ResNet50_Set(ModelInfoSet):
 
 
 class ResNet50(MBLT_Engine):
-    def __init__(
-        self,
-    ):
+    def __init__(self, local_model: str = None):
         model_cfg = ResNet50_Set.DEFAULT.value.model_cfg
+        if local_model is not None:
+            model_cfg["url"] = local_model
+
         pre_cfg = ResNet50_Set.DEFAULT.value.pre_cfg
         post_cfg = ResNet50_Set.DEFAULT.value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
