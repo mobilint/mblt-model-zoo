@@ -181,7 +181,7 @@ class MXQ_Model:
             mc.include_all_cores()
             print("Using all cores")
 
-        model_dir = "~/.mblt_models"
+        model_dir = os.path.expanduser("~/.mblt_models")
 
         os.makedirs(model_dir, exist_ok=True)
 
