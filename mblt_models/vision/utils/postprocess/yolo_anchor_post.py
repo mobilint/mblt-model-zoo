@@ -25,6 +25,7 @@ class YOLOAnchorPost(YOLOPostBase):
             yv, xv = torch.meshgrid(
                 torch.arange(ny, dtype=torch.float32),
                 torch.arange(nx, dtype=torch.float32),
+                indexing="ij",
             )
             grid = torch.stack((xv, yv), 2).expand(self.na, ny, nx, 2)
             self.grid.append(grid)

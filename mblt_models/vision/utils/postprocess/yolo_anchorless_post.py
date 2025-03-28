@@ -17,12 +17,12 @@ class YOLOAnchorlessPost(YOLOPostBase):
             ny, nx = self.imh // strd, self.imw // strd
             sy = torch.arange(ny, dtype=torch.float32) + offset
             sx = torch.arange(nx, dtype=torch.float32) + offset
-            yv, xv = torch.meshgrid(sy, sx)
-            anchor_points.append(torch.stack((xv, yv), -1).view(-1, 2))
+            yv, xv = torch.meshgrid(sy, sx, indexing="ij")
+            anchor_points.append(torch.stack((xv, yv), -1).reshape(-1, 2))
             stride_tensor.append(torch.full((ny * nx, 1), strd, dtype=torch.float32))
 
         self.anchors = torch.cat(anchor_points, dim=0).permute(1, 0)
-        self.stride = torch.cat(stride_tensor, dim=0)
+        self.stride = torch.cat(stride_tensor, dim=0).permute(1, 0)
 
     def rearrange(self, x):
         return x
