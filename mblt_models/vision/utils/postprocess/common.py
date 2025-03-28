@@ -40,24 +40,6 @@ def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
     return y
 
 
-class DFL(torch.nn.Module):
-    # Integral module of Distribution Focal Loss (DFL)
-    # Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
-    def __init__(self, c1=16):
-        super().__init__()
-        self.c1 = c1
-        self.conv = torch.nn.Conv2d(self.c1, 1, 1, bias=False).requires_grad_(False)
-        self.conv.weight.data = torch.nn.Parameter(
-            torch.arange(self.c1).float().view(1, self.c1, 1, 1)
-        )
-
-    def forward(self, x):
-        b, c, a = x.shape  # batch, channels, anchors
-        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(
-            b, 4, a
-        )
-
-
 def single_encode(x):
     """Encode predicted masks as RLE and append results to jdict."""
     rle = encode(np.asarray(x[:, :, None], order="F", dtype="uint8"))[0]

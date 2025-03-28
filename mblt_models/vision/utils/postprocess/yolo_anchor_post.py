@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torchvision
 from .base import YOLOPostBase
