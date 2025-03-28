@@ -58,7 +58,7 @@ class ResNet34_Set(ModelInfoSet):
 class ResNet50_Set(ModelInfoSet):
     IMAGNET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "https://maccel.mobilint.com/resnet50.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -80,7 +80,7 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "https://maccel.mobilint.com/resnet50.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -109,7 +109,6 @@ class ResNet50(MBLT_Engine):
     ):
         model_cfg = ResNet50_Set.DEFAULT.value.model_cfg
         model_cfg = {
-            "mxq_model_path": "/workspace/mblt-models/tmp/resnet50.mxq",
             "core_info": None,
             "trace": False,
         }
