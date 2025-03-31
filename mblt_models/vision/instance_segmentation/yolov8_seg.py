@@ -73,10 +73,13 @@ class YOLOv8mSeg_Set(ModelInfoSet):
 
 
 class YOLOv8mSeg(MBLT_Engine):
-    def __init__(self, local_model: str = None):
-        model_cfg = YOLOv8mSeg_Set.DEFAULT.value.model_cfg
+    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+        assert (
+            model_type in YOLOv8mSeg_Set.__dict__.keys()
+        ), f"model_type {model_type} not found in YOLOv8mSeg_Set. Available types: {YOLOv8mSeg_Set.__dict__.keys()}"
+        model_cfg = YOLOv8mSeg_Set.__dict__[model_type].value.model_cfg
         if local_model is not None:
             model_cfg["url"] = local_model
-        pre_cfg = YOLOv8mSeg_Set.DEFAULT.value.pre_cfg
-        post_cfg = YOLOv8mSeg_Set.DEFAULT.value.post_cfg
+        pre_cfg = YOLOv8mSeg_Set.__dict__[model_type].value.pre_cfg
+        post_cfg = YOLOv8mSeg_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

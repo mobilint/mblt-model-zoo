@@ -108,45 +108,45 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
         x = self.decode(x)
         x = self.nms(x)
         return self.masking(x, proto_outs)
-    
+
     def rearrange(self, x):
-        
         # for xi in x, unsqueeze the first dimension if ndim(xi) == 3
         for i, xi in enumerate(x):
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
                 x[i] = xi
-    
-        x = sorted(x, key=lambda x: x.numel(), reverse=True) # sort by numel
-        proto = x.pop(0) # (b, 32, 160, 160)
-        y= []
+
+        x = sorted(x, key=lambda x: x.numel(), reverse=True)  # sort by numel
+        proto = x.pop(0)  # (b, 32, 160, 160)
+        y = []
         for xi in x:
             if xi.shape[1] == 1:  # coord
                 xi = xi.squeeze(1) * self.stride
                 y.append(xi)
             elif xi.shape[1] == self.nc:  # cls
                 y.append(xi.squeeze(2))
-            elif xi.shape[1] == self.n_extra: # mask
+            elif xi.shape[1] == self.n_extra:  # mask
                 y.append(xi.squeeze(2))
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
-        
-        y = [y[-1]] + y[:-1] # move mask to the front
+
+        y = [y[-1]] + y[:-1]  # move mask to the front
         y = torch.cat(y, dim=1)  # (b, 116, 8400)
-        
+
         return y, proto
+
 
 class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
     def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
         super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
-        
+
     def rearrange(self, x):
         y = []
         for xi in x:
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
-            
+
             if xi.shape[1] == 1:  # cls
                 xi = xi.squeeze(1)
                 if xi.shape[1] == 4:  # coord

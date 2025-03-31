@@ -4,7 +4,7 @@ from typing import Optional, Union, List, Any
 
 
 class ResNet18_Set(ModelInfoSet):
-    IMAGNET1K_V1 = ModelInfo(
+    IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -26,11 +26,11 @@ class ResNet18_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGNET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V1  # Default model
 
 
 class ResNet34_Set(ModelInfoSet):
-    IMAGNET1K_V1 = ModelInfo(
+    IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -52,11 +52,11 @@ class ResNet34_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGNET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V1  # Default model
 
 
 class ResNet50_Set(ModelInfoSet):
-    IMAGNET1K_V1 = ModelInfo(
+    IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "https://maccel.mobilint.com/resnet50.mxq",
         },
@@ -100,15 +100,18 @@ class ResNet50_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGNET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V1  # Default model
 
 
 class ResNet50(MBLT_Engine):
-    def __init__(self, local_model: str = None):
-        model_cfg = ResNet50_Set.DEFAULT.value.model_cfg
+    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+        assert (
+            model_type in ResNet50_Set.__dict__.keys()
+        ), f"Model type {model_type} not found. Available types: {ResNet50_Set.__dict__.keys()}"
+        model_cfg = ResNet50_Set.__dict__[model_type].value.model_cfg
         if local_model is not None:
             model_cfg["url"] = local_model
 
-        pre_cfg = ResNet50_Set.DEFAULT.value.pre_cfg
-        post_cfg = ResNet50_Set.DEFAULT.value.post_cfg
+        pre_cfg = ResNet50_Set.__dict__[model_type].value.pre_cfg
+        post_cfg = ResNet50_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

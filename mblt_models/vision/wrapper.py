@@ -29,7 +29,7 @@ class MBLT_Engine:
 
 
 class MXQ_Model:
-    def __init__(self, url, core_info: dict = None, trace: bool = False):
+    def __init__(self, url, trace: bool = False):
         self.trace = trace
         self.acc = maccel.Accelerator()
         mc = maccel.ModelConfig()

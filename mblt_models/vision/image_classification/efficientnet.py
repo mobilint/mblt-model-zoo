@@ -4,7 +4,7 @@ from typing import Optional, Union, List, Any
 
 
 class EfficientNet_B0_Set(ModelInfoSet):
-    IMAGNET1K_V1 = ModelInfo(
+    IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -24,11 +24,11 @@ class EfficientNet_B0_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGNET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V1  # Default model
 
 
 class EfficientNet_B1_Set(ModelInfoSet):
-    IMAGNET1K_V1 = ModelInfo(
+    IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -48,7 +48,7 @@ class EfficientNet_B1_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    IMAGNET1K_V2 = ModelInfo(
+    IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -69,4 +69,4 @@ class EfficientNet_B1_Set(ModelInfoSet):
         post_cfg={"task": "image_classification"},
     )
 
-    DEFAULT = IMAGNET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V1  # Default model
