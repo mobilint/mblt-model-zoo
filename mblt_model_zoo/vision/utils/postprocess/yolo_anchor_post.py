@@ -1,5 +1,4 @@
 import torch
-import torchvision
 from .base import YOLOPostBase
 from .common import *
 
@@ -118,7 +117,7 @@ class YOLOAnchorPost(YOLOPostBase):
             # NMS
             c = xi[:, 5:6] * max_wh
             boxes, scores = xi[:, :4] + c, xi[:, 4]
-            i = torchvision.ops.nms(boxes, scores, self.iou_thres)[:max_det]
+            i = non_max_suppression(boxes, scores, self.iou_thres, max_det)
             output.append(xi[i])
 
         return output

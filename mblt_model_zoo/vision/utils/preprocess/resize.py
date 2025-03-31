@@ -1,20 +1,18 @@
-from typing import List, Union
+from typing import List, Union, Tuple
 import numpy as np
 import torch
-from torchvision.transforms.functional import InterpolationMode
-import torchvision.transforms.functional as F
-import PIL
-
+from PIL.Image import Image, Resampling
+import torch.nn.functional as F
 from .base import PreBase
 from mblt_model_zoo.vision.utils.types import *
 
-TORCH_INTERP_CODES = {
-    "nearest": InterpolationMode.NEAREST,
-    "bilinear": InterpolationMode.BILINEAR,
-    "bicubic": InterpolationMode.BICUBIC,
-    "box": InterpolationMode.BOX,
-    "hamming": InterpolationMode.HAMMING,
-    "lanczos": InterpolationMode.LANCZOS,
+PIL_INTERP_CODES = {
+    "nearest": Resampling.NEAREST,
+    "bilinear": Resampling.BILINEAR,
+    "bicubic": Resampling.BICUBIC,
+    "box": Resampling.BOX,
+    "hamming": Resampling.HAMMING,
+    "lanczos": Resampling.LANCZOS,
 }
 
 
@@ -31,11 +29,11 @@ class Resize(PreBase):
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(self, x: Union[TensorLike, PIL.Image.Image]):
+    def __call__(self, x: Union[TensorLike, Image]):
         """Resize image
 
         Args:
-            x (Union[np.ndarray, PIL.Image.Image]): Image to be resized.
+            x (Union[np.ndarray, Image]): Image to be resized.
 
         Raises:
             TypeError: If x is not numpy array or PIL image.
@@ -44,20 +42,96 @@ class Resize(PreBase):
             x: Resized image.
         """
         # result: np.ndarray (H, W, C)
-
         if isinstance(x, np.ndarray):
-            img_tensor = torch.from_numpy(x)
-            resized_img_tensor = F.resize(
-                img_tensor,
-                size=self.size,
-                interpolation=TORCH_INTERP_CODES[self.interpolation],
+            x = torch.from_numpy(x)
+
+        if isinstance(x, torch.Tensor):
+            assert x.ndim() == 3, f"Got unexpected x.shape={x.shape}."
+            img_h, img_w = x.shape[:2]
+            new_h, new_w = self._compute_resized_output_size(img_h, img_w)
+
+            if [img_h, img_w] == [new_h, new_w]:
+                return x
+
+            x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(
+                x, [torch.float32, torch.float64]
             )
-            return resized_img_tensor.detach().numpy()
-        elif isinstance(x, torch.Tensor) or isinstance(x, PIL.Image.Image):
-            return F.resize(
-                x,
-                size=self.size,
-                interpolation=TORCH_INTERP_CODES[self.interpolation],
+
+            x = F.interpolate(
+                x[None],
+                size=(new_h, new_w),
+                mode=self.interpolation,
+                align_corners=(
+                    False if self.interpolation in ["bilinear", "bicubic"] else None
+                ),
+                antialias=self.interpolation in ["bilinear", "bicubic"],
+            )
+
+            x = self._cast_squeeze_out(x, need_cast, need_squeeze, out_dtype)
+
+            return x
+        elif isinstance(x, Image):
+            img_w, img_h = x.size
+            new_h, new_w = self._compute_resized_output_size(img_h, img_w)
+            if [img_h, img_w] == [new_h, new_w]:
+                return x
+            return x.resize(
+                size=(new_w, new_h),
+                resample=PIL_INTERP_CODES[self.interpolation],
             )
         else:
             raise TypeError(f"Got unexpected type for x={type(x)}.")
+
+    def _compute_resized_output_size(self, img_h: int, img_w: int):
+        if isinstance(self.size, int):
+            # to match the shortest side to self.size with the same ratio
+            ratio = max(self.size / img_h, self.size / img_w)
+            new_h = int(round(img_h * ratio))
+            new_w = int(round(img_w * ratio))
+        elif isinstance(self.size, list) and len(self.size) == 2:
+            new_h, new_w = self.size
+        else:
+            raise ValueError(f"Got unexpected size={self.size}.")
+
+        return [new_h, new_w]
+
+    def _cast_squeeze_in(
+        self, img: torch.Tensor, req_dtypes: List[torch.dtype]
+    ) -> Tuple[torch.Tensor, bool, bool, torch.dtype]:
+        need_squeeze = False
+        # make image NCHW
+        if img.ndim < 4:
+            img = img.unsqueeze(dim=0)
+            need_squeeze = True
+
+        out_dtype = img.dtype
+        need_cast = False
+        if out_dtype not in req_dtypes:
+            need_cast = True
+            req_dtype = req_dtypes[0]
+            img = img.to(req_dtype)
+        return img, need_cast, need_squeeze, out_dtype
+
+    def _cast_squeeze_out(
+        self,
+        img: torch.Tensor,
+        need_cast: bool,
+        need_squeeze: bool,
+        out_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        if need_squeeze:
+            img = img.squeeze(dim=0)
+
+        if need_cast:
+            if out_dtype in (
+                torch.uint8,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ):
+                # it is better to round before cast
+                img = torch.round(img)
+            img = img.to(out_dtype)
+
+        return img

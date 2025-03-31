@@ -1,8 +1,8 @@
+import PIL
 import numpy as np
 import PIL
 import cv2
 import torch
-import torchvision.transforms as T
 import os
 from typing import Union
 from .base import PreBase
@@ -25,7 +25,8 @@ class Reader(PreBase):
 
         if isinstance(x, torch.Tensor):
             if self.style == "pil":
-                x = T.ToPILImage()(x)
+                x = x.numpy()
+                x = PIL.Image.fromarray(x.astype(np.uint8))
                 return x
             else:
                 return x
@@ -34,7 +35,7 @@ class Reader(PreBase):
             if self.style == "pil":
                 return x
             else:
-                raise ValueError(f"Unsupported style={self.style} for image reader.")
+                return np.array(x)
 
         elif isinstance(x, str):
             assert os.path.exists(x) and os.path.isfile(x), f"File {x} does not exist."
@@ -43,7 +44,7 @@ class Reader(PreBase):
             else:
                 x = cv2.imread(x)
                 x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
-                return x
+                return torch.from_numpy(x).float()
 
         else:
             raise ValueError(f"Unsupported input type={type(x)} for image reader.")

@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
-import numpy as np
-from mblt_model_zoo.vision import YOLOv5mSeg
+from mblt_model_zoo.vision import YOLOv5m, YOLOv5mSeg
+from mblt_model_zoo.vision.utils.results import Results
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -10,11 +10,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     image_path = args.image_path
 
-    yolov5m = YOLOv5mSeg(local_model="/workspace/mblt-model-zoo/tmp/yolov5m-seg.mxq")
-    yolov5m_pre = yolov5m.get_preprocess()
-    yolov5m_post = yolov5m.get_postprocess(conf_thres=0.5, iou_thres=0.5)
+    yolo = YOLOv5m(local_model="/workspace/mblt-model-zoo/tmp/yolov5m.mxq")
+    yolo_pre = yolo.get_preprocess()
+    yolo_post = yolo.get_postprocess(conf_thres=0.5, iou_thres=0.5)
 
-    input = yolov5m_pre(image_path)
-    output = yolov5m(input)
-    result = yolov5m_post(output)
+    input = yolo_pre(image_path)
+    output = yolo(input)
+    result = yolo_post(output)
     print(result)

@@ -9,6 +9,5 @@ required_packages = [
     "pycocotools",
     "PyYAML",
     "torch>=2.0.0",
-    "torchvision",
     "tqdm",
 ]

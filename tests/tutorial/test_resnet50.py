@@ -1,10 +1,14 @@
 from mblt_model_zoo.vision import ResNet50
 from argparse import ArgumentParser
-import numpy as np
+from mblt_model_zoo.vision.utils.results import Results
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--image_path", type=str, default="../rc/volcano.jpg")
+    parser.add_argument(
+        "--image_path",
+        type=str,
+        default="/workspace/mblt-model-zoo/tests/rc/volcano.jpg",
+    )
     args = parser.parse_args()
     image_path = args.image_path
 
@@ -17,5 +21,11 @@ if __name__ == "__main__":
 
     input = resnet_pre(image_path)
     output = resnet50(input)
-    result = resnet_post(output)
-    print(np.argmax(result))  # expected result: 980 (for volcano)
+    result = Results.from_engine(resnet50, resnet_post(output))
+
+    result.plot(
+        source_path=image_path,
+        save_path=None,
+        topk=5,
+        mode="print",
+    )

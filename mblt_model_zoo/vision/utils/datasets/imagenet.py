@@ -1,3 +1,25 @@
+def get_imagenet_label(idx: int) -> str:
+    """Get the label of the imagenet class index
+
+    Args:
+        idx (int): ImageNet class index
+
+    Returns:
+        str: ImageNet class label string
+    """
+    label_str = imagenet1000_clsidx_to_labels[idx]
+    return label_str.split(",")[0]
+
+
+def get_imagenet_class_num() -> int:
+    """Get the number of classes in ImageNet
+
+    Returns:
+        int: Number of classes in ImageNet
+    """
+    return len(imagenet1000_clsidx_to_labels)
+
+
 imagenet1000_clsidx_to_labels = {
     0: "tench, Tinca tinca",
     1: "goldfish, Carassius auratus",

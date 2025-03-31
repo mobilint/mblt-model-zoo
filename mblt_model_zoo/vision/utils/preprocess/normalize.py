@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import torchvision.transforms as T
 import PIL
 from typing import Union
 from .base import PreBase
@@ -35,13 +34,14 @@ class Normalize(PreBase):
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).float()
         elif isinstance(x, PIL.Image.Image):
-            x = T.PILToTensor()(x).float()
+            x = torch.from_numpy(np.array(x)).float()
         else:
             raise TypeError(f"Got unexpected type for x={type(x)})")
 
         if self.style == "torch":
             x = x / 255.0
-            x = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(x)
+            x -= torch.from_numpy(np.array([0.485, 0.456, 0.406]))
+            x /= torch.from_numpy(np.array([0.229, 0.224, 0.225]))
         elif self.style == "tf":
             x = x / 127.5 - 1.0
         return x

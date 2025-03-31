@@ -1,6 +1,4 @@
 import numpy as np
-import os
-import cv2
 import torch
 import torch.nn.functional as F
 from typing import List, Tuple, Union
@@ -214,6 +212,67 @@ def scale_masks(masks, shape, padding=True):
 
     masks = F.interpolate(masks, shape, mode="bilinear", align_corners=False)  # NCHW
     return masks
+
+
+def non_max_suppression(boxes, scores, iou_threshold, max_output):
+    """
+    Modified non-maximum suppression (NMS) implemented with PyTorch.
+
+    Args:
+        boxes (torch.Tensor): Bounding boxes in (x1, y1, x2, y2) format.
+        scores (torch.Tensor): Confidence scores for each box (assumed to be sorted in descending order).
+        iou_threshold (float): IoU threshold for suppression.
+        max_output (int): Maximum number of boxes to keep.
+
+    Returns:
+        List[int]: Indices of the boxes that have been kept after NMS.
+    """
+    if boxes.numel() == 0:
+        return []
+
+    # Coordinates of bounding boxes
+    start_x = boxes[:, 0]
+    start_y = boxes[:, 1]
+    end_x = boxes[:, 2]
+    end_y = boxes[:, 3]
+
+    picked_indices = []
+
+    # Compute areas of bounding boxes
+    areas = (end_x - start_x) * (end_y - start_y)
+
+    # Create an index order (assumed scores are already sorted in descending order)
+    order = torch.arange(scores.size(0))
+
+    while order.numel() > 0 and len(picked_indices) < max_output:
+        # The index with the highest score
+        index = order[0].item()
+        picked_indices.append(index)
+        order = order[1:]  # Remove the index from the order
+
+        if order.numel() == 0 or len(picked_indices) >= max_output:
+            break
+
+        # Compute the coordinates of the intersection boxes
+        x1 = torch.maximum(start_x[index], start_x[order])
+        y1 = torch.maximum(start_y[index], start_y[order])
+        x2 = torch.minimum(end_x[index], end_x[order])
+        y2 = torch.minimum(end_y[index], end_y[order])
+
+        # Compute width and height of the intersection boxes
+        w = torch.clamp(x2 - x1, min=0.0)
+        h = torch.clamp(y2 - y1, min=0.0)
+        intersection = w * h
+
+        # Compute the IoU ratio
+        union = areas[index] + areas[order] - intersection
+        ratio = intersection / union
+
+        # Keep boxes with IoU less than or equal to the threshold
+        keep = ratio <= iou_threshold
+        order = order[keep]
+
+    return picked_indices
 
 
 def nmsout2eval(nms_out, img1_shape, img0_shape):
