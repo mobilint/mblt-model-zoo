@@ -6,7 +6,7 @@ import torchvision.transforms as T
 import os
 from typing import Union
 from .base import PreBase
-from mblt_models.vision.utils.types import TensorLike
+from mblt_model_zoo.vision.utils.types import TensorLike
 
 
 class Reader(PreBase):

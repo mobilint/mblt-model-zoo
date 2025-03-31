@@ -1,3 +1,3 @@
-# MBLT-Models
+# MBLT-Model-Zoo
 ---
-`mblt-models` is an open model zoo for Mobilint NPU. It provides a collection of pre-quantized models, and pre/post processing tools associated with the quantized models. 
+`mblt-model-zoo` is an open model zoo for Mobilint NPU. It provides a collection of pre-quantized models, and pre/post processing tools associated with the quantized models. 

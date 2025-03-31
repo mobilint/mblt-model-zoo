@@ -5,7 +5,7 @@ import torchvision.transforms as T
 import numpy as np
 import cv2
 from .base import PreBase
-from mblt_models.vision.utils.types import TensorLike
+from mblt_model_zoo.vision.utils.types import TensorLike
 
 
 class CenterCrop(PreBase):

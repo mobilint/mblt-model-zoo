@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Union
 import numpy as np
 import torch
-from mblt_models.vision.utils.types import TensorLike, ListTensorLike
+from mblt_model_zoo.vision.utils.types import TensorLike, ListTensorLike
 from .common import *
 
 

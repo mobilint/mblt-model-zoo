@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from typing import List, Tuple, Union
 from pycocotools.mask import encode
-from mblt_models.vision.utils.datasets import get_coco_inv
+from mblt_model_zoo.vision.utils.datasets import get_coco_inv
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):

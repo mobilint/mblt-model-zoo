@@ -1,9 +1,9 @@
-from mblt_models.vision.utils.types import ModelInfo, ModelInfoSet
-from mblt_models.vision.wrapper import MBLT_Engine
+from mblt_model_zoo.vision.utils.types import ModelInfo, ModelInfoSet
+from mblt_model_zoo.vision.wrapper import MBLT_Engine
 from typing import Optional, Union, List, Any
 
 
-class YOLOv5n_Set(ModelInfoSet):
+class YOLOv8n_Set(ModelInfoSet):
     DEFAULT = ModelInfo(
         model_cfg={
             "url": "/",
@@ -20,16 +20,12 @@ class YOLOv5n_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "nl": 3,  # Number of detection layers
         },
     )
 
 
-class YOLOv5s_Set(ModelInfoSet):
+class YOLOv8s_Set(ModelInfoSet):
     DEFAULT = ModelInfo(
         model_cfg={
             "url": "/",
@@ -46,16 +42,12 @@ class YOLOv5s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "nl": 3,  # Number of detection layers
         },
     )
 
 
-class YOLOv5m_Set(ModelInfoSet):
+class YOLOv8m_Set(ModelInfoSet):
     DEFAULT = ModelInfo(
         model_cfg={
             "url": "/",
@@ -72,23 +64,19 @@ class YOLOv5m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "nl": 3,  # Number of detection layers
         },
     )
 
 
-class YOLOv5m(MBLT_Engine):
+class YOLOv8m(MBLT_Engine):
     def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
         assert (
-            model_type in YOLOv5m_Set.__dict__.keys()
-        ), f"Model type {model_type} not found in YOLOv5m_Set. Available types: {YOLOv5m_Set.__dict__.keys()}"
-        model_cfg = YOLOv5m_Set.__dict__[model_type].value.model_cfg
+            model_type in YOLOv8m_Set.__dict__.keys()
+        ), f"Model type {model_type} not found in YOLOv8m_Set. Available types: {YOLOv8m_Set.__dict__.keys()}"
+        model_cfg = YOLOv8m_Set.__dict__[model_type].value.model_cfg
         if local_model is not None:
             model_cfg["url"] = local_model
-        pre_cfg = YOLOv5m_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = YOLOv5m_Set.__dict__[model_type].value.post_cfg
+        pre_cfg = YOLOv8m_Set.__dict__[model_type].value.pre_cfg
+        post_cfg = YOLOv8m_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

@@ -42,7 +42,7 @@ class MXQ_Model:
             cached_file = url
 
         else:
-            model_dir = os.path.expanduser("~/.mblt_models")
+            model_dir = os.path.expanduser("~/.mblt_model_zoo")
 
             os.makedirs(model_dir, exist_ok=True)
 

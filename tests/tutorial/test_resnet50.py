@@ -1,4 +1,4 @@
-from mblt_models.vision import ResNet50
+from mblt_model_zoo.vision import ResNet50
 from argparse import ArgumentParser
 import numpy as np
 
@@ -9,7 +9,7 @@ if __name__ == "__main__":
     image_path = args.image_path
 
     resnet50 = ResNet50(
-        local_model="/workspace/mblt-models/tmp/resnet50.mxq",
+        local_model="/workspace/mblt-model-zoo/tmp/resnet50.mxq",
         model_type="IMAGENET1K_V1",
     )
     resnet_pre = resnet50.get_preprocess()

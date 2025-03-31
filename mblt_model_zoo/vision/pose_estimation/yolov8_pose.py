@@ -1,5 +1,5 @@
-from mblt_models.vision.utils.types import ModelInfo, ModelInfoSet
-from mblt_models.vision.wrapper import MBLT_Engine
+from mblt_model_zoo.vision.utils.types import ModelInfo, ModelInfoSet
+from mblt_model_zoo.vision.wrapper import MBLT_Engine
 from typing import Optional, Union, List, Any
 
 

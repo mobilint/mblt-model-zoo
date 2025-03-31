@@ -6,7 +6,7 @@ import torchvision.transforms.functional as F
 import PIL
 
 from .base import PreBase
-from mblt_models.vision.utils.types import *
+from mblt_model_zoo.vision.utils.types import *
 
 TORCH_INTERP_CODES = {
     "nearest": InterpolationMode.NEAREST,

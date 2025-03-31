@@ -85,7 +85,7 @@ def download_url_to_file(
 
     """
     file_size = None
-    req = Request(url, headers={"User-Agent": "mblt_models"})
+    req = Request(url, headers={"User-Agent": "mblt_model_zoo"})
     u = urlopen(req)
     meta = u.info()
     if hasattr(meta, "getheaders"):
