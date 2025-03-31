@@ -127,3 +127,69 @@ class YOLOAnchorPost(YOLOPostBase):
 class YOLOAnchorSegPost(YOLOAnchorPost):
     def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
         super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
+
+    def __call__(self, x):
+        x = self.check_input(x)
+        x, proto_outs = self.rearrange(x)
+        x = self.decode(x)
+        x = self.nms(x)
+        return self.masking(x, proto_outs)
+
+    def rearrange(self, x):
+        proto_exist = False
+        for i, xi in enumerate(x):
+            if xi.ndim == 3:
+                xi = xi.unsqueeze(0)
+            assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
+
+            if self.n_extra == xi.shape[1]:
+                proto = xi
+                x.pop(i)
+                proto_exist = True
+                break
+            elif self.n_extra == xi.shape[3]:
+                proto = xi.transpose(0, 3, 1, 2)
+                x.pop(i)
+                proto_exist = True
+                break
+
+        if not proto_exist:
+            raise ValueError("Proto output is missing.")
+
+        y = super().rearrange(x)
+        return y, proto
+
+    def decode(self, x):
+        x = torch.cat(
+            [
+                xi.reshape(xi.shape[0], self.na, self.no, xi.shape[2], xi.shape[3])
+                .permute(0, 1, 3, 4, 2)
+                .reshape(xi.shape[0], -1, self.no)
+                for xi in x
+            ],
+            dim=1,
+        )
+        x = [xi for xi in x]  # convert to list of tensors if shape is (25200, 85 + 32)
+
+        y = []
+        for xi in x:
+            ic = xi[:, 4] > self.inv_conf_thres  # candidate indices
+            box_cls = xi[ic]  # candidate boxes
+            if len(box_cls) == 0:
+                y.append(torch.zeros((0, self.no), dtype=torch.float32))
+                continue
+            grid = self.grid[ic]
+            anchor_grid = self.anchor_grid[ic]
+            stride = self.stride[ic]
+
+            xy, wh, conf, scores, extra = torch.split(
+                box_cls, [2, 2, 1, self.nc, self.n_extra], dim=-1
+            )
+
+            xy = (xy.sigmoid() * 2.0 - 0.5 + grid) * stride
+            wh = (wh.sigmoid() * 2) ** 2 * anchor_grid
+            conf = conf.sigmoid()
+            scores = scores.sigmoid()
+            extra *= conf
+            y.append(torch.cat([xy, wh, conf, scores, extra], dim=-1))
+        return y

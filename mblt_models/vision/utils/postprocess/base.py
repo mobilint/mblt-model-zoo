@@ -3,6 +3,7 @@ from typing import Union
 import numpy as np
 import torch
 from mblt_models.vision.utils.types import TensorLike, ListTensorLike
+from .common import *
 
 
 class PostBase(ABC):
@@ -73,3 +74,16 @@ class YOLOPostBase(PostBase):
     @abstractmethod
     def nms(self, x):
         pass
+
+    def masking(self, x, proto_outs):
+        masks = []
+        for pred, proto in zip(x, proto_outs):
+            if len(pred) == 0:
+                masks.append(torch.zeros((0, self.imh, self.imw), dtype=torch.float32))
+                continue
+            masks.append(
+                process_mask_upsample(
+                    proto, pred[:, 6:], pred[:, :4], [self.imh, self.imw]
+                )
+            )
+        return [[xi, mask] for xi, mask in zip(x, masks)]

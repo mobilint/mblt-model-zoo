@@ -261,6 +261,36 @@ POSE_PALETTE = [
     [255, 255, 255],
 ]
 
+POSE_SKELETON = [
+    [16, 14],
+    [14, 12],
+    [17, 15],
+    [15, 13],
+    [12, 13],
+    [6, 12],
+    [7, 13],
+    [6, 7],
+    [6, 8],
+    [7, 9],
+    [8, 10],
+    [9, 11],
+    [2, 3],
+    [1, 2],
+    [1, 3],
+    [2, 4],
+    [3, 5],
+    [4, 6],
+    [5, 7],
+]
+
+LIMB_PALLETE = [
+    POSE_PALETTE[i]
+    for i in [9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]
+]
+KEYPOINT_PALLETE = [
+    POSE_PALETTE[i] for i in [16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]
+]
+
 
 def get_coco_class_num() -> int:
     """Get the number of COCO classes.
@@ -283,3 +313,63 @@ def get_coco_label(idx: int) -> str:
     assert 0 <= idx < get_coco_class_num(), f"Invalid index: {idx}"
 
     return CLASSES[idx]
+
+
+def get_coco_inv(idx: int) -> str:
+    """Get the COCO label by index.
+
+    Args:
+        idx (int): The index of the COCO label.
+
+    Returns:
+        str: The COCO label.
+    """
+    return CLASS_INV_MAP[idx]
+
+
+def get_coco_det_palette(idx: int) -> tuple:
+    """Get the COCO detection palette by index.
+
+    Args:
+        idx (int): The index of the COCO detection palette.
+
+    Returns:
+        tuple: The COCO detection palette. (R, G, B)
+    """
+    return DET_PALETTE[idx]
+
+
+def get_coco_pose_palette() -> tuple:
+    """Get the COCO pose palette.
+
+    Returns:
+        tuple: The COCO pose palette.
+    """
+    return POSE_PALETTE
+
+
+def get_coco_pose_skeleton() -> list:
+    """Get the COCO pose skeleton.
+
+    Returns:
+        list: The COCO pose skeleton.
+    """
+    return POSE_SKELETON
+
+
+def get_coco_limb_palette() -> list:
+    """Get the COCO limb palette.
+
+    Returns:
+        list: The COCO limb palette.
+    """
+    return LIMB_PALLETE
+
+
+def get_coco_keypoint_palette() -> list:
+    """Get the COCO keypoint palette.
+
+    Returns:
+        list: The COCO keypoint palette.
+    """
+    return KEYPOINT_PALLETE

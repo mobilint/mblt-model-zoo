@@ -2,8 +2,10 @@ import numpy as np
 import os
 import cv2
 import torch
+import torch.nn.functional as F
 from typing import List, Tuple, Union
 from pycocotools.mask import encode
+from mblt_models.vision.utils.datasets import get_coco_inv
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
@@ -38,6 +40,209 @@ def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
     y[..., 3] = x[..., 3] - x[..., 1]
 
     return y
+
+
+def compute_ratio_pad(img1_shape, img0_shape, ratio_pad=None):
+    """Compute ratio and pad which were used to resize image to input_shape"""
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(
+            img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
+        )  # gain  = old / new
+        pad = round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1), round(
+            (img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1
+        )  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
+    return gain, pad
+
+
+def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+    """Transform distance(ltrb) to box(xywh or xyxy)."""
+    lt, rb = distance.chunk(2, dim)
+    x1y1 = anchor_points - lt
+    x2y2 = anchor_points + rb
+    if xywh:
+        c_xy = (x1y1 + x2y2) / 2
+        wh = x2y2 - x1y1
+        return torch.cat((c_xy, wh), dim)  # xywh bbox
+    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+
+def clip_boxes(boxes, shape):
+    boxes[..., 0] = boxes[..., 0].clamp(0, shape[1])
+    boxes[..., 1] = boxes[..., 1].clamp(0, shape[0])
+    boxes[..., 2] = boxes[..., 2].clamp(0, shape[1])
+    boxes[..., 3] = boxes[..., 3].clamp(0, shape[0])
+    return boxes
+
+
+def clip_coords(coords, shape):
+    """Clip coordinates to image shape."""
+    coords[..., 0] = coords[..., 0].clamp(0, shape[1])
+    coords[..., 1] = coords[..., 1].clamp(0, shape[0])
+    return coords
+
+
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True):
+    """
+    Original Source: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L92
+    Rescales bounding boxes (in the format of xyxy) from the shape of the image they were originally specified in
+    (img1_shape) to the shape of a different image (img0_shape).
+
+    Args:
+        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
+        boxes (np.ndarray): the bounding boxes of the objects in the image, in the format of (x1, y1, x2, y2)
+        img0_shape (tuple): the shape of the target image, in the format of (height, width).
+        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
+            calculated based on the size difference between the two images.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
+            rescaling.
+
+    Returns:
+        boxes (np.ndarray): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
+    """
+    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
+
+    if padding:
+        boxes[..., [0, 2]] -= pad[0]  # x padding
+        boxes[..., [1, 3]] -= pad[1]  # y padding
+    boxes[..., :4] /= gain
+    return clip_boxes(boxes, img0_shape)
+
+
+def process_mask(protos, masks_in, bboxes, shape, upsample=False):
+    """
+    https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L680
+    Faster way to process masks.
+    protos: [mask_dim, mask_h, mask_w]
+    masks_in: [n, mask_dim], n is number of masks after nms
+    bboxes: [n, 4], n is number of masks after nms
+    shape: input_image_size, (h, w)
+
+    return: h, w, n
+    """
+
+    c, mh, mw = protos.shape  # CHW
+    ih, iw = shape
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # n, CHW
+
+    downsampled_bboxes = bboxes.clone()
+    downsampled_bboxes[:, 0] *= mw / iw
+    downsampled_bboxes[:, 2] *= mw / iw
+    downsampled_bboxes[:, 3] *= mh / ih
+    downsampled_bboxes[:, 1] *= mh / ih
+
+    masks = crop_mask(masks, downsampled_bboxes)  # CHW
+
+    if upsample:
+        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[
+            0
+        ]  # CHW
+    masks = masks.gt_(0.0)
+
+    return masks
+
+
+def process_mask_upsample(protos, masks_in, bboxes, shape):
+    """
+    Takes the output of the mask head, and applies the mask to the bounding boxes. This produces masks of higher quality
+    but is slower.
+
+    https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L713
+    Args:
+        protos (torch.Tensor): [mask_dim, mask_h, mask_w]
+        masks_in (torch.Tensor): [n, mask_dim], n is number of masks after nms
+        bboxes (torch.Tensor): [n, 4], n is number of masks after nms
+        shape (tuple): the size of the input image (h,w)
+
+    Returns:
+        (torch.Tensor): The upsampled masks.
+    """
+    c, mh, mw = protos.shape  # CHW
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # n, CHW
+    masks = scale_masks(masks[None], shape)[0]  # CHW
+    masks = crop_mask(masks, bboxes)  # CHW
+    return masks.gt_(0.0)
+
+
+def crop_mask(masks, boxes):
+    """
+    Crop masks to bounding boxes.
+
+    Args:
+        masks (torch.Tensor): [n, h, w] tensor of masks.
+        boxes (torch.Tensor): [n, 4] tensor of bbox coordinates in relative point form.
+
+    Returns:
+        (torch.Tensor): Cropped masks.
+    """
+    _, h, w = masks.shape
+    x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)  # x1 shape(n,1,1)
+    r = torch.arange(w, device=masks.device, dtype=x1.dtype)[
+        None, None, :
+    ]  # rows shape(1,1,w)
+    c = torch.arange(h, device=masks.device, dtype=x1.dtype)[
+        None, :, None
+    ]  # cols shape(1,h,1)
+
+    return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
+
+
+def scale_masks(masks, shape, padding=True):
+    """
+    Rescale segment masks to shape.
+
+    Args:
+        masks (torch.Tensor): (N, C, H, W).
+        shape (tuple): Height and width.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
+            rescaling.
+
+    Returns:
+        (torch.Tensor): Rescaled masks.
+    """
+    mh, mw = masks.shape[2:]
+    gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
+    pad = [mw - shape[1] * gain, mh - shape[0] * gain]  # wh padding
+    if padding:
+        pad[0] /= 2
+        pad[1] /= 2
+    top, left = (int(pad[1]), int(pad[0])) if padding else (0, 0)  # y, x
+    bottom, right = (int(mh - pad[1]), int(mw - pad[0]))
+    masks = masks[..., top:bottom, left:right]
+
+    masks = F.interpolate(masks, shape, mode="bilinear", align_corners=False)  # NCHW
+    return masks
+
+
+def nmsout2eval(nms_out, img1_shape, img0_shape):
+    """NMS output to evaluation format.
+
+    Args:
+        nms_out (torch.Tensor): The output of the NMS operation of shape (n, 6), where n is the number of objects
+        img1_shape (torch.Tensor): processed image shape
+        img0_shape (torch.Tensor): original image shape
+
+    Returns:
+        labels (list): The labels of the objects
+        boxes (list): The bounding boxes of the objects
+        scores (list): The confidence scores of the objects
+    """
+    boxes = nms_out[:, :4]
+    scores = nms_out[:, 4]
+    labels = nms_out[:, 5]
+
+    scale_boxes(img1_shape, boxes, img0_shape)
+    boxes = xyxy2xywh(boxes)
+    boxes[:, :2] -= boxes[:, 2:] / 2
+
+    boxes = boxes.tolist()
+    scores = scores.tolist()
+    labels = labels.tolist()
+    labels = [get_coco_inv(int(l)) for l in labels]
+
+    return labels, boxes, scores
 
 
 def single_encode(x):

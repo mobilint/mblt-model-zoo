@@ -6,4 +6,5 @@ import cv2
 
 class Results:
     def __init__(self, engine):
-        self.engine = engine
+        self.pre_cfg = engine.pre_cfg
+        self.post_cfg = engine.post_cfg
