@@ -25,7 +25,6 @@ if __name__ == "__main__":
 
     result.plot(
         source_path=image_path,
-        save_path=None,
+        save_path="/workspace/mblt-model-zoo/tests/tmp/volcano_resnet50.jpg",
         topk=5,
-        mode="print",
     )

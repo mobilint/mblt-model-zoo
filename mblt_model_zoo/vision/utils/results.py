@@ -4,14 +4,23 @@ from typing import Union, List
 import os
 import cv2
 from .datasets import *
+from .postprocess.common import *
+from .types import TensorLike, ListTensorLike
+
+LW = 2  # line width
+RADIUS = 5  # circle radius
+ALPHA = 0.3  # alpha for overlay
+# for drawing bounding box
 
 
 class Results:
-    def __init__(self, pre_cfg: dict, post_cfg: dict, output):
+    def __init__(
+        self, pre_cfg: dict, post_cfg: dict, output: Union[TensorLike, ListTensorLike]
+    ):
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
-        self.output = output
+        self.set_output(output)
 
     @classmethod
     def from_engine(cls, engine, output):
@@ -19,54 +28,192 @@ class Results:
         post_cfg = engine.post_cfg
         return cls(pre_cfg, post_cfg, output)
 
-    def plot(self, source_path, save_path=None, **kwargs):
+    def set_output(self, output):
+        self.acc = None
+        self.box_cls = None
+        self.mask = None
+
+        if self.task.lower() == "image_classification":
+            if isinstance(output, list):
+                assert len(output) == 1, f"Got unexpected output={output}."
+                output = output[0]
+            self.acc = output
+        elif (
+            self.task.lower() == "object_detection"
+            or self.task.lower() == "pose_estimation"
+        ):
+            if isinstance(output, list):
+                assert len(output) == 1, f"Got unexpected output={output}."
+                output = output[0]
+            self.box_cls = output
+        elif self.task.lower() == "instance_segmentation":
+            assert isinstance(
+                output, list
+            ), f"Got unexpected output={output}. It should be a list."
+            if len(output) == 2:  # [box_cls, mask]
+                pass
+            elif len(output) == 1:  # [[box_cls, mask]]
+                assert len(output[0]) == 2, f"Got unexpected output={output}."
+                output = output[0]
+            else:
+                raise ValueError(f"Got unexpected output={output}.")
+            self.box_cls = output[0]
+            self.mask = output[1]
+        else:
+            raise NotImplementedError(
+                f"Task {self.task} is not supported for plotting results."
+            )
+        self.output = output  # store raw output
+
+    def plot(self, source_path: str, save_path: str = None, **kwargs):
         if self.task.lower() == "image_classification":
             return self._plot_image_classification(source_path, save_path, **kwargs)
         elif self.task.lower() == "object_detection":
             return self._plot_object_detection(source_path, save_path, **kwargs)
-        elif self.task.lower() == "image_segmentation":
-            return self._plot_image_segmentation(source_path, save_path, **kwargs)
-        elif self.task.lower() == "image_segmentation_instance":
-            return self._plot_image_segmentation_instance(
-                source_path, save_path, **kwargs
-            )
+        elif self.task.lower() == "instance_segmentation":
+            return self._plot_instance_segmentation(source_path, save_path, **kwargs)
+        elif self.task.lower() == "pose_estimation":
+            return self._plot_pose_estimation(source_path, save_path, **kwargs)
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."
             )
 
     def _plot_image_classification(
-        self, source_path, save_path=None, topk=5, mode="draw", **kwargs
+        self, source_path: str, save_path: str = None, topk=5, **kwargs
     ):
-        assert mode in [
-            "draw",
-            "print",
-        ], f"Mode {mode} is not supported. Available modes: ['draw', 'print']"
+        assert self.acc is not None, "No accuracy output found."
+        if isinstance(self.acc, np.ndarray):
+            self.acc = torch.tensor(self.acc)
 
-        if mode == "print":
-            # print the topk results with corresponding labels and probabilities
-            # assume self.output is a probability vector
-            if isinstance(self.output, np.ndarray):
-                self.output = torch.tensor(self.output)
+        topk_probs, topk_indices = torch.topk(self.acc, topk)
+        topk_probs = topk_probs.squeeze().numpy()
+        topk_indices = topk_indices.squeeze().numpy()
 
-            topk_probs, topk_indices = torch.topk(self.output, topk)
-            topk_probs = topk_probs.squeeze().numpy()
-            topk_indices = topk_indices.squeeze().numpy()
+        # load labels
+        labels = [get_imagenet_label(i) for i in topk_indices]
+        comments = []
+        for i in range(topk):
+            comments.append(f"{labels[i]}: {topk_probs[i]*100:.2f}%")
+            print(f"Label: {labels[i]}, Probability: {topk_probs[i]*100:.2f}%")
 
-            # load labels
-            labels = [get_imagenet_label(i) for i in topk_indices]
-            for i in range(topk):
-                print(f"Label: {labels[i]}, Probability: {topk_probs[i]*100:.2f}%")
+        if source_path is not None and save_path is not None:
+            assert os.path.exists(source_path) and os.path.isfile(
+                source_path
+            ), f"File {source_path} does not exist or is not a file."
+            comments = "\n".join(comments)
+            img = cv2.imread(source_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            avg_color = img.mean(axis=(0, 1))
+            txt_color = (
+                int(255 - avg_color[0]),
+                int(255 - avg_color[1]),
+                int(255 - avg_color[2]),
+            )
+            for i, line in enumerate(comments.splitlines()):
+                (_, h), _ = cv2.getTextSize(
+                    text=line,
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    thickness=1,
+                )
+                img = cv2.putText(
+                    img,
+                    line,
+                    (15, 15 + int(1.5 * i * h)),  # line spacing
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    color=txt_color,
+                    thickness=1,
+                    lineType=cv2.LINE_AA,
+                )
+                cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                cv2.destroyAllWindows()
+
+            return img
         else:
-            raise NotImplementedError(
-                f"Mode {mode} is not supported for plotting results."
+            return None
+
+    def _plot_object_detection(self, source_path: str, save_path: str = None, **kwargs):
+        assert os.path.exists(source_path) and os.path.isfile(
+            source_path
+        ), f"File {source_path} does not exist or is not a file."
+
+        assert self.box_cls.shape[1] == 6 + self.post_cfg.get(
+            "n_extra", 0
+        ), f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
+
+        img = cv2.imread(source_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        self.labels = self.box_cls[:, 5].to(torch.int64)
+        self.scores = self.box_cls[:, 4]
+        self.boxes = scale_boxes(
+            self.pre_cfg["YoloPre"]["img_size"],
+            self.box_cls[:, :4],
+            img.shape[:2],
+        )
+        contours = {i: [] for i in list(range(get_coco_class_num()))}
+
+        for box, score, label in zip(self.boxes, self.scores, self.labels):
+            img = cv2.putText(
+                img,
+                f"{get_coco_label(label)} {int(100*score)}%",
+                (int(box[0]), int(box[1]) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                get_coco_det_palette(label),
+                1,
+                cv2.LINE_AA,
+            )
+            contours[label.item()].append(
+                np.array(
+                    [
+                        [int(box[0]), int(box[1])],
+                        [int(box[2]), int(box[1])],
+                        [int(box[2]), int(box[3])],
+                        [int(box[0]), int(box[3])],
+                    ]
+                )
             )
 
-    def _plot_object_detection(self, source_path, save_path=None, **kwargs):
-        pass
+        for label, contour in contours.items():
+            if len(contour) > 0:
+                cv2.drawContours(
+                    img,
+                    contour,
+                    -1,
+                    get_coco_det_palette(label),
+                    LW,
+                )
 
-    def _plot_image_segmentation(self, source_path, save_path=None, **kwargs):
-        pass
+        if save_path is not None:
+            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.destroyAllWindows()
+        return img
 
-    def _plot_image_segmentation_instance(self, source_path, save_path=None, **kwargs):
-        pass
+    def _plot_instance_segmentation(self, source_path, save_path=None, **kwargs):
+        img = self._plot_object_detection(source_path, None, **kwargs)
+        masks = scale_image(self.mask.permute(1, 2, 0), img.shape[:2])
+        overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
+
+        for i, label in enumerate(self.labels):
+            overlay = np.maximum(
+                overlay,
+                masks[:, :, i][:, :, np.newaxis]
+                * np.array(get_coco_det_palette(label)).reshape(1, 1, 3),
+            )
+
+        total_mask = overlay.max(axis=2, keepdims=True)
+        inv_mask = 1 - ALPHA * total_mask / 255
+        img = (img * inv_mask + overlay * ALPHA).astype(np.uint8)
+
+        if save_path is not None:
+            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.destroyAllWindows()
+        return img
+
+    def _plot_pose_estimation(self, source_path, save_path=None, **kwargs):
+        raise NotImplementedError(
+            "Pose Estimation is not supported for plotting results."
+        )

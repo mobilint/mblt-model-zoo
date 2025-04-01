@@ -147,7 +147,7 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
                 proto_exist = True
                 break
             elif self.n_extra == xi.shape[3]:
-                proto = xi.transpose(0, 3, 1, 2)
+                proto = xi.permute(0, 3, 1, 2)
                 x.pop(i)
                 proto_exist = True
                 break

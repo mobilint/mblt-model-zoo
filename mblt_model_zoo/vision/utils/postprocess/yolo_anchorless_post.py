@@ -28,11 +28,11 @@ class YOLOAnchorlessPost(YOLOPostBase):
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
-            if xi.shape[1] == 1:  # (b, 1, 4, 8400)
-                xi = xi.squeeze(1)
+            if xi.shape[-1] == 1:  # (b, 4, 8400, 1)
+                xi = xi.squeeze(-1)
                 xi = xi * self.stride
-            elif xi.shape[2] == 1:  # (b, 80, 1, 8400)
-                xi = xi.squeeze(2)
+            elif xi.shape[1] == 1:  # (b, 1, 8400, 80)
+                xi = xi.squeeze(1).permute(0, 2, 1)
             else:
                 raise ValueError(f"Got unexpected shape for x={x.shape}.")
             y.append(xi)
@@ -75,7 +75,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
                 continue
 
             box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
-            i, j = (score > self.conf_thres).nonzero(as_tuple=True).T
+            i, j = (score > self.conf_thres).nonzero(as_tuple=False).T
 
             xi = torch.cat(
                 [box[i], xi[i, j + 4, None], j[:, None].float(), extra[i]], 1
@@ -115,16 +115,15 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
                 x[i] = xi
 
         x = sorted(x, key=lambda x: x.numel(), reverse=True)  # sort by numel
-        proto = x.pop(0)  # (b, 32, 160, 160)
+        proto = x.pop(0)  # (b, 160, 160, 32)
+        proto = proto.permute(0, 3, 1, 2)  # (b, 32, 160, 160)
         y = []
         for xi in x:
-            if xi.shape[1] == 1:  # coord
-                xi = xi.squeeze(1) * self.stride
+            if xi.shape[-1] == 1:  # coord
+                xi = xi.squeeze(-1) * self.stride
                 y.append(xi)
-            elif xi.shape[1] == self.nc:  # cls
-                y.append(xi.squeeze(2))
-            elif xi.shape[1] == self.n_extra:  # mask
-                y.append(xi.squeeze(2))
+            elif xi.shape[1] == 1:  # cls, mask
+                y.append(xi.squeeze(1).permute(0, 2, 1))
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
 
