@@ -22,10 +22,12 @@ class MBLT_Engine:
         return self.model(x)
 
     def get_preprocess(self, **kwargs):
-        return build_preprocess(self.pre_cfg, **kwargs)
+        self.preprocess = build_preprocess(self.pre_cfg, **kwargs)
+        return self.preprocess
 
     def get_postprocess(self, **kwargs):
-        return build_postprocess(self.pre_cfg, self.post_cfg, **kwargs)
+        self.postprocess = build_postprocess(self.pre_cfg, self.post_cfg, **kwargs)
+        return self.postprocess
 
 
 class MXQ_Model:

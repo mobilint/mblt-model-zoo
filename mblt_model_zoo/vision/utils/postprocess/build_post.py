@@ -1,7 +1,11 @@
 from .base import PostBase
 from .cls_post import ClsPost
-from .yolo_anchor_post import *
-from .yolo_anchorless_post import *
+from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
+from .yolo_anchorless_post import (
+    YOLOAnchorlessPost,
+    YOLOAnchorlessSegPost,
+    YOLOAnchorlessPosePost,
+)
 
 
 def build_postprocess(pre_cfg: dict, post_cfg: dict, **kwargs) -> PostBase:

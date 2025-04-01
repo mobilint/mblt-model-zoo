@@ -26,6 +26,8 @@ class Results:
     def from_engine(cls, engine, output):
         pre_cfg = engine.pre_cfg
         post_cfg = engine.post_cfg
+        if hasattr(engine.postprocess, "conf_thres"):
+            post_cfg["conf_thres"] = engine.postprocess.conf_thres
         return cls(pre_cfg, post_cfg, output)
 
     def set_output(self, output):
@@ -214,6 +216,47 @@ class Results:
         return img
 
     def _plot_pose_estimation(self, source_path, save_path=None, **kwargs):
-        raise NotImplementedError(
-            "Pose Estimation is not supported for plotting results."
+        img = self._plot_object_detection(source_path, None, **kwargs)
+        self.kpts = scale_coords(
+            self.pre_cfg["YoloPre"]["img_size"],
+            self.box_cls[:, :6].reshape(-1, 17, 3),
+            img.shape[:2],
         )
+        for kpt in self.kpts:
+            for i, (x, y, v) in enumerate(kpt):
+                color_k = KEYPOINT_PALLETE[i]
+                if v < self.post_cfg["conf_thres"]:
+                    continue
+                cv2.circle(
+                    img,
+                    (int(x), int(y)),
+                    RADIUS,
+                    color_k,
+                    -1,
+                    lineType=cv2.LINE_AA,
+                )
+
+            for j, sk in enumerate(POSE_SKELETON):
+                pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
+                pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
+
+                conf1 = kpt[sk[0] - 1, 2]
+                conf2 = kpt[sk[1] - 1, 2]
+
+                if (
+                    conf1 < self.post_cfg["conf_thres"]
+                    or conf2 < self.post_cfg["conf_thres"]
+                ):
+                    continue
+                cv2.line(
+                    img,
+                    pos1,
+                    pos2,
+                    LIMB_PALLETE[j],
+                    thickness=int(np.ceil(LW / 2)),
+                    lineType=cv2.LINE_AA,
+                )
+        if save_path is not None:
+            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.destroyAllWindows()
+        return img

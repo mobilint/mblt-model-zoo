@@ -142,7 +142,7 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
 
             if self.n_extra == xi.shape[1]:
-                proto = xi
+                proto = xi  # (bs, 32, 160, 160)
                 x.pop(i)
                 proto_exist = True
                 break

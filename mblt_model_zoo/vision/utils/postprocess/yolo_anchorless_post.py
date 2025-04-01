@@ -28,6 +28,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
+
             if xi.shape[-1] == 1:  # (b, 4, 8400, 1)
                 xi = xi.squeeze(-1)
                 xi = xi * self.stride
@@ -109,14 +110,15 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
 
     def rearrange(self, x):
         # for xi in x, unsqueeze the first dimension if ndim(xi) == 3
-        for i, xi in enumerate(x):
+        for i, xi in enumerate(x):  # expand
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
                 x[i] = xi
 
         x = sorted(x, key=lambda x: x.numel(), reverse=True)  # sort by numel
         proto = x.pop(0)  # (b, 160, 160, 32)
-        proto = proto.permute(0, 3, 1, 2)  # (b, 32, 160, 160)
+        if proto.shape[-1] == self.n_extra:
+            proto = proto.permute(0, 3, 1, 2)  # (b, 32, 160, 160)
         y = []
         for xi in x:
             if xi.shape[-1] == 1:  # coord
@@ -144,18 +146,20 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
                 xi = xi.unsqueeze(0)
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
 
-            if xi.shape[1] == 1:  # cls
-                xi = xi.squeeze(1)
-                if xi.shape[1] == 4:  # coord
+            if xi.shape[-1] == 1:  # cls (b, 1, 8400, 1)
+                xi = xi.squeeze(-1)
+                if xi.shape[1] == 4:  # coord (b, 4, 8400, 1)
                     xi = xi * self.stride
                 y.append(xi)
-            elif xi.shape[3] == 3:  # keypoints
-                xi = xi.reshape(xi.shape[0], -1, self.n_extra)
-                xi = xi.transpose(0, 2, 1)
+            elif xi.shape[2] == 3:  # keypoints (b, 17, 3, 8400)
+                xi = xi.reshape(xi.shape[0], self.n_extra, -1)  # (b, 17*3, 8400)
                 y.append(xi)
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
         y = sorted(
             y, key=lambda x: x.size, reverse=True
         )  # sort by size descending (bs, 51, 8400), (bs, 4, 8400), (bs, 1, 8400)
+        y = y[1:] + [
+            y[0]
+        ]  # move keypoints to the front (bs, 4, 8400), (bs, 1, 8400), (bs, 51, 8400)
         return torch.cat(y, dim=1)  # (bs, 56, 8400)

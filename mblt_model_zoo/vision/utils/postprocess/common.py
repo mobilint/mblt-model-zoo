@@ -110,6 +110,43 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True):
     return clip_boxes(boxes, img0_shape)
 
 
+def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, padding=True):
+    """
+    Original Source:
+    https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L756
+
+    Args:
+        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
+        coords (tuple): The coordinates of the objects in the image, in the format of (x, y).
+        img0_shape (tuple): The shape of the target image, in the format of (height, width).
+        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
+            calculated based on the size difference between the two images.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
+            rescaling.
+
+    Returns:
+        coords (tuple): The scaled coordinates, in the format of (x, y)
+    """
+
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(
+            img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
+        )  # gain  = old / new
+        pad = int((img1_shape[1] - img0_shape[1] * gain) / 2), int(
+            (img1_shape[0] - img0_shape[0] * gain) / 2
+        )  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
+
+    if padding:
+        coords[..., 0] -= pad[0]  # x padding
+        coords[..., 1] -= pad[1]  # y padding
+
+    coords[..., :2] /= gain
+    return clip_coords(coords, img0_shape)
+
+
 def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     """
     https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L680
