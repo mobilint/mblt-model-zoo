@@ -1,13 +1,13 @@
 from typing import List, Union
-import PIL
+from PIL import Image
 import torch
 import numpy as np
 import cv2
-from .base import PreBase
-from mblt_model_zoo.vision.utils.types import TensorLike
+from .base import PreOps
+from ..types import TensorLike
 
 
-class CenterCrop(PreBase):
+class CenterCrop(PreOps):
     def __init__(self, size: Union[int, List[int]]):
         """Center crop the image
 
@@ -22,10 +22,10 @@ class CenterCrop(PreBase):
         elif isinstance(size, int):
             self.size = [size, size]
 
-    def __call__(self, x: Union[TensorLike, PIL.Image.Image]):
+    def __call__(self, x: Union[TensorLike, Image.Image]):
         if isinstance(x, torch.Tensor):
-            x = x.numpy()
-        if isinstance(x, PIL.Image.Image):
+            x = x.cpu().numpy()
+        elif isinstance(x, Image.Image):
             x = np.array(x)
 
         H, W = x.shape[:2]

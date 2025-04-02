@@ -1,50 +1,47 @@
-import PIL
 import numpy as np
-import PIL
 import cv2
 import torch
-import os
+from PIL import Image
 from typing import Union
-from .base import PreBase
-from mblt_model_zoo.vision.utils.types import TensorLike
+from .base import PreOps
+from ..types import TensorLike
 
 
-class Reader(PreBase):
+class Reader(PreOps):
     def __init__(self, style: str):
         """Read image and convert to tensor"""
-        assert style in [
+        assert style.lower() in [
             "pil",
             "numpy",
         ], f"Unsupported style={style} for image reader."
 
-        self.style = style
+        self.style = style.lower()
 
-    def __call__(self, x: Union[str, TensorLike, PIL.Image.Image]):
-        if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x)
-
-        if isinstance(x, torch.Tensor):
-            if self.style == "pil":
-                x = x.numpy()
-                x = PIL.Image.fromarray(x.astype(np.uint8))
+    def __call__(self, x: Union[str, TensorLike, Image.Image]):
+        if self.style == "numpy":
+            if isinstance(x, np.ndarray):
                 return x
-            else:
-                return x
-
-        elif isinstance(x, PIL.Image.Image):
-            if self.style == "pil":
-                return x
-            else:
-                return np.array(x)
-
-        elif isinstance(x, str):
-            assert os.path.exists(x) and os.path.isfile(x), f"File {x} does not exist."
-            if self.style == "pil":
-                return PIL.Image.open(x).convert("RGB")
-            else:
+            elif isinstance(x, torch.Tensor):
+                return x.cpu().numpy()
+            elif isinstance(x, str):
                 x = cv2.imread(x)
                 x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
-                return torch.from_numpy(x).float()
-
+                return x
+            elif isinstance(x, Image.Image):
+                return np.array(x)
+            else:
+                raise ValueError("Got Unsupported Input")
+        elif self.style == "pil":
+            if isinstance(x, np.ndarray):
+                return Image.fromarray(x.astype(np.uint8))
+            elif isinstance(x, torch.Tensor):
+                x = x.cpu().numpy()
+                return Image.fromarray(x.astype(np.uint8))
+            elif isinstance(x, str):
+                return Image.open(x).convert("RGB")
+            elif isinstance(x, Image.Image):
+                return x
+            else:
+                raise ValueError("Got Unsupported Input")
         else:
-            raise ValueError(f"Unsupported input type={type(x)} for image reader.")
+            raise NotImplementedError("Got Unsupported Style")

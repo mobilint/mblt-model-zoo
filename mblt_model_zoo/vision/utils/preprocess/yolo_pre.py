@@ -2,11 +2,11 @@ import numpy as np
 import torch
 import cv2
 from typing import List
-from mblt_model_zoo.vision.utils.types import TensorLike
-from .base import PreBase
+from .base import PreOps
+from ..types import TensorLike
 
 
-class YoloPre(PreBase):
+class YoloPre(PreOps):
     """
     Preprocess for YOLO model.
     Original code:
@@ -20,7 +20,7 @@ class YoloPre(PreBase):
 
     def __call__(self, x: TensorLike):
         if isinstance(x, torch.Tensor):
-            x = x.numpy()
+            x = x.cpu().numpy()
         img = x
         h0, w0 = img.shape[:2]  # original hw
         r = min(self.img_size[0] / h0, self.img_size[1] / w0)  # ratio
@@ -41,4 +41,4 @@ class YoloPre(PreBase):
         )  # add border
         img = (img / 255).astype(np.float32)
 
-        return torch.from_numpy(img)
+        return torch.from_numpy(img).to(self.device)

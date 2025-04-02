@@ -4,8 +4,8 @@ from .common import *
 
 
 class YOLOAnchorPost(YOLOPostBase):
-    def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
-        super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
+    def __init__(self, pre_cfg: dict, post_cfg: dict):
+        super().__init__(pre_cfg, post_cfg)
         self.no = self.nc + 5 + self.n_extra
         self.make_anchor_grid()
 
@@ -21,8 +21,8 @@ class YOLOAnchorPost(YOLOPostBase):
         ]  # (80, 80), (40, 40), (20, 20)
         for anchr, (ny, nx), strd in zip(self.anchors, out_sizes, strides):
             yv, xv = torch.meshgrid(
-                torch.arange(ny, dtype=torch.float32),
-                torch.arange(nx, dtype=torch.float32),
+                torch.arange(ny, dtype=torch.float32, device=self.device),
+                torch.arange(nx, dtype=torch.float32, device=self.device),
                 indexing="ij",
             )
             grid = torch.stack((xv, yv), 2).expand(self.na, ny, nx, 2)
@@ -31,16 +31,20 @@ class YOLOAnchorPost(YOLOPostBase):
             anchr = torch.broadcast_to(
                 torch.tensor(anchr).reshape(self.na, 1, 1, 2),
                 (self.na, ny, nx, 2),
-            )
+            ).to(self.device)
             self.anchor_grid.append(anchr)
 
-            self.stride.append(strd * torch.ones(self.na, ny, nx, 2))
+            self.stride.append(strd * torch.ones(self.na, ny, nx, 2).to(self.device))
 
-        self.grid = torch.cat([grd.reshape(-1, 2) for grd in self.grid], dim=0)
+        self.grid = torch.cat([grd.reshape(-1, 2) for grd in self.grid], dim=0).to(
+            self.device
+        )
         self.anchor_grid = torch.cat(
             [anc.reshape(-1, 2) for anc in self.anchor_grid], dim=0
-        )
-        self.stride = torch.cat([strd.reshape(-1, 2) for strd in self.stride], dim=0)
+        ).to(self.device)
+        self.stride = torch.cat(
+            [strd.reshape(-1, 2) for strd in self.stride], dim=0
+        ).to(self.device)
 
     def rearrange(self, x):
         y = []
@@ -54,7 +58,7 @@ class YOLOAnchorPost(YOLOPostBase):
             elif xi.shape[3] == self.no * self.na:
                 y.append(xi.permute(0, 3, 1, 2))
             else:
-                raise ValueError(f"Got unexpected shape for x={x.shape}.")
+                raise ValueError(f"Got unexpected shape for x={xi.shape}.")
 
         y = sorted(
             y, key=lambda x: x.numel(), reverse=True
@@ -70,15 +74,17 @@ class YOLOAnchorPost(YOLOPostBase):
                 for xi in x
             ],
             dim=1,
-        )
-        x = [xi for xi in x]  # convert to list of tensors if shape is (25200, 85)
+        ).to(self.device)
+        x = list(x.unbind())  # convert to list of tensors if shape is (25200, 85)
 
         y = []
         for xi in x:
-            ic = xi[:, 4] > self.conf_thres  # candidate indices
+            ic = (xi[:, 4] > self.conf_thres).to(self.device)  # candidate indices
             box_cls = xi[ic]  # candidate boxes
             if len(box_cls) == 0:
-                y.append(torch.zeros((0, self.no), dtype=torch.float32))
+                y.append(
+                    torch.zeros((0, self.no), dtype=torch.float32, device=self.device)
+                )
                 continue
             grid = self.grid[ic]
             anchor_grid = self.anchor_grid[ic]
@@ -90,7 +96,7 @@ class YOLOAnchorPost(YOLOPostBase):
 
             xy = (xy * 2.0 - 0.5 + grid) * stride
             wh = (wh * 2) ** 2 * anchor_grid
-            y.append(torch.cat([xy, wh, conf, scores, extra], dim=-1))
+            y.append(torch.cat([xy, wh, conf, scores, extra], dim=-1).to(self.device))
         return y
 
     def nms(self, x, max_det=300, max_nms=30000, max_wh=7680):
@@ -98,7 +104,11 @@ class YOLOAnchorPost(YOLOPostBase):
         output = []
         for xi in x:
             if len(xi) == 0:
-                output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32))
+                output.append(
+                    torch.zeros(
+                        (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
+                    )
+                )
                 continue
             xi[..., 5:] *= xi[..., 4:5]  # conf = obj_conf * cls_conf
 
@@ -106,7 +116,9 @@ class YOLOAnchorPost(YOLOPostBase):
             mask = xi[..., mi:]
 
             i, j = (xi[..., 5:mi] > self.conf_thres).nonzero(as_tuple=False).T
-            xi = torch.cat([box[i], xi[i, j + 5, None], j[:, None].float(), mask[i]], 1)
+            xi = torch.cat(
+                [box[i], xi[i, j + 5, None], j[:, None].float(), mask[i]], 1
+            ).to(self.device)
 
             if len(xi) == 0:
                 output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32))
@@ -124,10 +136,11 @@ class YOLOAnchorPost(YOLOPostBase):
 
 
 class YOLOAnchorSegPost(YOLOAnchorPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict, conf_thres=0.001, iou_thres=0.7):
-        super().__init__(pre_cfg, post_cfg, conf_thres, iou_thres)
+    def __init__(self, pre_cfg: dict, post_cfg: dict):
+        super().__init__(pre_cfg, post_cfg)
 
-    def __call__(self, x):
+    def __call__(self, x, conf_thres=None, iou_thres=None):
+        self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x, proto_outs = self.rearrange(x)
         x = self.decode(x)
@@ -167,15 +180,17 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
                 for xi in x
             ],
             dim=1,
-        )
-        x = [xi for xi in x]  # convert to list of tensors if shape is (25200, 85 + 32)
+        ).to(self.device)
+        x = list(x.unbind())  # convert to list of tensors if shape is (25200, 85 + 32)
 
         y = []
         for xi in x:
-            ic = xi[:, 4] > self.inv_conf_thres  # candidate indices
+            ic = (xi[:, 4] > self.inv_conf_thres).to(self.device)  # candidate indices
             box_cls = xi[ic]  # candidate boxes
             if len(box_cls) == 0:
-                y.append(torch.zeros((0, self.no), dtype=torch.float32))
+                y.append(
+                    torch.zeros((0, self.no), dtype=torch.float32, device=self.device)
+                )
                 continue
             grid = self.grid[ic]
             anchor_grid = self.anchor_grid[ic]
@@ -190,5 +205,5 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
             conf = conf.sigmoid()
             scores = scores.sigmoid()
             extra *= conf
-            y.append(torch.cat([xy, wh, conf, scores, extra], dim=-1))
+            y.append(torch.cat([xy, wh, conf, scores, extra], dim=-1).to(self.device))
         return y

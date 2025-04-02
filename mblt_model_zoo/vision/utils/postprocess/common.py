@@ -2,9 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import cv2
-from typing import List, Tuple, Union
-from pycocotools.mask import encode
-from mblt_model_zoo.vision.utils.datasets import get_coco_inv
+from typing import Union
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
@@ -12,7 +10,7 @@ def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
     if isinstance(x, np.ndarray):
         y = np.copy(x)
     elif isinstance(x, torch.Tensor):
-        y = torch.clone(x)
+        y = torch.clone(x).to(x)
     else:
         raise ValueError("x should be np.ndarray or torch.Tensor")
 
@@ -29,7 +27,7 @@ def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
     if isinstance(x, np.ndarray):
         y = np.copy(x)
     elif isinstance(x, torch.Tensor):
-        y = torch.clone(x)
+        y = torch.clone(x).to(x)
     else:
         raise ValueError("x should be np.ndarray or torch.Tensor")
 
@@ -175,9 +173,7 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
         masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[
             0
         ]  # CHW
-    masks = masks.gt_(0.0)
-
-    return masks
+    return masks.gt_(0.0)
 
 
 def process_mask_upsample(protos, masks_in, bboxes, shape):
@@ -328,7 +324,7 @@ def non_max_suppression(boxes, scores, iou_threshold, max_output):
     areas = (end_x - start_x) * (end_y - start_y)
 
     # Create an index order (assumed scores are already sorted in descending order)
-    order = torch.arange(scores.size(0))
+    order = torch.arange(scores.size(0)).to(boxes.device)
 
     while order.numel() > 0 and len(picked_indices) < max_output:
         # The index with the highest score
@@ -355,43 +351,7 @@ def non_max_suppression(boxes, scores, iou_threshold, max_output):
         ratio = intersection / union
 
         # Keep boxes with IoU less than or equal to the threshold
-        keep = ratio <= iou_threshold
+        keep = (ratio <= iou_threshold).to(order.device)
         order = order[keep]
 
     return picked_indices
-
-
-def nmsout2eval(nms_out, img1_shape, img0_shape):
-    """NMS output to evaluation format.
-
-    Args:
-        nms_out (torch.Tensor): The output of the NMS operation of shape (n, 6), where n is the number of objects
-        img1_shape (torch.Tensor): processed image shape
-        img0_shape (torch.Tensor): original image shape
-
-    Returns:
-        labels (list): The labels of the objects
-        boxes (list): The bounding boxes of the objects
-        scores (list): The confidence scores of the objects
-    """
-    boxes = nms_out[:, :4]
-    scores = nms_out[:, 4]
-    labels = nms_out[:, 5]
-
-    scale_boxes(img1_shape, boxes, img0_shape)
-    boxes = xyxy2xywh(boxes)
-    boxes[:, :2] -= boxes[:, 2:] / 2
-
-    boxes = boxes.tolist()
-    scores = scores.tolist()
-    labels = labels.tolist()
-    labels = [get_coco_inv(int(l)) for l in labels]
-
-    return labels, boxes, scores
-
-
-def single_encode(x):
-    """Encode predicted masks as RLE and append results to jdict."""
-    rle = encode(np.asarray(x[:, :, None], order="F", dtype="uint8"))[0]
-    rle["counts"] = rle["counts"].decode("utf-8")
-    return rle

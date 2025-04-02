@@ -1,10 +1,10 @@
 import numpy as np
-from typing import Union
-from .base import *
 import torch
+from .base import PreOps
+from ..types import TensorLike
 
 
-class SetOrder(PreBase):
+class SetOrder(PreOps):
     """Set the channel order of the image."""
 
     def __init__(self, shape: str = "HWC"):
@@ -17,18 +17,23 @@ class SetOrder(PreBase):
         assert shape.lower() in ["hwc", "chw"], f"Got unsupported shape={shape}."
         self.shape = shape
 
-    def __call__(self, x: np.ndarray):
-        # Assume x is HWC
-        if isinstance(x, np.ndarray):
-            if self.shape.lower() == "hwc":
-                return x
-            elif self.shape.lower() == "chw":
-                x = x.transpose(2, 0, 1)
-                return x
-        elif isinstance(x, torch.Tensor):
-            if self.shape.lower() == "hwc":
-                return x.permute(1, 2, 0)
-            elif self.shape.lower() == "chw":
-                return x
+    def __call__(self, x: TensorLike):
+        assert x.ndim == 3, "Assume that x is a color image"
+        if x.shape[0] == 3:
+            cdim = 0
+        elif x.shape[-1] == 3:
+            cdim = 2
         else:
-            raise TypeError(f"Got unexpected type for x={type(x)}.")
+            raise ValueError(
+                f"Only assume HWC or CHW with 3 channels, but got shape {x.shape}"
+            )
+
+        is_tensor = isinstance(x, torch.Tensor)
+        permute_fn = torch.permute if is_tensor else np.transpose
+
+        if cdim == 0 and self.shape.lower() == "hwc":
+            return permute_fn(x, (1, 2, 0))
+        elif cdim == 2 and self.shape.lower() == "chw":
+            return permute_fn(x, (2, 0, 1))
+
+        return x

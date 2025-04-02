@@ -1,6 +1,5 @@
 from mblt_model_zoo.vision import ResNet50
 from argparse import ArgumentParser
-from mblt_model_zoo.vision.utils.results import Results
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -16,12 +15,11 @@ if __name__ == "__main__":
         local_model="/workspace/mblt-model-zoo/tmp/resnet50.mxq",
         model_type="IMAGENET1K_V1",
     )
-    resnet_pre = resnet50.get_preprocess()
-    resnet_post = resnet50.get_postprocess()
 
-    input = resnet_pre(image_path)
-    output = resnet50(input)
-    result = Results.from_engine(resnet50, resnet_post(output))
+    # resnet50.gpu()
+    input_img = resnet50.preprocess(image_path)
+    output = resnet50(input_img)
+    result = resnet50.postprocess(output)
 
     result.plot(
         source_path=image_path,

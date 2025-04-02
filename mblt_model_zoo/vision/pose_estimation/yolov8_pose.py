@@ -1,6 +1,5 @@
-from mblt_model_zoo.vision.utils.types import ModelInfo, ModelInfoSet
-from mblt_model_zoo.vision.wrapper import MBLT_Engine
-from typing import Optional, Union, List, Any
+from ..utils.types import ModelInfo, ModelInfoSet
+from ..wrapper import MBLT_Engine
 
 
 class YOLOv8nPose_Set(ModelInfoSet):

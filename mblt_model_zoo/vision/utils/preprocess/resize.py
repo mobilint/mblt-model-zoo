@@ -1,22 +1,22 @@
 from typing import List, Union, Tuple
 import numpy as np
 import torch
-from PIL.Image import Image, Resampling
+from PIL import Image
 import torch.nn.functional as F
-from .base import PreBase
-from mblt_model_zoo.vision.utils.types import *
+from .base import PreOps
+from ..types import TensorLike
 
 PIL_INTERP_CODES = {
-    "nearest": Resampling.NEAREST,
-    "bilinear": Resampling.BILINEAR,
-    "bicubic": Resampling.BICUBIC,
-    "box": Resampling.BOX,
-    "hamming": Resampling.HAMMING,
-    "lanczos": Resampling.LANCZOS,
+    "nearest": Image.Resampling.NEAREST,
+    "bilinear": Image.Resampling.BILINEAR,
+    "bicubic": Image.Resampling.BICUBIC,
+    "box": Image.Resampling.BOX,
+    "hamming": Image.Resampling.HAMMING,
+    "lanczos": Image.Resampling.LANCZOS,
 }
 
 
-class Resize(PreBase):
+class Resize(PreOps):
     """Resize image in Torch backend"""
 
     def __init__(
@@ -29,7 +29,7 @@ class Resize(PreBase):
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(self, x: Union[TensorLike, Image]):
+    def __call__(self, x: Union[TensorLike, Image.Image]):
         """Resize image
 
         Args:
@@ -43,10 +43,11 @@ class Resize(PreBase):
         """
         # result: np.ndarray (H, W, C)
         if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x)
+            x = torch.from_numpy(x).to(self.device)
 
         if isinstance(x, torch.Tensor):
             assert x.ndim() == 3, f"Got unexpected x.shape={x.shape}."
+            x = x.to(self.device)
             img_h, img_w = x.shape[:2]
             new_h, new_w = self._compute_resized_output_size(img_h, img_w)
 
@@ -69,8 +70,8 @@ class Resize(PreBase):
 
             x = self._cast_squeeze_out(x, need_cast, need_squeeze, out_dtype)
 
-            return x
-        elif isinstance(x, Image):
+            return x.to(self.device)
+        elif isinstance(x, Image.Image):
             img_w, img_h = x.size
             new_h, new_w = self._compute_resized_output_size(img_h, img_w)
             if [img_h, img_w] == [new_h, new_w]:

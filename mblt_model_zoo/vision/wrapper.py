@@ -1,13 +1,15 @@
-import maccel
 import numpy as np
 import torch
 import sys
 import os
+from typing import Union
 from urllib.parse import urlparse
+import maccel
 from .utils.downloads import download_url_to_file
 from .utils.types import TensorLike
 from .utils.preprocess import build_preprocess
 from .utils.postprocess import build_postprocess
+from .utils.results import Results
 
 
 class MBLT_Engine:
@@ -17,17 +19,48 @@ class MBLT_Engine:
         self.post_cfg = post_cfg
 
         self.model = MXQ_Model(**self.model_cfg)
+        self._preprocess = build_preprocess(self.pre_cfg)
+        self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
 
-    def __call__(self, x):
+        self.device = torch.device("cpu")
+
+    def __call__(self, x: TensorLike):
         return self.model(x)
 
-    def get_preprocess(self, **kwargs):
-        self.preprocess = build_preprocess(self.pre_cfg, **kwargs)
-        return self.preprocess
+    def preprocess(self, x, **kwargs):
+        return self._preprocess(x, **kwargs)
 
-    def get_postprocess(self, **kwargs):
-        self.postprocess = build_postprocess(self.pre_cfg, self.post_cfg, **kwargs)
-        return self.postprocess
+    def postprocess(self, x, **kwargs):
+        pre_result = self._postprocess(x, **kwargs)
+        return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
+
+    def to(self, device: Union[str, torch.device]):
+        self._preprocess.to(device)
+        self._postprocess.to(device)
+
+        if isinstance(device, str):
+            self.device = torch.device(device)
+        elif isinstance(device, torch.device):
+            self.device = device
+        else:
+            raise TypeError(f"Got unexpected type for device={type(device)}.")
+
+    def cpu(self):
+        self.to(device="cpu")
+
+    def gpu(self):
+        self.to(device="cuda")
+
+    def cuda(self, device: Union[str, int] = 0):
+        if isinstance(device, int):
+            device = f"cuda:{device}"
+        elif isinstance(device, str):
+            if not device.startswith("cuda:"):
+                raise ValueError("Invalid device string. It should start with 'cuda:'.")
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available. Please check your environment.")
+        self.to(device=device)
 
 
 class MXQ_Model:

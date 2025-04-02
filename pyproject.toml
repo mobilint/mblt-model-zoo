@@ -4,21 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mblt-model-zoo"
+authors = [
+    {"name" = "Mobilint Inc.", email = "contact@mobilint.com"},
+]
 dynamic = ["version"]
 description = "A collection of pre-quantized models for NPU inference"
 readme = "README.md"
 # license = {text = "Apache-2.0"}
-requires-python = ">=3.8"
-keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "mobilint", "mblt", "aries"]
+requires-python = ">=3.8, <3.12"
+keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
     "torch>=2.0",
     "numpy>=1.24",
     "opencv-python>=4.10",
     "pillow>=10.0",
-    "pycocotools",
     "urllib3>=2.1"
 ]
-
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Software Development",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+]
 
 [project.urls]
 Home = "https://www.mobilint.com/"

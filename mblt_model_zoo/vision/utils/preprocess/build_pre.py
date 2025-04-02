@@ -1,4 +1,3 @@
-from typing import List
 from collections import OrderedDict
 from .base import PreBase
 from .resize import Resize
@@ -9,7 +8,7 @@ from .reader import Reader
 from .yolo_pre import YoloPre
 
 
-def build_preprocess(pre_cfg: OrderedDict) -> List[PreBase]:
+def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
     res = []
     for pre_type, pre_attr in pre_cfg.items():
         pre_type_lower = pre_type.lower()
@@ -28,10 +27,4 @@ def build_preprocess(pre_cfg: OrderedDict) -> List[PreBase]:
         else:
             raise ValueError(f"Got unsupported pre_type={pre_type}.")
 
-    def preprocess(x):
-        for pre in res:
-            x = pre(x)
-
-        return x
-
-    return preprocess
+    return PreBase(res)

@@ -15,22 +15,19 @@ ALPHA = 0.3  # alpha for overlay
 
 class Results:
     def __init__(
-        self, pre_cfg: dict, post_cfg: dict, output: Union[TensorLike, ListTensorLike]
+        self,
+        pre_cfg: dict,
+        post_cfg: dict,
+        output: Union[TensorLike, ListTensorLike],
+        **kwargs,
     ):
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
         self.set_output(output)
+        self.conf_thres = kwargs.get("conf_thres", 0.5)
 
-    @classmethod
-    def from_engine(cls, engine, output):
-        pre_cfg = engine.pre_cfg
-        post_cfg = engine.post_cfg
-        if hasattr(engine.postprocess, "conf_thres"):
-            post_cfg["conf_thres"] = engine.postprocess.conf_thres
-        return cls(pre_cfg, post_cfg, output)
-
-    def set_output(self, output):
+    def set_output(self, output: Union[TensorLike, ListTensorLike]):
         self.acc = None
         self.box_cls = None
         self.mask = None
@@ -219,13 +216,13 @@ class Results:
         img = self._plot_object_detection(source_path, None, **kwargs)
         self.kpts = scale_coords(
             self.pre_cfg["YoloPre"]["img_size"],
-            self.box_cls[:, :6].reshape(-1, 17, 3),
+            self.box_cls[:, 6:].reshape(-1, 17, 3),
             img.shape[:2],
         )
         for kpt in self.kpts:
             for i, (x, y, v) in enumerate(kpt):
                 color_k = KEYPOINT_PALLETE[i]
-                if v < self.post_cfg["conf_thres"]:
+                if v < self.conf_thres:
                     continue
                 cv2.circle(
                     img,
@@ -243,10 +240,7 @@ class Results:
                 conf1 = kpt[sk[0] - 1, 2]
                 conf2 = kpt[sk[1] - 1, 2]
 
-                if (
-                    conf1 < self.post_cfg["conf_thres"]
-                    or conf2 < self.post_cfg["conf_thres"]
-                ):
+                if conf1 < self.conf_thres or conf2 < self.conf_thres:
                     continue
                 cv2.line(
                     img,
