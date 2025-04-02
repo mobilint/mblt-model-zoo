@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from mblt_model_zoo.vision import YOLOv5m, YOLOv5mSeg, YOLOv8n, YOLOv8nSeg, YOLOv8nPose
-import time
+import mblt_model_zoo.vision
 
 
 if __name__ == "__main__":
@@ -20,26 +20,4 @@ if __name__ == "__main__":
     result.plot(
         source_path=image_path,
         save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8n_pose.jpg",
-    )
-
-    time.sleep(5)
-    yolo.gpu()
-    input_img = yolo.preprocess(image_path)
-    output = yolo(input_img)
-    result = yolo.postprocess(output, conf_thres=0.5, iou_thres=0.5)
-
-    result.plot(
-        source_path=image_path,
-        save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8n_pose_gpu.jpg",
-    )
-
-    time.sleep(5)
-    yolo.cpu()
-    input_img = yolo.preprocess(image_path)
-    output = yolo(input_img)
-    result = yolo.postprocess(output, conf_thres=0.5, iou_thres=0.5)
-
-    result.plot(
-        source_path=image_path,
-        save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8n_pose_cpu.jpg",
     )
