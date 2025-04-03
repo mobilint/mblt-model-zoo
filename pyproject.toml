@@ -1,7 +1,9 @@
 [build-system]
-requires = ["setuptools>=59", "wheel"]
+requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
+# Project setting -----------------------------
 [project]
 name = "mblt-model-zoo"
 authors = [
@@ -33,3 +35,11 @@ classifiers = [
 [project.urls]
 Home = "https://www.mobilint.com/"
 "Source Code" = "https://github.com/mobilint/mblt-model-zoo"
+
+
+# Tools setting -----------------------------------------
+[tool.setuptools]
+packages = { find = { where = ["."], include = ["mblt_model_zoo","mblt_model_zoo.*"] } }
+
+[tool.setuptools.dynamic]
+version = { attr = "mblt_model_zoo.__version__" }

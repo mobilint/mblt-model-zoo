@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
 from mblt_model_zoo.vision import YOLOv5m, YOLOv5mSeg, YOLOv8n, YOLOv8nSeg, YOLOv8nPose
-import mblt_model_zoo.vision
 
 
 if __name__ == "__main__":
