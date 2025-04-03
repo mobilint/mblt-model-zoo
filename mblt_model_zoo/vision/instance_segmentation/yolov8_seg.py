@@ -3,7 +3,7 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv8nSeg_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -23,10 +23,11 @@ class YOLOv8nSeg_Set(ModelInfoSet):
             "n_extra": 32,
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv8sSeg_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -46,10 +47,11 @@ class YOLOv8sSeg_Set(ModelInfoSet):
             "n_extra": 32,
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv8mSeg_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -69,10 +71,11 @@ class YOLOv8mSeg_Set(ModelInfoSet):
             "n_extra": 32,
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv8lSeg_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -92,10 +95,11 @@ class YOLOv8lSeg_Set(ModelInfoSet):
             "n_extra": 32,
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv8xSeg_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -115,6 +119,7 @@ class YOLOv8xSeg_Set(ModelInfoSet):
             "n_extra": 32,
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv8nSeg(MBLT_Engine):

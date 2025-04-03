@@ -3,7 +3,7 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv5n_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -26,10 +26,11 @@ class YOLOv5n_Set(ModelInfoSet):
             ],
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv5s_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -52,10 +53,11 @@ class YOLOv5s_Set(ModelInfoSet):
             ],
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv5m_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -78,10 +80,11 @@ class YOLOv5m_Set(ModelInfoSet):
             ],
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv5l_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -104,10 +107,11 @@ class YOLOv5l_Set(ModelInfoSet):
             ],
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv5x_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -130,6 +134,7 @@ class YOLOv5x_Set(ModelInfoSet):
             ],
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv5n(MBLT_Engine):

@@ -3,7 +3,7 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv9t_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -22,10 +22,11 @@ class YOLOv9t_Set(ModelInfoSet):
             "nl": 3,  # Number of detection layers
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv9s_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -44,10 +45,11 @@ class YOLOv9s_Set(ModelInfoSet):
             "nl": 3,  # Number of detection layers
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv9m_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -66,10 +68,11 @@ class YOLOv9m_Set(ModelInfoSet):
             "nl": 3,  # Number of detection layers
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv9c_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -88,10 +91,11 @@ class YOLOv9c_Set(ModelInfoSet):
             "nl": 3,  # Number of detection layers
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv9e_Set(ModelInfoSet):
-    DEFAULT = ModelInfo(
+    COCO_V1 = ModelInfo(
         model_cfg={
             "url": "/",
         },
@@ -110,6 +114,7 @@ class YOLOv9e_Set(ModelInfoSet):
             "nl": 3,  # Number of detection layers
         },
     )
+    DEFAULT = COCO_V1
 
 
 class YOLOv9t(MBLT_Engine):

@@ -31,9 +31,9 @@ class EfficientNet_V2_S(MBLT_Engine):
         assert (
             model_type in EfficientNet_V2_S_Set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {EfficientNet_V2_S_Set.__dict__.keys()}"
-        model_cfg = EfficientNet_V2_S_Set.__dict__[model_type].model_cfg
+        model_cfg = EfficientNet_V2_S_Set.__dict__[model_type].value.model_cfg
         if local_model:
             model_cfg["url"] = local_model
-        pre_cfg = EfficientNet_V2_S_Set.__dict__[model_type].pre_cfg
-        post_cfg = EfficientNet_V2_S_Set.__dict__[model_type].post_cfg
+        pre_cfg = EfficientNet_V2_S_Set.__dict__[model_type].value.pre_cfg
+        post_cfg = EfficientNet_V2_S_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
