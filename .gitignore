@@ -1,9 +1,10 @@
-*/tmp/*
+tmp/
+dist/
+.vscode/
+build/
 *.pyc
 *.egg-info
-dist
 *.log
-.vscode/*
 *.so
 *__pycache__*
 *.o
@@ -17,4 +18,3 @@ dist
 *.pth
 *.mblt
 *.msgpack
-build/*
