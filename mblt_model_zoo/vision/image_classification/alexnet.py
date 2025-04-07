@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class AlexNet_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/alexnet_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/alexnet_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

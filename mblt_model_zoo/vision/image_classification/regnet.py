@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class Regnet_X_16GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_16gf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_16gf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +29,7 @@ class Regnet_X_16GF_Set(ModelInfoSet):
 class Regnet_X_1_6GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_1_6gf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_1_6gf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +53,7 @@ class Regnet_X_1_6GF_Set(ModelInfoSet):
 class Regnet_X_32GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_32gf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_32gf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,7 +77,7 @@ class Regnet_X_32GF_Set(ModelInfoSet):
 class Regnet_X_3_2GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_3_2gf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_3_2gf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -101,7 +101,7 @@ class Regnet_X_3_2GF_Set(ModelInfoSet):
 class Regnet_X_400MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_400mf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_400mf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -125,7 +125,7 @@ class Regnet_X_400MF_Set(ModelInfoSet):
 class Regnet_X_800MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_800mf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_800mf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -149,7 +149,7 @@ class Regnet_X_800MF_Set(ModelInfoSet):
 class Regnet_X_8GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/regnet_x_8gf_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/regnet_x_8gf_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

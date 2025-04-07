@@ -17,7 +17,6 @@ from .efficientnet import EfficientNet_B1
 from .mobilenet_v1 import MobileNet_V1
 from .mobilenet_v2 import MobileNet_V2
 from .shufflenet_v2 import (
-    ShuffleNet_V2_X0_5,
     ShuffleNet_V2_X1_0,
     ShuffleNet_V2_X1_5,
     ShuffleNet_V2_X2_0,

@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class EfficientNet_B1_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/efficientnet_b1_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/efficientnet_b1_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

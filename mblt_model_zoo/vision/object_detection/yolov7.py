@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv7_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_detection/yolov7_640_640.mxq",
+            "url": "https://dl.mobilint.com/model/image_detection/yolov7_640_640.mxq",
         },
         pre_cfg={
             "Reader": {

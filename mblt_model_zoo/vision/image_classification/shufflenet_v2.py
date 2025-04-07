@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class ShuffleNet_V2_X1_0(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/shufflenet_v2_x1_0_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_0_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -31,7 +31,7 @@ class ShuffleNet_V2_X1_0(ModelInfoSet):
 class ShuffleNet_V2_X1_5(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/shufflenet_v2_x1_5_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_5_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -57,7 +57,7 @@ class ShuffleNet_V2_X1_5(ModelInfoSet):
 class ShuffleNet_V2_X2_0(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/shufflenet_v2_x2_0_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x2_0_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

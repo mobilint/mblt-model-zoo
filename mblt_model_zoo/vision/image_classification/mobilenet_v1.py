@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class MobileNet_V1_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/mobilenet_v1.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/mobilenet_v1.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -1,10 +1,11 @@
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
+
 class YOLOv5lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
+            "url": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
         },
         pre_cfg={
             "Reader": {

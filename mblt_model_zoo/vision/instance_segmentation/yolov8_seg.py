@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv8sSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_detection/yolov8s-seg.mxq",
+            "url": "https://dl.mobilint.com/model/image_detection/yolov8s-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +29,7 @@ class YOLOv8sSeg_Set(ModelInfoSet):
 class YOLOv8mSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_detection/yolov8m-seg.mxq",
+            "url": "https://dl.mobilint.com/model/image_detection/yolov8m-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +53,7 @@ class YOLOv8mSeg_Set(ModelInfoSet):
 class YOLOv8lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_detection/yolov8l-seg.mxq",
+            "url": "https://dl.mobilint.com/model/image_detection/yolov8l-seg.mxq",
         },
         pre_cfg={
             "Reader": {

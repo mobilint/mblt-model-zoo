@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class VGG11_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg11_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg11_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +29,7 @@ class VGG11_Set(ModelInfoSet):
 class VGG11_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg11_bn_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg11_bn_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +53,7 @@ class VGG11_BN_Set(ModelInfoSet):
 class VGG13_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg13_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg13_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,7 +77,7 @@ class VGG13_Set(ModelInfoSet):
 class VGG13_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg13_bn_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg13_bn_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -101,7 +101,7 @@ class VGG13_BN_Set(ModelInfoSet):
 class VGG16_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg16_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg16_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -125,7 +125,7 @@ class VGG16_Set(ModelInfoSet):
 class VGG16_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg16_bn_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg16_bn_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -149,7 +149,7 @@ class VGG16_BN_Set(ModelInfoSet):
 class VGG19_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg19_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg19_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -173,7 +173,7 @@ class VGG19_Set(ModelInfoSet):
 class VGG19_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/vgg19_bn_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/vgg19_bn_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

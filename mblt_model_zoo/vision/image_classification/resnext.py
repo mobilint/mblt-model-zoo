@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class ResNext50_32x4d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/resnext50_32x4d_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/resnext50_32x4d_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -31,7 +31,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
 class ResNext101_32x8d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/resnext101_32x8d_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/resnext101_32x8d_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -57,7 +57,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
 class ResNext101_64x4d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/resnext101_64x4d_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/resnext101_64x4d_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class DenseNet121_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/densenet121_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/densenet121_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +29,7 @@ class DenseNet121_Set(ModelInfoSet):
 class DenseNet161_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/densenet161_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/densenet161_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +53,7 @@ class DenseNet161_Set(ModelInfoSet):
 class DenseNet169_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/densenet169_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/densenet169_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,7 +77,7 @@ class DenseNet169_Set(ModelInfoSet):
 class DenseNet201_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/densenet201_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/densenet201_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {

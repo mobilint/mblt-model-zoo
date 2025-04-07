@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class MNasNet0_5_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/mnasnet0_5_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/mnasnet0_5_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +29,7 @@ class MNasNet0_5_Set(ModelInfoSet):
 class MNasNet1_0_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/mnasnet1_0_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/mnasnet1_0_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +53,7 @@ class MNasNet1_0_Set(ModelInfoSet):
 class MNasNet0_75_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "dl.mobilint.com/model/image_classification/mnasnet0_75_torchvision.mxq",
+            "url": "https://dl.mobilint.com/model/image_classification/mnasnet0_75_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
