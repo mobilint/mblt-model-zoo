@@ -67,3 +67,4 @@ yolov9c	                        | (640,640,3)	| 52.161	| 52.68	| 99.01	| 102.86	
 yolov9m	                        | (640,640,3)	| 50.648	| 51.4	| 98.53	| 76.95	| 38.47	| [Link](https://github.com/WongKinYiu/yolov9)	
 
 ## Support & Issues
+If you encounter any problem with this package, please feel free to contact [us](tech-support@mobilint.com).
