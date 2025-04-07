@@ -5,7 +5,7 @@ from ..wrapper import MBLT_Engine
 class ResNet18_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "dl.mobilint.com/model/image_classification/resnet18_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -31,7 +31,7 @@ class ResNet18_Set(ModelInfoSet):
 class ResNet34_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "dl.mobilint.com/model/image_classification/resnet34_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -57,7 +57,7 @@ class ResNet34_Set(ModelInfoSet):
 class ResNet50_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://maccel.mobilint.com/resnet50.mxq",
+            "url": "dl.mobilint.com/model/image_classification/resnet50_v1_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -79,7 +79,7 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url": "https://maccel.mobilint.com/resnet50.mxq",
+            "url": "dl.mobilint.com/model/image_classification/resnet50_v2_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -105,7 +105,7 @@ class ResNet50_Set(ModelInfoSet):
 class ResNet101_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "dl.mobilint.com/model/image_classification/resnet101_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -113,28 +113,6 @@ class ResNet101_Set(ModelInfoSet):
             },
             "Resize": {
                 "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
-    )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "url": "/",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
                 "interpolation": "bilinear",
             },
             "CenterCrop": {
@@ -153,7 +131,7 @@ class ResNet101_Set(ModelInfoSet):
 class ResNet152_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "/",
+            "url": "dl.mobilint.com/model/image_classification/resnet152_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -161,28 +139,6 @@ class ResNet152_Set(ModelInfoSet):
             },
             "Resize": {
                 "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
-    )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "url": "/",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
                 "interpolation": "bilinear",
             },
             "CenterCrop": {
