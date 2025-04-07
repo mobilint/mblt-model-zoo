@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=65.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+# Project setting -----------------------------
+[project]
+name = "mblt-model-zoo"
+authors = [
+    {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
+]
+dynamic = ["version"]
+description = "A collection of pre-quantized models for NPU inference"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.8, <3.12"
+keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "opencv-python>=4.10",
+    "pillow>=10.0",
+    "tqdm",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Home = "https://www.mobilint.com/"
+Repository  = "https://github.com/mobilint/mblt-model-zoo"
+
+
+# Tools setting -----------------------------------------
+[tool.setuptools]
+packages = { find = { where = ["."], include = ["mblt_model_zoo","mblt_model_zoo.*"] } }
+
+[tool.setuptools.dynamic]
+version = { attr = "mblt_model_zoo.__version__" }
