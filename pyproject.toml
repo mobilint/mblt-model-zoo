@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mblt-model-zoo"
 authors = [
-    {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
+    {"name" = "Mobilint Inc.", email = "infra@mobilint.com"},
 ]
 dynamic = ["version"]
 description = "A collection of pre-quantized models for NPU inference"
