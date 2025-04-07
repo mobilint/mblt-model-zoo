@@ -20,8 +20,7 @@ dependencies = [
     "numpy>=1.24",
     "opencv-python>=4.10",
     "pillow>=10.0",
-    "urllib3>=2.1",
-    #"tqdm",
+    "tqdm",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
