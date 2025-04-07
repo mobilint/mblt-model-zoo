@@ -7,12 +7,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mblt-model-zoo"
 authors = [
-    {"name" = "Mobilint Inc.", email = "contact@mobilint.com"},
+    {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
 ]
 dynamic = ["version"]
 description = "A collection of pre-quantized models for NPU inference"
 readme = "README.md"
-# license = {text = "Apache-2.0"}
+license = {text = "BSD-3-Clause"}
 requires-python = ">=3.8, <3.12"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
@@ -28,7 +28,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
-    #"License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: BSD License",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
