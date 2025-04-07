@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import Union
+from typing import Union, List
 import os
 import cv2
 from .datasets import *
