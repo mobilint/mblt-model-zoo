@@ -134,7 +134,7 @@ yolov8l-seg	                    | (640,640,3)	| 42.042	| 42.27	| 220.55	| 110.27
 
 
 ## License
-The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE]("https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE") file for more details.
+The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
 
 ## Support & Issues
 If you encounter any problem with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
