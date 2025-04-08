@@ -12,6 +12,7 @@ Mobilint Model Zoo
 `mblt-model-zoo` is an open model zoo for [Mobilint](https://www.mobilint.com/) NPU. It provides a collection of public pre-trained, pre-quantized models, and pre/post-processing tools associated with the quantized models.
 
 ## Model List
+The following tables summarize the models available in `mblt-model-zoo`. We provide the models that are pre-quantized with our advanced quantization techniques.
 ### Image Classification (ImageNet)
 
 | Model | Input Size  (H, W, C)|Top1 Acc (NPU)| Top1 Acc (GPU)| Ops(G) | MACs |Source|
