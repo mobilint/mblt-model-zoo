@@ -9,10 +9,68 @@ Mobilint Model Zoo
 </p>
 </div>
 
-`mblt-model-zoo` is an open model zoo for [Mobilint](https://www.mobilint.com/) NPU. It provides a collection of public pre-trained, pre-quantized models, and pre/post-processing tools associated with the quantized models.
+`mblt-model-zoo` is an open model zoo for [Mobilint](https://www.mobilint.com/) NPU. It provides a collection of public pre-trained, and quantized models, and pre/post-processing tools associated with the quantized models.
+
+
+## Installation
+- Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
+- Install `mblt-model-zoo` using pip:
+```bash
+pip install mblt-model-zoo
+```
+- If you want to install the latest version from the source, clone the repository and install it:
+```bash
+git clone https://github.com/mobilint/mblt-model-zoo.git
+cd mblt-model-zoo
+pip install -e .
+```
+## Quick Start Guide
+### Initializing Quantized Model Class
+`mblt-model-zoo` provides a quantized model with associated pre- and post-processing tools. The following code snippet shows how to use the pre-trained model for inference.
+
+```python
+from mblt_model_zoo.vision import ResNet50
+
+# Load the pre-trained model. 
+# Automatically download the model if not found in the local cache.
+resnet50 = ResNet50() 
+
+# Load the model trained with different recipe
+# Currently, default is "DEFAULT", or "IMAGENET1K_V1
+resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
+
+# Load the model from a local path
+resnet50 = ResNet50(local_model = "path/to/local/model.mxq")
+
+```
+### Working with Quantized Model
+With the image given as path, PIL image, numpy array, or torch tensor, you can perform inference with the quantized model. The following code snippet shows how to use the quantized model for inference:
+```python
+image_path = "path/to/image.jpg"
+
+input_img = resnet50.preprocess(image_path) # Preprocess the input image
+output = resnet50(input_img) # Perform inference with the quantized model
+result = resnet50.postprocess(output) # Postprocess the output
+
+result.plot(
+    source_path=image_path,
+    save_path="path/to/save/result.jpg",
+)
+```
+### Listing Available Models
+`mblt-model-zoo` offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., image classification, object detection, etc.):
+
+```python
+from mblt_model_zoo.vision import list_models
+from pprint import pprint
+
+available_models = list_models()
+pprint(available_models)
+```
+
 
 ## Model List
-The following tables summarize the models available in `mblt-model-zoo`. We provide the models that are pre-quantized with our advanced quantization techniques.
+The following tables summarize the models available in `mblt-model-zoo`. We provide the models that are quantized with our advanced quantization techniques.
 ### Image Classification (ImageNet)
 
 | Model | Input Size <br> (H, W, C)|Top1 Acc <br> (NPU)| Top1 Acc <br> (GPU)| Ops (G) | MACs |Source|
@@ -74,6 +132,9 @@ yolov8s-seg	                    | (640,640,3)	| 35.9	| 36.5	| 42.64	| 21.32	| [L
 yolov8m-seg                 	| (640,640,3)	| 39.882	| 40.4	|  110.26	| 55.13	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
 yolov8l-seg	                    | (640,640,3)	| 42.042	| 42.27	| 220.55	| 110.27	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
 
+
+## License
+The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE]("https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE") file for more details.
 
 ## Support & Issues
 If you encounter any problem with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
