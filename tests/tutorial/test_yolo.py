@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from mblt_model_zoo.vision import YOLOv8m
+from mblt_model_zoo.vision import YOLOv8l
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -9,7 +9,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     image_path = args.image_path
 
-    yolo = YOLOv8m()
+    yolo = YOLOv8l()
 
     input_img = yolo.preprocess(image_path)
     output = yolo(input_img)
@@ -17,5 +17,5 @@ if __name__ == "__main__":
 
     result.plot(
         source_path=image_path,
-        save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8m.jpg",
+        save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8l.jpg",
     )
