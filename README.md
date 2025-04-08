@@ -76,4 +76,4 @@ yolov8l-seg	                    | (640,640,3)	| 42.042	| 42.27	| 220.55	| 110.27
 
 
 ## Support & Issues
-If you encounter any problem with this package, please feel free to contact [us](tech-support@mobilint.com).
+If you encounter any problem with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
