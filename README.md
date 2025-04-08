@@ -4,7 +4,7 @@ Mobilint Model Zoo
 <div align="center">
 <p>
  <a href="https://www.mobilint.com/" target="_blank">
-<img src="https://github.com/mobilint/mblt-model-zoo/raw/main/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
+<img src="https://github.com/mobilint/mblt-model-zoo/blob/master/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
 </a>
 </p>
 </div>
