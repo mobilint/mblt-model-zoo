@@ -15,7 +15,7 @@ Mobilint Model Zoo
 The following tables summarize the models available in `mblt-model-zoo`. We provide the models that are pre-quantized with our advanced quantization techniques.
 ### Image Classification (ImageNet)
 
-| Model | Input Size  (H, W, C)|Top1 Acc (NPU)| Top1 Acc (GPU)| Ops(G) | MACs |Source|
+| Model | Input Size <br> (H, W, C)|Top1 Acc <br> (NPU)| Top1 Acc <br> (GPU)| Ops (G) | MACs |Source|
 |------------|------------|-----------|--------------------|--------|-------|------|
 alexnet	        | (224,224,3)	| 56.01	| 56.56	| 1.42	| 0.71	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.alexnet.html)	
 densenet121	        | (224,224,3)	| 73.86	| 74.44	| 5.70	| 2.85	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.densenet121.html)	
@@ -57,7 +57,7 @@ vgg19	            | (224,224,3)	| 72.27	| 72.376	| 39.26	| 19.63	| [Link](https:
 vgg19_bn	        | (224,224,3)	| 73.9	| 74.218	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19_bn.html)	
 
 ### Object Detection (COCO)
-| Model | Input Size  (H, W, C)| mAP (NPU) | mAP (GPU)| Ops(G) | MACs |Source|
+| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| Ops (G) | MACs |Source|
 |------------|------------|-----------|--------------------|--------|-------|------|
 yolov7	                | (640,640,3)	| 50.134	| 51.14	| 104.66	| 52.33	| [Link](https://github.com/WongKinYiu/yolov7)	
 yolov8l	                        | (640,640,3)	| 52.31	| 52.75	| 165.24	| 82.62	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
@@ -67,7 +67,7 @@ yolov8x	                        | (640,640,3)	| 53.371	| 53.9	| 257.92	| 128.96	
 yolov9c	                        | (640,640,3)	| 52.161	| 52.68	| 102.86	| 51.43	| [Link](https://github.com/WongKinYiu/yolov9)	
 yolov9m	                        | (640,640,3)	| 50.648	| 51.4	| 76.95	| 38.47	| [Link](https://github.com/WongKinYiu/yolov9)	
 ### Instance Segmentation (COCO)
-| Model | Input Size  (H, W, C)| mAPmask (NPU) | mAPmask(GPU)| Ops(G) | MACs |Source|
+| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| Ops (G) | MACs |Source|
 |------------|------------|-----------|--------------------|--------|-------|------|
 yolov5l-seg	                    | (640,640,3)	| 39.318	| 39.67	| 147.83	| 73.91	| [Link](https://github.com/ultralytics/yolov5/releases)	
 yolov8s-seg	                    | (640,640,3)	| 35.9	| 36.5	| 42.64	| 21.32	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#key-features-of-yolov8)	
