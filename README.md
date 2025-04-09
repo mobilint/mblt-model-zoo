@@ -108,12 +108,12 @@ shufflenet_v2_x1_5	| (224,224,3)	| 72.41	| 72.98	| 1.36	| 0.68	| [Link](https://
 shufflenet_v2_x2_0	| (224,224,3)	| 75.38	| 76.23	| 2.65	| 1.32	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.shufflenet_v2_x2_0.html)	
 vgg11   	        | (224,224,3)	| 68.82	| 69.04| 15.22	| 7.61	| [Link](https://pytorch.org/vision/master/models/generated/torchvision.models.vgg11.html)	
 vgg11_bn   	        | (224,224,3)	| 70.02	| 70.37	| 15.22	| 7.61	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg11_bn.html)	
-vgg13	            | (224,224,3)	| 69.65	| 69.928	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13.html)	
-vgg13_bn	        | (224,224,3)	| 71.25	| 71.586	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13_bn.html)	
-vgg16   	        | (224,224,3)	| 71.41	| 71.592	| 30.94	| 15.47	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg16.html)	
+vgg13	            | (224,224,3)	| 69.65	| 69.93	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13.html)	
+vgg13_bn	        | (224,224,3)	| 71.25	| 71.59	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13_bn.html)	
+vgg16   	        | (224,224,3)	| 71.41	| 71.59	| 30.94	| 15.47	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg16.html)	
 vgg16_bn   	        | (224,224,3)	| 73.18	| 73.36	| 30.94	| 15.47	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg16_bn.html)	
-vgg19	            | (224,224,3)	| 72.27	| 72.376	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19.html)	
-vgg19_bn	        | (224,224,3)	| 73.90	| 74.218	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19_bn.html)	
+vgg19	            | (224,224,3)	| 72.27	| 72.38	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19.html)	
+vgg19_bn	        | (224,224,3)	| 73.90	| 74.22	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19_bn.html)	
 
 ### Object Detection (COCO)
 | Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| Ops (G) | MACs |Source|
