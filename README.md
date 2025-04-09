@@ -9,8 +9,9 @@ Mobilint Model Zoo
 </p>
 </div>
 
-`mblt-model-zoo` is an open model zoo for [Mobilint](https://www.mobilint.com/) NPU. It provides a collection of public pre-trained, and quantized models, and pre/post-processing tools associated with the quantized models.
+`mblt-model-zoo` is a curated collection of AI models optimized by [Mobilint](https://www.mobilint.com/)’s Neural Processing Units (NPUs).
 
+Designed to help developers accelerate deployment, Mobilint's Model Zoo offers access to public, pre-trained, and pre-quantized models for vision, language, and multimodal tasks. Along with performance results, we provide pre- and post-processing tools to help developers evaluate, fine-tune, and integrate the models with ease.
 
 ## Installation
 - Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
