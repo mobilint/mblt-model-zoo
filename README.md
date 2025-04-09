@@ -119,12 +119,13 @@ vgg19_bn	        | (224,224,3)	| 73.90	| 74.22	| 39.26	| 19.63	| [Link](https://
 | Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| Ops (G) | MACs |Source|
 |------------|------------|-----------|--------------------|--------|-------|------|
 yolov7	                | (640,640,3)	| 50.13	| 51.14	| 104.66	| 52.33	| [Link](https://github.com/WongKinYiu/yolov7)	
-yolov8l	                        | (640,640,3)	| 52.31	| 52.75	| 165.24	| 82.62	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
-yolov8m	                        | (640,640,3)	| 49.68	| 50.22	| 79.00	| 39.50	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
 yolov8s	                        | (640,640,3)	| 44.07	| 44.95	| 28.64	| 14.32	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
-yolov8x	                        | (640,640,3)	| 53.37	| 53.90	| 257.92	| 128.96	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
+yolov8m	                        | (640,640,3)	| 49.68	| 50.22	| 79.00	| 39.50	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
+yolov8l	                        | (640,640,3)	| 52.31	| 52.75	| 165.24	| 82.62	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
+yolov8x	                        | (640,640,3)	| 53.37	| 53.90	| 257.92	| 128.96	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
+yolov9m	                        | (640,640,3)	| 50.65	| 51.40	| 76.95	| 38.47	| [Link](https://github.com/WongKinYiu/yolov9)		
 yolov9c	                        | (640,640,3)	| 52.16	| 52.68	| 102.86	| 51.43	| [Link](https://github.com/WongKinYiu/yolov9)	
-yolov9m	                        | (640,640,3)	| 50.65	| 51.40	| 76.95	| 38.47	| [Link](https://github.com/WongKinYiu/yolov9)	
+
 ### Instance Segmentation (COCO)
 | Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| Ops (G) | MACs |Source|
 |------------|------------|-----------|--------------------|--------|-------|------|
