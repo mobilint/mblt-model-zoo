@@ -10,16 +10,16 @@ authors = [
     {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
 ]
 dynamic = ["version"]
-description = "A collection of pre-quantized models for NPU inference"
+description = "A collection of pre-quantized AI models for Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = "~=3.10"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
-    "torch>=2.0",
     "numpy>=1.24",
     "opencv-python>=4.10",
     "pillow>=10.0",
+    "torch>=2.0",
     "tqdm",
 ]
 classifiers = [
