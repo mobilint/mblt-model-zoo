@@ -1,0 +1,7 @@
+numpy>=1.24
+opencv-python>=4.10
+pillow>=10.0
+setuptools>=65.0.0
+torch>=2.0
+tqdm
+wheel
