@@ -31,13 +31,12 @@ class YOLOv5lSeg_Set(ModelInfoSet):
 
 
 class YOLOv5lSeg(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in YOLOv5lSeg_Set.__dict__.keys()
         ), f"Model type {model_type} not found in YOLOv5lSeg_Set. Available types: {YOLOv5lSeg_Set.__dict__.keys()}"
         model_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
         pre_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

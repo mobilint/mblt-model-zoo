@@ -64,30 +64,38 @@ class MBLT_Engine:
 
 
 class MXQ_Model:
-    def __init__(self, url, trace: bool = False):
+    def __init__(
+        self,
+        url,
+        local_path: str = None,
+        trace: bool = False,
+    ):
         self.trace = trace
         self.acc = maccel.Accelerator()
         mc = maccel.ModelConfig()
-        mc.exclude_all_cores()
         mc.set_global_core_mode(
             [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
         )  # Cluster0, Cluster1 모두 사용
 
-        if os.path.exists(url) and os.path.isfile(url) and url.endswith(".mxq"):
-            cached_file = url
+        parts = urlparse(url)
+        filename = os.path.basename(parts.path)
+
+        if local_path is None:  # default option
+            model_dir = os.path.expanduser("~/.mblt_model_zoo")
+            os.makedirs(model_dir, exist_ok=True)
+            cached_file = os.path.join(model_dir, filename)
 
         else:
-            model_dir = os.path.expanduser("~/.mblt_model_zoo")
+            if local_path.endswith(".mxq"):
+                cached_file = local_path
+            else:
+                os.makedirs(local_path, exist_ok=True)
+                cached_file = os.path.join(local_path, filename)
 
-            os.makedirs(model_dir, exist_ok=True)
-
-            parts = urlparse(url)
-            filename = os.path.basename(parts.path)
-            cached_file = os.path.join(model_dir, filename)
-            if not os.path.exists(cached_file):
-                sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
-                hash_prefix = None
-                download_url_to_file(url, cached_file, hash_prefix, progress=True)
+        if not os.path.exists(cached_file):
+            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+            hash_prefix = None
+            download_url_to_file(url, cached_file, hash_prefix, progress=True)
 
         self.model = maccel.Model(cached_file, mc)
         self.model.launch(self.acc)

@@ -81,13 +81,12 @@ class ResNext101_64x4d_Set(ModelInfoSet):
 
 
 class ResNext50_32x4d(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNext50_32x4d_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNext50_32x4d_Set.__dict__.keys()}"
         model_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.post_cfg
@@ -95,13 +94,12 @@ class ResNext50_32x4d(MBLT_Engine):
 
 
 class ResNext101_32x8d(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNext101_32x8d_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNext101_32x8d_Set.__dict__.keys()}"
         model_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.post_cfg
@@ -109,13 +107,12 @@ class ResNext101_32x8d(MBLT_Engine):
 
 
 class ResNext101_64x4d(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNext101_64x4d_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNext101_64x4d_Set.__dict__.keys()}"
         model_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.post_cfg
