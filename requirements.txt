@@ -1,7 +1,11 @@
+transformers==4.51.3
+torch==2.7.0
+numpy==2.2.1
+datasets==3.6.0
+safetensors==0.5.2
 numpy>=1.24
 opencv-python>=4.10
 pillow>=10.0
 setuptools>=65.0.0
-torch>=2.0
 tqdm
 wheel
