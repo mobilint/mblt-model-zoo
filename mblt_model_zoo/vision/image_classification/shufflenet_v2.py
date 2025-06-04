@@ -2,7 +2,7 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class ShuffleNet_V2_X1_0(ModelInfoSet):
+class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_0_torchvision.mxq",
@@ -28,7 +28,7 @@ class ShuffleNet_V2_X1_0(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class ShuffleNet_V2_X1_5(ModelInfoSet):
+class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_5_torchvision.mxq",
@@ -54,7 +54,7 @@ class ShuffleNet_V2_X1_5(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class ShuffleNet_V2_X2_0(ModelInfoSet):
+class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x2_0_torchvision.mxq",
