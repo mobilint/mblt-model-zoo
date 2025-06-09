@@ -23,7 +23,7 @@ class MBLT_Engine:
         self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
 
         self.device = torch.device("cpu")
-
+    
     def __call__(self, x: TensorLike):
         return self.model(x)
 
@@ -61,7 +61,9 @@ class MBLT_Engine:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. Please check your environment.")
         self.to(device=device)
-
+    
+    def dispose(self):
+        self.model.dispose()
 
 class MXQ_Model:
     def __init__(
