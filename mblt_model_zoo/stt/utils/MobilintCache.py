@@ -5,13 +5,14 @@ import torch
 
 from transformers.cache_utils import Cache
 
+
 class MobilintCache(Cache):
     def __init__(self, model: maccel.Model):
         super().__init__()
         self.model = model
         self.model.reset_cache_memory()
         self._seen_tokens: int = 0
-    
+
     def update(
         self,
         key_states: torch.Tensor,
@@ -20,7 +21,7 @@ class MobilintCache(Cache):
         cache_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("update is not implemented")
-    
+
     def update_cache_position(self, cache_position: torch.LongTensor):
         self._seen_tokens += cache_position.numel()
 
