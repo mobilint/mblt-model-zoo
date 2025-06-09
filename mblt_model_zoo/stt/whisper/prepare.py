@@ -1,6 +1,6 @@
 from huggingface_hub import snapshot_download
 import os
-from ...vision.utils.downloads import *
+from ...vision.utils.downloads import download_url_to_file
 
 
 def prepare_files(
