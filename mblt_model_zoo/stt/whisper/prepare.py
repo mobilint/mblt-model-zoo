@@ -13,9 +13,7 @@ def prepare_files(
 ):
     MODEL_NAME = REPO_ID.strip("/").split("/")[-1]
     if local_path is not None:
-        if local_path.endswith("/"):
-            local_path = local_path[:-1]
-        MODEL_PATH = local_path + f"/{MODEL_NAME}"
+        MODEL_PATH = os.path.join(local_path, MODEL_NAME)
         os.makedirs(MODEL_PATH, exist_ok=True)
     else:
         HOME_PATH = os.path.expanduser("~")

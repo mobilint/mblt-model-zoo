@@ -41,7 +41,7 @@ resnet50 = ResNet50()
 resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
 
 # Download the model to local directory and load it
-resnet50 = ResNet50(local_path = "path/to/local/")
+resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded to "path/to/local/model.mxq"
 
 # Load the model from a local path or download as filename and file path you want
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
