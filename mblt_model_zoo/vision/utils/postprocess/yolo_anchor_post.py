@@ -81,7 +81,7 @@ class YOLOAnchorPost(YOLOPostBase):
         for xi in x:
             ic = (xi[:, 4] > self.conf_thres).to(self.device)  # candidate indices
             box_cls = xi[ic]  # candidate boxes
-            if len(box_cls) == 0:
+            if box_cls.numel() == 0:
                 y.append(
                     torch.zeros((0, self.no), dtype=torch.float32, device=self.device)
                 )
@@ -103,7 +103,7 @@ class YOLOAnchorPost(YOLOPostBase):
         mi = 5 + self.nc  # mask index
         output = []
         for xi in x:
-            if len(xi) == 0:
+            if xi.numel() == 0:
                 output.append(
                     torch.zeros(
                         (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
@@ -120,7 +120,7 @@ class YOLOAnchorPost(YOLOPostBase):
                 [box[i], xi[i, j + 5, None], j[:, None].float(), mask[i]], 1
             ).to(self.device)
 
-            if len(xi) == 0:
+            if xi.numel() == 0:
                 output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32))
                 continue
 
@@ -187,7 +187,7 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
         for xi in x:
             ic = (xi[:, 4] > self.inv_conf_thres).to(self.device)  # candidate indices
             box_cls = xi[ic]  # candidate boxes
-            if len(box_cls) == 0:
+            if box_cls.numel() == 0:
                 y.append(
                     torch.zeros((0, self.no), dtype=torch.float32, device=self.device)
                 )

@@ -78,7 +78,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
             xi = xi[:, ic]  # (144, *)
 
-            if xi.size == 0:
+            if xi.numel() == 0:
                 y.append(
                     torch.zeros(
                         (0, 4 + self.nc + self.n_extra),
@@ -108,7 +108,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
         output = []
 
         for xi in x:
-            if len(xi) == 0:
+            if xi.numel() == 0:
                 output.append(
                     torch.zeros(
                         (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
@@ -123,7 +123,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
                 [box[i], xi[i, j + 4, None], j[:, None].float(), extra[i]], 1
             ).to(self.device)
 
-            if len(xi) == 0:
+            if xi.numel() == 0:
                 output.append(
                     torch.zeros(
                         (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
