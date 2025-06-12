@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, Type, TypeVar, Union, Callable, List
+from typing import Dict, Optional, Tuple, TypeVar, Union, Callable, List
 
 import maccel
 import torch
@@ -6,27 +6,38 @@ import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 import numpy as np
 import warnings
-import os
-import copy
+
 import math
 
 from transformers import (
-  WhisperTokenizer,
-  WhisperFeatureExtractor,
-  WhisperProcessor,
-  GenerationConfig,
-  PreTrainedModel,
-  WhisperConfig,
-  WhisperPreTrainedModel,
-  AutoConfig,
-  AutoTokenizer,
-  AutoFeatureExtractor,
-  AutoProcessor,
-  AutoModelForSpeechSeq2Seq
+    WhisperTokenizer,
+    WhisperFeatureExtractor,
+    WhisperProcessor,
+    GenerationConfig,
+    PreTrainedModel,
+    WhisperConfig,
+    WhisperPreTrainedModel,
+    AutoConfig,
+    AutoTokenizer,
+    AutoFeatureExtractor,
+    AutoProcessor,
+    AutoModelForSpeechSeq2Seq,
 )
-from transformers.models.whisper.modeling_whisper import WhisperPositionalEmbedding, shift_tokens_right
-from transformers.models.whisper.generation_whisper import WhisperGenerationMixin, _get_attr_from_logit_processors, _pad_to_max_length
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, Seq2SeqModelOutput, Seq2SeqLMOutput
+from transformers.models.whisper.modeling_whisper import (
+    WhisperPositionalEmbedding,
+    shift_tokens_right,
+)
+from transformers.models.whisper.generation_whisper import (
+    WhisperGenerationMixin,
+    _get_attr_from_logit_processors,
+    _pad_to_max_length,
+)
+from transformers.modeling_outputs import (
+    BaseModelOutput,
+    BaseModelOutputWithPastAndCrossAttentions,
+    Seq2SeqModelOutput,
+    Seq2SeqLMOutput,
+)
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     SuppressTokensLogitsProcessor,
@@ -38,7 +49,10 @@ from ..utils.MobilintCache import MobilintCache
 
 logger = logging.get_logger(__name__)
 
-SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
+SpecificPreTrainedModelType = TypeVar(
+    "SpecificPreTrainedModelType", bound="PreTrainedModel"
+)
+
 
 class MobilintWhisperConfig(WhisperConfig):
     model_type = "mobilint-whisper"
@@ -55,8 +69,9 @@ class MobilintWhisperConfig(WhisperConfig):
         self.dev_no = dev_no
 
         super().__init__(**kwargs)
-        
+
         self.tie_word_embeddings = False
+
 
 class MobilintWhisperPreTrainedModel(WhisperPreTrainedModel):
     config_class = MobilintWhisperConfig
@@ -67,6 +82,7 @@ class MobilintWhisperPreTrainedModel(WhisperPreTrainedModel):
 
     def _init_weights(self, module):
         raise NotImplementedError("_init_weights is not implemented")
+
 
 class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
     def __init__(self, config: MobilintWhisperConfig):
@@ -90,7 +106,9 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_global_core_mode([maccel.Cluster.Cluster1])
-        self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.encoder_mxq_path}", mc)
+        self.mxq_model = maccel.Model(
+            f"{config.name_or_path}/{config.encoder_mxq_path}", mc
+        )
         self.mxq_model.launch(self.acc)
 
     def _freeze_parameters(self):
@@ -111,35 +129,48 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
     ):
-        expected_seq_length = self.config.max_source_positions * self.conv1_stride * self.conv2_stride
+        expected_seq_length = (
+            self.config.max_source_positions * self.conv1_stride * self.conv2_stride
+        )
         if input_features.shape[-1] != expected_seq_length:
             raise ValueError(
                 f"Whisper expects the mel input features to be of length {expected_seq_length}, but found {input_features.shape[-1]}. Make sure to pad the input mel features to {expected_seq_length}."
             )
 
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
-        
+
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
-        output = self.mxq_model.infer(input_features.permute(0, 2, 1).cpu().numpy().astype(np.float32))
+        output = self.mxq_model.infer(
+            input_features.permute(0, 2, 1).cpu().numpy().astype(np.float32)
+        )
         hidden_states = torch.from_numpy(output[0]).to("cpu").unsqueeze(0)
-    
+
         if not return_dict:
             return (hidden_states,)
         return BaseModelOutput(
             last_hidden_state=hidden_states, hidden_states=None, attentions=None
         )
+
 
 class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
     main_input_name = "input_ids"
@@ -153,8 +184,12 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         self.max_source_positions = config.max_source_positions
         self.embed_scale = math.sqrt(config.d_model) if config.scale_embedding else 1.0
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.d_model, self.padding_idx)
-        self.embed_positions = WhisperPositionalEmbedding(self.max_target_positions, config.d_model)
+        self.embed_tokens = nn.Embedding(
+            config.vocab_size, config.d_model, self.padding_idx
+        )
+        self.embed_positions = WhisperPositionalEmbedding(
+            self.max_target_positions, config.d_model
+        )
 
         self._use_flash_attention_2 = False
         self._use_sdpa = False
@@ -166,8 +201,12 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(None, [maccel.CoreId(maccel.Cluster.Cluster0, maccel.Core.Core3)])
-        self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.decoder_mxq_path}", mc)
+        mc.set_single_core_mode(
+            None, [maccel.CoreId(maccel.Cluster.Cluster0, maccel.Core.Core3)]
+        )
+        self.mxq_model = maccel.Model(
+            f"{config.name_or_path}/{config.decoder_mxq_path}", mc
+        )
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):
@@ -192,16 +231,24 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         return_dict=None,
         cache_position=None,
     ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if attention_mask is not None:
             logger.warning_once("attention_mask is not supported.")
-        
+
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
 
@@ -210,27 +257,34 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
-        
+
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
         # retrieve input_ids and inputs_embeds
         if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time")
+            raise ValueError(
+                "You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time"
+            )
         elif input_ids is not None:
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
         else:
-            raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
-        
+            raise ValueError(
+                "You have to specify either decoder_input_ids or decoder_inputs_embeds"
+            )
+
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache or past_key_values is not None:
             if not isinstance(past_key_values, MobilintCache):
-                logger.warning_once("Class of past_key_values should be MobilintCache, current: " + past_key_values.__class__.__name__)
+                logger.warning_once(
+                    "Class of past_key_values should be MobilintCache, current: "
+                    + past_key_values.__class__.__name__
+                )
                 past_key_values = MobilintCache(self.mxq_model)
 
         past_key_values_length = 0
@@ -241,26 +295,37 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
 
         if cache_position is None:
             cache_position = torch.arange(
-                past_key_values_length, past_key_values_length + input_shape[1], device=inputs_embeds.device
+                past_key_values_length,
+                past_key_values_length + input_shape[1],
+                device=inputs_embeds.device,
             )
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0).repeat(input_shape[0], 1)
-        
+
         # embed positions
         if input_ids is not None:
             positions = self.embed_positions(
-                input_ids, past_key_values_length=past_key_values_length, position_ids=position_ids
+                input_ids,
+                past_key_values_length=past_key_values_length,
+                position_ids=position_ids,
             )
         else:
             positions = self.embed_positions(
-                inputs_embeds, past_key_values_length=past_key_values_length, position_ids=position_ids
+                inputs_embeds,
+                past_key_values_length=past_key_values_length,
+                position_ids=position_ids,
             )
-        
+
         hidden_states = inputs_embeds + positions.to(inputs_embeds.device)
 
-        inputs = [encoder_hidden_states.cpu().numpy().astype(np.float32), hidden_states.unsqueeze(0).cpu().numpy().astype(np.float32)]
-        logits = torch.from_numpy(self.mxq_model.infer(inputs, cache_size=int(past_key_values_length))[0]).to(self.device)
+        inputs = [
+            encoder_hidden_states.cpu().numpy().astype(np.float32),
+            hidden_states.unsqueeze(0).cpu().numpy().astype(np.float32),
+        ]
+        logits = torch.from_numpy(
+            self.mxq_model.infer(inputs, cache_size=int(past_key_values_length))[0]
+        ).to(self.device)
 
         if use_cache:
             past_key_values.update_cache_position(cache_position)
@@ -275,7 +340,8 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
             attentions=None,
             cross_attentions=None,
         )
-    
+
+
 class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
     def __init__(self, config: WhisperConfig):
         super().__init__(config)
@@ -317,12 +383,20 @@ class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple[torch.Tensor], Seq2SeqModelOutput]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if encoder_outputs is None:
             if attention_mask is not None:
@@ -374,7 +448,10 @@ class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
         )
 
-class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWhisperPreTrainedModel):
+
+class MobilintWhisperForConditionalGeneration(
+    WhisperGenerationMixin, MobilintWhisperPreTrainedModel
+):
     base_model_prefix = "model"
 
     def __init__(self, config: MobilintWhisperConfig, *inputs, **kwargs):
@@ -401,7 +478,7 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
 
     def freeze_encoder(self):
         self.model.encoder._freeze_parameters()
-    
+
     def tie_weights(self):
         pass
 
@@ -414,8 +491,15 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         max_cache_length: int,
         device: torch.device,
     ) -> bool:
-        super()._prepare_cache_for_generation(generation_config, model_kwargs, assistant_model, batch_size, max_cache_length, device)
-        
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model,
+            batch_size,
+            max_cache_length,
+            device,
+        )
+
         cache_name = "past_key_values"
 
         if model_kwargs.get(cache_name, None) is None:
@@ -425,8 +509,10 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         elif model_kwargs[cache_name].__class__.__name__ == "EncoderDecoderCache":
             model_kwargs[cache_name] = MobilintCache(self.model.decoder.mxq_model)
         else:
-            raise NotImplementedError(f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache")
-        
+            raise NotImplementedError(
+                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
+            )
+
     def forward(
         self,
         input_features: Optional[torch.FloatTensor] = None,
@@ -447,7 +533,9 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutput]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if labels is not None:
             if labels.shape[1] > self.max_target_positions:
@@ -458,7 +546,7 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
                 decoder_input_ids = shift_tokens_right(
                     labels, self.config.pad_token_id, self.config.decoder_start_token_id
                 )
-        
+
         outputs = self.model(
             input_features,
             attention_mask=attention_mask,
@@ -477,14 +565,16 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
             return_dict=return_dict,
             cache_position=cache_position,
         )
-        lm_logits = outputs[0].squeeze(0) # proj_out is performed on decoder mblt.
+        lm_logits = outputs[0].squeeze(0)  # proj_out is performed on decoder mblt.
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # move labels to correct device to enable PP
             labels = labels.to(lm_logits.device)
-            loss = loss_fct(lm_logits.view(-1, self.config.vocab_size), labels.reshape(-1))
+            loss = loss_fct(
+                lm_logits.view(-1, self.config.vocab_size), labels.reshape(-1)
+            )
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
@@ -508,7 +598,9 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         generation_config: Optional[GenerationConfig] = None,
         logits_processor: Optional[LogitsProcessorList] = None,
         stopping_criteria: Optional[StoppingCriteriaList] = None,
-        prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
+        prefix_allowed_tokens_fn: Optional[
+            Callable[[int, torch.Tensor], List[int]]
+        ] = None,
         synced_gpus: bool = False,
         return_timestamps: Optional[bool] = None,
         task: Optional[str] = None,
@@ -540,7 +632,9 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
             )
 
         # 1. prepare generation config
-        generation_config, kwargs = self._prepare_generation_config(generation_config, **kwargs)
+        generation_config, kwargs = self._prepare_generation_config(
+            generation_config, **kwargs
+        )
 
         # 2. set global generate variables
         input_stride = self.model.encoder.conv1_stride * self.model.encoder.conv2_stride
@@ -559,13 +653,20 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
             generation_config=generation_config,
         )
         timestamp_begin = self._set_return_timestamps(
-            return_timestamps=return_timestamps, is_shortform=is_shortform, generation_config=generation_config
+            return_timestamps=return_timestamps,
+            is_shortform=is_shortform,
+            generation_config=generation_config,
         )
         self._set_language_and_task(
-            language=language, task=task, is_multilingual=is_multilingual, generation_config=generation_config
+            language=language,
+            task=task,
+            is_multilingual=is_multilingual,
+            generation_config=generation_config,
         )
         self._set_num_frames(
-            return_token_timestamps=return_token_timestamps, generation_config=generation_config, kwargs=kwargs
+            return_token_timestamps=return_token_timestamps,
+            generation_config=generation_config,
+            kwargs=kwargs,
         )
         self._set_thresholds_and_condition(
             generation_config=generation_config,
@@ -593,13 +694,20 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         self._check_decoder_input_ids(kwargs=kwargs)
 
         # 3. Retrieve logits processors
-        device = kwargs["encoder_outputs"][0].device if "encoder_outputs" in kwargs else input_features.device
+        device = (
+            kwargs["encoder_outputs"][0].device
+            if "encoder_outputs" in kwargs
+            else input_features.device
+        )
         begin_index = init_tokens.shape[1]
         num_beams = kwargs.get(
             "num_beams",
-            generation_config.num_beams
-            if hasattr(generation_config, "num_beams") and generation_config.num_beams is not None
-            else 1,
+            (
+                generation_config.num_beams
+                if hasattr(generation_config, "num_beams")
+                and generation_config.num_beams is not None
+                else 1
+            ),
         )
         if "assistant_model" in kwargs:
             # speculative decoding: the model should be able to return eos token
@@ -615,10 +723,13 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
 
         # 4 Set and retrieve global generation variables
         self._set_condition_on_prev_tokens(
-            condition_on_prev_tokens=condition_on_prev_tokens, generation_config=generation_config
+            condition_on_prev_tokens=condition_on_prev_tokens,
+            generation_config=generation_config,
         )
 
-        temperatures = [temperature] if not isinstance(temperature, (list, tuple)) else temperature
+        temperatures = (
+            [temperature] if not isinstance(temperature, (list, tuple)) else temperature
+        )
         temperature = temperatures[0]
 
         max_frames, seek = self._retrieve_max_frames_and_seek(
@@ -661,9 +772,13 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
 
         if force_unique_generate_call is None:
             if hasattr(generation_config, "force_unique_generate_call"):
-                force_unique_generate_call = generation_config.force_unique_generate_call
+                force_unique_generate_call = (
+                    generation_config.force_unique_generate_call
+                )
             elif hasattr(self.generation_config, "force_unique_generate_call"):
-                force_unique_generate_call = self.generation_config.force_unique_generate_call
+                force_unique_generate_call = (
+                    self.generation_config.force_unique_generate_call
+                )
             else:
                 force_unique_generate_call = False
 
@@ -681,7 +796,9 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
                 batch_idx_map=batch_idx_map,
             )
             time_offset = (
-                seek.to(torch.float32 if device.type == "mps" else torch.float64) * time_precision / input_stride
+                seek.to(torch.float32 if device.type == "mps" else torch.float64)
+                * time_precision
+                / input_stride
             )
             seek_num_frames = (max_frames - seek).clamp(max=num_segment_frames)
 
@@ -791,7 +908,10 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
         # output tokens from the list of dicts. If we use batch size > 1, we make sure to pad the output
         final_segments = (
             [x[1:] for x in current_segments]
-            if (prompt_ids is not None and generation_config.prompt_condition_type == "first-segment")
+            if (
+                prompt_ids is not None
+                and generation_config.prompt_condition_type == "first-segment"
+            )
             else current_segments
         )
 
@@ -804,14 +924,22 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
             and (force_unique_generate_call or not return_timestamps)
         ):
             # only one call to generate_with_fallback, we can return a ModelOutput
-            outputs = self._stack_split_outputs(seek_outputs, model_output_type, self.device, kwargs)
+            outputs = self._stack_split_outputs(
+                seek_outputs, model_output_type, self.device, kwargs
+            )
             if num_return_sequences > 1:
-                if hasattr(outputs, "encoder_attentions") and outputs.encoder_attentions is not None:
+                if (
+                    hasattr(outputs, "encoder_attentions")
+                    and outputs.encoder_attentions is not None
+                ):
                     outputs.encoder_attentions = tuple(
                         outputs.encoder_attentions[i][::num_return_sequences]
                         for i in range(len(outputs.encoder_attentions))
                     )
-                if hasattr(outputs, "encoder_hidden_states") and outputs.encoder_hidden_states is not None:
+                if (
+                    hasattr(outputs, "encoder_hidden_states")
+                    and outputs.encoder_hidden_states is not None
+                ):
                     outputs.encoder_hidden_states = tuple(
                         outputs.encoder_hidden_states[i][::num_return_sequences]
                         for i in range(len(outputs.encoder_hidden_states))
@@ -852,8 +980,11 @@ class MobilintWhisperForConditionalGeneration(WhisperGenerationMixin, MobilintWh
 
         return outputs
 
+
 AutoConfig.register("mobilint-whisper", MobilintWhisperConfig)
 AutoTokenizer.register(MobilintWhisperConfig, WhisperTokenizer)
 AutoFeatureExtractor.register(MobilintWhisperConfig, WhisperFeatureExtractor)
 AutoProcessor.register(MobilintWhisperConfig, WhisperProcessor)
-AutoModelForSpeechSeq2Seq.register(MobilintWhisperConfig, MobilintWhisperForConditionalGeneration)
+AutoModelForSpeechSeq2Seq.register(
+    MobilintWhisperConfig, MobilintWhisperForConditionalGeneration
+)

@@ -60,10 +60,9 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     x1y1 = anchor_points - lt
     x2y2 = anchor_points + rb
     if xywh:
-        c_xy = (x1y1 + x2y2) / 2
-        wh = x2y2 - x1y1
-        return torch.cat((c_xy, wh), dim)  # xywh bbox
-    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+        return torch.cat(((x1y1 + x2y2) / 2, x2y2 - x1y1), dim)  # xywh bbox
+    else:
+        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
 
 def clip_boxes(boxes, shape):

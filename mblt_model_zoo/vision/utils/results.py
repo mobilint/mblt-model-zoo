@@ -65,6 +65,9 @@ class Results:
         self.output = output  # store raw output
 
     def plot(self, source_path: str, save_path: str = None, **kwargs):
+        if save_path is not None:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
         if self.task.lower() == "image_classification":
             return self._plot_image_classification(source_path, save_path, **kwargs)
         elif self.task.lower() == "object_detection":

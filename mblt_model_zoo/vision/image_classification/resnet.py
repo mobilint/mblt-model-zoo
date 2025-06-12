@@ -155,13 +155,12 @@ class ResNet152_Set(ModelInfoSet):
 
 
 class ResNet18(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNet18_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNet18_Set.__dict__.keys()}"
         model_cfg = ResNet18_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNet18_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNet18_Set.__dict__[model_type].value.post_cfg
@@ -169,13 +168,12 @@ class ResNet18(MBLT_Engine):
 
 
 class ResNet34(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNet34_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNet34_Set.__dict__.keys()}"
         model_cfg = ResNet34_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNet34_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNet34_Set.__dict__[model_type].value.post_cfg
@@ -183,13 +181,12 @@ class ResNet34(MBLT_Engine):
 
 
 class ResNet50(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNet50_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNet50_Set.__dict__.keys()}"
         model_cfg = ResNet50_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNet50_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNet50_Set.__dict__[model_type].value.post_cfg
@@ -197,13 +194,12 @@ class ResNet50(MBLT_Engine):
 
 
 class ResNet101(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNet101_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNet101_Set.__dict__.keys()}"
         model_cfg = ResNet101_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNet101_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNet101_Set.__dict__[model_type].value.post_cfg
@@ -211,13 +207,12 @@ class ResNet101(MBLT_Engine):
 
 
 class ResNet152(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in ResNet152_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {ResNet152_Set.__dict__.keys()}"
         model_cfg = ResNet152_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = ResNet152_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNet152_Set.__dict__[model_type].value.post_cfg

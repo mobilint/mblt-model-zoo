@@ -11,9 +11,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     image_path = args.image_path
 
-    resnet50 = ResNet50(
-        model_type="IMAGENET1K_V1",
-    )
+    resnet50 = ResNet50()
 
     # resnet50.gpu()
     input_img = resnet50.preprocess(image_path)

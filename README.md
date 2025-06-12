@@ -40,8 +40,11 @@ resnet50 = ResNet50()
 # Currently, default is "DEFAULT", or "IMAGENET1K_V1
 resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
 
-# Load the model from a local path
-resnet50 = ResNet50(local_model = "path/to/local/model.mxq")
+# Download the model to local directory and load it
+resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded to "path/to/local/model.mxq"
+
+# Load the model from a local path or download as filename and file path you want
+resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
 
 ```
 ### Working with Quantized Model

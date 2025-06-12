@@ -99,52 +99,52 @@ class DenseNet201_Set(ModelInfoSet):
 
 
 class DenseNet121(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in DenseNet121_Set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {DenseNet121_Set.__dict__.keys()}"
         model_cfg = DenseNet121_Set.__dict__[model_type].value.model_cfg
-        if local_model:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
+
         pre_cfg = DenseNet121_Set.__dict__[model_type].value.pre_cfg
         post_cfg = DenseNet121_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
 class DenseNet161(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in DenseNet161_Set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {DenseNet161_Set.__dict__.keys()}"
         model_cfg = DenseNet161_Set.__dict__[model_type].value.model_cfg
-        if local_model:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
+
         pre_cfg = DenseNet161_Set.__dict__[model_type].value.pre_cfg
         post_cfg = DenseNet161_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
 class DenseNet169(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in DenseNet169_Set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {DenseNet169_Set.__dict__.keys()}"
         model_cfg = DenseNet169_Set.__dict__[model_type].value.model_cfg
-        if local_model:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
+
         pre_cfg = DenseNet169_Set.__dict__[model_type].value.pre_cfg
         post_cfg = DenseNet169_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
 class DenseNet201(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in DenseNet201_Set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {DenseNet201_Set.__dict__.keys()}"
         model_cfg = DenseNet201_Set.__dict__[model_type].value.model_cfg
-        if local_model:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
+
         pre_cfg = DenseNet201_Set.__dict__[model_type].value.pre_cfg
         post_cfg = DenseNet201_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

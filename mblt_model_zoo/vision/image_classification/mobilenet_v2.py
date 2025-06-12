@@ -29,13 +29,12 @@ class MobileNet_V2_Set(ModelInfoSet):
 
 
 class MobileNet_V2(MBLT_Engine):
-    def __init__(self, local_model: str = None, model_type: str = "DEFAULT"):
+    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
         assert (
             model_type in MobileNet_V2_Set.__dict__.keys()
         ), f"Model type {model_type} not found. Available types: {MobileNet_V2_Set.__dict__.keys()}"
         model_cfg = MobileNet_V2_Set.__dict__[model_type].value.model_cfg
-        if local_model is not None:
-            model_cfg["url"] = local_model
+        model_cfg["local_path"] = local_path
 
         pre_cfg = MobileNet_V2_Set.__dict__[model_type].value.pre_cfg
         post_cfg = MobileNet_V2_Set.__dict__[model_type].value.post_cfg
