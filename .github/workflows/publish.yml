@@ -35,11 +35,11 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-  publish-to-testpypi:
-    name: Publish to TestPyPI 🌐
+  publish-to-pypi:
+    name: Publish to PyPI 📦
     needs: [build]
     runs-on: ubuntu-latest
-    environment: testpypi
+    environment: pypi
     permissions:
       id-token: write
 
@@ -63,6 +63,6 @@ jobs:
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
-          twine upload --repository testpypi dist/*
+          twine upload dist/*
