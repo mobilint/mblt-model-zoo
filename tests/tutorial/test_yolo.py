@@ -1,3 +1,4 @@
+import os
 from argparse import ArgumentParser
 from mblt_model_zoo.vision import YOLOv8l
 
@@ -6,8 +7,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--image_path", type=str, default="/workspace/mblt-model-zoo/tests/rc/cr7.jpg"
     )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default=None,
+    )
+
     args = parser.parse_args()
     image_path = args.image_path
+    if args.save_path is not None:
+        save_path = args.save_path
+    else:
+        save_path = os.path.join(
+            "/workspace/mblt-model-zoo/tests/tmp/",
+            "yolov8l_" + os.path.basename(image_path),
+        )
 
     yolo = YOLOv8l()
 
@@ -17,5 +31,5 @@ if __name__ == "__main__":
 
     result.plot(
         source_path=image_path,
-        save_path="/workspace/mblt-model-zoo/tests/tmp/cr7_yolov8l.jpg",
+        save_path=save_path,
     )

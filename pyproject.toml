@@ -16,14 +16,10 @@ license = {text = "BSD-3-Clause"}
 requires-python = ">=3.8,<3.13"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
-    "transformers>=4.48,<4.52",
-    "datasets>=3.2.0",
-    "safetensors>=0.4.5",
     "numpy>=1.26.0,<2.0.0",
-    "torch>=2.4.1",
+    "torch>=2.4.1,<2.7.0",
     "opencv-python>=4.11.0.86",
     "pillow>=11.1.0",
-    "torch>=2.0",
     "setuptools>=70.0.0",
     "tqdm",
     "wheel",
@@ -55,6 +51,8 @@ classifiers = [
 Home = "https://www.mobilint.com/"
 Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
+[project.optional-dependencies]
+stt = ["transformers>=4.48,<4.52", "datasets>=3.2.0","safetensors>=0.4.5", "librosa", "soundfile"]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]

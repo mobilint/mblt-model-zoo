@@ -72,7 +72,6 @@ available_models = list_models()
 pprint(available_models)
 ```
 
-
 ## Model List
 The following tables summarize the models available in **mblt-model-zoo**. We provide the models that are quantized with our advanced quantization techniques.
 ### Image Classification (ImageNet)
@@ -137,6 +136,14 @@ yolov8s-seg	                    | (640,640,3)	| 35.90	| 36.50	| 42.64	| 21.32	| 
 yolov8m-seg                 	| (640,640,3)	| 39.88	| 40.40	|  110.26	| 55.13	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
 yolov8l-seg	                    | (640,640,3)	| 42.04	| 42.27	| 220.55	| 110.27	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
 
+## Optional Extras
+When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.
+
+Currently, this optional functions are only available on environment equipped with Mobilint's [Aries](https://www.mobilint.com/aries).
+
+|Name|Use|
+|-------|------|
+|stt|For using Speach-To-Text models (Whisper)| 
 
 ## License
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
