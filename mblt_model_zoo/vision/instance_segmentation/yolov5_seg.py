@@ -5,7 +5,12 @@ from ..wrapper import MBLT_Engine
 class YOLOv5lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
+            "url_dict": {
+                "single": None,
+                "multi": None,
+                "global": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
+                "regulus": None,
+            },
         },
         pre_cfg={
             "Reader": {
@@ -31,12 +36,18 @@ class YOLOv5lSeg_Set(ModelInfoSet):
 
 
 class YOLOv5lSeg(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
+    def __init__(
+        self,
+        local_path: str = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+    ):
         assert (
             model_type in YOLOv5lSeg_Set.__dict__.keys()
         ), f"Model type {model_type} not found in YOLOv5lSeg_Set. Available types: {YOLOv5lSeg_Set.__dict__.keys()}"
         model_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
+        model_cfg["infer_mode"] = infer_mode
         pre_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

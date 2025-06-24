@@ -62,7 +62,6 @@ READ_DATA_CHUNK = 128 * 1024
 def download_url_to_file(
     url: str,
     dst: str,
-    hash_prefix: Optional[str] = None,
     progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
@@ -70,8 +69,6 @@ def download_url_to_file(
     Args:
         url (str): URL of the object to download
         dst (str): Full path where object will be saved, e.g. ``/tmp/temporary_file``
-        hash_prefix (str, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
-            Default: None
         progress (bool, optional): whether or not to display a progress bar to stderr
             Default: True
 
@@ -112,8 +109,6 @@ def download_url_to_file(
         raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
 
     try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
         with tqdm(
             total=file_size,
             disable=not progress,
@@ -126,17 +121,9 @@ def download_url_to_file(
                 if len(buffer) == 0:
                     break
                 f.write(buffer)  # type: ignore[possibly-undefined]
-                if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
                 pbar.update(len(buffer))
 
         f.close()
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
         shutil.move(f.name, dst)
     finally:
         f.close()
