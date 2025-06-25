@@ -69,43 +69,42 @@ class MBLT_Engine:
 class MXQ_Model:
     def __init__(
         self,
-        url_dict: dict = {
-            "single": None,
-            "multi": None,
-            "global": None,
-            "regulus": None,
-        },
+        url_dict,
         local_path: str = None,
         infer_mode: str = "global",
+        product: str = "aries",
     ):
-        assert infer_mode in [
-            "single",
-            "multi",
-            "global",
-            "regulus",
-        ], "single, multi, global inference mode on aries or inference on regulus are available"
-
         self.infer_mode = infer_mode
+        self.product = product
+        if self.product not in url_dict.keys():  # execption handling
+            url_dict[self.product] = {self.infer_mode: None}
 
         self.acc = maccel.Accelerator()
 
         # ----------------Core Allocation-------------------------
         mc = maccel.ModelConfig()
-        if self.infer_mode == "single":
-            pass  # default is single with all cores
-        elif self.infer_mode == "multi":
-            mc.set_multi_core_mode([maccel.Cluster.Cluster0, maccel.Cluster.Cluster1])
-        elif self.infer_mode == "global":
-            mc.set_global_core_mode(
-                [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
-            )  # Use all Cluster0, Cluster1
-        elif self.infer_mode == "regulus":
-            pass  # Only single core mode is available on Regulus
+        if self.product == "aries":
+            if self.infer_mode == "single":
+                pass  # default is single with all cores
+            elif self.infer_mode == "multi":
+                mc.set_multi_core_mode(
+                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                )
+            elif self.infer_mode == "global":
+                mc.set_global_core_mode(
+                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                )  # Use all Cluster0, Cluster1
+            else:
+                raise ValueError("Inappropriate inferece mode")
+        elif self.product == "regulus":
+            assert (
+                self.infer_mode == "single"
+            ), "Only single core mode is available on Regulus"
         else:
-            raise ValueError("Inappropriate inference mode")
+            raise ValueError("Inappropriate product")
 
         # -----------------Model Preparation-----------------------
-        url = url_dict.get(self.infer_mode)
+        url = url_dict[self.product].get(self.infer_mode)
         if url is not None:
             parts = urlparse(url)
             filename = os.path.basename(parts.path)

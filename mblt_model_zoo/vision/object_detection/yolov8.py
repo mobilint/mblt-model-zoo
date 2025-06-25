@@ -6,10 +6,12 @@ class YOLOv8m_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov8m.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov8m.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -34,10 +36,12 @@ class YOLOv8l_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov8l.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov8l.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -62,10 +66,12 @@ class YOLOv8s_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov8s.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov8s.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -90,10 +96,12 @@ class YOLOv8x_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov8x.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov8x.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -120,6 +128,7 @@ class YOLOv8s(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv8s_Set.__dict__.keys()
@@ -127,6 +136,7 @@ class YOLOv8s(MBLT_Engine):
         model_cfg = YOLOv8s_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv8s_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv8s_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -138,6 +148,7 @@ class YOLOv8m(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv8m_Set.__dict__.keys()
@@ -145,6 +156,7 @@ class YOLOv8m(MBLT_Engine):
         model_cfg = YOLOv8m_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv8m_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv8m_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -156,6 +168,7 @@ class YOLOv8l(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv8l_Set.__dict__.keys()
@@ -163,6 +176,7 @@ class YOLOv8l(MBLT_Engine):
         model_cfg = YOLOv8l_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv8l_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv8l_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -174,6 +188,7 @@ class YOLOv8x(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv8x_Set.__dict__.keys()
@@ -181,6 +196,7 @@ class YOLOv8x(MBLT_Engine):
         model_cfg = YOLOv8x_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv8x_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv8x_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

@@ -6,10 +6,12 @@ class YOLOv9m_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov9m.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov9m.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -34,10 +36,12 @@ class YOLOv9c_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov9c.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov9c.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -64,6 +68,7 @@ class YOLOv9m(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv9m_Set.__dict__.keys()
@@ -71,6 +76,7 @@ class YOLOv9m(MBLT_Engine):
         model_cfg = YOLOv9m_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv9m_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv9m_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -82,6 +88,7 @@ class YOLOv9c(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv9c_Set.__dict__.keys()
@@ -89,6 +96,7 @@ class YOLOv9c(MBLT_Engine):
         model_cfg = YOLOv9c_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv9c_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv9c_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

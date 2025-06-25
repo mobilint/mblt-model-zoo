@@ -6,10 +6,12 @@ class YOLOv5lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -41,6 +43,7 @@ class YOLOv5lSeg(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in YOLOv5lSeg_Set.__dict__.keys()
@@ -48,6 +51,7 @@ class YOLOv5lSeg(MBLT_Engine):
         model_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.pre_cfg
         post_cfg = YOLOv5lSeg_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)

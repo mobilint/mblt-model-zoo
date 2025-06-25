@@ -6,10 +6,12 @@ class ResNext50_32x4d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_classification/resnext50_32x4d_torchvision.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_classification/resnext50_32x4d_torchvision.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -37,10 +39,12 @@ class ResNext101_32x8d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_classification/resnext101_32x8d_torchvision.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_classification/resnext101_32x8d_torchvision.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -68,10 +72,12 @@ class ResNext101_64x4d_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
-                "single": None,
-                "multi": None,
-                "global": "https://dl.mobilint.com/model/image_classification/resnext101_64x4d_torchvision.mxq",
-                "regulus": None,
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": "https://dl.mobilint.com/model/image_classification/resnext101_64x4d_torchvision.mxq",
+                },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -101,6 +107,7 @@ class ResNext50_32x4d(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in ResNext50_32x4d_Set.__dict__.keys()
@@ -108,6 +115,7 @@ class ResNext50_32x4d(MBLT_Engine):
         model_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext50_32x4d_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -119,6 +127,7 @@ class ResNext101_32x8d(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in ResNext101_32x8d_Set.__dict__.keys()
@@ -126,6 +135,7 @@ class ResNext101_32x8d(MBLT_Engine):
         model_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext101_32x8d_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
@@ -137,6 +147,7 @@ class ResNext101_64x4d(MBLT_Engine):
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global",
+        product: str = "aries",
     ):
         assert (
             model_type in ResNext101_64x4d_Set.__dict__.keys()
@@ -144,6 +155,7 @@ class ResNext101_64x4d(MBLT_Engine):
         model_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
         pre_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.pre_cfg
         post_cfg = ResNext101_64x4d_Set.__dict__[model_type].value.post_cfg
         super().__init__(model_cfg, pre_cfg, post_cfg)
