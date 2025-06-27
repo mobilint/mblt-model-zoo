@@ -9,7 +9,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnext50_32x4d_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnext50_32x4d_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -42,7 +42,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnext101_32x8d_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnext101_32x8d_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -75,7 +75,7 @@ class ResNext101_64x4d_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnext101_64x4d_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnext101_64x4d_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

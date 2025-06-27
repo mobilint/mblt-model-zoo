@@ -9,7 +9,7 @@ class YOLOv9m_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov9m.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov9m.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -39,7 +39,7 @@ class YOLOv9c_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov9c.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov9c.mxq",
                 },
                 "regulus": {"single": None},
             },

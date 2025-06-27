@@ -9,7 +9,7 @@ class YOLOv8m_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8m.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov8m.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -39,7 +39,7 @@ class YOLOv8l_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8l.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov8l.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -69,7 +69,7 @@ class YOLOv8s_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8s.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov8s.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -99,7 +99,7 @@ class YOLOv8x_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8x.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov8x.mxq",
                 },
                 "regulus": {"single": None},
             },

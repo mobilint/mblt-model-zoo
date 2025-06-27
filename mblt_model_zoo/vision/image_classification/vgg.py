@@ -9,7 +9,7 @@ class VGG11_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg11_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg11_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -40,7 +40,7 @@ class VGG11_BN_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg11_bn_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg11_bn_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -71,7 +71,7 @@ class VGG13_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg13_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg13_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -102,7 +102,7 @@ class VGG13_BN_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg13_bn_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg13_bn_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -133,7 +133,7 @@ class VGG16_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg16_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg16_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -164,7 +164,7 @@ class VGG16_BN_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg16_bn_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg16_bn_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -195,7 +195,7 @@ class VGG19_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg19_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg19_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -226,7 +226,7 @@ class VGG19_BN_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/vgg19_bn_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/vgg19_bn_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

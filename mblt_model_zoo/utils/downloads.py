@@ -1,64 +1,17 @@
 import os
-import sys
 import tempfile
 import uuid
 import errno
-import hashlib
 import shutil
-from typing import Optional
+from tqdm import tqdm
+from typing import List
 from urllib.request import Request, urlopen
-from urllib.parse import urlparse
-
-
-# The code below is copied from torch.hub.download_url_to_file
-
-
-class _Faketqdm:  # type: ignore[no-redef]
-    def __init__(self, total=None, disable=False, unit=None, *args, **kwargs):
-        self.total = total
-        self.disable = disable
-        self.n = 0
-        # Ignore all extra *args and **kwargs lest you want to reinvent tqdm
-
-    def update(self, n):
-        if self.disable:
-            return
-
-        self.n += n
-        if self.total is None:
-            sys.stderr.write(f"\r{self.n:.1f} bytes")
-        else:
-            sys.stderr.write(f"\r{100 * self.n / float(self.total):.1f}%")
-        sys.stderr.flush()
-
-    # Don't bother implementing; use real tqdm if you want
-    def set_description(self, *args, **kwargs):
-        pass
-
-    def write(self, s):
-        sys.stderr.write(f"{s}\n")
-
-    def close(self):
-        self.disable = True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.disable:
-            return
-
-        sys.stderr.write("\n")
-
-
-try:
-    from tqdm import tqdm  # If tqdm is installed use it, otherwise use the fake wrapper
-except ImportError:
-    tqdm = _Faketqdm
+from urllib.parse import urljoin
 
 READ_DATA_CHUNK = 128 * 1024
 
 
+# The code below is copied from torch.hub.download_url_to_file
 def download_url_to_file(
     url: str,
     dst: str,
@@ -71,17 +24,9 @@ def download_url_to_file(
         dst (str): Full path where object will be saved, e.g. ``/tmp/temporary_file``
         progress (bool, optional): whether or not to display a progress bar to stderr
             Default: True
-
-    Example:
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
-        >>> # xdoctest: +REQUIRES(POSIX)
-        >>> torch.hub.download_url_to_file(
-        ...     "https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth",
-        ...     "/tmp/temporary_file",
-        ... )
-
     """
     file_size = None
+    print(url)
     req = Request(url, headers={"User-Agent": "mblt_model_zoo"})
     u = urlopen(req)
     meta = u.info()
@@ -129,3 +74,23 @@ def download_url_to_file(
         f.close()
         if os.path.exists(f.name):
             os.remove(f.name)
+
+
+def download_url_to_folder(
+    url_dir: str,
+    url_filelist: List[str],
+    dst: str,
+    progress: bool = True,
+) -> None:
+    os.makedirs(dst, exist_ok=True)
+
+    for url_file in url_filelist:
+        u = urljoin(url_dir, url_file)
+        d = os.path.join(dst, url_file)
+        try:
+            download_url_to_file(u, d, progress)
+
+        except Exception:
+            print(f"{url_file} download failed")
+
+    print("Downloading Done")

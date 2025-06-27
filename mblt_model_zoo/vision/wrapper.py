@@ -5,7 +5,7 @@ import os
 from typing import Union
 from urllib.parse import urlparse
 import maccel
-from .utils.downloads import download_url_to_file
+from ..utils.downloads import download_url_to_file
 from .utils.types import TensorLike
 from .utils.preprocess import build_preprocess
 from .utils.postprocess import build_postprocess
@@ -110,7 +110,9 @@ class MXQ_Model:
             filename = os.path.basename(parts.path)
 
             if local_path is None:  # default option
-                model_dir = os.path.expanduser("~/.mblt_model_zoo")
+                model_dir = os.path.expanduser(
+                    f"~/.mblt_model_zoo/{product}/{infer_mode}"
+                )
                 os.makedirs(model_dir, exist_ok=True)
                 cached_file = os.path.join(model_dir, filename)
 

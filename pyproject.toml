@@ -52,7 +52,13 @@ Home = "https://www.mobilint.com/"
 Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
 [project.optional-dependencies]
-stt = ["transformers>=4.48,<4.52", "datasets>=3.2.0","safetensors>=0.4.5", "librosa", "soundfile"]
+transformers = [
+    "transformers>=4.48,<4.52",
+    "datasets>=3.2.0",
+    "safetensors>=0.4.5", 
+    "librosa", 
+    "soundfile",
+]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]

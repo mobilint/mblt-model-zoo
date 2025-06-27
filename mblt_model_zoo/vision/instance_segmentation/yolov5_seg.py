@@ -9,7 +9,7 @@ class YOLOv5lSeg_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov5l-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/instance_segmentation/yolov5l-seg.mxq",
                 },
                 "regulus": {"single": None},
             },

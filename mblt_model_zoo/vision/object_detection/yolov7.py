@@ -9,7 +9,7 @@ class YOLOv7_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov7_640_640.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/object_detection/yolov7_640_640.mxq",
                 },
                 "regulus": {"single": None},
             },

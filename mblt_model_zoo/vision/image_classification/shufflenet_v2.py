@@ -9,7 +9,7 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_0_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/shufflenet_v2_x1_0_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -42,7 +42,7 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x1_5_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/shufflenet_v2_x1_5_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -75,7 +75,7 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/shufflenet_v2_x2_0_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/shufflenet_v2_x2_0_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

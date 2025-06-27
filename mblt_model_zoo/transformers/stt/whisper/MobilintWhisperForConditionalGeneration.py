@@ -1,13 +1,12 @@
 from typing import Dict, Optional, Tuple, TypeVar, Union, Callable, List
-
+import math
+import warnings
 import maccel
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.nn import CrossEntropyLoss
 import numpy as np
-import warnings
 
-import math
 
 from transformers import (
     WhisperTokenizer,
@@ -44,7 +43,7 @@ from transformers.generation.logits_process import (
 )
 from transformers.generation.stopping_criteria import StoppingCriteriaList
 from transformers.utils import logging
-from ..utils.MobilintCache import MobilintCache
+from ...utils.MobilintCache import MobilintCache
 
 
 logger = logging.get_logger(__name__)

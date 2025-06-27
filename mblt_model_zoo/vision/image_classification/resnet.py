@@ -9,7 +9,7 @@ class ResNet18_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet18_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet18_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -42,7 +42,7 @@ class ResNet34_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet34_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet34_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -75,7 +75,7 @@ class ResNet50_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet50_v1_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet50_v1_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -104,7 +104,7 @@ class ResNet50_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet50_v2_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet50_v2_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -137,7 +137,7 @@ class ResNet101_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet101_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet101_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -170,7 +170,7 @@ class ResNet152_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/resnet152_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/resnet152_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

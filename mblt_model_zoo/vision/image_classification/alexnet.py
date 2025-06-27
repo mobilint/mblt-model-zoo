@@ -9,7 +9,7 @@ class AlexNet_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/alexnet_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/alexnet_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

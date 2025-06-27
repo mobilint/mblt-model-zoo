@@ -9,7 +9,7 @@ class MobileNet_V1_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/mobilenet_v1.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/mobilenet_v1.mxq",
                 },
                 "regulus": {"single": None},
             },

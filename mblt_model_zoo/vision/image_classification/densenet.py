@@ -9,7 +9,7 @@ class DenseNet121_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/densenet121_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet121_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -40,7 +40,7 @@ class DenseNet161_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/densenet161_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet161_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -71,7 +71,7 @@ class DenseNet169_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/densenet169_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet169_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -102,7 +102,7 @@ class DenseNet201_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/densenet201_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet201_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

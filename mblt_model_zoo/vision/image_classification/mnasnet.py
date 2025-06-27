@@ -9,7 +9,7 @@ class MNasNet0_5_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/mnasnet0_5_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/mnasnet0_5_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -40,7 +40,7 @@ class MNasNet1_0_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/mnasnet1_0_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/mnasnet1_0_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -71,7 +71,7 @@ class MNasNet0_75_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_classification/mnasnet0_75_torchvision.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/mnasnet0_75_torchvision.mxq",
                 },
                 "regulus": {"single": None},
             },

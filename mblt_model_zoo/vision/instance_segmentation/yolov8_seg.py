@@ -9,7 +9,7 @@ class YOLOv8sSeg_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8s-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/instance_segmentation/yolov8s-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -40,7 +40,7 @@ class YOLOv8mSeg_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8m-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/instance_segmentation/yolov8m-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -71,7 +71,7 @@ class YOLOv8lSeg_Set(ModelInfoSet):
                 "aries": {
                     "single": None,
                     "multi": None,
-                    "global": "https://dl.mobilint.com/model/image_detection/yolov8l-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/aries/global/vision/instance_segmentation/yolov8l-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
