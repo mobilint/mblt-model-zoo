@@ -26,7 +26,6 @@ def download_url_to_file(
             Default: True
     """
     file_size = None
-    print(url)
     req = Request(url, headers={"User-Agent": "mblt_model_zoo"})
     u = urlopen(req)
     meta = u.info()

@@ -143,7 +143,7 @@ Currently, this optional functions are only available on environment equipped wi
 
 |Name|Use|
 |-------|------|
-|stt|For using Speach-To-Text models (Whisper)| 
+|transformers|For using HuggingFace transformers related models| 
 
 ## License
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
