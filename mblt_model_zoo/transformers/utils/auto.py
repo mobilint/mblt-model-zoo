@@ -10,7 +10,10 @@ from transformers import (
     AutoFeatureExtractor as OriginalAutoFeatureExtractor,
     AutoProcessor as OriginalAutoProcessor,
     AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq,
-    
+    AutoModelForImageTextToText as OriginalAutoModelForImageTextToText,
+    AutoModelForCausalLM as OriginalAutoModelForCausalLM,
+    AutoModelForVision2Seq as OriginalAutoModelForVision2Seq,
+
     PreTrainedModel,
     TFPreTrainedModel,
     PretrainedConfig,
@@ -116,7 +119,25 @@ class AutoProcessor(OriginalAutoProcessor):
         return super().from_pretrained(pretrained_model_name_or_path, **kwargs)
 
 class AutoModelForSpeechSeq2Seq(OriginalAutoModelForSpeechSeq2Seq):
-    classmethod
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        pretrained_model_name_or_path = convert_identifier_to_path(pretrained_model_name_or_path)
+        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+    
+class AutoModelForImageTextToText(OriginalAutoModelForImageTextToText):
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        pretrained_model_name_or_path = convert_identifier_to_path(pretrained_model_name_or_path)
+        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+
+class AutoModelForCausalLM(OriginalAutoModelForCausalLM):
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        pretrained_model_name_or_path = convert_identifier_to_path(pretrained_model_name_or_path)
+        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+
+class AutoModelForVision2Seq(OriginalAutoModelForVision2Seq):
+    @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         pretrained_model_name_or_path = convert_identifier_to_path(pretrained_model_name_or_path)
         return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
