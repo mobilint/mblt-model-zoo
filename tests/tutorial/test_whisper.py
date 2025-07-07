@@ -6,8 +6,7 @@ pipe = pipeline("automatic-speech-recognition", model="mobilint/whisper-small")
 ds = load_dataset(
     "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
 )
-sample = ds[0:2]["audio"]
+sample = ds[0]["audio"]
 
-print("model inference start")
-outputs = pipe(sample)
-print(outputs)
+prediction = pipe(sample.copy(), batch_size=8, return_timestamps=True)["chunks"]
+print(prediction)
