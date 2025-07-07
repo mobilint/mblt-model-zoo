@@ -33,8 +33,8 @@ def list_models(tasks: Union[str, List[str]] = TASKS) -> Dict[str, TransformersM
 
         for name, obj in inspect.getmembers(module):
             if (
-                inspect.isclass(obj)
-                and issubclass(obj, TransformersModelInfo)
+                not inspect.isclass(obj)
+                and isinstance(obj, TransformersModelInfo)
                 and obj is not TransformersModelInfo
             ):
                 available_models[task].append(obj)

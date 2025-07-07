@@ -220,20 +220,17 @@ AutoModelForCausalLM.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-class MobilintWhisperSmallInfo(TransformersModelInfo):
-    original_model_id="openai/whisper-small"
-    model_id="mobilint/whisper-small"
-    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/"
+MobilintC4aiCommandInfo = TransformersModelInfo(
+    original_model_id="CohereLabs/c4ai-command-r7b-12-2024",
+    model_id="mobilint/c4ai-command-r7b-12-2024",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/c4ai-command-r7b-12-2024/",
     file_list=[
-        "added_tokens.json",
+        "c4ai-command-r7b-12-2024.mxq",
         "config.json",
         "generation_config.json",
-        "merges.txt",
         "model.safetensors",
-        "normalizer.json",
-        "preprocessor_config.json",
+        "special_tokens_map.json",
         "tokenizer.json",
-        "vocab.json",
-        "whisper-small_encoder.mxq",
-        "whisper-small_decoder.mxq",
-    ]
+        "tokenizer_config.json",
+    ],
+)

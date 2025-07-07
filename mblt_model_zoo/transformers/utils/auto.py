@@ -35,7 +35,7 @@ def convert_identifier_to_path(identifier: Any):
     if model is None:
         return identifier
     
-    download_path = os.path.expanduser(f"~/.mblt_model_zoo/transformers/{model.model_id}/")
+    download_path = os.path.expanduser(f"~/.mblt_model_zoo/transformers/{model.get_directory_name()}/")
     download_url_to_folder(model.download_url_base, model.file_list, download_path)
     
     return download_path

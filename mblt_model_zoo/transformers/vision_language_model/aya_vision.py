@@ -287,20 +287,21 @@ AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionF
 
 from ..utils.types import TransformersModelInfo
 
-class MobilintAyaVision8BInfo(TransformersModelInfo):
-    original_model_id="CohereLabs/aya-vision-8b"
-    model_id="mobilint/aya-vision-8b"
-    download_url_base="https://dl.mobilint.com/model/transformers/stt/aya-vision-8b/"
+MobilintAyaVision8BInfo = TransformersModelInfo(
+    original_model_id="CohereLabs/aya-vision-8b",
+    model_id="mobilint/aya-vision-8b",
+    download_url_base="https://dl.mobilint.com/model/transformers/vlm/aya-vision-8b/",
     file_list=[
-        "added_tokens.json",
+        "c4ai-command-r7b-12-2024.mxq",
+        "chat_template.json",
         "config.json",
         "generation_config.json",
-        "merges.txt",
         "model.safetensors",
-        "normalizer.json",
         "preprocessor_config.json",
+        "processor_config.json",
+        "siglip2-so400m-patch14-384-vision.mxq",
+        "special_tokens_map.json",
         "tokenizer.json",
-        "vocab.json",
-        "whisper-small_encoder.mxq",
-        "whisper-small_decoder.mxq",
-    ]
+        "tokenizer_config.json",
+    ],
+)

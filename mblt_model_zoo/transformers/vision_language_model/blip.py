@@ -529,20 +529,19 @@ AutoModelForImageTextToText.register(MobilintBlipConfig, MobilintBlipForConditio
 
 from ..utils.types import TransformersModelInfo
 
-class MobilintWhisperSmallInfo(TransformersModelInfo):
-    original_model_id="openai/whisper-small"
-    model_id="mobilint/whisper-small"
-    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/"
+MobilintBlipImageCaptioningLargeInfo = TransformersModelInfo(
+    original_model_id="Salesforce/blip-image-captioning-large",
+    model_id="mobilint/blip-image-captioning-large",
+    download_url_base="https://dl.mobilint.com/model/transformers/vlm/blip-image-captioning-large/",
     file_list=[
-        "added_tokens.json",
+        "blip-image-captioning-large_text_decoder.mxq",
+        "blip-image-captioning-large_vision_model.mxq",
         "config.json",
-        "generation_config.json",
-        "merges.txt",
         "model.safetensors",
-        "normalizer.json",
         "preprocessor_config.json",
+        "special_tokens_map.json",
         "tokenizer.json",
-        "vocab.json",
-        "whisper-small_encoder.mxq",
-        "whisper-small_decoder.mxq",
-    ]
+        "tokenizer_config.json",
+        "vocab.txt",
+    ],
+)

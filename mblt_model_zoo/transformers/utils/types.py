@@ -14,7 +14,10 @@ class TransformersModelInfo:
     file_list: List[str]
     
     def __str__(self):
-        return self.model_id
+        return f"'{self.model_id}'"
+    
+    def __repr__(self):
+        return self.__str__()
     
     def get_directory_name(self):
         return self.model_id[len("mobilint/"):]

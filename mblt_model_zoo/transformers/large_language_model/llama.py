@@ -217,20 +217,47 @@ AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-class MobilintWhisperSmallInfo(TransformersModelInfo):
-    original_model_id="openai/whisper-small"
-    model_id="mobilint/whisper-small"
-    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/"
+MobilintLlama1BInfo = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.2-1B-Instruct",
+    model_id="mobilint/Llama-3.2-1B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-1B-Instruct/",
     file_list=[
-        "added_tokens.json",
         "config.json",
         "generation_config.json",
-        "merges.txt",
+        "Llama-3.2-1B-Instruct.mxq",
         "model.safetensors",
-        "normalizer.json",
-        "preprocessor_config.json",
+        "special_tokens_map.json",
         "tokenizer.json",
-        "vocab.json",
-        "whisper-small_encoder.mxq",
-        "whisper-small_decoder.mxq",
-    ]
+        "tokenizer_config.json",
+    ],
+)
+
+MobilintLlama3BInfo = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.2-3B-Instruct",
+    model_id="mobilint/Llama-3.2-3B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "Llama-3.2-3B-Instruct.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
+MobilintLlama8BInfo = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
+    model_id="mobilint/Llama-3.1-8B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "Llama-3.1-8B-Instruct.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)

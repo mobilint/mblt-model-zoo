@@ -990,10 +990,10 @@ AutoModelForSpeechSeq2Seq.register(
 
 from ..utils.types import TransformersModelInfo
 
-class MobilintWhisperSmallInfo(TransformersModelInfo):
-    original_model_id="openai/whisper-small"
-    model_id="mobilint/whisper-small"
-    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/"
+MobilintWhisperSmallInfo = TransformersModelInfo(
+    original_model_id="openai/whisper-small",
+    model_id="mobilint/whisper-small",
+    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/",
     file_list=[
         "added_tokens.json",
         "config.json",
@@ -1006,4 +1006,5 @@ class MobilintWhisperSmallInfo(TransformersModelInfo):
         "vocab.json",
         "whisper-small_encoder.mxq",
         "whisper-small_decoder.mxq",
-    ]
+    ],
+)
