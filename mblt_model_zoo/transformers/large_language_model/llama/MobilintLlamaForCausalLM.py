@@ -22,7 +22,7 @@ from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from transformers.utils import LossKwargs, logging
-from ...utils.MobilintCache import MobilintCache
+from ...utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 

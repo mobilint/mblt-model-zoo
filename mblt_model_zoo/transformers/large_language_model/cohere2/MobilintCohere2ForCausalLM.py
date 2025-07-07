@@ -22,7 +22,7 @@ from transformers import (
     CohereTokenizerFast,
 )
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from ...utils.MobilintCache import MobilintCache
+from ...utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 

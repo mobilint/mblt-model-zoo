@@ -43,7 +43,7 @@ from transformers.generation.logits_process import (
 )
 from transformers.generation.stopping_criteria import StoppingCriteriaList
 from transformers.utils import logging
-from ...utils.MobilintCache import MobilintCache
+from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
@@ -987,3 +987,23 @@ AutoProcessor.register(MobilintWhisperConfig, WhisperProcessor)
 AutoModelForSpeechSeq2Seq.register(
     MobilintWhisperConfig, MobilintWhisperForConditionalGeneration
 )
+
+from ..utils.types import TransformersModelInfo
+
+class MobilintWhisperSmallInfo(TransformersModelInfo):
+    original_model_id="openai/whisper-small"
+    model_id="mobilint/whisper-small"
+    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/"
+    file_list=[
+        "added_tokens.json",
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "model.safetensors",
+        "normalizer.json",
+        "preprocessor_config.json",
+        "tokenizer.json",
+        "vocab.json",
+        "whisper-small_encoder.mxq",
+        "whisper-small_decoder.mxq",
+    ]

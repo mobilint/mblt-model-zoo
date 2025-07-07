@@ -87,9 +87,8 @@ def download_url_to_folder(
         u = urljoin(url_dir, url_file)
         d = os.path.join(dst, url_file)
         try:
-            download_url_to_file(u, d, progress)
+            if not os.path.exists(d):
+                download_url_to_file(u, d, progress)
 
         except Exception:
             print(f"{url_file} download failed")
-
-    print("Downloading Done")
