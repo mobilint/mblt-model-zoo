@@ -48,7 +48,7 @@ if streaming:
     thread = Thread(target=model.generate, kwargs=dict(
         input_ids=input_ids,
         eos_token_id=tokenizer.eos_token_id,
-        max_new_tokens=32768,
+        max_new_tokens=4096,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -62,7 +62,7 @@ else:
     output = model.generate(
         input_ids,
         eos_token_id=tokenizer.eos_token_id,
-        max_new_tokens=32768,
+        max_new_tokens=4096,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
