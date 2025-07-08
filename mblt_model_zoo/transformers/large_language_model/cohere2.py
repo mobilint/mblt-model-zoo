@@ -150,12 +150,6 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
-            
-        if position_ids is not None:
-            logger.warning_once("position_ids is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")

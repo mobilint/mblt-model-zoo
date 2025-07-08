@@ -107,8 +107,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
 
     def __init__(self, config: MobilintExaoneConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.config = config
+        self.embed_dim = config.hidden_size
+        self.wte = nn.Embedding(config.vocab_size, self.embed_dim, self.config.pad_token_id)
 
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
@@ -166,12 +167,6 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
-            
-        if position_ids is not None:
-            logger.warning_once("position_ids is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
@@ -183,7 +178,7 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
         if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids)
+            inputs_embeds = self.wte(input_ids)
 
         if use_cache and past_key_values is None:
             past_key_values = MobilintCache(self.mxq_model)
@@ -194,7 +189,7 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], dtype=torch.long, device=inputs_embeds.device
             )
 
-        inputs_embeds = inputs_embeds.cpu().numpy().astype(np.float32)
+        inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
         if inputs_embeds.ndim == 3:
             inputs_embeds = np.expand_dims(

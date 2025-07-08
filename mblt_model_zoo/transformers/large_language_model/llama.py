@@ -140,12 +140,6 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
-            
-        if position_ids is not None:
-            logger.warning_once("position_ids is not supported.")
             
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
