@@ -217,8 +217,8 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         else:
             embedding_output = encoder_embeds
 
-        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).cpu().numpy().astype(np.float32)
-        embedding_output = embedding_output.unsqueeze(1).cpu().numpy().astype(np.float32)
+        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).type(torch.float32).cpu().numpy()
+        embedding_output = embedding_output.unsqueeze(1).type(torch.float32).cpu().numpy()
 
         cache_position = torch.arange(
             past_key_values_length, past_key_values_length + embedding_output.shape[2], device="cpu"
@@ -391,7 +391,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         if interpolate_pos_encoding is True:
             logger.warning_once("interpolate_pos_encoding is not supported.")
 
-        last_hidden_state = self.mxq_model.infer(pixel_values.cpu().numpy().astype(np.float32))[0]
+        last_hidden_state = self.mxq_model.infer(pixel_values.type(torch.float32).cpu().numpy())[0]
         last_hidden_state = np.transpose(last_hidden_state[:, :, 0], (0, 2, 1))
         last_hidden_state = torch.from_numpy(last_hidden_state).half()
 

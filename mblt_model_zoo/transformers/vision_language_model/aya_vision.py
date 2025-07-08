@@ -109,7 +109,7 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         if vision_feature_layer != -1:
             raise ValueError(f"Unexpected vision_feature_layer: {vision_feature_layer}")
 
-        image_features = pixel_values.cpu().numpy().astype(np.float32)
+        image_features = pixel_values.type(torch.float32).cpu().numpy()
         image_features = self.mxq_model.infer([image_features])[0]
         image_features = np.transpose(image_features, (0, 2, 3, 1))
         image_features = torch.from_numpy(image_features).to(pixel_values.device)

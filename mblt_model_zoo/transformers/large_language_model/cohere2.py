@@ -175,7 +175,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             )
 
-        inputs_embeds = inputs_embeds.cpu().numpy().astype(np.float32)
+        inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
         if inputs_embeds.ndim == 3:
             inputs_embeds = np.expand_dims(
