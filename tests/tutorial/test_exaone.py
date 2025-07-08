@@ -27,7 +27,7 @@ input_ids = tokenizer.apply_chat_template(
 output = model.generate(
     input_ids,
     eos_token_id=tokenizer.eos_token_id,
-    max_new_tokens=128,
+    max_new_tokens=1024,
     do_sample=False,
 )
 print(tokenizer.decode(output[0]))
