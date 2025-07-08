@@ -5,34 +5,84 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
+from torch.nn import CrossEntropyLoss
 
 from transformers import (
-  LlamaPreTrainedModel,
   GenerationMixin,
-  LlamaConfig,
-  LlamaTokenizerFast,
+  PretrainedConfig,
   GenerationConfig,
   PreTrainedModel,
+  GPT2Tokenizer,
+  GPT2TokenizerFast,
   AutoConfig,
   AutoModel,
   AutoTokenizer,
   AutoModelForCausalLM
 )
-from transformers.processing_utils import Unpack
-from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.utils import LossKwargs, logging
+from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
+from transformers.utils import logging
 from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
 
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
-
 SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
 
-class MobilintLlamaConfig(LlamaConfig):
-    model_type = "mobilint-llama"
+class ExaoneConfig(PretrainedConfig):
+    model_type = "exaone"
+    keys_to_ignore_at_inference = ["past_key_values"]
+    attribute_map = {"num_hidden_layers": "num_layers"}
+
+    def __init__(
+        self,
+        vocab_size=102400,
+        max_position_embeddings=2048,
+        hidden_size=2048,
+        num_layers=32,
+        num_attention_heads=32,
+        num_key_value_heads=None,
+        intermediate_size=None,
+        activation_function="silu",
+        rope_theta=10000.0,
+        rope_scaling=None,
+        embed_dropout=0.0,
+        attention_dropout=0.0,
+        layer_norm_epsilon=1e-5,
+        initializer_range=0.02,
+        use_cache=True,
+        bos_token_id=0,
+        eos_token_id=2,
+        **kwargs,
+    ):
+        self.vocab_size = vocab_size
+        self.max_position_embeddings = max_position_embeddings
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.num_attention_heads = num_attention_heads
+        self.num_layers = num_layers
+        if num_key_value_heads is None:
+            num_key_value_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads
+        if intermediate_size:
+            self.intermediate_size = intermediate_size
+        else:
+            self.intermediate_size = hidden_size * 4
+        self.activation_function = activation_function
+        self.embed_dropout = embed_dropout
+        self.attention_dropout = attention_dropout
+        self.layer_norm_epsilon = layer_norm_epsilon
+        self.initializer_range = initializer_range
+        self.use_cache = use_cache
+        self.rope_theta = rope_theta
+        self.rope_scaling = rope_scaling
+
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+
+        super().__init__(bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+
+class MobilintExaoneConfig(ExaoneConfig):
+    model_type = "mobilint-exaone"
 
     def __init__(
         self,
@@ -47,25 +97,18 @@ class MobilintLlamaConfig(LlamaConfig):
 
         self.tie_word_embeddings = False
 
-class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
+class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
     supports_gradient_checkpointing = False
     _supports_flash_attn_2 = False
     _supports_sdpa = False
-    _supports_flex_attn = False
-    _supports_quantized_cache = False
-    _supports_static_cache = False
+    _supports_cache_class = False
 
-    config_class = MobilintLlamaConfig
+    config_class = MobilintExaoneConfig
 
-    def __init__(self, config: MobilintLlamaConfig, *inputs, **kwargs):
+    def __init__(self, config: MobilintExaoneConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
-
-        self.padding_idx = config.pad_token_id
-        self.vocab_size = config.vocab_size
-
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-
-        self.gradient_checkpointing = False
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.config = config
 
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
@@ -73,27 +116,12 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
-    
-    def get_input_embeddings(self):
-        return self.embed_tokens
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
 
     def get_output_embeddings(self):
         raise NotImplementedError("self.lm_head is implemented in mxq")
 
     def set_output_embeddings(self, new_embeddings):
         raise NotImplementedError("self.lm_head is implemented in mxq")
-
-    def set_decoder(self, decoder):
-        raise NotImplementedError("self.model is implemented in mxq")
-
-    def get_decoder(self):
-        raise NotImplementedError("self.model is implemented in mxq")
-    
-    def tie_weights(self):
-        pass
     
     def _prepare_cache_for_generation(
         self,
@@ -130,31 +158,26 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        num_logits_to_keep: int = 0,
         chunk_size: int = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
-    ) -> Union[Tuple, CausalLMOutputWithPast]:
+    ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        
         if attention_mask is not None:
             logger.warning_once("attention_mask is not supported.")
             
         if position_ids is not None:
             logger.warning_once("position_ids is not supported.")
-            
+
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
         
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
-        
-        if num_logits_to_keep > 1:
-            logger.warning("num_logits_to_keep larger than 1 is not supported: %d" % num_logits_to_keep)
 
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
@@ -198,72 +221,54 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
             if use_cache:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
     
-        logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
+        lm_logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
 
         loss = None
         if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
+            lm_logits = lm_logits.to(torch.float32)
+
+            # Shift so that tokens < n predict n
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+            lm_logits = lm_logits.to(self.config.torch_dtype)
+            loss = loss.to(self.config.torch_dtype)
 
         if not return_dict:
-            output = (logits,)
-            return (loss,) + output if loss is not None else output
+            output = (lm_logits,)
+            return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithPast(
             loss=loss,
-            logits=logits,
+            logits=lm_logits,
             past_key_values=past_key_values if use_cache else None,
             hidden_states=None,
             attentions=None,
         )
 
-AutoConfig.register("mobilint-llama", MobilintLlamaConfig)
-AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
-AutoTokenizer.register(MobilintLlamaConfig, fast_tokenizer_class=LlamaTokenizerFast)
-AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
+AutoConfig.register("mobilint-exaone", MobilintExaoneConfig)
+AutoModel.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
+AutoTokenizer.register(MobilintExaoneConfig, fast_tokenizer_class=GPT2TokenizerFast, slow_tokenizer_class=GPT2Tokenizer)
+AutoModelForCausalLM.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-MobilintLlama1BInfo = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-1B-Instruct",
-    model_id="mobilint/Llama-3.2-1B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-1B-Instruct/",
+MobilintExaone1BInfo = TransformersModelInfo(
+    original_model_id="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+    model_id="mobilint/EXAONE-3.5-2.4B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-3.5-2.4B-Instruct/",
     file_list=[
         "config.json",
+        "EXAONE-3.5-2.4B-Instruct.mxq",
         "generation_config.json",
-        "Llama-3.2-1B-Instruct.mxq",
+        "merges.txt",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer_config.json",
-    ],
-)
-
-MobilintLlama3BInfo = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-3B-Instruct",
-    model_id="mobilint/Llama-3.2-3B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct/",
-    file_list=[
-        "config.json",
-        "generation_config.json",
-        "Llama-3.2-3B-Instruct.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)
-
-MobilintLlama8BInfo = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
-    model_id="mobilint/Llama-3.1-8B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct/",
-    file_list=[
-        "config.json",
-        "generation_config.json",
-        "Llama-3.1-8B-Instruct.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
+        "vocab.json",
     ],
 )

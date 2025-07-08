@@ -150,6 +150,12 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
+        
+        if attention_mask is not None:
+            logger.warning_once("attention_mask is not supported.")
+            
+        if position_ids is not None:
+            logger.warning_once("position_ids is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
@@ -204,9 +210,13 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
 
         logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
         logits = logits * self.logit_scale  # main diff from Llama
+        
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
 
         return CausalLMOutputWithPast(
-            loss=None,
+            loss=loss,
             logits=logits,
             past_key_values=past_key_values if use_cache else None,
             hidden_states=None,
