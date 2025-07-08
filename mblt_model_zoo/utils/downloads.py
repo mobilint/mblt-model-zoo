@@ -54,6 +54,7 @@ def download_url_to_file(
 
     try:
         with tqdm(
+            desc=os.path.split(dst)[1],
             total=file_size,
             disable=not progress,
             unit="B",
