@@ -37,7 +37,7 @@ from mblt_model_zoo.vision import ResNet50
 resnet50 = ResNet50() 
 
 # Load the model trained with different recipe
-# Currently, default is "DEFAULT", or "IMAGENET1K_V1
+# Currently, default is "DEFAULT", or "IMAGENET1K_V1.
 resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
 
 # Download the model to local directory and load it
@@ -45,6 +45,22 @@ resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded
 
 # Load the model from a local path or download as filename and file path you want
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
+
+# Set inference mode for better performance
+# Aries supports "single", "multi" and "global" inferece mode. Default is "global"
+resnet50 = ResNet50(infer_mode = "global")
+
+# (Beta) If you are holding a model compiled for Regulus, enable inference on the Regulus device.
+resnet50 = ResNet50(product = "regulus")
+
+# In summary, the model can be loaded with the following arguments. 
+# You may customize those arguments to work with Mobilint's NPU.
+resnet50 = ResNet50(
+    local_path = None,
+    model_type = "DEFAULT",
+    infer_mode = "global",
+    product = "aries",
+)
 
 ```
 ### Working with Quantized Model
@@ -74,67 +90,100 @@ pprint(available_models)
 
 ## Model List
 The following tables summarize the models available in **mblt-model-zoo**. We provide the models that are quantized with our advanced quantization techniques.
+
 ### Image Classification (ImageNet)
 
-| Model | Input Size <br> (H, W, C)|Top1 Acc <br> (NPU)| Top1 Acc <br> (GPU)| Ops (G) | MACs |Source|
-|------------|------------|-----------|--------------------|--------|-------|------|
-alexnet	        | (224,224,3)	| 56.01	| 56.56	| 1.42	| 0.71	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.alexnet.html)	
-densenet121	        | (224,224,3)	| 73.86	| 74.44	| 5.70	| 2.85	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.densenet121.html)	
-densenet161	        | (224,224,3)	| 76.69	| 77.11	| 15.52	| 7.76	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.densenet161.html)	
-densenet169	        | (224,224,3)	| 74.90	| 75.61	| 6.76	| 3.38	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.densenet169.html)	
-densenet201	        | (224,224,3)	| 76.30	| 76.89	| 8.64	| 4.32	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.densenet201.html)	
-efficientnet_b1	    | (240,240,3)	| 77.22	| 78.60	| 1.39	| 0.69	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.efficientnet_b1.html)	
-mnasnet0_5	        | (224,224,3)	| 67.01	| 67.73	| 0.20	| 0.10	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.mnasnet0_5.html)	
-mnasnet0_75	        | (224,224,3)	| 70.42	| 71.18	| 0.43	| 0.21	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.mnasnet0_75.html)	
-mnasnet1_0  	    | (224,224,3)	| 73.06	| 73.47	| 0.62	| 0.31	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.mnasnet1_0.html)	
-mobilenet_v1	                | (224,224,3)	| 72.35	| 70.60	| 1.14	| 0.57	| [Link](https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet_v1.md)	
-mobilenet_v2	    | (224,224,3)	| 72.85	| 71.87	| 0.60	| 0.30	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.mobilenet_v2.html)	
-regnet_x_16gf	    | (224,224,3)	| 79.83	| 80.06	| 31.88	| 15.94	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_16gf.html)	
-regnet_x_1_6gf	    | (224,224,3)	| 76.84	| 77.05	| 3.20	| 1.60	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_1_6gf.html)	
-regnet_x_32gf	    | (224,224,3)	| 80.46	| 80.61	| 63.47	| 31.73	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_32gf.html)	
-regnet_x_3_2gf	    | (224,224,3)	| 78.10	| 78.36	| 6.35	| 3.17	| [Link](https://pytorch.org/vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html)	
-regnet_x_400mf	    | (224,224,3)	| 72.37	| 72.83	| 0.82	| 0.41	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_400mf.html)	
-regnet_x_800mf	    | (224,224,3)	| 74.94	| 75.22	| 1.60	| 0.80	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_800mf.html)	
-regnet_x_8gf	    | (224,224,3)	| 79.21	| 79.34	| 15.99	| 7.99	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.regnet_x_8gf.html)	
-resnet18	        | (224,224,3)	| 69.54	| 69.75	| 3.63	| 1.81	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnet18.html)	
-resnet34	        | (224,224,3)	| 73.08	| 73.30	| 7.33	| 3.66	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnet34.html)	
-resnet50_v1 	    | (224,224,3)	| 75.92	| 76.13	| 8.18	| 4.09	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnet50.html)	
-resnet50_v2	        | (224,224,3)	| 80.25	| 80.86	| 8.18	| 4.09	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnet50.html)	
-resnet101	        | (224,224,3)	| 77.06	| 77.37	| 15.60	| 7.80	| [Link](https://pytorch.org/vision/2.0/models/generated/torchvision.models.resnet101.html)	
-resnet152	        | (224,224,3)	| 77.82	| 78.31	| 23.04	| 11.52	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnet152.html)	
-resnext50_32x4d	    | (224,224,3)	| 77.48	| 77.61	| 8.46	| 4.23	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnext50_32x4d.html)	
-resnext101_32x8d	| (224,224,3)	| 79.01	| 79.31	| 32.83	| 16.41	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnext101_32x8d.html)	
-resnext101_64x4d	| (224,224,3)	| 82.77	| 83.25	| 30.92	| 15.46	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.resnext101_64x4d.html)	
-shufflenet_v2_x1_0	| (224,224,3)	| 68.74	| 69.36	| 0.62	| 0.31	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.shufflenet_v2_x1_0.html)	
-shufflenet_v2_x1_5	| (224,224,3)	| 72.41	| 72.98	| 1.36	| 0.68	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.shufflenet_v2_x1_5.html)	
-shufflenet_v2_x2_0	| (224,224,3)	| 75.38	| 76.23	| 2.65	| 1.32	| [Link](https://pytorch.org/vision/main/models/generated/torchvision.models.shufflenet_v2_x2_0.html)	
-vgg11   	        | (224,224,3)	| 68.82	| 69.04| 15.22	| 7.61	| [Link](https://pytorch.org/vision/master/models/generated/torchvision.models.vgg11.html)	
-vgg11_bn   	        | (224,224,3)	| 70.02	| 70.37	| 15.22	| 7.61	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg11_bn.html)	
-vgg13	            | (224,224,3)	| 69.65	| 69.93	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13.html)	
-vgg13_bn	        | (224,224,3)	| 71.25	| 71.59	| 22.62	| 11.31	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg13_bn.html)	
-vgg16   	        | (224,224,3)	| 71.41	| 71.59	| 30.94	| 15.47	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg16.html)	
-vgg16_bn   	        | (224,224,3)	| 73.18	| 73.36	| 30.94	| 15.47	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg16_bn.html)	
-vgg19	            | (224,224,3)	| 72.27	| 72.38	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19.html)	
-vgg19_bn	        | (224,224,3)	| 73.90	| 74.22	| 39.26	| 19.63	| [Link](https://pytorch.org/vision/0.20/models/generated/torchvision.models.vgg19_bn.html)	
+| Model | Input Size <br> (H, W, C)|Top1 Acc <br> (NPU)| Top1 Acc <br> (GPU)| FLOPs (B) | params (M) |Source|Note|
+|------------|------------|-----------|--------------------|--------|-------|------|------|
+AlexNet | (224,224,3)| 56.076 | 56.552 | 0.71 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |
+ConvNeXt_Tiny | (224,224,3) | 82.242 | 82.460| 4.46 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) |  |
+ConvNeXt_Small | (224,224,3) | 83.182 | 83.560 | 8.68 | 50.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_small.html) |  |
+ConvNeXt_Base | (224,224,3) | 83.834 | 84.050 | 15.36 | 88.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_base.html) |  |
+DenseNet121 | (224,224,3) | 73.948 | 74.414 | 2.83 | 7.98 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) |  |
+DenseNet161 | (224,224,3) | 76.890 | 77.132 | 7.73 | 28.68 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet161.html) |  |
+DenseNet169 | (224,224,3) | 74.984 | 75.566 | 3.36 | 14.15 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) |  |
+DenseNet201 | (224,224,3) | 76.194 | 76.880 | 4.29 | 20.01 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) |  |
+GoogLeNet | (224,224,3) | 69.566 | 69.780 | 1.50 | 6.62 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.googlenet.html)	|  |
+Inception_V3 | (299,299,3) | 77.110 | 77.278 | 5.71 | 27.16 | [Link](https://docs.pytorch.org/vision/main/models/generated/torchvision.models.inception_v3.html)|  |
+MNASNet1_0 | (224,224,3)| 72.752 | 73.422 | 0.31 | 4.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_0.html) | |
+MNASNet1_3 | (224,224,3) | 75.708 | 76.466 | 0.53 | 6.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_3.html) | |
+RegNet_X_400MF | (224,224,3) | 72.574 | 72.900 | 0.41 | 5.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V1 |
+RegNet_X_400MF | (224,224,3) | 74.212 | 74.846 | 0.41 | 5.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V2 |
+RegNet_X_800MF | (224,224,3) | 74.920 | 75.204 | 0.80 | 7.26 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V1 |
+RegNet_X_800MF | (224,224,3) | 76.868 | 77.488 | 0.80 | 7.26 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V2 |
+RegNet_X_1_6GF | (224,224,3) | 76.818 | 77.080 | 1.60 | 9.19 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V1 |
+RegNet_X_1_6GF | (224,224,3) | 79.220 | 79.670 | 1.60 | 9.19 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V2 |
+RegNet_X_3_2GF | (224,224,3) | 78.040 | 78.346 | 3.18 | 15.30 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V1 |
+RegNet_X_3_2GF | (224,224,3) | 80.712 | 81.188 | 3.18 | 15.30 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V2 |
+RegNet_X_8GF | (224,224,3) | 79.248 | 79.368 | 8.00 | 39.57 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V1 |
+RegNet_X_8GF | (224,224,3) | 81.330 | 81.680 | 8.00 | 39.57 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V2 |
+RegNet_X_16GF | (224,224,3) | 79.880 | 80.090 | 15.94 | 54.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V1 |
+RegNet_X_16GF | (224,224,3) | 82.334 | 82.712 | 15.94 | 54.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V2 |
+RegNet_X_32GF | (224,224,3) | 80.420 | 80.592 | 31.74 | 107.81 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V1 |
+RegNet_X_32GF | (224,224,3) | 82.798 | 83.014 | 31.74 | 107.81 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V2 |
+RegNet_Y_400MF | (224,224,3) | 73.528 | 73.998 | 0.40 | 4.34 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V1 |
+RegNet_Y_400MF | (224,224,3) | 75.156 | 75.804 | 0.40 | 4.34 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V2 |
+RegNet_Y_800MF | (224,224,3) | 76.132 | 76.406 | 0.83 | 6.43 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V1|
+RegNet_Y_800MF | (224,224,3) | 78.266 | 78.904 | 0.83 | 6.43 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V2|
+RegNet_Y_1_6GF | (224,224,3) | 77.342 | 77.934 | 1.61 | 11.20 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V1 |
+RegNet_Y_1_6GF | (224,224,3) | 80.404 | 80.876 | 1.61 | 11.20 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V2 |
+RegNet_Y_3_2GF | (224,224,3) | 78.474 | 78.962 | 3.18 | 19.44 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V1 |
+RegNet_Y_3_2GF | (224,224,3) | 81.374 | 82.010 | 3.18 | 19.44 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V2 |
+RegNet_Y_8GF | (224,224,3) | 79.792 | 80.052 | 8.47 | 39.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V1 |
+RegNet_Y_8GF | (224,224,3) | 82.438 | 82.822 | 8.47 | 39.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V2 |
+RegNet_Y_16GF | (224,224,3) | 80.110 | 80.428 | 15.91 | 83.59 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html)| IMAGENET1K_V1 |
+RegNet_Y_16GF | (224,224,3) | 82.314 | 82.868 | 15.91 | 83.59 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html)| IMAGENET1K_V2 |
+RegNet_Y_32GF | (224,224,3) | 80.532 | 80.840 | 32.28 | 145.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V1 |
+RegNet_Y_32GF | (224,224,3) | 82.798 | 83.362 | 32.28 | 145.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V2 |
+ResNet18 | (224,224,3) | 69.552 | 69.774 | 1.81 | 11.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
+ResNet34 | (224,224,3) | 73.220 | 73.310 | 3.66 | 21.80 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
+ResNet50 | (224,224,3) | 75.940 | 76.128 | 4.09 | 25.56 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
+ResNet50 | (224,224,3) | 80.390 | 80.844 | 4.09 | 25.56 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
+ResNet101 | (224,224,3) | 77.140 | 77.362 | 7.80 | 44.55 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
+ResNet101 | (224,224,3) | 81.538 | 81.918 | 7.80 | 44.55 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V2 |
+ResNet152 | (224,224,3) | 77.860 | 78.316 | 11.51 | 60.19 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V1 |
+ResNet152 | (224,224,3) | 81.888 | 82.272 | 11.51 | 60.19 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V2 |
+ResNeXt50_32X4D | (224,224,3) | 77.560 | 77.630 | 4.23 | 25.03 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V1 |
+ResNeXt50_32X4D | (224,224,3) | 80.744 | 81.220 | 4.23 | 25.03 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V2 |
+ResNeXt101_32X8D | (224,224,3) | 78.974 | 79.288 | 16.41 | 88.79 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V1 |
+ResNeXt101_32X8D | (224,224,3) | 82.516 | 82.780 | 16.41 | 88.79 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V2 |
+ResNeXt101_64X4D | (224,224,3) | 82.900 | 83.236 | 15.46 | 83.46 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_64x4d.html) | |
+ShuffleNet_V2_X1_0 | (224,224,3) | 68.788 | 69.312 | 0.14 | 2.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_0.html) | |
+ShuffleNet_V2_X1_5 | (224,224,3) | 72.240 | 72.966 | 0.30 | 3.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_5.html) | |
+ShuffleNet_V2_X2_0 | (224,224,3) | 75.638 | 76.222 | 0.58 | 7.39 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x2_0.html) | |
+VGG11 | (224,224,3) | 68.614 | 68.978 | 7.61 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11.html) | |
+VGG11_BN | (224,224,3) | 69.978 | 70.328 | 7.61 | 132.87 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11_bn.html) | |
+VGG13 | (224,224,3) | 69.588 | 69.886 | 11.31 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13.html) | |
+VGG13_BN | (224,224,3) | 71.268 | 71.570 | 11.31 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13_bn.html) | |
+VGG16 | (224,224,3) | 71.344 | 71.610 | 15.47 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16.html) | |
+VGG16_BN | (224,224,3) | 73.184 | 73.408 | 15.47 | 138.37 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) | |
+VGG19 | (224,224,3) | 72.142 | 72.384 | 19.63 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) | |
+VGG19_BN | (224,224,3) | 73.974 | 74.166 | 19.63 | 143.68 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) | |
+Wide_ResNet50_2 | (224,224,3) | 78.364 | 78.490 | 11.40 | 68.88 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V1 |
+Wide_ResNet50_2 | (224,224,3) | 81.230 | 81.626 | 11.40 | 68.88 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V2 |
+Wide_ResNet101_2 | (224,224,3) | 78.478 | 78.834 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
+Wide_ResNet101_2 | (224,224,3) | 82.230 | 82.504 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
 
 ### Object Detection (COCO)
-| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| Ops (G) | MACs |Source|
-|------------|------------|-----------|--------------------|--------|-------|------|
-yolov7	                | (640,640,3)	| 50.13	| 51.14	| 104.66	| 52.33	| [Link](https://github.com/WongKinYiu/yolov7)	
-yolov8s	                        | (640,640,3)	| 44.07	| 44.95	| 28.64	| 14.32	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
-yolov8m	                        | (640,640,3)	| 49.68	| 50.22	| 79.00	| 39.50	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
-yolov8l	                        | (640,640,3)	| 52.31	| 52.75	| 165.24	| 82.62	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
-yolov8x	                        | (640,640,3)	| 53.37	| 53.90	| 257.92	| 128.96	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
-yolov9m	                        | (640,640,3)	| 50.65	| 51.40	| 76.95	| 38.47	| [Link](https://github.com/WongKinYiu/yolov9)		
-yolov9c	                        | (640,640,3)	| 52.16	| 52.68	| 102.86	| 51.43	| [Link](https://github.com/WongKinYiu/yolov9)	
+
+| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | MACs | Source | Note |
+|------------|------------|-----------|--------------------|--------|-------|------|----|
+yolov7 | (640,640,3) | 50.13 | 51.14 | 104.66 | 52.33 | [Link](https://github.com/WongKinYiu/yolov7)| |
+yolov8s | (640,640,3) | 44.07 | 44.95 | 28.64 | 14.32 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov8m | (640,640,3) | 49.68 | 50.22 | 79.00 | 39.50 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov8l | (640,640,3) | 52.31 | 52.75 | 165.24 | 82.62 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov8x | (640,640,3) | 53.37 | 53.90 | 257.92 | 128.96 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov9m | (640,640,3) | 50.65 | 51.40 | 76.95 | 38.47 | [Link](https://github.com/WongKinYiu/yolov9) | |
+yolov9c | (640,640,3) | 52.16 | 52.68 | 102.86 | 51.43 | [Link](https://github.com/WongKinYiu/yolov9) | |
 
 ### Instance Segmentation (COCO)
-| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| Ops (G) | MACs |Source|
-|------------|------------|-----------|--------------------|--------|-------|------|
-yolov5l-seg	                    | (640,640,3)	| 39.32	| 39.67	| 147.83	| 73.91	| [Link](https://github.com/ultralytics/yolov5/releases)	
-yolov8s-seg	                    | (640,640,3)	| 35.90	| 36.50	| 42.64	| 21.32	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#key-features-of-yolov8)	
-yolov8m-seg                 	| (640,640,3)	| 39.88	| 40.40	|  110.26	| 55.13	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)	
-yolov8l-seg	                    | (640,640,3)	| 42.04	| 42.27	| 220.55	| 110.27	| [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview)
+
+| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| FLOPs (B) | MACs |Source| Note|
+|------------|------------|-----------|--------------------|--------|-------|------|-----|
+yolov5l-seg | (640,640,3) | 39.32 | 39.67 | 147.83 | 73.91 | [Link](https://github.com/ultralytics/yolov5/releases) | |
+yolov8s-seg | (640,640,3) | 35.90 | 36.50 | 42.64 | 21.32 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#key-features-of-yolov8) | |
+yolov8m-seg | (640,640,3) | 39.88 | 40.40 | 110.26 | 55.13 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov8l-seg | (640,640,3) | 42.04 | 42.27 | 220.55 | 110.27 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
 
 ## Optional Extras
 When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.

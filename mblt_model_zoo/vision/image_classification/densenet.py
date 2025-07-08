@@ -7,9 +7,9 @@ class DenseNet121_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet121_torchvision.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/single/densenet121_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/multi/densenet121_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/global/densenet121_IMAGENET1K_V1.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -38,9 +38,9 @@ class DenseNet161_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet161_torchvision.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet161_IMAGENET1K_V1/aries/single/densenet161_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet161_IMAGENET1K_V1/aries/multi/densenet161_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet161_IMAGENET1K_V1/aries/global/densenet161_IMAGENET1K_V1.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -69,9 +69,9 @@ class DenseNet169_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet169_torchvision.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/single/densenet169_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/multi/densenet169_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/global/densenet169_IMAGENET1K_V1.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -100,9 +100,9 @@ class DenseNet201_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": "https://dl.mobilint.com/model/aries/global/vision/image_classification/densenet201_torchvision.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/single/densenet201_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/multi/densenet201_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/global/densenet201_IMAGENET1K_V1.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -126,81 +126,61 @@ class DenseNet201_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class DenseNet121(MBLT_Engine):
-    def __init__(
-        self,
-        local_path: str = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global",
-        product: str = "aries",
-    ):
-        assert (
-            model_type in DenseNet121_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet121_Set.__dict__.keys()}"
-        model_cfg = DenseNet121_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-        model_cfg["infer_mode"] = infer_mode
-        model_cfg["product"] = product
-        pre_cfg = DenseNet121_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet121_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet121(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+):
+    return MBLT_Engine.from_model_info_set(
+        DenseNet121_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class DenseNet161(MBLT_Engine):
-    def __init__(
-        self,
-        local_path: str = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global",
-        product: str = "aries",
-    ):
-        assert (
-            model_type in DenseNet161_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet161_Set.__dict__.keys()}"
-        model_cfg = DenseNet161_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-        model_cfg["infer_mode"] = infer_mode
-        model_cfg["product"] = product
-        pre_cfg = DenseNet161_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet161_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet161(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+):
+    return MBLT_Engine.from_model_info_set(
+        DenseNet161_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class DenseNet169(MBLT_Engine):
-    def __init__(
-        self,
-        local_path: str = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global",
-        product: str = "aries",
-    ):
-        assert (
-            model_type in DenseNet169_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet169_Set.__dict__.keys()}"
-        model_cfg = DenseNet169_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-        model_cfg["infer_mode"] = infer_mode
-        model_cfg["product"] = product
-        pre_cfg = DenseNet169_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet169_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet169(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+):
+    return MBLT_Engine.from_model_info_set(
+        DenseNet169_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class DenseNet201(MBLT_Engine):
-    def __init__(
-        self,
-        local_path: str = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global",
-        product: str = "aries",
-    ):
-        assert (
-            model_type in DenseNet201_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet201_Set.__dict__.keys()}"
-        model_cfg = DenseNet201_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-        model_cfg["infer_mode"] = infer_mode
-        model_cfg["product"] = product
-        pre_cfg = DenseNet201_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet201_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet201(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+):
+    return MBLT_Engine.from_model_info_set(
+        DenseNet201_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )

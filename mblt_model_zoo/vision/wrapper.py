@@ -6,7 +6,7 @@ from typing import Union
 from urllib.parse import urlparse
 import maccel
 from ..utils.downloads import download_url_to_file
-from .utils.types import TensorLike
+from .utils.types import TensorLike, ModelInfoSet
 from .utils.preprocess import build_preprocess
 from .utils.postprocess import build_postprocess
 from .utils.results import Results
@@ -23,6 +23,43 @@ class MBLT_Engine:
         self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
 
         self.device = torch.device("cpu")
+
+    @classmethod
+    def from_model_info_set(
+        cls,
+        model_info_set: ModelInfoSet,
+        local_path: str = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """
+        Create an instance of the model from a ModelInfoSet.
+        """
+
+        assert (
+            model_type in model_info_set.__dict__.keys()
+        ), f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
+        assert (
+            product
+            in model_info_set.__dict__[model_type].value.model_cfg["url_dict"].keys()
+        ), f"product {product} not found in model_type {model_type}. Available products: {model_info_set.__dict__[model_type].value.model_cfg['url_dict'].keys()}"
+        assert (
+            infer_mode
+            in model_info_set.__dict__[model_type]
+            .value.model_cfg["url_dict"][product]
+            .keys()
+        ), f"infer_mode {infer_mode} not found in model_type {model_type} for product {product}. Available infer modes: {model_info_set.__dict__[model_type].value.model_cfg['url_dict'][product].keys()}"
+
+        model_cfg = model_info_set.__dict__[model_type].value.model_cfg
+        model_cfg["local_path"] = local_path
+        model_cfg["infer_mode"] = infer_mode
+        model_cfg["product"] = product
+
+        pre_cfg = model_info_set.__dict__[model_type].value.pre_cfg
+        post_cfg = model_info_set.__dict__[model_type].value.post_cfg
+
+        return cls(model_cfg, pre_cfg, post_cfg)
 
     def __call__(self, x: TensorLike):
         return self.model(x)
