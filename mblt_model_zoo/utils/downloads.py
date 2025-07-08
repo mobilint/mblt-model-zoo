@@ -54,6 +54,7 @@ def download_url_to_file(
 
     try:
         with tqdm(
+            desc=os.path.split(dst)[1],
             total=file_size,
             disable=not progress,
             unit="B",
@@ -87,9 +88,8 @@ def download_url_to_folder(
         u = urljoin(url_dir, url_file)
         d = os.path.join(dst, url_file)
         try:
-            download_url_to_file(u, d, progress)
+            if not os.path.exists(d):
+                download_url_to_file(u, d, progress)
 
         except Exception:
             print(f"{url_file} download failed")
-
-    print("Downloading Done")

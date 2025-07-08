@@ -43,7 +43,7 @@ from transformers.generation.logits_process import (
 )
 from transformers.generation.stopping_criteria import StoppingCriteriaList
 from transformers.utils import logging
-from ...utils.MobilintCache import MobilintCache
+from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
@@ -160,7 +160,7 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
             logger.warning_once("output_hidden_states is not supported.")
 
         output = self.mxq_model.infer(
-            input_features.permute(0, 2, 1).cpu().numpy().astype(np.float32)
+            input_features.permute(0, 2, 1).type(torch.float32).cpu().numpy()
         )
         hidden_states = torch.from_numpy(output[0]).to("cpu").unsqueeze(0)
 
@@ -319,8 +319,8 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         hidden_states = inputs_embeds + positions.to(inputs_embeds.device)
 
         inputs = [
-            encoder_hidden_states.cpu().numpy().astype(np.float32),
-            hidden_states.unsqueeze(0).cpu().numpy().astype(np.float32),
+            encoder_hidden_states.type(torch.float32).cpu().numpy(),
+            hidden_states.unsqueeze(0).type(torch.float32).cpu().numpy(),
         ]
         logits = torch.from_numpy(
             self.mxq_model.infer(inputs, cache_size=int(past_key_values_length))[0]
@@ -986,4 +986,27 @@ AutoFeatureExtractor.register(MobilintWhisperConfig, WhisperFeatureExtractor)
 AutoProcessor.register(MobilintWhisperConfig, WhisperProcessor)
 AutoModelForSpeechSeq2Seq.register(
     MobilintWhisperConfig, MobilintWhisperForConditionalGeneration
+)
+
+from ..utils.types import TransformersModelInfo
+
+whisper_small = TransformersModelInfo(
+    original_model_id="openai/whisper-small",
+    model_id="mobilint/whisper-small",
+    download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/",
+    file_list=[
+        "added_tokens.json",
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "model.safetensors",
+        "normalizer.json",
+        "preprocessor_config.json",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "whisper-small_encoder.mxq",
+        "whisper-small_decoder.mxq",
+    ],
 )

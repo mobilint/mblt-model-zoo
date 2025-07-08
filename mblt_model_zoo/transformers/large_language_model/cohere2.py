@@ -22,19 +22,14 @@ from transformers import (
     CohereTokenizerFast,
 )
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from ...utils.MobilintCache import MobilintCache
+from ..utils.cache_utils import MobilintCache
+
 
 logger = logging.get_logger(__name__)
 
+class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
 
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs):
-    ...
-
-
-SpecificPreTrainedModelType = TypeVar(
-    "SpecificPreTrainedModelType", bound="PreTrainedModel"
-)
-
+SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
 
 class MobilintCohere2Config(Cohere2Config):
     model_type = "mobilint-cohere2"
@@ -67,9 +62,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(
-            config.vocab_size, config.hidden_size, self.padding_idx
-        )
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
@@ -152,15 +145,9 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         chunk_size: int = 0,
         **kwargs: Unpack[KwargsForCausalLM],
     ) -> CausalLMOutputWithPast:
-        output_attentions = (
-            output_attentions
-            if output_attentions is not None
-            else self.config.output_attentions
-        )
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
@@ -171,14 +158,10 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
             logger.warning_once("output_hidden_states is not supported.")
 
         if logits_to_keep > 1:
-            logger.warning(
-                "logits_to_keep larger than 1 is not supported: %d" % logits_to_keep
-            )
+            logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
 
         if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError(
-                "You must specify exactly one of input_ids or inputs_embeds"
-            )
+            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
@@ -187,16 +170,12 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
             past_key_values = MobilintCache(self.mxq_model)
 
         if cache_position is None:
-            past_seen_tokens = (
-                past_key_values.get_seq_length() if past_key_values is not None else 0
-            )
+            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
             cache_position = torch.arange(
-                past_seen_tokens,
-                past_seen_tokens + inputs_embeds.shape[1],
-                device=inputs_embeds.device,
+                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             )
 
-        inputs_embeds = inputs_embeds.cpu().numpy().astype(np.float32)
+        inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
         if inputs_embeds.ndim == 3:
             inputs_embeds = np.expand_dims(
@@ -208,42 +187,54 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         if chunk_size == 0:
             chunk_size = self.mxq_model.get_input_buffer_info()[0].max_width
         num_of_chunks = math.ceil(inputs_embeds.shape[2] / chunk_size)
-
+        
         for i in range(num_of_chunks):
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds.shape[2])
-            cache_size = (
-                0 if past_key_values is None else past_key_values.get_seq_length()
-            )
+            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
 
             # last infer
             if i == num_of_chunks - 1:
-                logits = self.mxq_model.infer(
-                    [inputs_embeds[:, :, start_index:end_index, :]], None, cache_size
-                )[0]
+                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
             else:
-                logits = self.mxq_model.infer(
-                    [inputs_embeds[:, :, start_index:end_index, :]], None, cache_size
-                )[0]
+                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
 
             if use_cache:
-                past_key_values.update_cache_position(
-                    cache_position[start_index:end_index]
-                )
+                past_key_values.update_cache_position(cache_position[start_index:end_index])
 
         logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
         logits = logits * self.logit_scale  # main diff from Llama
+        
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
 
         return CausalLMOutputWithPast(
-            loss=None,
+            loss=loss,
             logits=logits,
             past_key_values=past_key_values if use_cache else None,
             hidden_states=None,
             attentions=None,
         )
 
-
 AutoConfig.register("mobilint-cohere2", MobilintCohere2Config)
 AutoModel.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
 AutoTokenizer.register(MobilintCohere2Config, fast_tokenizer_class=CohereTokenizerFast)
 AutoModelForCausalLM.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
+
+from ..utils.types import TransformersModelInfo
+
+c4ai_command_r7b_12_2024 = TransformersModelInfo(
+    original_model_id="CohereLabs/c4ai-command-r7b-12-2024",
+    model_id="mobilint/c4ai-command-r7b-12-2024",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/c4ai-command-r7b-12-2024/",
+    file_list=[
+        "c4ai-command-r7b-12-2024.mxq",
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
