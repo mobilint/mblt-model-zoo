@@ -223,7 +223,7 @@ AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-MobilintLlama1BInfo = TransformersModelInfo(
+Llama_32_1B_Instruct = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.2-1B-Instruct",
     model_id="mobilint/Llama-3.2-1B-Instruct",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-1B-Instruct/",
@@ -238,7 +238,7 @@ MobilintLlama1BInfo = TransformersModelInfo(
     ],
 )
 
-MobilintLlama3BInfo = TransformersModelInfo(
+Llama_32_3B_Instruct = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.2-3B-Instruct",
     model_id="mobilint/Llama-3.2-3B-Instruct",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct/",
@@ -253,7 +253,7 @@ MobilintLlama3BInfo = TransformersModelInfo(
     ],
 )
 
-MobilintLlama8BInfo = TransformersModelInfo(
+Llama_31_8B_Instruct = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.1-8B-Instruct",
     model_id="mobilint/Llama-3.1-8B-Instruct",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct/",
@@ -268,7 +268,7 @@ MobilintLlama8BInfo = TransformersModelInfo(
     ],
 )
 
-MobilintHyperCLOVAXInfo = TransformersModelInfo(
+HyperCLOVAX_SEED_Text_Instruct_15B = TransformersModelInfo(
     original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
     model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-1.5B/",

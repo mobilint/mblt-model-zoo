@@ -990,7 +990,7 @@ AutoModelForSpeechSeq2Seq.register(
 
 from ..utils.types import TransformersModelInfo
 
-MobilintWhisperSmallInfo = TransformersModelInfo(
+whisper_small = TransformersModelInfo(
     original_model_id="openai/whisper-small",
     model_id="mobilint/whisper-small",
     download_url_base="https://dl.mobilint.com/model/transformers/stt/whisper-small/",

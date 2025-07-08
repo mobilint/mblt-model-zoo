@@ -287,7 +287,7 @@ AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionF
 
 from ..utils.types import TransformersModelInfo
 
-MobilintAyaVision8BInfo = TransformersModelInfo(
+aya_vision_8b = TransformersModelInfo(
     original_model_id="CohereLabs/aya-vision-8b",
     model_id="mobilint/aya-vision-8b",
     download_url_base="https://dl.mobilint.com/model/transformers/vlm/aya-vision-8b/",

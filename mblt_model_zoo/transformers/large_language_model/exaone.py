@@ -256,7 +256,7 @@ AutoModelForCausalLM.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-MobilintExaoneInstructInfo = TransformersModelInfo(
+EXAONE_35_24B_Instruct = TransformersModelInfo(
     original_model_id="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
     model_id="mobilint/EXAONE-3.5-2.4B-Instruct",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-3.5-2.4B-Instruct/",
@@ -273,7 +273,7 @@ MobilintExaoneInstructInfo = TransformersModelInfo(
     ],
 )
 
-MobilintExaoneDeepInfo = TransformersModelInfo(
+EXAONE_Deep_24B = TransformersModelInfo(
     original_model_id="LGAI-EXAONE/EXAONE-Deep-2.4B",
     model_id="mobilint/EXAONE-Deep-2.4B",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-Deep-2.4B/",

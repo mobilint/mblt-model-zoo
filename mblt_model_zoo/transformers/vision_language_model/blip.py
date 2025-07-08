@@ -529,7 +529,7 @@ AutoModelForImageTextToText.register(MobilintBlipConfig, MobilintBlipForConditio
 
 from ..utils.types import TransformersModelInfo
 
-MobilintBlipImageCaptioningLargeInfo = TransformersModelInfo(
+blip_image_captioning_large = TransformersModelInfo(
     original_model_id="Salesforce/blip-image-captioning-large",
     model_id="mobilint/blip-image-captioning-large",
     download_url_base="https://dl.mobilint.com/model/transformers/vlm/blip-image-captioning-large/",
