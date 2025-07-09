@@ -10,18 +10,17 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # Choose your prompt
 prompt = "Explain how wonderful you are"  # English example
-prompt = "스스로를 자랑해 봐"       # Korean example
+prompt = "스스로를 자랑해 봐"  # Korean example
 
 messages = [
-    {"role": "system", 
-     "content": "You are EXAONE model from LG AI Research, a helpful assistant."},
-    {"role": "user", "content": prompt}
+    {
+        "role": "system",
+        "content": "You are EXAONE model from LG AI Research, a helpful assistant.",
+    },
+    {"role": "user", "content": prompt},
 ]
 input_ids = tokenizer.apply_chat_template(
-    messages,
-    tokenize=True,
-    add_generation_prompt=True,
-    return_tensors="pt"
+    messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
 )
 
 output = model.generate(

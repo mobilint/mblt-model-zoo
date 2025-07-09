@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from transformers import (
-    PretrainedConfig, 
+    PretrainedConfig,
     PreTrainedModel,
     BlipTextConfig,
     BlipVisionConfig,
@@ -20,8 +20,13 @@ from transformers import (
     AutoModelForVision2Seq,
     AutoModelForImageTextToText,
 )
-from transformers.models.blip.modeling_blip import BlipForConditionalGenerationModelOutput
-from transformers.models.blip.modeling_blip_text import BlipTextPreTrainedModel, BlipTextEmbeddings
+from transformers.models.blip.modeling_blip import (
+    BlipForConditionalGenerationModelOutput,
+)
+from transformers.models.blip.modeling_blip_text import (
+    BlipTextPreTrainedModel,
+    BlipTextEmbeddings,
+)
 from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
@@ -33,7 +38,10 @@ from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 
-SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
+SpecificPreTrainedModelType = TypeVar(
+    "SpecificPreTrainedModelType", bound="PreTrainedModel"
+)
+
 
 class MobilintBlipTextConfig(BlipTextConfig):
     model_type = "mobilint-blip_text_model"
@@ -55,6 +63,7 @@ class MobilintBlipTextConfig(BlipTextConfig):
 
         self.tie_word_embeddings = False
 
+
 class MobilintBlipVisionConfig(BlipVisionConfig):
     model_type = "mobilint-blip_vision_model"
 
@@ -71,9 +80,13 @@ class MobilintBlipVisionConfig(BlipVisionConfig):
 
         self.tie_word_embeddings = False
 
+
 class MobilintBlipConfig(PretrainedConfig):
     model_type = "mobilint-blip"
-    sub_configs = {"text_config": MobilintBlipTextConfig, "vision_config": MobilintBlipVisionConfig}
+    sub_configs = {
+        "text_config": MobilintBlipTextConfig,
+        "vision_config": MobilintBlipVisionConfig,
+    }
 
     def __init__(
         self,
@@ -89,11 +102,15 @@ class MobilintBlipConfig(PretrainedConfig):
 
         if text_config is None:
             text_config = {}
-            logger.info("`text_config` is `None`. Initializing the `MobilintBlipTextConfig` with default values.")
+            logger.info(
+                "`text_config` is `None`. Initializing the `MobilintBlipTextConfig` with default values."
+            )
 
         if vision_config is None:
             vision_config = {}
-            logger.info("`vision_config` is `None`. Initializing the `MobilintBlipVisionConfig` with default values.")
+            logger.info(
+                "`vision_config` is `None`. Initializing the `MobilintBlipVisionConfig` with default values."
+            )
 
         self.text_config = MobilintBlipTextConfig(**text_config)
         self.vision_config = MobilintBlipVisionConfig(**vision_config)
@@ -108,8 +125,18 @@ class MobilintBlipConfig(PretrainedConfig):
         self.label_smoothing = label_smoothing
 
     @classmethod
-    def from_text_vision_configs(cls, text_config: MobilintBlipTextConfig, vision_config: MobilintBlipVisionConfig, **kwargs):
-        return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
+    def from_text_vision_configs(
+        cls,
+        text_config: MobilintBlipTextConfig,
+        vision_config: MobilintBlipVisionConfig,
+        **kwargs,
+    ):
+        return cls(
+            text_config=text_config.to_dict(),
+            vision_config=vision_config.to_dict(),
+            **kwargs,
+        )
+
 
 class MobilintBlipPreTrainedModel(BlipPreTrainedModel):
     config_class = MobilintBlipConfig
@@ -118,11 +145,13 @@ class MobilintBlipPreTrainedModel(BlipPreTrainedModel):
     def _init_weights(self, module):
         raise NotImplementedError("_init_weights is not implemented")
 
+
 class MobilintBlipTextPreTrainedModel(BlipTextPreTrainedModel):
     config_class = MobilintBlipTextConfig
 
     def _init_weights(self, module):
         raise NotImplementedError("_init_weights is not implemented")
+
 
 class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
     def __init__(self, config: MobilintBlipTextConfig):
@@ -130,11 +159,13 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         self.config = config
 
         self.embeddings = BlipTextEmbeddings(config)
-        
+
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(None, [maccel.CoreId(maccel.Cluster.Cluster1, maccel.Core.Core1)])
+        mc.set_single_core_mode(
+            None, [maccel.CoreId(maccel.Cluster.Cluster1, maccel.Core.Core1)]
+        )
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
 
@@ -164,48 +195,65 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         return_dict: Optional[bool] = None,
         is_decoder: Optional[bool] = False,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if is_decoder:
             use_cache = use_cache if use_cache is not None else self.config.use_cache
         else:
             use_cache = False
-        
+
         if attention_mask is not None:
             logger.warning_once("attention_mask is not supported.")
 
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
-        
+
         if encoder_attention_mask is not None:
             logger.warning_once("encoder_attention_mask is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
-        
+
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
         if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
         elif input_ids is not None:
             self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
         else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds or encoder_embeds")
+            raise ValueError(
+                "You have to specify either input_ids or inputs_embeds or encoder_embeds"
+            )
 
         if use_cache or past_key_values is not None:
             if past_key_values is None:
                 past_key_values = MobilintCache(self.mxq_model)
             elif not isinstance(past_key_values, MobilintCache):
-                logger.warning_once("Class of past_key_values should be MobilintCache, current: " + past_key_values.__class__.__name__)
+                logger.warning_once(
+                    "Class of past_key_values should be MobilintCache, current: "
+                    + past_key_values.__class__.__name__
+                )
                 past_key_values = MobilintCache(self.mxq_model)
 
         # past_key_values_length
-        past_key_values_length = past_key_values.get_seq_length() if past_key_values is not None else 0
+        past_key_values_length = (
+            past_key_values.get_seq_length() if past_key_values is not None else 0
+        )
 
         if encoder_embeds is None:
             embedding_output = self.embeddings(
@@ -217,14 +265,23 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         else:
             embedding_output = encoder_embeds
 
-        encoder_hidden_states = encoder_hidden_states.unsqueeze(1).type(torch.float32).cpu().numpy()
-        embedding_output = embedding_output.unsqueeze(1).type(torch.float32).cpu().numpy()
-
-        cache_position = torch.arange(
-            past_key_values_length, past_key_values_length + embedding_output.shape[2], device="cpu"
+        encoder_hidden_states = (
+            encoder_hidden_states.unsqueeze(1).type(torch.float32).cpu().numpy()
+        )
+        embedding_output = (
+            embedding_output.unsqueeze(1).type(torch.float32).cpu().numpy()
         )
 
-        logits = self.mxq_model.infer([encoder_hidden_states, embedding_output], cache_size=int(past_key_values_length))[0]
+        cache_position = torch.arange(
+            past_key_values_length,
+            past_key_values_length + embedding_output.shape[2],
+            device="cpu",
+        )
+
+        logits = self.mxq_model.infer(
+            [encoder_hidden_states, embedding_output],
+            cache_size=int(past_key_values_length),
+        )[0]
         logits = torch.from_numpy(logits)[0]
 
         past_key_values.update_cache_position(cache_position)
@@ -240,6 +297,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             attentions=None,
             cross_attentions=None,
         )
+
 
 class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMixin):
     def __init__(self, config: MobilintBlipTextConfig):
@@ -279,12 +337,16 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         is_decoder: Optional[bool] = True,
         reduction: Optional[str] = "mean",
     ) -> Union[Tuple[torch.Tensor], CausalLMOutputWithCrossAttentions]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
         if labels is not None:
             use_cache = False
-        
+
         if reduction != "mean":
-            logger.warning_once("reduction except 'mean' is not supported: " + reduction)
+            logger.warning_once(
+                "reduction except 'mean' is not supported: " + reduction
+            )
 
         outputs = self.bert(
             input_ids,
@@ -322,9 +384,9 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
     def prepare_inputs_for_generation(
         self,
         input_ids,
-        past_key_values: MobilintCache=None,
+        past_key_values: MobilintCache = None,
         attention_mask=None,
-        **model_kwargs
+        **model_kwargs,
     ):
         # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
@@ -350,6 +412,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
     def _reorder_cache(self, past_key_values, beam_idx):
         raise NotImplementedError("_reorder_cache is not implemented")
 
+
 class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
     main_input_name = "pixel_values"
     config_class = MobilintBlipVisionConfig
@@ -373,25 +436,35 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
-        
+
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
         if interpolate_pos_encoding is True:
             logger.warning_once("interpolate_pos_encoding is not supported.")
 
-        last_hidden_state = self.mxq_model.infer(pixel_values.type(torch.float32).cpu().numpy())[0]
+        last_hidden_state = self.mxq_model.infer(
+            pixel_values.type(torch.float32).cpu().numpy()
+        )[0]
         last_hidden_state = np.transpose(last_hidden_state[:, :, 0], (0, 2, 1))
         last_hidden_state = torch.from_numpy(last_hidden_state).half()
 
@@ -407,8 +480,11 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
 
     def get_input_embeddings(self):
         raise NotImplementedError("get_input_embeddings is not implemented")
-    
-class MobilintBlipForConditionalGeneration(MobilintBlipPreTrainedModel, GenerationMixin):
+
+
+class MobilintBlipForConditionalGeneration(
+    MobilintBlipPreTrainedModel, GenerationMixin
+):
     config_class = MobilintBlipConfig
     _tied_weights_keys = []
     main_input_name = "pixel_values"
@@ -443,10 +519,18 @@ class MobilintBlipForConditionalGeneration(MobilintBlipPreTrainedModel, Generati
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, BlipForConditionalGenerationModelOutput]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
 
         vision_outputs = self.vision_model(
@@ -501,7 +585,9 @@ class MobilintBlipForConditionalGeneration(MobilintBlipPreTrainedModel, Generati
             input_ids = torch.LongTensor(input_ids)
         elif input_ids is None:
             input_ids = (
-                torch.LongTensor([[self.decoder_input_ids, self.config.text_config.eos_token_id]])
+                torch.LongTensor(
+                    [[self.decoder_input_ids, self.config.text_config.eos_token_id]]
+                )
                 .repeat(batch_size, 1)
                 .to(image_embeds.device)
             )
@@ -519,13 +605,17 @@ class MobilintBlipForConditionalGeneration(MobilintBlipPreTrainedModel, Generati
         )
 
         return outputs
-    
+
 
 AutoConfig.register("mobilint-blip", MobilintBlipConfig)
 AutoTokenizer.register(MobilintBlipConfig, BertTokenizer, BertTokenizerFast)
 AutoProcessor.register(MobilintBlipConfig, BlipProcessor)
-AutoModelForVision2Seq.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
-AutoModelForImageTextToText.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
+AutoModelForVision2Seq.register(
+    MobilintBlipConfig, MobilintBlipForConditionalGeneration
+)
+AutoModelForImageTextToText.register(
+    MobilintBlipConfig, MobilintBlipForConditionalGeneration
+)
 
 from ..utils.types import TransformersModelInfo
 

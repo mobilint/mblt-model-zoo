@@ -20,10 +20,13 @@ from transformers import (
     GenerationConfig,
     PreTrainedModel,
 )
-from transformers.models.aya_vision.modeling_aya_vision import AyaVisionCausalLMOutputWithPast
+from transformers.models.aya_vision.modeling_aya_vision import (
+    AyaVisionCausalLMOutputWithPast,
+)
 from transformers.utils import is_torchdynamo_compiling
 from ..large_language_model.cohere2 import MobilintCohere2ForCausalLM
 from ..utils.cache_utils import MobilintCache
+
 
 class MobilintAyaVisionConfig(AyaVisionConfig):
     model_type = "mobilint-aya_vision"
@@ -45,7 +48,10 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
                 f"Got: {self.vision_feature_select_strategy}"
             )
 
-class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, GenerationMixin):
+
+class MobilintAyaVisionForConditionalGeneration(
+    AyaVisionPreTrainedModel, GenerationMixin
+):
     config_class = MobilintAyaVisionConfig
 
     def __init__(self, config: MobilintAyaVisionConfig):
@@ -57,26 +63,31 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
 
         if self.language_model._tied_weights_keys is not None:
-            self._tied_weights_keys = [f"language_model.{k}" for k in self.language_model._tied_weights_keys]
+            self._tied_weights_keys = [
+                f"language_model.{k}" for k in self.language_model._tied_weights_keys
+            ]
 
-        self.pad_token_id = self.config.pad_token_id if self.config.pad_token_id is not None else -1
+        self.pad_token_id = (
+            self.config.pad_token_id if self.config.pad_token_id is not None else -1
+        )
 
         self.post_init()
 
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(core_ids=[
-            CoreId(Cluster.Cluster0, Core.Core2),
-            CoreId(Cluster.Cluster0, Core.Core3),
-            CoreId(Cluster.Cluster1, Core.Core0),
-            CoreId(Cluster.Cluster1, Core.Core1),
-            CoreId(Cluster.Cluster1, Core.Core2),
-            CoreId(Cluster.Cluster1, Core.Core3),
-        ])
+        mc.set_single_core_mode(
+            core_ids=[
+                CoreId(Cluster.Cluster0, Core.Core2),
+                CoreId(Cluster.Cluster0, Core.Core3),
+                CoreId(Cluster.Cluster1, Core.Core0),
+                CoreId(Cluster.Cluster1, Core.Core1),
+                CoreId(Cluster.Cluster1, Core.Core2),
+                CoreId(Cluster.Cluster1, Core.Core3),
+            ]
+        )
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
-
 
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
@@ -104,8 +115,10 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         **kwargs,
     ):
         if vision_feature_select_strategy != "full":
-            raise ValueError(f"Unexpected vision_feature_select_strategy: {vision_feature_select_strategy}")
-    
+            raise ValueError(
+                f"Unexpected vision_feature_select_strategy: {vision_feature_select_strategy}"
+            )
+
         if vision_feature_layer != -1:
             raise ValueError(f"Unexpected vision_feature_layer: {vision_feature_layer}")
 
@@ -114,7 +127,7 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         image_features = np.transpose(image_features, (0, 2, 3, 1))
         image_features = torch.from_numpy(image_features).to(pixel_values.device)
         return image_features
-    
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -135,13 +148,23 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         image_sizes: Optional[torch.Tensor] = None,
         **lm_kwargs,
     ) -> Union[Tuple, AyaVisionCausalLMOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
         vision_feature_layer = (
-            vision_feature_layer if vision_feature_layer is not None else self.config.vision_feature_layer
+            vision_feature_layer
+            if vision_feature_layer is not None
+            else self.config.vision_feature_layer
         )
         vision_feature_select_strategy = (
             vision_feature_select_strategy
@@ -150,7 +173,9 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
         )
 
         if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+            raise ValueError(
+                "You must specify exactly one of input_ids or inputs_embeds"
+            )
 
         if pixel_values is not None and inputs_embeds is not None:
             raise ValueError(
@@ -168,16 +193,27 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
                 image_sizes=image_sizes,
             )
 
-            special_image_mask = (input_ids == self.config.image_token_index).unsqueeze(-1)
-            special_image_mask = special_image_mask.expand_as(inputs_embeds).to(inputs_embeds.device)
-            if not is_torchdynamo_compiling() and inputs_embeds[special_image_mask].numel() != image_features.numel():
+            special_image_mask = (input_ids == self.config.image_token_index).unsqueeze(
+                -1
+            )
+            special_image_mask = special_image_mask.expand_as(inputs_embeds).to(
+                inputs_embeds.device
+            )
+            if (
+                not is_torchdynamo_compiling()
+                and inputs_embeds[special_image_mask].numel() != image_features.numel()
+            ):
                 n_image_tokens = (input_ids == self.config.image_token_index).sum()
                 n_image_features = image_features.shape[0] * image_features.shape[1]
                 raise ValueError(
                     f"Image features and image tokens do not match: tokens: {n_image_tokens}, features {n_image_features}"
                 )
-            image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-            inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
+            image_features = image_features.to(
+                inputs_embeds.device, inputs_embeds.dtype
+            )
+            inputs_embeds = inputs_embeds.masked_scatter(
+                special_image_mask, image_features
+            )
 
         outputs = self.language_model(
             attention_mask=attention_mask,
@@ -201,16 +237,23 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
             if attention_mask is not None:
                 # we use the input attention mask to shift the logits and labels, because it is 2D.
                 # we also crop attn mask in case it is longer, which happens in PrefixTuning with peft
-                shift_attention_mask = attention_mask[:, -(logits.shape[1] - 1) :].to(logits.device)
-                shift_logits = logits[..., :-1, :][shift_attention_mask.to(logits.device) != 0].contiguous()
-                shift_labels = labels[..., 1:][shift_attention_mask.to(labels.device) != 0].contiguous()
+                shift_attention_mask = attention_mask[:, -(logits.shape[1] - 1) :].to(
+                    logits.device
+                )
+                shift_logits = logits[..., :-1, :][
+                    shift_attention_mask.to(logits.device) != 0
+                ].contiguous()
+                shift_labels = labels[..., 1:][
+                    shift_attention_mask.to(labels.device) != 0
+                ].contiguous()
             else:
                 shift_logits = logits[..., :-1, :].contiguous()
                 shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1).to(shift_logits.device)
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1).to(shift_logits.device),
             )
 
         if not return_dict:
@@ -273,17 +316,26 @@ class MobilintAyaVisionForConditionalGeneration(AyaVisionPreTrainedModel, Genera
     def tie_weights(self):
         return self.language_model.tie_weights()
 
-    def resize_token_embeddings(self, new_num_tokens: Optional[int] = None, pad_to_multiple_of=None) -> nn.Embedding:
-        model_embeds = self.language_model.resize_token_embeddings(new_num_tokens, pad_to_multiple_of)
+    def resize_token_embeddings(
+        self, new_num_tokens: Optional[int] = None, pad_to_multiple_of=None
+    ) -> nn.Embedding:
+        model_embeds = self.language_model.resize_token_embeddings(
+            new_num_tokens, pad_to_multiple_of
+        )
         # update vocab size
         self.config.text_config.vocab_size = model_embeds.num_embeddings
         self.vocab_size = model_embeds.num_embeddings
         return model_embeds
 
+
 AutoConfig.register("mobilint-aya_vision", MobilintAyaVisionConfig)
-AutoTokenizer.register(MobilintAyaVisionConfig, fast_tokenizer_class=CohereTokenizerFast)
+AutoTokenizer.register(
+    MobilintAyaVisionConfig, fast_tokenizer_class=CohereTokenizerFast
+)
 AutoProcessor.register(MobilintAyaVisionConfig, AyaVisionProcessor)
-AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration)
+AutoModelForImageTextToText.register(
+    MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration
+)
 
 from ..utils.types import TransformersModelInfo
 

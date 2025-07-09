@@ -15,7 +15,9 @@ def list_tasks():
     return TASKS
 
 
-def list_models(tasks: Union[str, List[str]] = TASKS) -> Dict[str, TransformersModelInfo]:
+def list_models(
+    tasks: Union[str, List[str]] = TASKS,
+) -> Dict[str, TransformersModelInfo]:
     if isinstance(tasks, str):
         tasks = [tasks]
     assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"

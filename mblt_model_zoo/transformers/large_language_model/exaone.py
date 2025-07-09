@@ -8,25 +8,31 @@ import math
 from torch.nn import CrossEntropyLoss
 
 from transformers import (
-  GenerationMixin,
-  PretrainedConfig,
-  GenerationConfig,
-  PreTrainedModel,
-  GPT2Tokenizer,
-  GPT2TokenizerFast,
-  AutoConfig,
-  AutoModel,
-  AutoTokenizer,
-  AutoModelForCausalLM
+    GenerationMixin,
+    PretrainedConfig,
+    GenerationConfig,
+    PreTrainedModel,
+    GPT2Tokenizer,
+    GPT2TokenizerFast,
+    AutoConfig,
+    AutoModel,
+    AutoTokenizer,
+    AutoModelForCausalLM,
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
+from transformers.modeling_outputs import (
+    CausalLMOutputWithPast,
+    BaseModelOutputWithPast,
+)
 from transformers.utils import logging
 from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
 
-SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
+SpecificPreTrainedModelType = TypeVar(
+    "SpecificPreTrainedModelType", bound="PreTrainedModel"
+)
+
 
 class ExaoneConfig(PretrainedConfig):
     model_type = "exaone"
@@ -81,6 +87,7 @@ class ExaoneConfig(PretrainedConfig):
 
         super().__init__(bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
 
+
 class MobilintExaoneConfig(ExaoneConfig):
     model_type = "mobilint-exaone"
 
@@ -97,6 +104,7 @@ class MobilintExaoneConfig(ExaoneConfig):
 
         self.tie_word_embeddings = False
 
+
 class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
     supports_gradient_checkpointing = False
     _supports_flash_attn_2 = False
@@ -109,7 +117,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         super().__init__(config, *inputs, **kwargs)
         self.config = config
         self.embed_dim = config.hidden_size
-        self.wte = nn.Embedding(config.vocab_size, self.embed_dim, self.config.pad_token_id)
+        self.wte = nn.Embedding(
+            config.vocab_size, self.embed_dim, self.config.pad_token_id
+        )
 
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
@@ -123,7 +133,7 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
 
     def set_output_embeddings(self, new_embeddings):
         raise NotImplementedError("self.lm_head is implemented in mxq")
-    
+
     def _prepare_cache_for_generation(
         self,
         generation_config: GenerationConfig,
@@ -133,8 +143,15 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         max_cache_length: int,
         device: torch.device,
     ) -> bool:
-        super()._prepare_cache_for_generation(generation_config, model_kwargs, assistant_model, batch_size, max_cache_length, device)
-        
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model,
+            batch_size,
+            max_cache_length,
+            device,
+        )
+
         cache_name = "past_key_values"
 
         if model_kwargs.get(cache_name, None) is None:
@@ -144,7 +161,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
             model_kwargs[cache_name] = MobilintCache(self.mxq_model)
         else:
-            raise NotImplementedError(f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache")
+            raise NotImplementedError(
+                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
+            )
 
     def forward(
         self,
@@ -161,21 +180,31 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         cache_position: Optional[torch.LongTensor] = None,
         chunk_size: int = 0,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
-        
+
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
         if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+            raise ValueError(
+                "You must specify exactly one of input_ids or inputs_embeds"
+            )
 
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
@@ -184,9 +213,14 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
             past_key_values = MobilintCache(self.mxq_model)
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
             cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], dtype=torch.long, device=inputs_embeds.device
+                past_seen_tokens,
+                past_seen_tokens + inputs_embeds.shape[1],
+                dtype=torch.long,
+                device=inputs_embeds.device,
             )
 
         inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
@@ -205,17 +239,25 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         for i in range(num_of_chunks):
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds.shape[2])
-            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+            cache_size = (
+                0 if past_key_values is None else past_key_values.get_seq_length()
+            )
 
             # last infer
             if i == num_of_chunks - 1:
-                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
+                logits = self.mxq_model.infer(
+                    [inputs_embeds[:, :, start_index:end_index, :]], None, cache_size
+                )[0]
             else:
-                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
-        
+                logits = self.mxq_model.infer(
+                    [inputs_embeds[:, :, start_index:end_index, :]], None, cache_size
+                )[0]
+
             if use_cache:
-                past_key_values.update_cache_position(cache_position[start_index:end_index])
-    
+                past_key_values.update_cache_position(
+                    cache_position[start_index:end_index]
+                )
+
         lm_logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
 
         loss = None
@@ -227,7 +269,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
             shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            loss = loss_fct(
+                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+            )
 
             lm_logits = lm_logits.to(self.config.torch_dtype)
             loss = loss.to(self.config.torch_dtype)
@@ -244,9 +288,14 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
             attentions=None,
         )
 
+
 AutoConfig.register("mobilint-exaone", MobilintExaoneConfig)
 AutoModel.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
-AutoTokenizer.register(MobilintExaoneConfig, fast_tokenizer_class=GPT2TokenizerFast, slow_tokenizer_class=GPT2Tokenizer)
+AutoTokenizer.register(
+    MobilintExaoneConfig,
+    fast_tokenizer_class=GPT2TokenizerFast,
+    slow_tokenizer_class=GPT2Tokenizer,
+)
 AutoModelForCausalLM.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
 
 from ..utils.types import TransformersModelInfo
