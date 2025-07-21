@@ -166,24 +166,35 @@ Wide_ResNet101_2 | (224,224,3) | 82.230 | 82.504 | 22.75 | 126.89 | [Link](https
 
 ### Object Detection (COCO)
 
-| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | MACs | Source | Note |
+| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | params (M) | Source | Note |
 |------------|------------|-----------|--------------------|--------|-------|------|----|
-yolov7 | (640,640,3) | 50.13 | 51.14 | 104.66 | 52.33 | [Link](https://github.com/WongKinYiu/yolov7)| |
-yolov8s | (640,640,3) | 44.07 | 44.95 | 28.64 | 14.32 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
-yolov8m | (640,640,3) | 49.68 | 50.22 | 79.00 | 39.50 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
-yolov8l | (640,640,3) | 52.31 | 52.75 | 165.24 | 82.62 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
-yolov8x | (640,640,3) | 53.37 | 53.90 | 257.92 | 128.96 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
-yolov9m | (640,640,3) | 50.65 | 51.40 | 76.95 | 38.47 | [Link](https://github.com/WongKinYiu/yolov9) | |
-yolov9c | (640,640,3) | 52.16 | 52.68 | 102.86 | 51.43 | [Link](https://github.com/WongKinYiu/yolov9) | |
+yolov3u | (640,640,3) | 51.085 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| w/o Anchor |
+yolov3-sppu | (640,640,3) | 51.311 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| w/o Anchor |
+yolov5su | (640, 640, 3) | 42.050 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| w/o Anchor |
+yolov5mu | (640, 640, 3) | 48.211 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| w/o Anchor |
+yolov5lu | (640, 640, 3) | 51.721 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| w/o Anchor |
+yolov5xu | (640, 640, 3) | 52.592 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| w/o Anchor |
+yolov7 | (640,640,3) | 50.032 | 50.941 | 104.67 | 36.91 | [Link](https://github.com/WongKinYiu/yolov7/)| w/ Anchor |
+yolov7x | (640,640,3) | 51.697 | 52.706 | 189.88 | 71.31 | [Link](https://github.com/WongKinYiu/yolov7/)| w/ Anchor |
+yolov8s | (640,640,3) | 44.022 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov8m | (640,640,3) | 49.687 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov8l | (640,640,3) | 52.334 | 52.773 | 165.24 | 43.67 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov8x | (640,640,3) | 53.374 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov9m | (640,640,3) | 50.390 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | w/o Anchor |
+yolov9c | (640,640,3) | 52.414 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | w/o Anchor |
 
 ### Instance Segmentation (COCO)
 
-| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| FLOPs (B) | MACs |Source| Note|
+| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| FLOPs (B) | params (M) |Source| Note|
 |------------|------------|-----------|--------------------|--------|-------|------|-----|
-yolov5l-seg | (640,640,3) | 39.32 | 39.67 | 147.83 | 73.91 | [Link](https://github.com/ultralytics/yolov5/releases) | |
-yolov8s-seg | (640,640,3) | 35.90 | 36.50 | 42.64 | 21.32 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#key-features-of-yolov8) | |
-yolov8m-seg | (640,640,3) | 39.88 | 40.40 | 110.26 | 55.13 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
-yolov8l-seg | (640,640,3) | 42.04 | 42.27 | 220.55 | 110.27 | [Link](https://docs.ultralytics.com/ko/models/yolov8/#overview) | |
+yolov5m-seg | (640,640,3) | 36.314 | 36.977 | 70.91 | 22.97 | [Link](https://github.com/ultralytics/yolov5/) | w/ Anchor |
+yolov5l-seg | (640,640,3) | 39.087 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | w/ Anchor |
+yolov5x-seg | (640,640,3) | 40.753 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | w/ Anchor |
+yolov8s-seg | (640,640,3) | 36.139 | 36.582 | 42.64 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/#key-features-of-yolov8) | w/o Anchor |
+yolov8m-seg | (640,640,3) | 40.032 | 40.444 | 110.26 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/#overview) | w/o Anchor |
+yolov8l-seg | (640,640,3) | 41.877 | 42.316 | 220.55 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov8x-seg | (640,640,3) | 42.717 | 43.020 | 344.20 | 71.78 | [Link](https://docs.ultralytics.com/models/yolov8/) | w/o Anchor |
+yolov9c-seg | (640,640,3) | 42.236 | 42.460 | 145.72 | 27.45 | [Link](https://docs.ultralytics.com/models/yolov9/) | w/o Anchor |
 
 ## Optional Extras
 When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.

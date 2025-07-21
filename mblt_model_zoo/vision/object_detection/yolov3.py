@@ -2,14 +2,14 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class YOLOv9m_Set(ModelInfoSet):
+class YOLOv3u_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/single/yolov9m.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/multi/yolov9m.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/global/yolov9m.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/single/yolov3u.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/multi/yolov3u.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/global/yolov3u.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -32,14 +32,14 @@ class YOLOv9m_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
-class YOLOv9c_Set(ModelInfoSet):
+class YOLOv3_sppu_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/single/yolov9c.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/multi/yolov9c.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/global/yolov9c.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/single/yolov3-sppu.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/multi/yolov3-sppu.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/global/yolov3-sppu.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -62,14 +62,14 @@ class YOLOv9c_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
-def YOLOv9m(
+def YOLOv3u(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ):
     return MBLT_Engine.from_model_info_set(
-        YOLOv9m_Set,
+        YOLOv3u_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -77,14 +77,14 @@ def YOLOv9m(
     )
 
 
-def YOLOv9c(
+def YOLOv3_sppu(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ):
     return MBLT_Engine.from_model_info_set(
-        YOLOv9c_Set,
+        YOLOv3_sppu_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
