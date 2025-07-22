@@ -298,6 +298,9 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             cross_attentions=None,
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMixin):
     def __init__(self, config: MobilintBlipTextConfig):
@@ -412,6 +415,9 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
     def _reorder_cache(self, past_key_values, beam_idx):
         raise NotImplementedError("_reorder_cache is not implemented")
 
+    def dispose(self):
+        self.bert.dispose()
+
 
 class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
     main_input_name = "pixel_values"
@@ -480,6 +486,9 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
 
     def get_input_embeddings(self):
         raise NotImplementedError("get_input_embeddings is not implemented")
+
+    def dispose(self):
+        self.mxq_model.dispose()
 
 
 class MobilintBlipForConditionalGeneration(
@@ -605,6 +614,10 @@ class MobilintBlipForConditionalGeneration(
         )
 
         return outputs
+
+    def dispose(self):
+        self.vision_model.dispose()
+        self.text_decoder.dispose()
 
 
 AutoConfig.register("mobilint-blip", MobilintBlipConfig)

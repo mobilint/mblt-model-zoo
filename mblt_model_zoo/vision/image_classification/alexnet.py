@@ -38,7 +38,7 @@ def AlexNet(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         AlexNet_Set,
         local_path=local_path,

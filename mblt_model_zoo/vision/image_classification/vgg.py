@@ -255,7 +255,7 @@ def VGG11(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG11_Set,
         local_path=local_path,
@@ -270,7 +270,7 @@ def VGG11_BN(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG11_BN_Set,
         local_path=local_path,
@@ -285,7 +285,7 @@ def VGG13(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG13_Set,
         local_path=local_path,
@@ -300,7 +300,7 @@ def VGG13_BN(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG13_BN_Set,
         local_path=local_path,
@@ -315,7 +315,7 @@ def VGG16(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG16_Set,
         local_path=local_path,
@@ -330,7 +330,7 @@ def VGG16_BN(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG16_BN_Set,
         local_path=local_path,
@@ -345,7 +345,7 @@ def VGG19(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG19_Set,
         local_path=local_path,
@@ -360,7 +360,7 @@ def VGG19_BN(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         VGG19_BN_Set,
         local_path=local_path,

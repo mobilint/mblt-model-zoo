@@ -131,7 +131,7 @@ def DenseNet121(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         DenseNet121_Set,
         local_path=local_path,
@@ -146,7 +146,7 @@ def DenseNet161(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         DenseNet161_Set,
         local_path=local_path,
@@ -161,7 +161,7 @@ def DenseNet169(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         DenseNet169_Set,
         local_path=local_path,
@@ -176,7 +176,7 @@ def DenseNet201(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         DenseNet201_Set,
         local_path=local_path,

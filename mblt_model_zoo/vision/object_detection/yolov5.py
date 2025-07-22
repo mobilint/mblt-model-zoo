@@ -127,7 +127,7 @@ def YOLOv5su(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5su_Set,
         local_path=local_path,
@@ -142,7 +142,7 @@ def YOLOv5mu(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5mu_Set,
         local_path=local_path,
@@ -157,7 +157,7 @@ def YOLOv5lu(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5lu_Set,
         local_path=local_path,
@@ -172,7 +172,7 @@ def YOLOv5xu(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5xu_Set,
         local_path=local_path,

@@ -127,7 +127,7 @@ def YOLOv8s(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv8s_Set,
         local_path=local_path,
@@ -142,7 +142,7 @@ def YOLOv8m(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv8m_Set,
         local_path=local_path,
@@ -157,7 +157,7 @@ def YOLOv8l(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv8l_Set,
         local_path=local_path,
@@ -172,7 +172,7 @@ def YOLOv8x(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv8x_Set,
         local_path=local_path,

@@ -327,6 +327,9 @@ class MobilintAyaVisionForConditionalGeneration(
         self.vocab_size = model_embeds.num_embeddings
         return model_embeds
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 AutoConfig.register("mobilint-aya_vision", MobilintAyaVisionConfig)
 AutoTokenizer.register(

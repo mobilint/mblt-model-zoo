@@ -259,6 +259,9 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
             attentions=None,
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 AutoConfig.register("mobilint-llama", MobilintLlamaConfig)
 AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)

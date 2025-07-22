@@ -252,6 +252,9 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
             attentions=None,
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 AutoConfig.register("mobilint-cohere2", MobilintCohere2Config)
 AutoModel.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)

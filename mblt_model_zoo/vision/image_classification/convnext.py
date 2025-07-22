@@ -106,7 +106,7 @@ def ConvNeXt_Tiny(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Tiny_Set,
         local_path=local_path,
@@ -121,7 +121,7 @@ def ConvNeXt_Small(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Small_Set,
         local_path=local_path,
@@ -136,7 +136,7 @@ def ConvNeXt_Base(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Base_Set,
         local_path=local_path,

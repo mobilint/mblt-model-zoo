@@ -75,7 +75,7 @@ def YOLOv7(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv7_Set,
         local_path=local_path,
@@ -90,7 +90,7 @@ def YOLOv7x(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv7x_Set,
         local_path=local_path,

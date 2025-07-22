@@ -170,6 +170,9 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
             last_hidden_state=hidden_states, hidden_states=None, attentions=None
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
     main_input_name = "input_ids"
@@ -340,6 +343,9 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
             cross_attentions=None,
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
     def __init__(self, config: WhisperConfig):
@@ -446,6 +452,10 @@ class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
         )
+
+    def dispose(self):
+        self.encoder.dispose()
+        self.decoder.dispose()
 
 
 class MobilintWhisperForConditionalGeneration(

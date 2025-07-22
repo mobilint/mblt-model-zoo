@@ -164,7 +164,7 @@ def ResNext50_32x4d(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNext50_32x4d_Set,
         local_path=local_path,
@@ -179,7 +179,7 @@ def ResNext101_32x8d(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNext101_32x8d_Set,
         local_path=local_path,
@@ -194,7 +194,7 @@ def ResNext101_64x4d(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNext101_64x4d_Set,
         local_path=local_path,

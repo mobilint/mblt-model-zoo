@@ -106,7 +106,7 @@ def ShuffleNet_V2_X1_0(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X1_0_Set,
         local_path=local_path,
@@ -121,7 +121,7 @@ def ShuffleNet_V2_X1_5(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X1_5_Set,
         local_path=local_path,
@@ -136,7 +136,7 @@ def ShuffleNet_V2_X2_0(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X2_0_Set,
         local_path=local_path,

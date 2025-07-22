@@ -7,7 +7,9 @@ model_name = "mobilint/EXAONE-Deep-2.4B"
 streaming = True  # choose the streaming option
 
 model = AutoModelForCausalLM.from_pretrained(
-    model_name, torch_dtype=torch.bfloat16, trust_remote_code=True, device_map="auto"
+    model_name,
+    torch_dtype=torch.bfloat16,
+    trust_remote_code=True,
 )
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 

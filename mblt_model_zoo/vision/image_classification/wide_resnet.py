@@ -131,7 +131,7 @@ def Wide_ResNet50_2(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         Wide_ResNet50_2_Set,
         local_path=local_path,
@@ -146,7 +146,7 @@ def Wide_ResNet101_2(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         Wide_ResNet101_2_Set,
         local_path=local_path,

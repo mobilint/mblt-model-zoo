@@ -69,7 +69,7 @@ def MNasNet1_0(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         MNasNet1_0_Set,
         local_path=local_path,
@@ -84,7 +84,7 @@ def MNasNet1_3(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         MNasNet1_3_Set,
         local_path=local_path,

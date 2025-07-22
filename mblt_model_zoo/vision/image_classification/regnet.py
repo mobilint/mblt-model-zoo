@@ -819,7 +819,7 @@ def RegNet_X_400MF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_400MF_Set,
         local_path=local_path,
@@ -834,7 +834,7 @@ def RegNet_X_800MF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_800MF_Set,
         local_path=local_path,
@@ -849,7 +849,7 @@ def RegNet_X_1_6GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_1_6GF_Set,
         local_path=local_path,
@@ -864,7 +864,7 @@ def RegNet_X_3_2GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_3_2GF_Set,
         local_path=local_path,
@@ -879,7 +879,7 @@ def RegNet_X_8GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_8GF_Set,
         local_path=local_path,
@@ -894,7 +894,7 @@ def RegNet_X_16GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_16GF_Set,
         local_path=local_path,
@@ -909,7 +909,7 @@ def RegNet_X_32GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_X_32GF_Set,
         local_path=local_path,
@@ -924,7 +924,7 @@ def RegNet_Y_400MF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_400MF,
         local_path=local_path,
@@ -939,7 +939,7 @@ def RegNet_Y_800MF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_800MF,
         local_path=local_path,
@@ -954,7 +954,7 @@ def RegNet_Y_1_6GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_1_6GF_Set,
         local_path=local_path,
@@ -969,7 +969,7 @@ def RegNet_Y_3_2GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_3_2GF_Set,
         local_path=local_path,
@@ -984,7 +984,7 @@ def RegNet_Y_8GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_8GF_Set,
         local_path=local_path,
@@ -999,7 +999,7 @@ def RegNet_Y_16GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_16GF_Set,
         local_path=local_path,
@@ -1014,7 +1014,7 @@ def RegNet_Y_32GF(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_32GF_Set,
         local_path=local_path,

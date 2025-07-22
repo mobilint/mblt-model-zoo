@@ -288,6 +288,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
             attentions=None,
         )
 
+    def dispose(self):
+        self.mxq_model.dispose()
+
 
 AutoConfig.register("mobilint-exaone", MobilintExaoneConfig)
 AutoModel.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)

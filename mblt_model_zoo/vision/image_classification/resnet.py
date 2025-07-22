@@ -259,7 +259,7 @@ def ResNet18(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNet18_Set,
         local_path=local_path,
@@ -274,7 +274,7 @@ def ResNet34(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNet34_Set,
         local_path=local_path,
@@ -289,7 +289,7 @@ def ResNet50(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNet50_Set,
         local_path=local_path,
@@ -304,7 +304,7 @@ def ResNet101(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNet101_Set,
         local_path=local_path,
@@ -319,7 +319,7 @@ def ResNet152(
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
-):
+) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         ResNet152_Set,
         local_path=local_path,
