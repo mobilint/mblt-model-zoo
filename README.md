@@ -201,12 +201,12 @@ When working with tasks other than vision, extra dependencies may be required. T
 
 Currently, this optional functions are only available on environment equipped with Mobilint's [Aries](https://www.mobilint.com/aries).
 
-|Name|Use|
-|-------|------|
-|transformers|For using HuggingFace transformers related models| 
+|Name|Use|Details|
+|-------|------|------|
+|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/transformers/README.md)
 
 ## License
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
 
 ## Support & Issues
-If you encounter any problem with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
+If you encounter any problems with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
