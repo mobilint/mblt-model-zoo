@@ -926,7 +926,7 @@ def RegNet_Y_400MF(
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        RegNet_Y_400MF,
+        RegNet_Y_400MF_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -941,7 +941,7 @@ def RegNet_Y_800MF(
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        RegNet_Y_800MF,
+        RegNet_Y_800MF_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

@@ -2,14 +2,14 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class YOLOv3u_Set(ModelInfoSet):
+class YOLO11s_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/single/yolov3u.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/multi/yolov3u.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/global/yolov3u.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/single/yolo11s.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/multi/yolo11s.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/global/yolo11s.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -32,14 +32,14 @@ class YOLOv3u_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
-class YOLOv3_sppu_Set(ModelInfoSet):
+class YOLO11m_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/single/yolov3-sppu.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/multi/yolov3-sppu.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/global/yolov3-sppu.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/single/yolo11m.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/multi/yolo11m.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/global/yolo11m.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -62,14 +62,14 @@ class YOLOv3_sppu_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
-class YOLOv3_spp_Set(ModelInfoSet):
+class YOLO11l_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/single/yolov3-spp.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/multi/yolov3-spp.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/global/yolov3-spp.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/single/yolo11l.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/multi/yolo11l.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/global/yolo11l.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -86,24 +86,50 @@ class YOLOv3_spp_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
 
 
-def YOLOv3u(
+class YOLO11x_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/single/yolo11x.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/multi/yolo11x.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/global/yolo11x.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+def YOLO11s(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3u_Set,
+        YOLO11s_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -111,14 +137,14 @@ def YOLOv3u(
     )
 
 
-def YOLOv3_sppu(
+def YOLO11m(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3_sppu_Set,
+        YOLO11m_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -126,14 +152,29 @@ def YOLOv3_sppu(
     )
 
 
-def YOLOv3_spp(
+def YOLO11l(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3_spp_Set,
+        YOLO11l_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLO11x(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLO11x_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

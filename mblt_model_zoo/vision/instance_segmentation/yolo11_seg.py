@@ -2,14 +2,14 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class YOLOv3u_Set(ModelInfoSet):
+class YOLO11mSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/single/yolov3u.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/multi/yolov3u.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/global/yolov3u.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11m-seg/aries/single/yolo11m-seg.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11m-seg/aries/multi/yolo11m-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11m-seg/aries/global/yolo11m-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -24,22 +24,23 @@ class YOLOv3u_Set(ModelInfoSet):
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={
-            "task": "object_detection",
+            "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "n_extra": 32,
         },
     )
     DEFAULT = COCO_V1
 
 
-class YOLOv3_sppu_Set(ModelInfoSet):
+class YOLO11lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/single/yolov3-sppu.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/multi/yolov3-sppu.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/global/yolov3-sppu.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11l-seg/aries/single/yolo11l-seg.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11l-seg/aries/multi/yolo11l-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11l-seg/aries/global/yolo11l-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -54,22 +55,23 @@ class YOLOv3_sppu_Set(ModelInfoSet):
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={
-            "task": "object_detection",
+            "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "n_extra": 32,
         },
     )
     DEFAULT = COCO_V1
 
 
-class YOLOv3_spp_Set(ModelInfoSet):
+class YOLO11xSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/single/yolov3-spp.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/multi/yolov3-spp.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/global/yolov3-spp.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11x-seg/aries/single/yolo11x-seg.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11x-seg/aries/multi/yolo11x-seg.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolo11x-seg/aries/global/yolo11x-seg.mxq",
                 },
                 "regulus": {"single": None},
             },
@@ -84,26 +86,23 @@ class YOLOv3_spp_Set(ModelInfoSet):
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={
-            "task": "object_detection",
+            "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
         },
     )
     DEFAULT = COCO_V1
 
 
-def YOLOv3u(
+def YOLO11mSeg(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3u_Set,
+        YOLO11mSeg_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -111,14 +110,14 @@ def YOLOv3u(
     )
 
 
-def YOLOv3_sppu(
+def YOLO11lSeg(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3_sppu_Set,
+        YOLO11lSeg_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -126,14 +125,14 @@ def YOLOv3_sppu(
     )
 
 
-def YOLOv3_spp(
+def YOLO11xSeg(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        YOLOv3_spp_Set,
+        YOLO11xSeg_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

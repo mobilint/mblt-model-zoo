@@ -1,9 +1,10 @@
 from .alexnet import AlexNet
-from .convnext import ConvNeXt_Tiny, ConvNeXt_Small, ConvNeXt_Base
-from .densenet import DenseNet121, DenseNet161, DenseNet169, DenseNet201
+from .convnext import ConvNeXt_Tiny, ConvNeXt_Small, ConvNeXt_Base, ConvNeXt_Large
+from .densenet import DenseNet121, DenseNet169, DenseNet201
 from .googlenet import GoogLeNet
 from .inception_v3 import Inception_V3
 from .mnasnet import MNasNet1_0, MNasNet1_3
+from .mobilenet_v2 import MobileNet_V2
 from .regnet import (
     RegNet_X_16GF,
     RegNet_X_1_6GF,

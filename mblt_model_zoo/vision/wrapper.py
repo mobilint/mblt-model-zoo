@@ -128,9 +128,7 @@ class MXQ_Model:
                     [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
                 )
             elif self.infer_mode == "global":
-                mc.set_global_core_mode(
-                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
-                )  # Use all Cluster0, Cluster1
+                mc.set_global8_core_mode()
             else:
                 raise ValueError("Inappropriate inferece mode")
         elif self.product == "regulus":

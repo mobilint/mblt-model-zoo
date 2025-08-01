@@ -27,6 +27,9 @@ class YOLOAnchorlessPost(YOLOPostBase):
     def make_anchors(self, offset=0.5):
         anchor_points, stride_tensor = [], []
         strides = [2 ** (3 + i) for i in range(self.nl)]
+        if self.nl == 2:
+            strides = [strd * 2 for strd in strides]
+
         for strd in strides:
             ny, nx = self.imh // strd, self.imw // strd
             sy = torch.arange(ny, dtype=torch.float32, device=self.device) + offset
@@ -41,27 +44,34 @@ class YOLOAnchorlessPost(YOLOPostBase):
         self.stride = torch.cat(stride_tensor, dim=0).permute(1, 0)
 
     def rearrange(self, x):
-        y = []
+        y_det = []
+        y_cls = []
         for xi in x:
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
+
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
 
-            if xi.shape[1] == self.no:
-                pass
-            elif xi.shape[3] == self.no:
-                xi = xi.permute(0, 3, 1, 2)
+            if xi.shape[1] == self.reg_max * 4:
+                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[1] == self.nc:
+                y_cls.append(xi)  # (b, 80, 80, 80), (b, 80, 40, 40), ...
             else:
-                raise ValueError(f"Got unexpected shape for x={xi.shape}.")
-            y.append(xi)
+                raise ValueError(f"Wrong shape of input: {xi.shape}")
 
-        y = sorted(y, key=lambda x: x.numel(), reverse=True)
+        # sort as box, scores
+        y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
+        y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+
+        y = [
+            torch.cat((yi_det, yi_cls), dim=1).flatten(2)
+            for (yi_det, yi_cls) in zip(y_det, y_cls)
+        ]
+
         return y
 
     def decode(self, x):
-        batch_box_cls = torch.cat(
-            [xi.flatten(2) for xi in x], axis=2
-        )  # (b, no=144, 8400)
+        batch_box_cls = torch.cat(x, axis=-1)  # (b, no=144, 8400)
 
         y = []
         for xi in batch_box_cls:
@@ -158,28 +168,40 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
         return self.masking(x, proto_outs)
 
     def rearrange(self, x):
-        y = []
-        masks = []
-        for xi in x:
+        y_det = []
+        y_cls = []
+        y_ext = []
+        for xi in x:  # list of bchw outputs
             if xi.ndim == 3:
-                xi = xi.unsqueeze(0)
-            assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
-
-            if xi.shape[1] == self.no:
-                y.append(xi)
-            elif xi.shape[3] == self.no:
-                y.append(xi.permute(0, 3, 1, 2))
-            elif xi.shape[1] == self.n_extra:
-                masks.append(xi)
-            elif xi.shape[3] == self.n_extra:
-                masks.append(xi.permute(0, 3, 1, 2))
+                xi = xi[None]
+            elif xi.ndim == 4:
+                pass
             else:
-                raise ValueError(f"Got unexpected shape for x={xi.shape}.")
+                raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
 
-        y = sorted(y, key=lambda x: x.numel(), reverse=True)
-        masks = sorted(masks, key=lambda x: x.numel(), reverse=True)
-        proto = masks.pop(0)
-        y = [torch.cat([yi, mask], dim=1) for (yi, mask) in zip(y, masks)]
+            if xi.shape[1] == self.n_extra:
+                y_ext.append(xi)  # (b, 32, 160, 160), (b, 32, 80, 80), ...
+            elif xi.shape[1] == self.reg_max * 4:
+                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[1] == self.nc:
+                y_cls.append(xi)  # (b, 80, 80, 80), (b, 80, 40, 40), ...
+            else:
+                raise ValueError(f"Wrong shape of input: {xi.shape}")
+
+        # sort as box, scores
+        y_ext = sorted(y_ext, key=lambda x: x.numel(), reverse=True)
+        proto = y_ext.pop(0)
+        y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
+        y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+
+        assert (
+            len(y_cls) == len(y_det) == len(y_ext)
+        ), "output arguments are not in a proper form"
+
+        y = [
+            torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
+            for (yi_det, yi_cls, yi_ext) in zip(y_det, y_cls, y_ext)
+        ]
 
         return y, proto
 
@@ -191,6 +213,7 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
         post_cfg: dict,
     ):
         super().__init__(pre_cfg, post_cfg)
+        raise NotImplementedError("Pose Estimation is under maintenance")
 
     def rearrange(self, x):
         y = []

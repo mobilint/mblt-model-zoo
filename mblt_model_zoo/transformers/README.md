@@ -1,11 +1,11 @@
-Huggingface's Transformers
+Pretrained Models with Huggingface's Transformers
 ========================
 
-**mblt-model-zoo** also provides AI models from Huggingface's [Transformers](https://github.com/huggingface/transformers).
+**mblt-model-zoo** also provides generative AI models from Huggingface's [Transformers](https://github.com/huggingface/transformers).
 Currently, these models are only available on Mobilint's [Aries](https://www.mobilint.com/aries).
 Support for [Regulus](https://www.mobilint.com/regulus) is planned and currently under development
 
-Mobilint's Model Zoo provides seamless experience with using Transformers' models with exact same class/function interfaces. All of the needed auto classes in Transformers are overridden with our own which automatically detect our models' identifiers (ex. `mobilint/Llama-3.2-3B-Instruct`) and download needed files from our own model server. It also supports locally downloaded model directory just like the original Transformers.
+Mobilint's Model Zoo provides a seamless experience for using Transformers' models with the same class/function interfaces. All of the necessary auto classes in Transformers are overridden with our own, which automatically detect our models' identifiers (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from our model server. It also supports a locally downloaded model directory, just like the original Transformers.
 
 ## Installation
 - Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
@@ -129,6 +129,8 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 
 ## License
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
+
+Additionally, the license for each model provided in this package follows the terms specified in the source link provided with it.
 
 ## Support & Issues
 If you encounter any problems with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
