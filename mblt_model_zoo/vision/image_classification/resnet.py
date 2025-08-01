@@ -5,7 +5,14 @@ from ..wrapper import MBLT_Engine
 class ResNet18_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet18_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/single/resnet18_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/multi/resnet18_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/global/resnet18_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -31,7 +38,14 @@ class ResNet18_Set(ModelInfoSet):
 class ResNet34_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet34_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/single/resnet34_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/multi/resnet34_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/global/resnet34_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -57,7 +71,14 @@ class ResNet34_Set(ModelInfoSet):
 class ResNet50_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet50_v1_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/single/resnet50_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/multi/resnet50_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/global/resnet50_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -79,7 +100,14 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet50_v2_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/single/resnet50_IMAGENET1K_V2.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/multi/resnet50_IMAGENET1K_V2.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/global/resnet50_IMAGENET1K_V2.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -105,7 +133,14 @@ class ResNet50_Set(ModelInfoSet):
 class ResNet101_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet101_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/single/resnet101_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/multi/resnet101_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/global/resnet101_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -113,6 +148,35 @@ class ResNet101_Set(ModelInfoSet):
             },
             "Resize": {
                 "size": 256,
+                "interpolation": "bilinear",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "Normalize": {"style": "torch"},
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "image_classification",
+        },
+    )
+    IMAGENET1K_V2 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/single/resnet101_IMAGENET1K_V2.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/multi/resnet101_IMAGENET1K_V2.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/global/resnet101_IMAGENET1K_V2.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 232,
                 "interpolation": "bilinear",
             },
             "CenterCrop": {
@@ -131,7 +195,14 @@ class ResNet101_Set(ModelInfoSet):
 class ResNet152_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/resnet152_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/single/resnet152_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/multi/resnet152_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/global/resnet152_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -151,69 +222,108 @@ class ResNet152_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
+    IMAGENET1K_V2 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/single/resnet152_IMAGENET1K_V2.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/multi/resnet152_IMAGENET1K_V2.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/global/resnet152_IMAGENET1K_V2.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 232,
+                "interpolation": "bilinear",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "Normalize": {"style": "torch"},
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "image_classification",
+        },
+    )
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class ResNet18(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in ResNet18_Set.__dict__.keys()
-        ), f"Model type {model_type} not found. Available types: {ResNet18_Set.__dict__.keys()}"
-        model_cfg = ResNet18_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = ResNet18_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = ResNet18_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class ResNet34(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in ResNet34_Set.__dict__.keys()
-        ), f"Model type {model_type} not found. Available types: {ResNet34_Set.__dict__.keys()}"
-        model_cfg = ResNet34_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = ResNet34_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = ResNet34_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def ResNet18(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        ResNet18_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class ResNet50(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in ResNet50_Set.__dict__.keys()
-        ), f"Model type {model_type} not found. Available types: {ResNet50_Set.__dict__.keys()}"
-        model_cfg = ResNet50_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = ResNet50_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = ResNet50_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class ResNet101(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in ResNet101_Set.__dict__.keys()
-        ), f"Model type {model_type} not found. Available types: {ResNet101_Set.__dict__.keys()}"
-        model_cfg = ResNet101_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = ResNet101_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = ResNet101_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def ResNet34(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        ResNet34_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class ResNet152(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in ResNet152_Set.__dict__.keys()
-        ), f"Model type {model_type} not found. Available types: {ResNet152_Set.__dict__.keys()}"
-        model_cfg = ResNet152_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
+def ResNet50(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        ResNet50_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
-        pre_cfg = ResNet152_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = ResNet152_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+def ResNet101(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        ResNet101_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def ResNet152(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        ResNet152_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )

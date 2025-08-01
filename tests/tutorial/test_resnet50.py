@@ -1,3 +1,4 @@
+import os
 from mblt_model_zoo.vision import ResNet50
 from argparse import ArgumentParser
 
@@ -8,8 +9,21 @@ if __name__ == "__main__":
         type=str,
         default="/workspace/mblt-model-zoo/tests/rc/volcano.jpg",
     )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default=None,
+    )
+
     args = parser.parse_args()
     image_path = args.image_path
+    if args.save_path is not None:
+        save_path = args.save_path
+    else:
+        save_path = os.path.join(
+            "/workspace/mblt-model-zoo/tests/tmp/",
+            "resnet50_" + os.path.basename(image_path),
+        )
 
     resnet50 = ResNet50()
 
@@ -20,6 +34,6 @@ if __name__ == "__main__":
 
     result.plot(
         source_path=image_path,
-        save_path="/workspace/mblt-model-zoo/tests/tmp/volcano_resnet50.jpg",
+        save_path=save_path,
         topk=5,
     )

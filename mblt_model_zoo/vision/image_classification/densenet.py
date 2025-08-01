@@ -5,31 +5,14 @@ from ..wrapper import MBLT_Engine
 class DenseNet121_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/densenet121_torchvision.mxq",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/single/densenet121_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/multi/densenet121_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/global/densenet121_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
             },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
-        },
-        post_cfg={"task": "image_classification"},
-    )
-    DEFAULT = IMAGENET1K_V1  # Default model
-
-
-class DenseNet161_Set(ModelInfoSet):
-    IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/densenet161_torchvision.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +36,14 @@ class DenseNet161_Set(ModelInfoSet):
 class DenseNet169_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/densenet169_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/single/densenet169_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/multi/densenet169_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/global/densenet169_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -77,7 +67,14 @@ class DenseNet169_Set(ModelInfoSet):
 class DenseNet201_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/densenet201_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/single/densenet201_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/multi/densenet201_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/global/densenet201_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -98,53 +95,46 @@ class DenseNet201_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class DenseNet121(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in DenseNet121_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet121_Set.__dict__.keys()}"
-        model_cfg = DenseNet121_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = DenseNet121_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet121_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class DenseNet161(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in DenseNet161_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet161_Set.__dict__.keys()}"
-        model_cfg = DenseNet161_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = DenseNet161_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet161_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet121(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        DenseNet121_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class DenseNet169(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in DenseNet169_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet169_Set.__dict__.keys()}"
-        model_cfg = DenseNet169_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
+def DenseNet169(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        DenseNet169_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
-        pre_cfg = DenseNet169_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet169_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
 
-
-class DenseNet201(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in DenseNet201_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {DenseNet201_Set.__dict__.keys()}"
-        model_cfg = DenseNet201_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = DenseNet201_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = DenseNet201_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def DenseNet201(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        DenseNet201_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )

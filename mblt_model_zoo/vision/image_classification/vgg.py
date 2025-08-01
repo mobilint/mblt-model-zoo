@@ -5,7 +5,14 @@ from ..wrapper import MBLT_Engine
 class VGG11_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg11_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg11_IMAGENET1K_V1/aries/single/vgg11_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg11_IMAGENET1K_V1/aries/multi/vgg11_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg11_IMAGENET1K_V1/aries/global/vgg11_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -29,7 +36,14 @@ class VGG11_Set(ModelInfoSet):
 class VGG11_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg11_bn_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg11_bn_IMAGENET1K_V1/aries/single/vgg11_bn_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg11_bn_IMAGENET1K_V1/aries/multi/vgg11_bn_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg11_bn_IMAGENET1K_V1/aries/global/vgg11_bn_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -53,7 +67,14 @@ class VGG11_BN_Set(ModelInfoSet):
 class VGG13_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg13_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg13_IMAGENET1K_V1/aries/single/vgg13_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg13_IMAGENET1K_V1/aries/multi/vgg13_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg13_IMAGENET1K_V1/aries/global/vgg13_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -77,7 +98,14 @@ class VGG13_Set(ModelInfoSet):
 class VGG13_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg13_bn_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg13_bn_IMAGENET1K_V1/aries/single/vgg13_bn_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg13_bn_IMAGENET1K_V1/aries/multi/vgg13_bn_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg13_bn_IMAGENET1K_V1/aries/global/vgg13_bn_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -101,7 +129,14 @@ class VGG13_BN_Set(ModelInfoSet):
 class VGG16_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg16_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg16_IMAGENET1K_V1/aries/single/vgg16_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg16_IMAGENET1K_V1/aries/multi/vgg16_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg16_IMAGENET1K_V1/aries/global/vgg16_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -125,7 +160,14 @@ class VGG16_Set(ModelInfoSet):
 class VGG16_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg16_bn_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg16_bn_IMAGENET1K_V1/aries/single/vgg16_bn_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg16_bn_IMAGENET1K_V1/aries/multi/vgg16_bn_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg16_bn_IMAGENET1K_V1/aries/global/vgg16_bn_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -149,7 +191,14 @@ class VGG16_BN_Set(ModelInfoSet):
 class VGG19_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg19_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg19_IMAGENET1K_V1/aries/single/vgg19_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg19_IMAGENET1K_V1/aries/multi/vgg19_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg19_IMAGENET1K_V1/aries/global/vgg19_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -173,7 +222,14 @@ class VGG19_Set(ModelInfoSet):
 class VGG19_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url": "https://dl.mobilint.com/model/image_classification/vgg19_bn_torchvision.mxq",
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/vgg19_bn_IMAGENET1K_V1/aries/single/vgg19_bn_IMAGENET1K_V1.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vgg19_bn_IMAGENET1K_V1/aries/multi/vgg19_bn_IMAGENET1K_V1.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/vgg19_bn_IMAGENET1K_V1/aries/global/vgg19_bn_IMAGENET1K_V1.mxq",
+                },
+                "regulus": {"single": None},
+            },
         },
         pre_cfg={
             "Reader": {
@@ -194,105 +250,121 @@ class VGG19_BN_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class VGG11(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG11_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG11_Set.__dict__.keys()}"
-        model_cfg = VGG11_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG11_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG11_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class VGG11_BN(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG11_BN_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG11_BN_Set.__dict__.keys()}"
-        model_cfg = VGG11_BN_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG11_BN_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG11_BN_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def VGG11(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG11_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class VGG13(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG13_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG13_Set.__dict__.keys()}"
-        model_cfg = VGG13_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG13_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG13_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class VGG13_BN(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG13_BN_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG13_BN_Set.__dict__.keys()}"
-        model_cfg = VGG13_BN_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG13_BN_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG13_BN_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def VGG11_BN(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG11_BN_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class VGG16(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG16_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG16_Set.__dict__.keys()}"
-        model_cfg = VGG16_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG16_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG16_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class VGG16_BN(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG16_BN_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG16_BN_Set.__dict__.keys()}"
-        model_cfg = VGG16_BN_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
-
-        pre_cfg = VGG16_BN_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG16_BN_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+def VGG13(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG13_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class VGG19(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG19_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG19_Set.__dict__.keys()}"
-        model_cfg = VGG19_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
+def VGG13_BN(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG13_BN_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
-        pre_cfg = VGG19_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG19_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+def VGG16(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG16_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
-class VGG19_BN(MBLT_Engine):
-    def __init__(self, local_path: str = None, model_type: str = "DEFAULT"):
-        assert (
-            model_type in VGG19_BN_Set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {VGG19_BN_Set.__dict__.keys()}"
-        model_cfg = VGG19_BN_Set.__dict__[model_type].value.model_cfg
-        model_cfg["local_path"] = local_path
+def VGG16_BN(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG16_BN_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
-        pre_cfg = VGG19_BN_Set.__dict__[model_type].value.pre_cfg
-        post_cfg = VGG19_BN_Set.__dict__[model_type].value.post_cfg
-        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+def VGG19(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG19_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def VGG19_BN(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        VGG19_BN_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
