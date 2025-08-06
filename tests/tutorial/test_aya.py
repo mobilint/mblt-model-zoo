@@ -1,9 +1,8 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
 
 model_name = "mobilint/aya-vision-8b"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
@@ -25,9 +24,6 @@ messages = [
 
 pipe(
     text=messages,
-    padding='max_length',
-    truncation=True,
     max_length=4096,
-    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-    use_fast=False,
+    streamer=TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
 )
