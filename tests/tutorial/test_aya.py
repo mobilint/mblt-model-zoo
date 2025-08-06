@@ -1,12 +1,13 @@
 from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
 
-model_name = "mobilint/aya-vision-8b"
+model_name = "CohereLabs/aya-vision-8b"
 
+processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
-    use_fast=True,
+    processor=processor,
 )
 
 # Format message with the aya-vision chat template
