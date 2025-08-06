@@ -1,17 +1,14 @@
-import torch
-from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers import TextIteratorStreamer
-from threading import Thread
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from transformers import TextStreamer
 
 model_name = "mobilint/EXAONE-Deep-2.4B"
-streaming = True  # choose the streaming option
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.bfloat16,
-    trust_remote_code=True,
-)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+pipe = pipeline(
+    "text-generation",
+    model=model_name,
+    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+)
 
 # Choose your prompt:
 #   Math example (AIME 2024)
@@ -33,35 +30,8 @@ E) 140
 Please reason step by step, and you should write the correct option alphabet (A, B, C, D or E) within \\boxed{}."""
 
 messages = [{"role": "user", "content": prompt}]
-input_ids = tokenizer.apply_chat_template(
-    messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
+
+outputs = pipe(
+    messages,
+    max_length=4096,
 )
-
-if streaming:
-    streamer = TextIteratorStreamer(tokenizer)
-    thread = Thread(
-        target=model.generate,
-        kwargs=dict(
-            input_ids=input_ids,
-            eos_token_id=tokenizer.eos_token_id,
-            max_new_tokens=4096,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.95,
-            streamer=streamer,
-        ),
-    )
-    thread.start()
-
-    for text in streamer:
-        print(text, end="", flush=True)
-else:
-    output = model.generate(
-        input_ids,
-        eos_token_id=tokenizer.eos_token_id,
-        max_new_tokens=4096,
-        do_sample=True,
-        temperature=0.6,
-        top_p=0.95,
-    )
-    print(tokenizer.decode(output[0]))

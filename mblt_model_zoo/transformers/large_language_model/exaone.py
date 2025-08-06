@@ -129,7 +129,8 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
         self.mxq_model.launch(self.acc)
 
     def get_output_embeddings(self):
-        raise NotImplementedError("self.lm_head is implemented in mxq")
+        logger.warning_once("self.lm_head is implemented in mxq")
+        return None
 
     def set_output_embeddings(self, new_embeddings):
         raise NotImplementedError("self.lm_head is implemented in mxq")

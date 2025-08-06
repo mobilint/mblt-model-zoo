@@ -316,7 +316,8 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         self.bert.set_input_embeddings(new_embeddings)
 
     def get_output_embeddings(self):
-        raise NotImplementedError("get_output_embeddings is not implemented")
+        logger.warning_once("get_output_embeddings is not implemented")
+        return None
 
     def set_output_embeddings(self, new_embeddings):
         raise NotImplementedError("set_output_embeddings is not implemented")
@@ -485,7 +486,8 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         )
 
     def get_input_embeddings(self):
-        raise NotImplementedError("get_input_embeddings is not implemented")
+        logger.warning_once("get_input_embeddings is not implemented")
+        return None
 
     def dispose(self):
         self.mxq_model.dispose()
