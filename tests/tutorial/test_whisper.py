@@ -19,6 +19,7 @@ pipe(
     batch_size=8,
     return_timestamps=True,
     generate_kwargs={
+        "language": "en",
         "max_length": 4096,
         "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
     },
