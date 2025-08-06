@@ -8,6 +8,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+    use_fast=True,
 )
 
 # Format message with the aya-vision chat template
@@ -26,5 +27,7 @@ messages = [
 
 pipe(
     text=messages,
+    padding='max_length',
+    truncation=True,
     max_length=4096,
 )
