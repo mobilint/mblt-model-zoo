@@ -1,4 +1,4 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from mblt_model_zoo.transformers import pipeline
 from datasets import load_dataset
 from transformers import TextStreamer
 
