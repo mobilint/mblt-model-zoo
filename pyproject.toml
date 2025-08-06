@@ -59,6 +59,7 @@ transformers = [
     "safetensors>=0.4.5", 
     "librosa", 
     "soundfile",
+    "accelerate",
 ]
 
 # Tools setting -----------------------------------------
