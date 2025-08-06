@@ -20,5 +20,5 @@ messages = [
 
 outputs = pipe(
     messages,
-    max_new_tokens=2048,
+    max_length=4096,
 )

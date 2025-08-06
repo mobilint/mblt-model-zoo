@@ -1,8 +1,13 @@
-from mblt_model_zoo.transformers import pipeline
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from transformers import TextStreamer
 
+model_name = "mobilint/aya-vision-8b"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
 pipe = pipeline(
     "image-text-to-text",
-    model="mobilint/aya-vision-8b",
+    model=model_name,
+    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
 )
 
 # Format message with the aya-vision chat template
@@ -19,10 +24,7 @@ messages = [
     }
 ]
 
-outputs = pipe(
+pipe(
     text=messages,
-    max_new_tokens=300,
-    return_full_text=False,
+    max_length=4096,
 )
-
-print(outputs)

@@ -2,8 +2,8 @@ from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 from transformers import TextStreamer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_path)
 
+tokenizer = AutoTokenizer.from_pretrained(model_path)
 pipe = pipeline(
     "text-generation",
     model=model_path,
@@ -20,5 +20,5 @@ messages = [
 
 outputs = pipe(
     messages,
-    max_new_tokens=2048,
+    max_length=4096,
 )

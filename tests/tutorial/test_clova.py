@@ -1,10 +1,16 @@
-from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from transformers import TextStreamer
 
 model_name = "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B"
-model = AutoModelForCausalLM.from_pretrained(model_name)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-chat = [
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+pipe = pipeline(
+    "text-generation",
+    model=model_name,
+    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+)
+
+messages = [
     {"role": "tool_list", "content": ""},
     {
         "role": "system",
@@ -16,13 +22,7 @@ chat = [
     },
 ]
 
-inputs = tokenizer.apply_chat_template(
-    chat, add_generation_prompt=True, return_dict=True, return_tensors="pt"
+outputs = pipe(
+    messages,
+    max_length=4096,
 )
-output_ids = model.generate(
-    **inputs,
-    max_length=1024,
-    stop_strings=["<|endofturn|>", "<|stop|>"],
-    tokenizer=tokenizer,
-)
-print(tokenizer.batch_decode(output_ids)[0])
