@@ -90,7 +90,8 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         self.embed_tokens = value
 
     def get_output_embeddings(self):
-        raise NotImplementedError("self.lm_head is implemented in mxq")
+        logger.warning_once("self.lm_head is implemented in mxq")
+        return None
 
     def set_output_embeddings(self, new_embeddings):
         raise NotImplementedError("self.lm_head is implemented in mxq")
@@ -99,7 +100,8 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         raise NotImplementedError("self.model is implemented in mxq")
 
     def get_decoder(self):
-        raise NotImplementedError("self.model is implemented in mxq")
+        logger.warning_once("self.model is implemented in mxq")
+        return None
 
     def tie_weights(self):
         pass
