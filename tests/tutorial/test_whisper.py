@@ -4,11 +4,9 @@ from transformers import TextStreamer
 
 model_path = "mobilint/whisper-small"
 
-tokenizer = AutoTokenizer.from_pretrained(model_path)
 pipe = pipeline(
     "automatic-speech-recognition",
     model=model_path,
-    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
 )
 
 ds = load_dataset(
@@ -16,5 +14,12 @@ ds = load_dataset(
 )
 sample = ds[0]["audio"]
 
-prediction = pipe(sample.copy(), batch_size=8, return_timestamps=True)["chunks"]
-print(prediction)
+pipe(
+    sample.copy(),
+    batch_size=8,
+    return_timestamps=True,
+    generate_kwargs={
+        "max_length": 4096,
+        "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
+    },
+)
