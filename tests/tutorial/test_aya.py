@@ -24,6 +24,8 @@ messages = [
 
 pipe(
     text=messages,
-    max_length=4096,
-    streamer=TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
+    generate_kwargs={
+        "max_length"=4096,
+        "streamer"=TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
+    },
 )
