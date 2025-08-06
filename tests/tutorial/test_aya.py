@@ -6,6 +6,7 @@ model_name = "mobilint/aya-vision-8b"
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
+    use_fast=True,
 )
 
 # Format message with the aya-vision chat template
