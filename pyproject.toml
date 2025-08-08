@@ -13,7 +13,7 @@ dynamic = ["version"]
 description = "A collection of pre-quantized AI models for Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
-requires-python = ">=3.8,<3.13"
+requires-python = ">=3.9,<3.13"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
     "numpy>=1.26.0,<2.0.0",
@@ -53,7 +53,7 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
 [project.optional-dependencies]
 transformers = [
-    "transformers>=4.48,<4.52",
+    "transformers>=4.54.1",
     "datasets>=3.2.0",
     "safetensors>=0.4.5", 
     "librosa", 

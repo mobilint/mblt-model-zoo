@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, TypeVar, Union
+from typing import Dict, Optional, Tuple, Union
 
 import maccel
 import torch
@@ -20,21 +20,11 @@ from transformers import (
 )
 from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.utils import LossKwargs, logging
+from transformers.utils import TransformersKwargs, logging
 from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
-
-
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs):
-    ...
-
-
-SpecificPreTrainedModelType = TypeVar(
-    "SpecificPreTrainedModelType", bound="PreTrainedModel"
-)
 
 
 class MobilintLlamaConfig(LlamaConfig):
@@ -55,25 +45,24 @@ class MobilintLlamaConfig(LlamaConfig):
 
 
 class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
+    config: MobilintLlamaConfig
     supports_gradient_checkpointing = False
-    _supports_flash_attn_2 = False
+    _supports_flash_attn = False
     _supports_sdpa = False
     _supports_flex_attn = False
-    _supports_quantized_cache = False
-    _supports_static_cache = False
 
-    config_class = MobilintLlamaConfig
+    _can_compile_fullgraph = False
+    _supports_attention_backend = False
+    _can_record_outputs = {}
 
     def __init__(self, config: MobilintLlamaConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
-
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(
             config.vocab_size, config.hidden_size, self.padding_idx
         )
-
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
@@ -82,19 +71,6 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
-
-    def get_input_embeddings(self):
-        return self.embed_tokens
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
-
-    def get_output_embeddings(self):
-        logger.warning_once("self.lm_head is implemented in mxq")
-        return None
-
-    def set_output_embeddings(self, new_embeddings):
-        raise NotImplementedError("self.lm_head is implemented in mxq")
 
     def set_decoder(self, decoder):
         raise NotImplementedError("self.model is implemented in mxq")
@@ -139,46 +115,22 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
 
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[MobilintCache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        num_logits_to_keep: int = 0,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         chunk_size: int = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs: Unpack[TransformersKwargs],
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        output_attentions = (
-            output_attentions
-            if output_attentions is not None
-            else self.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        if output_attentions:
-            logger.warning_once("output_attentions is not supported.")
-
-        if output_hidden_states:
-            logger.warning_once("output_hidden_states is not supported.")
-
-        if num_logits_to_keep > 1:
+        if logits_to_keep > 1:
             logger.warning(
-                "num_logits_to_keep larger than 1 is not supported: %d"
-                % num_logits_to_keep
+                "logits_to_keep larger than 1 is not supported: %d"
+                % logits_to_keep
             )
 
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -199,9 +151,11 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
             cache_position = torch.arange(
                 past_seen_tokens,
                 past_seen_tokens + inputs_embeds.shape[1],
-                dtype=torch.long,
                 device=inputs_embeds.device,
             )
+        
+        if position_ids is None:
+            position_ids = cache_position.unsqueeze(0)
 
         inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
@@ -249,14 +203,10 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
                 **kwargs,
             )
 
-        if not return_dict:
-            output = (logits,)
-            return (loss,) + output if loss is not None else output
-
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            past_key_values=past_key_values if use_cache else None,
+            past_key_values=past_key_values,
             hidden_states=None,
             attentions=None,
         )
