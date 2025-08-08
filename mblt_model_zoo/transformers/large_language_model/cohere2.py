@@ -44,14 +44,15 @@ class MobilintCohere2Config(Cohere2Config):
 
 
 class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
-    config_class = MobilintCohere2Config
+    config: MobilintCohere2Config
     supports_gradient_checkpointing = False
-    _supports_flash_attn_2 = False
+    _supports_flash_attn = False
     _supports_sdpa = False
     _supports_flex_attn = False
-    _supports_quantized_cache = False
-    _supports_static_cache = False
+
+    _can_compile_fullgraph = False
     _supports_attention_backend = False
+    _can_record_outputs = {}
 
     def __init__(self, config: MobilintCohere2Config, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
@@ -72,19 +73,6 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
 
         self.logit_scale = config.logit_scale
         self.tie_word_embeddings = config.tie_word_embeddings
-
-    def get_input_embeddings(self):
-        return self.embed_tokens
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
-
-    def get_output_embeddings(self):
-        logger.warning_once("self.lm_head is implemented in mxq")
-        return None
-
-    def set_output_embeddings(self, new_embeddings):
-        raise NotImplementedError("self.lm_head is implemented in mxq")
 
     def set_decoder(self, decoder):
         raise NotImplementedError("self.model is implemented in mxq")
@@ -239,7 +227,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            past_key_values=past_key_values if use_cache else None,
+            past_key_values=past_key_values,
             hidden_states=None,
             attentions=None,
         )

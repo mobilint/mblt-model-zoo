@@ -5,7 +5,6 @@ import maccel
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
-import numpy as np
 
 
 from transformers import (
