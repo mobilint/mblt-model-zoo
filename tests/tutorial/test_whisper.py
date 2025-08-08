@@ -14,12 +14,13 @@ ds = load_dataset(
 )
 sample = ds[0]["audio"]
 
-pipe(
+output = pipe(
     sample.copy(),
     batch_size=8,
     return_timestamps=True,
     generate_kwargs={
         "max_length": 4096,
-        "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
     },
 )
+
+print(output)
