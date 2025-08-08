@@ -50,6 +50,10 @@ class MobilintCache(Cache):
         
         self.layers: list[CacheLayerMixin] = [MobilintLayer(self.mxq_model)]
         self.layer_classes = MobilintLayer
+        
+        self.num_hidden_layers = 1
+        
+        self.cache_processor = None
     
     def update_cache_position(self, cache_position: torch.Tensor):
         self.layers[0].update_cache_position(cache_position)
