@@ -326,8 +326,8 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         hidden_states = inputs_embeds + positions.to(inputs_embeds.device)
 
         inputs = [
-            hidden_states.unsqueeze(0).type(torch.float32).cpu().numpy(),
             encoder_hidden_states.type(torch.float32).cpu().numpy(),
+            hidden_states.unsqueeze(0).type(torch.float32).cpu().numpy(),
         ]
         logits = torch.from_numpy(
             self.mxq_model.infer(inputs, cache_size=int(past_key_values_length))[0]

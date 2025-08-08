@@ -9,6 +9,7 @@ pipe = pipeline(
     model=model_path,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
 )
+pipe.generation_config.max_new_tokens = None
 
 messages = [
     {

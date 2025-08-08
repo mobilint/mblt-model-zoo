@@ -11,6 +11,7 @@ pipe = pipeline(
     model=model_name,
     processor=processor,
 )
+pipe.generation_config.max_new_tokens = None
 
 img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
 raw_image = Image.open(requests.get(img_url, stream=True).raw).convert("RGB")

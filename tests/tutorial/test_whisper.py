@@ -7,6 +7,7 @@ pipe = pipeline(
     "automatic-speech-recognition",
     model=model_path,
 )
+pipe.generation_config.max_new_tokens = None
 
 ds = load_dataset(
     "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
