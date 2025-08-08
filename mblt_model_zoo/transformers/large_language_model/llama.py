@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, TypeVar, Union
+from typing import Dict, Optional, Tuple, Union
 
 import maccel
 import torch
@@ -20,21 +20,11 @@ from transformers import (
 )
 from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.utils import LossKwargs, logging
+from transformers.utils import TransformersKwargs, logging
 from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
-
-
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs):
-    ...
-
-
-SpecificPreTrainedModelType = TypeVar(
-    "SpecificPreTrainedModelType", bound="PreTrainedModel"
-)
 
 
 class MobilintLlamaConfig(LlamaConfig):
@@ -139,20 +129,17 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
 
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[MobilintCache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        num_logits_to_keep: int = 0,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         chunk_size: int = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs: Unpack[TransformersKwargs],
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = (
             output_attentions
@@ -175,10 +162,10 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
 
-        if num_logits_to_keep > 1:
+        if logits_to_keep > 1:
             logger.warning(
-                "num_logits_to_keep larger than 1 is not supported: %d"
-                % num_logits_to_keep
+                "logits_to_keep larger than 1 is not supported: %d"
+                % logits_to_keep
             )
 
         if (input_ids is None) ^ (inputs_embeds is not None):

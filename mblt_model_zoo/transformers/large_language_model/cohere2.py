@@ -1,4 +1,4 @@
-from typing import Dict, Optional, TypeVar, Union
+from typing import Dict, Optional, Union
 
 import maccel
 import torch
@@ -8,7 +8,7 @@ import math
 
 from transformers.models.cohere2.configuration_cohere2 import Cohere2Config
 from transformers.models.cohere2 import Cohere2PreTrainedModel
-from transformers.utils import LossKwargs, logging
+from transformers.utils import TransformersKwargs, logging
 from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers import (
@@ -21,20 +21,10 @@ from transformers import (
     AutoModelForCausalLM,
     CohereTokenizerFast,
 )
-from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
-
-
-class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs):
-    ...
-
-
-SpecificPreTrainedModelType = TypeVar(
-    "SpecificPreTrainedModelType", bound="PreTrainedModel"
-)
 
 
 class MobilintCohere2Config(Cohere2Config):
@@ -153,7 +143,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, GenerationMixin):
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         chunk_size: int = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
         output_attentions = (
             output_attentions

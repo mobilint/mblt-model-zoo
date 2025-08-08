@@ -1,17 +1,14 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 from transformers import TextStreamer
 import random
 
 model_name = "mobilint/EXAONE-4.0-1.2B"
 
+model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-pipe = pipeline(
-    "text-generation",
-    model=model_name,
-    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-)
+streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
-# Non-reasoning mode
+print("\n - Non-reasoning mode\n")
 
 # Choose your prompt
 prompt = "Explain how wonderful you are"
@@ -22,28 +19,44 @@ messages = [
     {"role": "user", "content": prompt}
 ]
 
-pipe(
+input_ids = tokenizer.apply_chat_template(
     messages,
-    max_new_tokens=128,
-    do_sample=False,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt"
 )
 
-# Reasoning mode
+model.generate(
+    input_ids.to(model.device),
+    max_length=4096,
+    do_sample=False,
+    streamer=streamer,
+)
+
+print("\n - Reasoning mode\n")
 
 messages = [
     {"role": "user", "content": "Which one is bigger, 3.12 vs 3.9?"}
 ]
 
-pipe(
+input_ids = tokenizer.apply_chat_template(
     messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt",
     enable_thinking=True,
-    max_new_tokens=128,
-    do_sample=True,
-    temperature=0.6,
-    top_p=0.95
 )
 
-# Agentic tool use
+model.generate(
+    input_ids.to(model.device),
+    max_length=4096,
+    do_sample=True,
+    temperature=0.6,
+    top_p=0.95,
+    streamer=streamer,
+)
+
+print("\n - Agentic tool use\n")
 
 def roll_dice(max_num: int):
     return random.randint(1, max_num)
@@ -72,11 +85,19 @@ messages = [
     {"role": "user", "content": "Roll D6 dice twice!"}
 ]
 
-pipe(
+input_ids = tokenizer.apply_chat_template(
     messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt",
     tools=tools,
-    max_new_tokens=1024,
+)
+
+model.generate(
+    input_ids.to(model.device),
+    max_length=4096,
     do_sample=True,
     temperature=0.6,
-    top_p=0.95
+    top_p=0.95,
+    streamer=streamer,
 )
