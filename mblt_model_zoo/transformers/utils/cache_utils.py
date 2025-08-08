@@ -24,6 +24,17 @@ class MobilintLayer(CacheLayerMixin):
     def get_max_cache_shape(self) -> Optional[int]:
         return self.model.get_input_buffer_info()[0].max_cache_size
 
+    def get_mask_sizes(self, cache_position: torch.Tensor) -> tuple[int, int]:
+        kv_offset = 0
+        query_length = cache_position.shape[0]
+        past_seen_tokens = self.get_seq_length()
+        kv_length = query_length + past_seen_tokens
+        return kv_length, kv_offset
+
+    def reset(self) -> None:
+        self.model.reset_cache_memory()
+        self._seen_tokens: int = 0
+
     def reorder_cache(self, beam_idx: torch.LongTensor):
         raise NotImplementedError("reorder_cache is not implemented")
     
@@ -34,5 +45,4 @@ class MobilintCache(Cache):
     def __init__(self, model: maccel.Model, *args, **kwargs):
         super().__init__(layer_classes=MobilintLayer, *args, **kwargs)
         self.model = model
-        self.model.reset_cache_memory()
-        self._seen_tokens: int = 0
+        self.reset()
