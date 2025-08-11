@@ -20,6 +20,7 @@ output = pipe(
     return_timestamps=True,
     generate_kwargs={
         "max_length": 4096,
+        "num_beams": 1, # Supports for beam search with reorder_cache is not implemented yet
     },
 )
 
