@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypeVar, Union, List, Dict
+from typing import Optional, Tuple, TypeVar, Union, List
 
 import maccel
 import torch
@@ -386,37 +386,19 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
             cross_attentions=None,
         )
 
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values: MobilintCache = None,
-        attention_mask=None,
-        **model_kwargs,
-    ):
-        # cut decoder_input_ids if past_key_values is used
-        if past_key_values is not None:
-            past_length = past_key_values.get_seq_length()
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None, **model_kwargs):
+        # Overwrite -- hardcoded key return (`is_decoder=True`)
 
-            # Some generation methods already pass only the last input ID
-            if input_ids.shape[1] > past_length:
-                remove_prefix_length = past_length
-            else:
-                # Default to old behavior: keep only final ID
-                remove_prefix_length = input_ids.shape[1] - 1
+        model_inputs = super().prepare_inputs_for_generation(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            **model_kwargs,
+        )
+        model_inputs["is_decoder"] = True
 
-            input_ids = input_ids[:, remove_prefix_length:]
-
-        return {
-            "input_ids": input_ids,
-            "past_key_values": past_key_values,
-            "encoder_hidden_states": model_kwargs.get("encoder_hidden_states", None),
-            "encoder_attention_mask": model_kwargs.get("encoder_attention_mask", None),
-            "is_decoder": True,
-        }
-
-    def _reorder_cache(self, past_key_values, beam_idx):
-        raise NotImplementedError("_reorder_cache is not implemented")
-
+        return model_inputs
+    
     def dispose(self):
         self.bert.dispose()
 
@@ -580,7 +562,7 @@ class MobilintBlipForConditionalGeneration(
     def _prepare_cache_for_generation(
         self,
         generation_config: GenerationConfig,
-        model_kwargs: Dict,
+        model_kwargs: dict,
         assistant_model: "PreTrainedModel",
         batch_size: int,
         max_cache_length: int,
