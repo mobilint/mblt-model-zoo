@@ -579,7 +579,7 @@ class MobilintWhisperForConditionalGeneration(
             return_dict=return_dict,
             cache_position=cache_position,
         )
-        lm_logits = outputs[0].squeeze(0)  # proj_out is performed on decoder mblt.
+        lm_logits = outputs[0].squeeze(1)  # proj_out is performed on decoder mblt.
 
         loss = None
         if labels is not None:
