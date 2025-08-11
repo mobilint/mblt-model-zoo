@@ -216,9 +216,6 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         else:
             use_cache = False
 
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
-
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
 
@@ -395,6 +392,37 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         model_inputs["is_decoder"] = True
 
         return model_inputs
+
+    def _prepare_cache_for_generation(
+        self,
+        generation_config: GenerationConfig,
+        model_kwargs: dict,
+        assistant_model: "PreTrainedModel",
+        batch_size: int,
+        max_cache_length: int,
+        device: torch.device,
+    ) -> bool:
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model,
+            batch_size,
+            max_cache_length,
+            device,
+        )
+
+        cache_name = "past_key_values"
+
+        if model_kwargs.get(cache_name, None) is None:
+            return
+        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
+            return
+        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
+            model_kwargs[cache_name] = MobilintCache(self.mxq_model)
+        else:
+            raise NotImplementedError(
+                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
+            )
     
     def dispose(self):
         self.bert.dispose()
@@ -555,37 +583,6 @@ class MobilintBlipForConditionalGeneration(
             hidden_states=vision_outputs.hidden_states,
             attentions=vision_outputs.attentions,
         )
-    
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        super()._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
-        )
-
-        cache_name = "past_key_values"
-
-        if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = MobilintCache(self.mxq_model)
-        else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
 
     def generate(
         self,
