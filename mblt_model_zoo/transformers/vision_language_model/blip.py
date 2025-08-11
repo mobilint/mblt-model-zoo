@@ -195,6 +195,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         is_decoder: Optional[bool] = False,
+        cache_position: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
         output_attentions = (
             output_attentions
@@ -273,12 +274,6 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             embedding_output.unsqueeze(1).type(torch.float32).cpu().numpy()
         )
 
-        cache_position = torch.arange(
-            past_key_values_length,
-            past_key_values_length + embedding_output.shape[2],
-            device="cpu",
-        )
-
         logits = self.mxq_model.infer(
             [encoder_hidden_states, embedding_output],
             cache_size=int(past_key_values_length),
@@ -341,6 +336,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         return_logits: Optional[bool] = False,
         is_decoder: Optional[bool] = True,
         reduction: Optional[str] = "mean",
+        cache_position: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[torch.Tensor], CausalLMOutputWithCrossAttentions]:
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
@@ -367,6 +363,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             is_decoder=is_decoder,
+            cache_position=cache_position,
         )
 
         prediction_scores = outputs[0]
