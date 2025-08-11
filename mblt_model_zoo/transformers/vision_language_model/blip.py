@@ -418,7 +418,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
             return
         elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = MobilintCache(self.mxq_model)
+            model_kwargs[cache_name] = MobilintCache(self.bert.mxq_model)
         else:
             raise NotImplementedError(
                 f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
