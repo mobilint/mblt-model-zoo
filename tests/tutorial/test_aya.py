@@ -9,6 +9,7 @@ pipe = pipeline(
     model=model_name,
     processor=processor,
 )
+pipe.generation_config.max_new_tokens = None
 
 # Format message with the aya-vision chat template
 messages = [

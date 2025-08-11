@@ -36,7 +36,6 @@ SpecificPreTrainedModelType = TypeVar(
 
 class ExaoneConfig(PretrainedConfig):
     model_type = "exaone"
-    keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {"num_hidden_layers": "num_layers"}
 
     def __init__(
@@ -109,7 +108,6 @@ class MobilintExaoneForCausalLM(PreTrainedModel, GenerationMixin):
     supports_gradient_checkpointing = False
     _supports_flash_attn_2 = False
     _supports_sdpa = False
-    _supports_cache_class = False
 
     config_class = MobilintExaoneConfig
 

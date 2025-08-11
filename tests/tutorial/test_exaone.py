@@ -9,6 +9,7 @@ pipe = pipeline(
     model=model_name,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
 )
+pipe.generation_config.max_new_tokens = None
 
 # Choose your prompt
 prompt = "Explain how wonderful you are"  # English example

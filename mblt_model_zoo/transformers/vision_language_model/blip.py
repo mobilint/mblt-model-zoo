@@ -19,6 +19,7 @@ from transformers import (
     BlipProcessor,
     AutoModelForVision2Seq,
     AutoModelForImageTextToText,
+    GenerationConfig,
 )
 from transformers.models.blip.modeling_blip import (
     BlipForConditionalGenerationModelOutput,
@@ -194,6 +195,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         is_decoder: Optional[bool] = False,
+        cache_position: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
         output_attentions = (
             output_attentions
@@ -213,9 +215,6 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             use_cache = use_cache if use_cache is not None else self.config.use_cache
         else:
             use_cache = False
-
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
 
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
@@ -270,12 +269,6 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         )
         embedding_output = (
             embedding_output.unsqueeze(1).type(torch.float32).cpu().numpy()
-        )
-
-        cache_position = torch.arange(
-            past_key_values_length,
-            past_key_values_length + embedding_output.shape[2],
-            device="cpu",
         )
 
         logits = self.mxq_model.infer(
@@ -340,6 +333,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
         return_logits: Optional[bool] = False,
         is_decoder: Optional[bool] = True,
         reduction: Optional[str] = "mean",
+        cache_position: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[torch.Tensor], CausalLMOutputWithCrossAttentions]:
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
@@ -366,6 +360,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             is_decoder=is_decoder,
+            cache_position=cache_position,
         )
 
         prediction_scores = outputs[0]
@@ -385,37 +380,50 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
             cross_attentions=None,
         )
 
-    def prepare_inputs_for_generation(
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None, **model_kwargs):
+        # Overwrite -- hardcoded key return (`is_decoder=True`)
+
+        model_inputs = super().prepare_inputs_for_generation(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            **model_kwargs,
+        )
+        model_inputs["is_decoder"] = True
+
+        return model_inputs
+
+    def _prepare_cache_for_generation(
         self,
-        input_ids,
-        past_key_values: MobilintCache = None,
-        attention_mask=None,
-        **model_kwargs,
-    ):
-        # cut decoder_input_ids if past_key_values is used
-        if past_key_values is not None:
-            past_length = past_key_values.get_seq_length()
+        generation_config: GenerationConfig,
+        model_kwargs: dict,
+        assistant_model: "PreTrainedModel",
+        batch_size: int,
+        max_cache_length: int,
+        device: torch.device,
+    ) -> bool:
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model,
+            batch_size,
+            max_cache_length,
+            device,
+        )
 
-            # Some generation methods already pass only the last input ID
-            if input_ids.shape[1] > past_length:
-                remove_prefix_length = past_length
-            else:
-                # Default to old behavior: keep only final ID
-                remove_prefix_length = input_ids.shape[1] - 1
+        cache_name = "past_key_values"
 
-            input_ids = input_ids[:, remove_prefix_length:]
-
-        return {
-            "input_ids": input_ids,
-            "past_key_values": past_key_values,
-            "encoder_hidden_states": model_kwargs.get("encoder_hidden_states", None),
-            "encoder_attention_mask": model_kwargs.get("encoder_attention_mask", None),
-            "is_decoder": True,
-        }
-
-    def _reorder_cache(self, past_key_values, beam_idx):
-        raise NotImplementedError("_reorder_cache is not implemented")
-
+        if model_kwargs.get(cache_name, None) is None:
+            return
+        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
+            return
+        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
+            model_kwargs[cache_name] = MobilintCache(self.bert.mxq_model)
+        else:
+            raise NotImplementedError(
+                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
+            )
+    
     def dispose(self):
         self.bert.dispose()
 
