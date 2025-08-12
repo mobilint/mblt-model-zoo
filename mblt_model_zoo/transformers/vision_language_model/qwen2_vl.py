@@ -119,33 +119,29 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
     ) -> torch.Tensor:
-        outputs = []
         
-        for grid, hidden in zip(grid_thw, hidden_states):
-            gt, gh, gw = grid
-            ph = pw = int((hidden.shape[-1] // (2 * 3)) ** 0.5)
-            pixel_values_mxq_input = rearrange(
-                hidden,
-                "(gt gh gw Mh Mw) (c pt ph pw) -> gt (pt c) (gh gw ph) (Mh Mw pw)",
-                gt=gt,
-                gh=gh // 2,
-                gw=gw // 2,
-                Mh=2,
-                Mw=2,
-                c=3,
-                pt=2,
-                ph=ph,
-                pw=pw,
-            )
-            pixel_values_mxq_input = pixel_values_mxq_input.permute(0, 2, 3, 1).squeeze(0)
-            pixel_values_mxq_input = pixel_values_mxq_input.type(torch.float32).cpu().numpy()
-            mxq_output = self.mxq_model.infer(pixel_values_mxq_input)[0]
-            
-            mxq_output = torch.tensor(mxq_output[0]).to(self.device).squeeze(0)
-            
-            outputs.append(mxq_output)
-            
-        return outputs
+        gt, gh, gw = grid_thw[0]
+        ph = pw = int((hidden_states.shape[-1] // (2 * 3)) ** 0.5)
+        pixel_values_mxq_input = rearrange(
+            hidden_states,
+            "(gt gh gw Mh Mw) (c pt ph pw) -> gt (pt c) (gh gw ph) (Mh Mw pw)",
+            gt=gt,
+            gh=gh // 2,
+            gw=gw // 2,
+            Mh=2,
+            Mw=2,
+            c=3,
+            pt=2,
+            ph=ph,
+            pw=pw,
+        )
+        pixel_values_mxq_input = pixel_values_mxq_input.permute(0, 2, 3, 1).squeeze(0)
+        pixel_values_mxq_input = pixel_values_mxq_input.type(torch.float32).cpu().numpy()
+        mxq_output = self.mxq_model.infer(pixel_values_mxq_input)[0]
+        
+        mxq_output = torch.tensor(mxq_output[0]).to(self.device).squeeze(0)
+                        
+        return mxq_output
 
     def dispose(self):
         self.mxq_model.dispose()
