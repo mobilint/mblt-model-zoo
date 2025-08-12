@@ -99,7 +99,6 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_global4_core_mode([maccel.Cluster.Cluster0])
-        print(f"{config.name_or_path}/{config.mxq_path}")
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
     
@@ -267,8 +266,12 @@ class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
 class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qwen2VLForConditionalGeneration):
     _tied_weights_keys = []
     
-    def __init__(self, config):
+    def __init__(self, config: MobilintQwen2VLConfig):
         super().__init__(config)
+        
+        config.vision_config.name_or_path = config.name_or_path
+        config.text_config.name_or_path = config.name_or_path
+        
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity lambda function
