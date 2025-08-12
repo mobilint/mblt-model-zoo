@@ -116,7 +116,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         outputs = []
         
         for grid, hidden in zip(grid_thw, hidden_states):
-            gt, gh, gw = grid[0]
+            gt, gh, gw = grid
             ph = pw = int((hidden.shape[-1] // (2 * 3)) ** 0.5)
             pixel_values_mxq_input = rearrange(
                 hidden,
