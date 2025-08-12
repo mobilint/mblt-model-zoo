@@ -95,6 +95,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
 
         self.gradient_checkpointing = False
         
+        self.dtype = torch.float32
+        
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
