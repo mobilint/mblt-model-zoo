@@ -164,7 +164,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         return torch.float32
 
     def get_device(self) -> torch.device:
-        return self.device
+        return 'cpu'
 
     def forward(
         self,
