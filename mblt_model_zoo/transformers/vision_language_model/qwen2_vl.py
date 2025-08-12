@@ -398,6 +398,7 @@ qwen2_vl_2b_instruct = TransformersModelInfo(
         "Qwen2-VL-2B-Instruct_vision_transformer.mxq",
         "tokenizer.json",
         "tokenizer_config.json",
+        "video_preprocessor_config.json",
         "vocab.json",
     ],
 )
