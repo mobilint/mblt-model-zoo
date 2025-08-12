@@ -155,6 +155,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
     def __getattribute__(self, name: str, /) -> Any:
         if name == 'dtype':
             return self.get_dtype()
+        elif name == 'device':
+            return self.get_device()
         else:
             return super().__getattribute__(name)
     
