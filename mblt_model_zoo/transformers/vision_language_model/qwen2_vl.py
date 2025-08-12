@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
+from PIL import Image
+from cv2 import resize as cv2_resize, INTER_CUBIC
+import torch.nn.functional as F
 
 from transformers import (
     Qwen2VLTextConfig,
@@ -25,6 +28,12 @@ from transformers import (
 from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
 from transformers.utils import logging
 from transformers.modeling_outputs import BaseModelOutputWithPast
+from transformers.image_utils import ImageInput
+from transformers.video_utils import VideoInput
+from transformers.processing_utils import Unpack
+from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
+from transformers.feature_extraction_utils import BatchFeature
+from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
 
 from ..utils.cache_utils import MobilintCache
 
@@ -32,6 +41,50 @@ from einops import rearrange
 
 logger = logging.get_logger(__name__)
 
+
+class MobilintQwen2VLProcessor(Qwen2VLProcessor):
+    def __call__(
+        self,
+        images: ImageInput = None,
+        text: Union[TextInput, PreTokenizedInput, list[TextInput], list[PreTokenizedInput]] = None,
+        videos: VideoInput = None,
+        **kwargs: Unpack[Qwen2VLProcessorKwargs],
+    ) -> BatchFeature:
+        # Make sure images is only one instance of PIL.Image.Image, np.ndarray, torch.Tensor, or None
+        if isinstance(images, list):
+            if len(images) > 1:
+                raise NotImplementedError("Only one image input is supported")
+            elif len(images) == 1:
+                images = images[0]
+        
+        # Image should be resized into (224, 224) to fit image token position
+        size = (224, 224)
+        
+        if isinstance(images, Image.Image):
+            images.resize(size)
+        elif isinstance(images, np.ndarray):
+            if images.ndim == 2:  # 흑백
+                return cv2_resize(images, size[::-1], interpolation=INTER_CUBIC)
+            elif images.ndim == 3:
+                return cv2_resize(images, size[::-1], interpolation=INTER_CUBIC)
+            else:
+                raise ValueError(f"Unsupported ndarray shape: {images.shape}")
+        elif torch.is_tensor(images):
+            if images.ndim == 3:  # CHW
+                images_unsqueezed = images.unsqueeze(0).float()  # BCHW
+                resized = F.interpolate(images_unsqueezed, size=size, mode="bicubic", align_corners=False)
+                return resized.squeeze(0).type(images.dtype)
+            elif images.ndim == 2:  # HW
+                images_unsqueezed = images.unsqueeze(0).unsqueeze(0).float()  # B1HW
+                resized = F.interpolate(images_unsqueezed, size=size, mode="bicubic", align_corners=False)
+                return resized.squeeze(0).squeeze(0).type(images.dtype)
+            else:
+                raise ValueError(f"Unsupported tensor shape: {tuple(images.shape)}")
+        
+        if videos is not None:
+            raise NotImplementedError("Video inputs are not supported")
+                
+        return super().__call__(images, text, videos, **kwargs)
 
 class MobilintQwen2VLTextConfig(Qwen2VLTextConfig):
     model_type = "mobilint-qwen2_vl_text"
@@ -316,7 +369,7 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qw
 
 AutoConfig.register("mobilint-qwen2_vl", MobilintQwen2VLConfig)
 AutoTokenizer.register(MobilintQwen2VLConfig, fast_tokenizer_class=Qwen2TokenizerFast)
-AutoProcessor.register(MobilintQwen2VLConfig, Qwen2VLProcessor)
+AutoProcessor.register(MobilintQwen2VLConfig, MobilintQwen2VLProcessor)
 AutoModelForImageTextToText.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
 
 from ..utils.types import TransformersModelInfo
