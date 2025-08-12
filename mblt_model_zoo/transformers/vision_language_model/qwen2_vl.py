@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 import maccel
 import torch
@@ -94,15 +94,19 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         self.spatial_merge_size = config.spatial_merge_size
 
         self.gradient_checkpointing = False
-        
-        self.dtype = torch.float32
-        
+                
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_multi_core_mode([maccel.Cluster.Cluster1])
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
+    
+    def __getattribute__(self, name: str, /) -> Any:
+        if name == 'dtype':
+            return self.get_dtype()
+        else:
+            return super().__getattribute__(name)
     
     def get_dtype(self) -> torch.dtype:
         return torch.float32
