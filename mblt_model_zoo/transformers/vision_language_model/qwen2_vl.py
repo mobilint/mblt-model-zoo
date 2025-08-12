@@ -37,7 +37,6 @@ from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwa
 
 from ..utils.cache_utils import MobilintCache
 
-from einops import rearrange
 
 logger = logging.get_logger(__name__)
 
@@ -171,29 +170,39 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
     ) -> torch.Tensor:
-        
-        gt, gh, gw = grid_thw[0]
-        ph = pw = int((hidden_states.shape[-1] // (2 * 3)) ** 0.5)
-        pixel_values_mxq_input = rearrange(
-            hidden_states,
-            "(gt gh gw Mh Mw) (c pt ph pw) -> gt (pt c) (gh gw ph) (Mh Mw pw)",
-            gt=gt,
-            gh=gh // 2,
-            gw=gw // 2,
-            Mh=2,
-            Mw=2,
-            c=3,
-            pt=2,
-            ph=ph,
-            pw=pw,
-        )
-        pixel_values_mxq_input = pixel_values_mxq_input.permute(0, 2, 3, 1).squeeze(0)
-        pixel_values_mxq_input = pixel_values_mxq_input.type(torch.float32).cpu().numpy()
-        mxq_output = self.mxq_model.infer(pixel_values_mxq_input)[0]
-        
-        mxq_output = torch.tensor(mxq_output[0]).to(self.device).squeeze(0)
-                        
-        return mxq_output
+        gt, gh, gw = grid_thw[0].tolist()
+
+        c  = 3
+        pt = 2
+        Mh = 2
+        Mw = 2
+        gh2 = gh // 2
+        gw2 = gw // 2
+        ph = pw = int((hidden_states.shape[-1] // (pt * c)) ** 0.5)
+
+        assert hidden_states.shape[0] == gt * gh2 * gw2 * Mh * Mw
+        assert hidden_states.shape[1] == c * pt * ph * pw
+
+        # (gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
+        hidden_states = hidden_states.view(gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
+
+        # rearrange: "(gt gh gw Mh Mw) (c pt ph pw) -> gt (pt c) (Mh Mw pw) (gh gw ph)"
+        # (gt, pt, c, Mh, Mw, pw, gh2, gw2, ph)
+        hidden_states = hidden_states.permute(0, 6, 5, 3, 4, 8, 1, 2, 7).contiguous()
+
+        # gt (pt c) (Mh Mw pw) (gh gw ph)
+        hidden_states = hidden_states.view(
+            gt,
+            Mh * Mw * pw,
+            pt * c,
+            gh2 * gw2 * ph,
+        ).squeeze(0)
+
+        hidden_states = hidden_states.to(torch.float32).cpu().numpy()
+        image_embeds = self.mxq_model.infer(hidden_states)[0]
+
+        image_embeds = torch.tensor(image_embeds[0], device=self.device).squeeze(0)
+        return image_embeds
 
     def dispose(self):
         self.mxq_model.dispose()
