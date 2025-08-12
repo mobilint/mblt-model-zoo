@@ -24,7 +24,6 @@ from transformers.models.aya_vision.modeling_aya_vision import (
     AyaVisionCausalLMOutputWithPast,
 )
 from transformers.utils import is_torchdynamo_compiling
-from ..large_language_model.cohere2 import MobilintCohere2ForCausalLM
 from ..utils.cache_utils import MobilintCache
 
 
@@ -134,7 +133,7 @@ class MobilintAyaVisionForConditionalGeneration(
         pixel_values: Optional[torch.FloatTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        past_key_values: Optional[MobilintCache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         vision_feature_layer: Optional[Union[int, List[int]]] = None,
         vision_feature_select_strategy: Optional[str] = None,

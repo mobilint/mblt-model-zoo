@@ -153,9 +153,6 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
                 past_seen_tokens + inputs_embeds.shape[1],
                 device=inputs_embeds.device,
             )
-        
-        if position_ids is None:
-            position_ids = cache_position.unsqueeze(0)
 
         inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
