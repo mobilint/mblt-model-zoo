@@ -16,7 +16,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | Inception_V3 | (299,299,3) | 77.120 | 77.278 | 5.71 | 27.16 | [Link](https://docs.pytorch.org/vision/main/models/generated/torchvision.models.inception_v3.html)|  |
 | MNASNet1_0 | (224,224,3)| 72.696 | 73.422 | 0.31 | 4.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_0.html) | |
 | MNASNet1_3 | (224,224,3) | 75.720 | 76.466 | 0.53 | 6.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_3.html) | |
-| MobileNet_V2 | (224,224,3)| 71.614 | 72.138 | 0.30 | 3.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mobilenet_v2.html) | IMAGENET1K_V2 |
+| MobileNet_V2 | (224,224,3)| 71.624 | 72.138 | 0.30 | 3.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mobilenet_v2.html) | IMAGENET1K_V2 |
 | RegNet_X_400MF | (224,224,3) | 72.544 | 72.900 | 0.41 | 5.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V1 |
 | RegNet_X_400MF | (224,224,3) | 74.218 | 74.846 | 0.41 | 5.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V2 |
 | RegNet_X_800MF | (224,224,3) | 74.928 | 75.204 | 0.80 | 7.26 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V1 |
@@ -78,29 +78,29 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 | Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|----------------|---------------|-----------|------------|--------|------|
-| yolov3u | (640,640,3) | 51.091 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
+| yolov3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
 | yolov3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
-| yolov3-sppu | (640,640,3) | 51.394 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
-| yolov5su | (640, 640, 3) | 42.051 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5mu | (640, 640, 3) | 48.189 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov3-sppu | (640,640,3) | 51.382 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
+| yolov5su | (640, 640, 3) | 42.206 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5mu | (640, 640, 3) | 48.217 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
 | yolov5lu | (640, 640, 3) | 51.718 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5l6 | (1280, 1280, 3) | 52.382 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
-| yolov5xu | (640, 640, 3) | 52.572 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5x6 | (1280, 1280, 3) | 53.679 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| yolov5l6 | (1280, 1280, 3) | 52.402 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| yolov5xu | (640, 640, 3) | 52.600 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5x6 | (1280, 1280, 3) | 53.706 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
 | yolov7 | (640,640,3) | 50.402 | 50.941 | 104.67 | 36.91 | [Link](https://github.com/WongKinYiu/yolov7/) | |
 | yolov7x | (640,640,3) | 52.103 | 52.706 | 189.88 | 71.31 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov8s | (640,640,3) | 44.040 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8m | (640,640,3) | 49.697 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8l | (640,640,3) | 52.321 | 52.773 | 165.24 | 43.67 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8x | (640,640,3) | 53.391 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov9m | (640,640,3) | 50.361 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
-| yolov9c | (640,640,3) | 52.409 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| yolov8s | (640,640,3) | 44.062 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8m | (640,640,3) | 49.657 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8l | (640,640,3) | 52.340 | 52.773 | 165.24 | 43.67 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8x | (640,640,3) | 53.365 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| yolov9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | yolo11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11l | (640,640,3) | 52.468 | 53.165 | 87.37 | 25.34 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11x | (640,640,3) | 54.059 | 54.478 | 195.67 | 56.92 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo12s | (640,640,3) | 46.740 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
-| yolo12m | (640,640,3) | 51.580 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| yolo12s | (640,640,3) | 46.746 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| yolo12m | (640,640,3) | 51.568 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 
 ## Instance Segmentation (COCO)
 
@@ -108,11 +108,12 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | yolov5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
 | yolov5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
-| yolov8s-seg | (640,640,3) | 36.121 | 36.582 | 42.64 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8m-seg | (640,640,3) | 40.008 | 40.444 | 110.26 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8l-seg | (640,640,3) | 41.894 | 42.316 | 220.55 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8x-seg | (640,640,3) | 42.731 | 43.020 | 344.20 | 71.78 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov9c-seg | (640,640,3) | 42.235 | 42.460 | 145.72 | 27.45 | [Link](https://docs.ultralytics.com/models/yolov9/) | |
+| yolov8s-seg | (640,640,3) | 36.072 | 36.582 | 42.64 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8m-seg | (640,640,3) | 39.978 | 40.444 | 110.26 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8l-seg | (640,640,3) | 41.993 | 42.316 | 220.55 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov8x-seg | (640,640,3) | 42.913 | 43.020 | 344.20 | 71.78 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolov9c-seg | (640,640,3) | 42.249 | 42.460 | 145.72 | 27.45 | [Link](https://docs.ultralytics.com/models/yolov9/) | |
+| yolo11s-seg | (640,640,3) | 36.874 | 37.602 | 35.69 | 10.10 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11m-seg | (640,640,3) | 41.031 | 41.546 | 123.56 | 22.40 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11l-seg | (640,640,3) | 42.509 | 42.831 | 142.68 | 27.65 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11x-seg | (640,640,3) | 43.614 | 43.746 | 319.78 | 62.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
