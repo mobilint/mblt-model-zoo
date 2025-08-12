@@ -98,7 +98,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_global_core_mode([maccel.Cluster.Cluster0])
+        mc.set_global4_core_mode([maccel.Cluster.Cluster0])
+        print(f"{config.name_or_path}/{config.mxq_path}")
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
     
