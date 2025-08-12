@@ -186,16 +186,16 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         # (gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
         hidden_states = hidden_states.view(gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
 
-        # rearrange: "(gt gh gw Mh Mw) (c pt ph pw) -> gt (pt c) (Mh Mw pw) (gh gw ph)"
+        # rearrange: "(gt gh gw Mh Mw) (c pt ph pw) -> gt (gh gw ph) (Mh Mw pw) (pt c)"
         # (gt, pt, c, Mh, Mw, pw, gh2, gw2, ph)
-        hidden_states = hidden_states.permute(0, 6, 5, 3, 4, 8, 1, 2, 7).contiguous()
+        hidden_states = hidden_states.permute(0, 1, 2, 7, 3, 4, 8, 6, 5).contiguous()
 
-        # gt (pt c) (Mh Mw pw) (gh gw ph)
+        # gt (gh gw ph) (Mh Mw pw) (pt c)
         hidden_states = hidden_states.view(
             gt,
+            gh2 * gw2 * ph,
             Mh * Mw * pw,
             pt * c,
-            gh2 * gw2 * ph,
         ).squeeze(0)
 
         hidden_states = hidden_states.to(torch.float32).cpu().numpy()
