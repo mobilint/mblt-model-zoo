@@ -60,7 +60,7 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         size = (224, 224)
         
         if isinstance(images, Image.Image):
-            images.resize(size)
+            images = images.resize(size)
         elif isinstance(images, np.ndarray):
             if images.ndim == 2:  # 흑백
                 return cv2_resize(images, size[::-1], interpolation=INTER_CUBIC)
@@ -70,13 +70,11 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
                 raise ValueError(f"Unsupported ndarray shape: {images.shape}")
         elif torch.is_tensor(images):
             if images.ndim == 3:  # CHW
-                images_unsqueezed = images.unsqueeze(0).float()  # BCHW
-                resized = F.interpolate(images_unsqueezed, size=size, mode="bicubic", align_corners=False)
-                return resized.squeeze(0).type(images.dtype)
+                images = images.unsqueeze(0).float()  # BCHW
+                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             elif images.ndim == 2:  # HW
-                images_unsqueezed = images.unsqueeze(0).unsqueeze(0).float()  # B1HW
-                resized = F.interpolate(images_unsqueezed, size=size, mode="bicubic", align_corners=False)
-                return resized.squeeze(0).squeeze(0).type(images.dtype)
+                images = images.unsqueeze(0).unsqueeze(0).float()  # B1HW
+                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             else:
                 raise ValueError(f"Unsupported tensor shape: {tuple(images.shape)}")
         
