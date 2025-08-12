@@ -274,8 +274,8 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qw
         
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model
-        # So we just replace self.lm_head with identity lambda function
-        self.lm_head = lambda a : a
+        # So we just replace self.lm_head with identity module
+        self.lm_head = nn.Identity()
     
     def _prepare_cache_for_generation(
         self,
