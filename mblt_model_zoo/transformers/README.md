@@ -127,6 +127,7 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 | ----- | -------- | ------ | ---- |
 | aya-vision-8b | `mobilint/aya-vision-8b` | [Link](https://huggingface.co/CohereLabs/aya-vision-8b) | |
 | blip-image-captioning-large | `mobilint/blip-image-captioning-large` | [Link](https://huggingface.co/Salesforce/blip-image-captioning-large) | |
+| Qwen2-VL-2B-Instruct | `mobilint/Qwen2-VL-2B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct) | Only supports 1 image input with (224, 224) size. Image input will be resized automatically by our overrided preprocessor. |
 
 ## License
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
