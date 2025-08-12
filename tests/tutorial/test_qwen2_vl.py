@@ -1,11 +1,13 @@
-from mblt_model_zoo.transformers import pipeline
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
+processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
+    processor=processor,
 )
 pipe.generation_config.max_new_tokens = None
 
