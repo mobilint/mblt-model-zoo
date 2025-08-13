@@ -95,6 +95,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | yolov8x | (640,640,3) | 53.365 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | yolov9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | yolov9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| yolov10b | (640,640,3) | 51.125 | 52.096 | 92.23 | 19.07 | [Link](https://docs.ultralytics.com/models/yolov10/) | |
 | yolo11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11l | (640,640,3) | 52.468 | 53.165 | 87.37 | 25.34 | [Link](https://docs.ultralytics.com/models/yolo11/) | |

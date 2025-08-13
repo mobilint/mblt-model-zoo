@@ -6,6 +6,7 @@ from .yolo_anchorless_post import (
     YOLOAnchorlessSegPost,
     YOLOAnchorlessPosePost,
 )
+from .yolo_nmsfree_post import YOLONMSFreePost
 
 
 def build_postprocess(
@@ -18,6 +19,11 @@ def build_postprocess(
     elif task_lower == "object_detection":
         if post_cfg.get("anchors") is not None:
             return YOLOAnchorPost(
+                pre_cfg,
+                post_cfg,
+            )
+        elif post_cfg.get("nmsfree", False):  # nms free is only available for detection
+            return YOLONMSFreePost(
                 pre_cfg,
                 post_cfg,
             )
@@ -40,15 +46,10 @@ def build_postprocess(
             )
 
     elif task_lower == "pose_estimation":
-        if post_cfg.get("anchors") is not None:
-            raise NotImplementedError(
-                "Pose estimation with anchor is not implemented yet"
-            )
-        else:
-            return YOLOAnchorlessPosePost(
-                pre_cfg,
-                post_cfg,
-            )
+        return YOLOAnchorlessPosePost(  # pose estimation is only available for anchorless model
+            pre_cfg,
+            post_cfg,
+        )
 
     else:
         raise NotImplementedError(f"Task {post_cfg['task']} is not implemented yet")
