@@ -45,4 +45,4 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
             return
         else:
-            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, device)
+            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, device, model_kwargs)
