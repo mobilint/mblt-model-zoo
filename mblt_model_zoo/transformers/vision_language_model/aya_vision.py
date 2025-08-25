@@ -16,12 +16,13 @@ from transformers import (
     AutoProcessor,
     AyaVisionProcessor,
     AutoModelForImageTextToText,
-    GenerationMixin,
 )
 from transformers.models.aya_vision.modeling_aya_vision import (
     AyaVisionCausalLMOutputWithPast,
 )
 from transformers.utils import is_torchdynamo_compiling
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
 from ..utils.cache_utils import MobilintCache
 
@@ -48,7 +49,7 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
 
 
 class MobilintAyaVisionForConditionalGeneration(
-    AyaVisionPreTrainedModel, GenerationMixin
+    AyaVisionPreTrainedModel, MobilintGenerationMixin
 ):
     config_class = MobilintAyaVisionConfig
 
@@ -86,6 +87,9 @@ class MobilintAyaVisionForConditionalGeneration(
         )
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
+    
+    def get_mxq_model(self):
+        return self.language_model.get_mxq_model()
 
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
