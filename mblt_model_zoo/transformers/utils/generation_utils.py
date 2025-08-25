@@ -5,6 +5,10 @@ from transformers import Cache, GenerationMixin
 from mblt_model_zoo.transformers.utils.cache_utils import MobilintCache
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
+    def __init__(self):
+        super().__init__()
+        self._cache = None
+        
     @abstractmethod
     def get_mxq_model(self) -> maccel.Model:
         pass
