@@ -4,11 +4,7 @@ from abc import ABC, abstractmethod
 from transformers import Cache, GenerationMixin
 from mblt_model_zoo.transformers.utils.cache_utils import MobilintCache
 
-class MobilintGenerationMixin(ABC, GenerationMixin):
-    def __init__(self):
-        super().__init__()
-        self._cache = None
-        
+class MobilintGenerationMixin(ABC, GenerationMixin):        
     @abstractmethod
     def get_mxq_model(self) -> maccel.Model:
         pass
@@ -16,7 +12,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     def _get_cache(
         self, cache_implementation: str, batch_size: int, max_cache_len: int, device: torch.device, model_kwargs
     ) -> Cache:
-        if self._cache is None:
+        if not hasattr(self, "_cache"):
             self._cache = MobilintCache(self.get_mxq_model())
         else:
             self._cache.reset()
