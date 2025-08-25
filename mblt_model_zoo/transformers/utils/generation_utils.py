@@ -44,9 +44,5 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
             return
         elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
             return
-        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, device)
         else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
+            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, device)
