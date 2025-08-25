@@ -46,7 +46,7 @@ class MobilintLayer(CacheLayerMixin):
         self._seen_tokens += cache_position.numel()
     
 class MobilintCache(Cache):
-    def __init__(self, mxq_model: maccel.Model, *args, **kwargs):
+    def __init__(self, mxq_model: maccel.Model):
         self.mxq_model = mxq_model
         
         self.layers: list[MobilintLayer] = [MobilintLayer(self.mxq_model)]
