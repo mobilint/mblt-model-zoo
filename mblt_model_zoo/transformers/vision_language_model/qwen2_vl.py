@@ -18,8 +18,6 @@ from transformers import (
     Qwen2VLModel,
     Qwen2VLForConditionalGeneration,
     
-    GenerationConfig,
-    PreTrainedModel,
     AutoConfig,
     AutoTokenizer,
     AutoProcessor,
@@ -34,6 +32,8 @@ from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
 from ..utils.cache_utils import MobilintCache
 
@@ -327,7 +327,7 @@ class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
         self.language_model.dispose()
 
 
-class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qwen2VLForConditionalGeneration):
+class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
@@ -341,36 +341,8 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qw
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
     
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        super()._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
-        )
-
-        cache_name = "past_key_values"
-
-        if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = MobilintCache(self.model.language_model.mxq_model)
-        else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
+    def get_mxq_model(self):
+        return self.model.language_model.mxq_model
     
     def dispose(self):
         self.model.dispose()

@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, TypeVar, Union
+from typing import Optional, Tuple, TypeVar, Union
 import math
 import maccel
 import torch
@@ -10,7 +10,6 @@ from transformers import (
     WhisperTokenizer,
     WhisperFeatureExtractor,
     WhisperProcessor,
-    GenerationConfig,
     PreTrainedModel,
     WhisperConfig,
     WhisperPreTrainedModel,
@@ -26,8 +25,6 @@ from transformers.models.whisper.modeling_whisper import (
 )
 from transformers.models.whisper.generation_whisper import (
     WhisperGenerationMixin,
-    _get_attr_from_logit_processors,
-    _pad_to_max_length,
 )
 from transformers.modeling_outputs import (
     BaseModelOutput,
@@ -35,12 +32,9 @@ from transformers.modeling_outputs import (
     Seq2SeqModelOutput,
     Seq2SeqLMOutput,
 )
-from transformers.generation.logits_process import (
-    LogitsProcessorList,
-    SuppressTokensLogitsProcessor,
-)
-from transformers.generation.stopping_criteria import StoppingCriteriaList
 from transformers.utils import logging
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from ..utils.cache_utils import MobilintCache
 
 
@@ -463,7 +457,7 @@ class MobilintWhisperModel(MobilintWhisperPreTrainedModel):
 
 
 class MobilintWhisperForConditionalGeneration(
-    WhisperGenerationMixin, MobilintWhisperPreTrainedModel
+    MobilintGenerationMixin, WhisperGenerationMixin, MobilintWhisperPreTrainedModel
 ):
     base_model_prefix = "model"
 
@@ -473,6 +467,9 @@ class MobilintWhisperForConditionalGeneration(
         self.max_target_positions = config.max_target_positions
         # for pipeline type checking
         self.config.model_type = "whisper"
+    
+    def get_mxq_model(self):
+        return self.model.decoder.mxq_model
 
     def get_encoder(self):
         return self.model.get_encoder()
@@ -495,37 +492,6 @@ class MobilintWhisperForConditionalGeneration(
 
     def tie_weights(self):
         pass
-
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: Dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        super()._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
-        )
-
-        cache_name = "past_key_values"
-
-        if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "EncoderDecoderCache":
-            model_kwargs[cache_name] = MobilintCache(self.model.decoder.mxq_model)
-        else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
 
     def forward(
         self,

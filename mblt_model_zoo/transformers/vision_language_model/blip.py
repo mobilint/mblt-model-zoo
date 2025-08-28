@@ -10,7 +10,6 @@ from transformers import (
     BlipTextConfig,
     BlipVisionConfig,
     BlipPreTrainedModel,
-    GenerationMixin,
     AutoConfig,
     AutoTokenizer,
     BertTokenizer,
@@ -19,7 +18,6 @@ from transformers import (
     BlipProcessor,
     AutoModelForVision2Seq,
     AutoModelForImageTextToText,
-    GenerationConfig,
 )
 from transformers.models.blip.modeling_blip import (
     BlipForConditionalGenerationModelOutput,
@@ -34,6 +32,8 @@ from transformers.modeling_outputs import (
     BaseModelOutputWithPooling,
 )
 from transformers.utils import logging
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from ..utils.cache_utils import MobilintCache
 
 
@@ -295,12 +295,15 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         self.mxq_model.dispose()
 
 
-class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMixin):
+class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGenerationMixin):
     def __init__(self, config: MobilintBlipTextConfig):
         super().__init__(config)
 
         self.bert = MobilintBlipTextModel(config)
         self.label_smoothing = config.label_smoothing
+    
+    def get_mxq_model(self):
+        return self.bert.mxq_model
 
     def get_input_embeddings(self):
         return self.bert.get_input_embeddings()
@@ -393,37 +396,6 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, GenerationMix
 
         return model_inputs
 
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        super()._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
-        )
-
-        cache_name = "past_key_values"
-
-        if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = MobilintCache(self.bert.mxq_model)
-        else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
-    
     def dispose(self):
         self.bert.dispose()
 
@@ -502,7 +474,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
 
 
 class MobilintBlipForConditionalGeneration(
-    MobilintBlipPreTrainedModel, GenerationMixin
+    MobilintBlipPreTrainedModel, MobilintGenerationMixin
 ):
     config_class = MobilintBlipConfig
     _tied_weights_keys = []
@@ -520,6 +492,9 @@ class MobilintBlipForConditionalGeneration(
 
         self.decoder_input_ids = config.text_config.bos_token_id
         self.decoder_pad_token_id = config.text_config.pad_token_id
+    
+    def get_mxq_model(self):
+        return self.text_decoder.get_mxq_model()
 
     def get_input_embeddings(self):
         return self.text_decoder.get_input_embeddings()
