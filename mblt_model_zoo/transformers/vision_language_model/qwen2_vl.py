@@ -18,8 +18,6 @@ from transformers import (
     Qwen2VLModel,
     Qwen2VLForConditionalGeneration,
     
-    GenerationConfig,
-    PreTrainedModel,
     AutoConfig,
     AutoTokenizer,
     AutoProcessor,
@@ -34,6 +32,8 @@ from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
 from ..utils.cache_utils import MobilintCache
 
@@ -327,7 +327,7 @@ class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
         self.language_model.dispose()
 
 
-class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qwen2VLForConditionalGeneration):
+class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
@@ -340,6 +340,9 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qw
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
+    
+    def get_mxq_model(self):
+        return self.model.language_model.mxq_model
     
     def dispose(self):
         self.model.dispose()
