@@ -146,7 +146,7 @@ class MXQ_Model:
 
             if local_path is None:  # default option
                 model_dir = os.path.expanduser(
-                    f"~/.mblt_model_zoo/{product}/{infer_mode}"
+                    f"~/.mblt_model_zoo/vision/{product}/{infer_mode}"
                 )
                 os.makedirs(model_dir, exist_ok=True)
                 cached_file = os.path.join(model_dir, filename)

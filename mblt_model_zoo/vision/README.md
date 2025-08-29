@@ -74,6 +74,10 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | Wide_ResNet101_2 | (224,224,3) | 78.384 | 78.834 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
 | Wide_ResNet101_2 | (224,224,3) | 82.282 | 82.504 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
 
+<details><summary>Note</summary>
+- **Acc** values are model accuracies on the [ImageNet](https://www.image-net.org/index.php) dataset validation set.
+</details>
+
 ## Object Detection (COCO)
 
 | Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | params (M) | Source | Note |
@@ -103,9 +107,14 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | yolo12s | (640,640,3) | 46.746 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | yolo12m | (640,640,3) | 51.568 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 
+<details open>
+<summary>Note</summary>
+- **mAP** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+</details>
+
 ## Instance Segmentation (COCO)
 
-| Model | Input Size <br> (H, W, C)| mAPmask <br> (NPU) | mAPmask <br> (GPU)| FLOPs (B) | params (M) |Source| Note |
+| Model | Input Size <br> (H, W, C)| mAP<sup>mask</sup> <br> (NPU) | mAP<sup>mask</sup> <br> (GPU)| FLOPs (B) | params (M) |Source| Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | yolov5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
 | yolov5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
@@ -118,3 +127,21 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | yolo11m-seg | (640,640,3) | 41.031 | 41.546 | 123.56 | 22.40 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11l-seg | (640,640,3) | 42.509 | 42.831 | 142.68 | 27.65 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | yolo11x-seg | (640,640,3) | 43.614 | 43.746 | 319.78 | 62.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+
+
+<details open>
+<summary>Note</summary>
+- **mAP<sup>mask</sup>** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+</details>
+
+## Pose Estimation
+
+| Model | Input Size <br> (H, W, C)| mAP<sup>pose</sup> <br> (NPU) | mAP<sup>pose</sup> <br> (GPU)| FLOPs (B) | params (M) |Source| Note |
+|-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
+| yolov8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| yolo11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+
+<details open>
+<summary>Note</summary>
+- **mAP<sup>pose</sup>** values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
+</details>
