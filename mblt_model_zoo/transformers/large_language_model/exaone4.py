@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 import maccel
 import torch
@@ -8,11 +8,8 @@ import math
 
 from transformers import (
     Exaone4PreTrainedModel,
-    GenerationMixin,
     Exaone4Config,
     GPT2TokenizerFast,
-    GenerationConfig,
-    PreTrainedModel,
     AutoConfig,
     AutoModel,
     AutoTokenizer,
@@ -21,6 +18,8 @@ from transformers import (
 from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.utils import TransformersKwargs, logging
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from ..utils.cache_utils import MobilintCache
 
 
@@ -44,7 +43,7 @@ class MobilintExaone4Config(Exaone4Config):
         self.tie_word_embeddings = False
 
 
-class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, GenerationMixin):
+class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, MobilintGenerationMixin):
     supports_gradient_checkpointing = False
     _no_split_modules = []
     _skip_keys_device_placement = []
@@ -74,6 +73,9 @@ class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, GenerationMixin):
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
+    
+    def get_mxq_model(self):
+        return self.mxq_model
 
     def set_decoder(self, decoder):
         raise NotImplementedError("self.model is implemented in mxq")
@@ -84,37 +86,6 @@ class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, GenerationMixin):
 
     def tie_weights(self):
         pass
-
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: Dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        super()._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
-        )
-
-        cache_name = "past_key_values"
-
-        if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "DynamicCache":
-            model_kwargs[cache_name] = MobilintCache(self.mxq_model)
-        else:
-            raise NotImplementedError(
-                f"_prepare_cache_for_generation Cache class {model_kwargs[cache_name].__class__.__name__}, which is not compatible for MobilintCache"
-            )
 
     def forward(
         self,

@@ -1,4 +1,4 @@
-from typing import Optional, Union, List, Tuple, Dict
+from typing import Optional, Union, List, Tuple
 
 import maccel
 from maccel import Cluster, Core, CoreId
@@ -9,7 +9,6 @@ import numpy as np
 from transformers import (
     AyaVisionConfig,
     AyaVisionPreTrainedModel,
-    GenerationMixin,
     AutoModelForCausalLM,
     AutoConfig,
     AutoTokenizer,
@@ -17,13 +16,14 @@ from transformers import (
     AutoProcessor,
     AyaVisionProcessor,
     AutoModelForImageTextToText,
-    GenerationConfig,
-    PreTrainedModel,
 )
 from transformers.models.aya_vision.modeling_aya_vision import (
     AyaVisionCausalLMOutputWithPast,
 )
 from transformers.utils import is_torchdynamo_compiling
+
+from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+
 from ..utils.cache_utils import MobilintCache
 
 
@@ -49,7 +49,7 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
 
 
 class MobilintAyaVisionForConditionalGeneration(
-    AyaVisionPreTrainedModel, GenerationMixin
+    AyaVisionPreTrainedModel, MobilintGenerationMixin
 ):
     config_class = MobilintAyaVisionConfig
 
@@ -87,6 +87,9 @@ class MobilintAyaVisionForConditionalGeneration(
         )
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
+    
+    def get_mxq_model(self):
+        return self.language_model.get_mxq_model()
 
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
@@ -266,24 +269,6 @@ class MobilintAyaVisionForConditionalGeneration(
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             image_hidden_states=image_features if pixel_values is not None else None,
-        )
-
-    def _prepare_cache_for_generation(
-        self,
-        generation_config: GenerationConfig,
-        model_kwargs: Dict,
-        assistant_model: "PreTrainedModel",
-        batch_size: int,
-        max_cache_length: int,
-        device: torch.device,
-    ) -> bool:
-        return self.language_model._prepare_cache_for_generation(
-            generation_config,
-            model_kwargs,
-            assistant_model,
-            batch_size,
-            max_cache_length,
-            device,
         )
 
     def prepare_inputs_for_generation(
