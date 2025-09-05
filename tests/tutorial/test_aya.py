@@ -8,6 +8,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 

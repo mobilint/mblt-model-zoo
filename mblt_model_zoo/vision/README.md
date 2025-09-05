@@ -1,8 +1,10 @@
 # Pre-Trained Vision Models
-Here, we give the full list of publicly pre-trained models supported by the Mobilint Model Zoo.
-## Image Classification (ImageNet)
 
-| Model | Input Size <br> (H, W, C)|Top1 Acc <br> (NPU)| Top1 Acc <br> (GPU)| FLOPs (B) | params (M) |Source|Note|
+Here, we give the full list of publicly pre-trained models supported by the Mobilint Model Zoo.
+
+## Image Classification
+
+| Model | Input Size<br>(H,W,C) | Top1 Acc<br>(NPU) | Top1 Acc<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |------------|------------|-----------|--------------------|--------|-------|------|------|
 | AlexNet | (224,224,3)| 56.022 | 56.552 | 0.71 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |
 | ConvNeXt_Tiny | (224,224,3) | 82.302 | 82.460| 4.46 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) |  |
@@ -12,7 +14,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | DenseNet121 | (224,224,3) | 74.194 | 74.414 | 2.83 | 7.98 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) |  |
 | DenseNet169 | (224,224,3) | 75.476 | 75.566 | 3.36 | 14.15 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) |  |
 | DenseNet201 | (224,224,3) | 76.650 | 76.880 | 4.29 | 20.01 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) |  |
-| GoogLeNet | (224,224,3) | 69.566 | 69.780 | 1.50 | 6.62 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.googlenet.html)	|  |
+| GoogLeNet | (224,224,3) | 69.566 | 69.780 | 1.50 | 6.62 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.googlenet.html) |  |
 | Inception_V3 | (299,299,3) | 77.120 | 77.278 | 5.71 | 27.16 | [Link](https://docs.pytorch.org/vision/main/models/generated/torchvision.models.inception_v3.html)|  |
 | MNASNet1_0 | (224,224,3)| 72.696 | 73.422 | 0.31 | 4.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_0.html) | |
 | MNASNet1_3 | (224,224,3) | 75.720 | 76.466 | 0.53 | 6.28 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_3.html) | |
@@ -74,24 +76,35 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | Wide_ResNet101_2 | (224,224,3) | 78.384 | 78.834 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
 | Wide_ResNet101_2 | (224,224,3) | 82.282 | 82.504 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
 
-<details><summary>Note</summary>
+<details>
+<summary>ImageNet</summary>
+
 - **Acc** values are model accuracies on the [ImageNet](https://www.image-net.org/index.php) dataset validation set.
+
 </details>
 
-## Object Detection (COCO)
+## Object Detection
 
-| Model | Input Size <br> (H, W, C)| mAP <br> (NPU) | mAP <br> (GPU)| FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | mAP<br>(NPU) | mAP<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|----------------|---------------|-----------|------------|--------|------|
 | yolov3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
 | yolov3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
 | yolov3-sppu | (640,640,3) | 51.382 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
-| yolov5su | (640, 640, 3) | 42.206 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5mu | (640, 640, 3) | 48.217 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5lu | (640, 640, 3) | 51.718 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5l6 | (1280, 1280, 3) | 52.402 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
-| yolov5xu | (640, 640, 3) | 52.600 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5x6 | (1280, 1280, 3) | 53.706 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| yolov5su | (640,640,3) | 42.206 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5s6u | (1280,1280,3) | 48.008 | 48.632 | 97,75 | 15.29 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5mu | (640,640,3) | 48.217 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5m6u | (1280,1280,3) | 52.938 | 53.475 | 261.56 | 41.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5lu | (640,640,3) | 51.718 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5l6 | (1280,1280,3) | 52.402 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| yolov5l6u | (1280,1280,3) | 54.974 | 55.465 | 549.86 | 80.05 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5xu | (640,640,3) | 52.600 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| yolov5x6 | (1280, 1280,3) | 53.706 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| yolov5x6u | (1280,1280,3) | 56.141 | 56.489 | 1003.46 | 155.48 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
 | yolov7 | (640,640,3) | 50.402 | 50.941 | 104.67 | 36.91 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| yolov7d6 | (1280,1280,3) | 55.635 | 55.792 | 702.30 | 133.76 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| yolov7e6 | (1280,1280,3) | 55.304 | 55.567 | 514.89 | 97.20 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| yolov7e6e | (1280,1280,3) | 55.768 | 56.295 | 842.87 | 151.69 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| yolov7w6 | (1280,1280,3) | 53.783 | 54.131 | 359.99 | 70.39 | [Link](https://github.com/WongKinYiu/yolov7/) | |
 | yolov7x | (640,640,3) | 52.103 | 52.706 | 189.88 | 71.31 | [Link](https://github.com/WongKinYiu/yolov7/) | |
 | yolov8s | (640,640,3) | 44.062 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | yolov8m | (640,640,3) | 49.657 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
@@ -107,14 +120,16 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | yolo12s | (640,640,3) | 46.746 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | yolo12m | (640,640,3) | 51.568 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 
-<details open>
-<summary>Note</summary>
+<details>
+<summary>COCO</summary>
+
 - **mAP** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+
 </details>
 
-## Instance Segmentation (COCO)
+## Instance Segmentation
 
-| Model | Input Size <br> (H, W, C)| mAP<sup>mask</sup> <br> (NPU) | mAP<sup>mask</sup> <br> (GPU)| FLOPs (B) | params (M) |Source| Note |
+| Model | Input Size<br>(H,W,C) | mAP<sup>mask</sup><br>(NPU) | mAP<sup>mask</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | yolov5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
 | yolov5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
@@ -129,19 +144,23 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | yolo11x-seg | (640,640,3) | 43.614 | 43.746 | 319.78 | 62.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 
 
-<details open>
-<summary>Note</summary>
+<details>
+<summary>COCO</summary>
+
 - **mAP<sup>mask</sup>** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+
 </details>
 
 ## Pose Estimation
 
-| Model | Input Size <br> (H, W, C)| mAP<sup>pose</sup> <br> (NPU) | mAP<sup>pose</sup> <br> (GPU)| FLOPs (B) | params (M) |Source| Note |
+| Model | Input Size<br>(H,W,C) | mAP<sup>pose</sup><br>(NPU) | mAP<sup>pose</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | yolov8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | yolo11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 
-<details open>
-<summary>Note</summary>
+<details>
+<summary>COCO</summary>
+
 - **mAP<sup>pose</sup>** values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
+
 </details>

@@ -32,6 +32,36 @@ class YOLOv5su_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
+class YOLOv5s6u_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov5s6u/aries/single/yolov5s6u.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov5s6u/aries/multi/yolov5s6u.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov5s6u/aries/global/yolov5s6u.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 4,  # Number of detection layers
+        },
+    )
+    DEFAULT = COCO_V1
+
+
 class YOLOv5mu_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
@@ -57,6 +87,36 @@ class YOLOv5mu_Set(ModelInfoSet):
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+class YOLOv5m6u_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov5m6u/aries/single/yolov5m6u.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov5m6u/aries/multi/yolov5m6u.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov5m6u/aries/global/yolov5m6u.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -127,6 +187,36 @@ class YOLOv5l6_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
+class YOLOv5l6u_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov5l6u/aries/single/yolov5l6u.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov5l6u/aries/multi/yolov5l6u.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov5l6u/aries/global/yolov5l6u.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 4,  # Number of detection layers
+        },
+    )
+    DEFAULT = COCO_V1
+
+
 class YOLOv5xu_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
@@ -192,6 +282,36 @@ class YOLOv5x6_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
+class YOLOv5x6u_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov5x6u/aries/single/yolov5x6u.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov5x6u/aries/multi/yolov5x6u.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov5x6u/aries/global/yolov5x6u.mxq",
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 4,  # Number of detection layers
+        },
+    )
+    DEFAULT = COCO_V1
+
+
 def YOLOv5su(
     local_path: str = None,
     model_type: str = "DEFAULT",
@@ -207,6 +327,21 @@ def YOLOv5su(
     )
 
 
+def YOLOv5s6u(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5s6u_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
 def YOLOv5mu(
     local_path: str = None,
     model_type: str = "DEFAULT",
@@ -215,6 +350,21 @@ def YOLOv5mu(
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5mu_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv5m6u(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5m6u_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -252,6 +402,21 @@ def YOLOv5l6(
     )
 
 
+def YOLOv5l6u(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5l6u_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
 def YOLOv5xu(
     local_path: str = None,
     model_type: str = "DEFAULT",
@@ -275,6 +440,21 @@ def YOLOv5x6(
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv5x6_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv5x6u(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5x6u_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

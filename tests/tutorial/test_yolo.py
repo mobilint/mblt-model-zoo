@@ -1,6 +1,6 @@
 import os
 from argparse import ArgumentParser
-from mblt_model_zoo.vision import YOLO11xPose
+from mblt_model_zoo.vision import YOLOv7e6e
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -20,10 +20,10 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             "/workspace/mblt-model-zoo/tests/tmp/",
-            "yolo11x-pose_" + os.path.basename(image_path),
+            "yolo7e6e_" + os.path.basename(image_path),
         )
 
-    yolo = YOLO11xPose()
+    yolo = YOLOv7e6e()
 
     input_img = yolo.preprocess(image_path)
     output = yolo(input_img)

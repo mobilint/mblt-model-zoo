@@ -15,15 +15,10 @@ prompt = "Explain how wonderful you are"
 prompt = "Explica lo increíble que eres"
 prompt = "너가 얼마나 대단한지 설명해 봐"
 
-messages = [
-    {"role": "user", "content": prompt}
-]
+messages = [{"role": "user", "content": prompt}]
 
 input_ids = tokenizer.apply_chat_template(
-    messages,
-    tokenize=True,
-    add_generation_prompt=True,
-    return_tensors="pt"
+    messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
 )
 
 model.generate(
@@ -35,9 +30,7 @@ model.generate(
 
 print("\n - Reasoning mode\n")
 
-messages = [
-    {"role": "user", "content": "Which one is bigger, 3.12 vs 3.9?"}
-]
+messages = [{"role": "user", "content": "Which one is bigger, 3.12 vs 3.9?"}]
 
 input_ids = tokenizer.apply_chat_template(
     messages,
@@ -58,8 +51,10 @@ model.generate(
 
 print("\n - Agentic tool use\n")
 
+
 def roll_dice(max_num: int):
     return random.randint(1, max_num)
+
 
 tools = [
     {
@@ -71,19 +66,14 @@ tools = [
                 "type": "object",
                 "required": ["max_num"],
                 "properties": {
-                    "max_num": {
-                        "type": "int",
-                        "description": "Max number of the dice"
-                    }
-                }
-            }
-        }
+                    "max_num": {"type": "int", "description": "Max number of the dice"}
+                },
+            },
+        },
     }
 ]
 
-messages = [
-    {"role": "user", "content": "Roll D6 dice twice!"}
-]
+messages = [{"role": "user", "content": "Roll D6 dice twice!"}]
 
 input_ids = tokenizer.apply_chat_template(
     messages,

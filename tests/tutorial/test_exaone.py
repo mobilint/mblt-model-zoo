@@ -8,6 +8,7 @@ pipe = pipeline(
     "text-generation",
     model=model_name,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 
