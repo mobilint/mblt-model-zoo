@@ -1,5 +1,4 @@
-Pretrained Models with Huggingface's Transformers
-========================
+# Pretrained Models with Huggingface's Transformers
 
 **mblt-model-zoo** also provides generative AI models from Huggingface's [Transformers](https://github.com/huggingface/transformers).
 Currently, these models are only available on Mobilint's [Aries](https://www.mobilint.com/aries).
@@ -8,12 +7,16 @@ Support for [Regulus](https://www.mobilint.com/regulus) is planned and currently
 Mobilint's Model Zoo provides a seamless experience for using Transformers' models with the same class/function interfaces. All of the necessary auto classes in Transformers are overridden with our own, which automatically detect our models' identifiers (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from our model server. It also supports a locally downloaded model directory, just like the original Transformers.
 
 ## Installation
+
 - Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
 - Install **mblt-model-zoo** with extra dependency using pip:
+
 ```bash
 pip install mblt-model-zoo[transformers]
 ```
+
 - If you want to install the latest version from source, clone the repository and install it:
+
 ```bash
 git clone https://github.com/mobilint/mblt-model-zoo.git
 cd mblt-model-zoo
@@ -100,6 +103,7 @@ pprint(available_models)
 ```
 
 ## Model List
+
 The following tables summarize Transformers' models available in **mblt-model-zoo**. We provide the models that are quantized with our advanced quantization techniques. Performance metrics will be provided in the future.
 
 ### Large Language Models
@@ -130,9 +134,11 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 | Qwen2-VL-2B-Instruct | `mobilint/Qwen2-VL-2B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct) | Only supports 1 image input with (224, 224) size. Image input will be resized automatically by our overrided preprocessor. |
 
 ## License
+
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
 
 Additionally, the license for each model provided in this package follows the terms specified in the source link provided with it.
 
 ## Support & Issues
+
 If you encounter any problems with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
