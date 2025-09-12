@@ -25,7 +25,7 @@ class Results:
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
         self.set_output(output)
-        self.conf_thres = kwargs.get("conf_thres", 0.5)
+        self.conf_thres = kwargs.get("conf_thres", 0.25)
 
     def set_output(self, output: Union[TensorLike, ListTensorLike]):
         self.acc = None

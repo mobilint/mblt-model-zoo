@@ -17,11 +17,9 @@ class MBLT_Engine:
         self.model_cfg = model_cfg
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
-
         self.model = MXQ_Model(**self.model_cfg)
         self._preprocess = build_preprocess(self.pre_cfg)
         self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
-
         self.device = torch.device("cpu")
 
     @classmethod
@@ -117,7 +115,6 @@ class MXQ_Model:
             url_dict[self.product] = {self.infer_mode: None}
 
         self.acc = maccel.Accelerator()
-
         # ----------------Core Allocation-------------------------
         mc = maccel.ModelConfig()
         if self.product == "aries":

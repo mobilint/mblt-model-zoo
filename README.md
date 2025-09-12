@@ -1,9 +1,8 @@
 # Mobilint Model Zoo
 
-
 <div align="center">
 <p>
- <a href="https://www.mobilint.com/" target="_blank">
+<a href="https://www.mobilint.com/" target="_blank">
 <img src="https://raw.githubusercontent.com/mobilint/mblt-model-zoo/master/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
 </a>
 </p>
@@ -112,7 +111,7 @@ Currently, this optional functions are only available on environment equipped wi
 
 |Name|Use|Details|
 |-------|------|------|
-|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/transformers/README.md)
+|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/transformers/README.md) |
 
 ## License
 

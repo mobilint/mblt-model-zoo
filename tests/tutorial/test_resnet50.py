@@ -1,6 +1,6 @@
 import os
-from mblt_model_zoo.vision import ResNet50
 from argparse import ArgumentParser
+from mblt_model_zoo.vision import ResNet50
 
 if __name__ == "__main__":
     parser = ArgumentParser()
