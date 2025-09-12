@@ -11,21 +11,21 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | ConvNeXt_Small | (224,224,3) | 83.432 | 83.560 | 8.68 | 50.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_small.html) |  |
 | ConvNeXt_Base | (224,224,3) | 83.834 | 84.050 | 15.36 | 88.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_base.html) |  |
 | ConvNeXt_Large | (224,224,3) | 83.276 | 84.410 | 34.36 | 197.77 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_large.html) |  |
-| DeiT_Tiny_Patch16_224 | (224,224,3) | 71.864 | 72.030 |  | 5.72 | [Link](https://huggingface.co/timm/deit_tiny_patch16_224.fb_in1k) | fb_in1k |
-| DeiT_Small_Patch16_224 | (224,224,3) | 79.770 | 79.790 |  | 22.05 | [Link](https://huggingface.co/timm/deit_small_patch16_224.fb_in1k) | fb_in1k |
-| DeiT_Base_Patch16_224 | (224,224,3) | 81.886 | 81.980 |  | 86.57 | [Link](https://huggingface.co/timm/deit_base_patch16_224.fb_in1k) | fb_in1k |
+| DeiT_Tiny_Patch16_224 | (224,224,3) | 71.864 | 72.030 | 2.53 | 5.72 | [Link](https://huggingface.co/timm/deit_tiny_patch16_224.fb_in1k) | fb_in1k |
+| DeiT_Small_Patch16_224 | (224,224,3) | 79.770 | 79.790 | 9.25 | 22.05 | [Link](https://huggingface.co/timm/deit_small_patch16_224.fb_in1k) | fb_in1k |
+| DeiT_Base_Patch16_224 | (224,224,3) | 81.886 | 81.980 | 35.23 | 86.57 | [Link](https://huggingface.co/timm/deit_base_patch16_224.fb_in1k) | fb_in1k |
 | DeiT_Base_Patch16_384 | (384,384,3) | 83.046 | 83.100 | 111.34 | 86.86 | [Link](https://huggingface.co/timm/deit_base_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Small_Patch16_224 | (224,224,3) | 81.326 | 81.398 |  | 22.06 | [Link](https://huggingface.co/timm/deit3_small_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Small_Patch16_384 | (384,384,3) | 81.304 | 81.414 |  | 22.21 | [Link](https://huggingface.co/timm/deit3_small_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Medium_Patch16_224 | (224,224,3) | 82.930 | 83.044 |  | 38.85 | [Link](https://huggingface.co/timm/deit3_medium_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Base_Patch16_224 | (224,224,3) | 83.644 | 83.766 |  | 86.59 | [Link](https://huggingface.co/timm/deit3_base_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Base_Patch16_384 | (384,384,3) | 84.990 | 85.062 |  | 86.88 | [Link](https://huggingface.co/timm/deit3_base_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Large_Patch16_224 | (224,224,3) | 84.658 | 84.738 |  | 304.37 | [Link](https://huggingface.co/timm/deit3_large_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Large_Patch16_384 | (384,384,3) | 85.770 | 85.828 |  | 304.76 | [Link](https://huggingface.co/timm/deit3_large_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Small_Patch16_224 | (224,224,3) | 81.326 | 81.398 | 9.25 | 22.06 | [Link](https://huggingface.co/timm/deit3_small_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Small_Patch16_384 | (384,384,3) | 81.304 | 81.414 | 31.17 | 22.21 | [Link](https://huggingface.co/timm/deit3_small_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Medium_Patch16_224 | (224,224,3) | 82.930 | 83.044 | 16.05 | 38.85 | [Link](https://huggingface.co/timm/deit3_medium_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Base_Patch16_224 | (224,224,3) | 83.644 | 83.766 | 35.23 | 86.59 | [Link](https://huggingface.co/timm/deit3_base_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Base_Patch16_384 | (384,384,3) | 84.990 | 85.062 | 111.34 | 86.88 | [Link](https://huggingface.co/timm/deit3_base_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Large_Patch16_224 | (224,224,3) | 84.658 | 84.738 | 123.39 | 304.37 | [Link](https://huggingface.co/timm/deit3_large_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Large_Patch16_384 | (384,384,3) | 85.770 | 85.828 | 383.13 | 304.76 | [Link](https://huggingface.co/timm/deit3_large_patch16_384.fb_in1k) | fb_in1k |
 | DenseNet121 | (224,224,3) | 74.194 | 74.414 | 2.83 | 7.98 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) |  |
 | DenseNet169 | (224,224,3) | 75.476 | 75.566 | 3.36 | 14.15 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) |  |
 | DenseNet201 | (224,224,3) | 76.650 | 76.880 | 4.29 | 20.01 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) |  |
-| FlexiViT_Small | (240,240,3) | 82.284 | 82.532 |  | 22.06 | [Link](https://huggingface.co/timm/flexivit_small.1200ep_in1k) | 1200ep_in1k |
+| FlexiViT_Small | (240,240,3) | 82.284 | 82.532 | 10.73 | 22.06 | [Link](https://huggingface.co/timm/flexivit_small.1200ep_in1k) | 1200ep_in1k |
 | FlexiViT_Base | (240,240,3) | 84.670 | 84.670 | 40.66 | 86.59 | [Link](https://huggingface.co/timm/flexivit_base.1200ep_in1k) | 1200ep_in1k |
 | FlexiViT_Large | (240,240,3) | 85.576 | 85.660 | 142.21 | 304.36 | [Link](https://huggingface.co/timm/flexivit_large.1200ep_in1k) | 1200ep_in1k |
 | GoogLeNet | (224,224,3) | 69.566 | 69.780 | 1.50 | 6.62 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.googlenet.html) |  |
@@ -85,20 +85,20 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | VGG16_BN | (224,224,3) | 73.178 | 73.408 | 15.47 | 138.37 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) | |
 | VGG19 | (224,224,3) | 72.140 | 72.384 | 19.63 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) | |
 | VGG19_BN | (224,224,3) | 73.898 | 74.166 | 19.63 | 143.68 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) | |
-| ViT_Tiny_Patch16_224 | (224,224,3) | 75.308 | 75.458 |  | 5.72 | [Link](https://huggingface.co/timm/vit_tiny_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Tiny_Patch16_384 | (384,384,3) | 78.213 | 78.466 |  | 5.79 | [Link](https://huggingface.co/timm/vit_tiny_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch16_224 | (224,224,3) | 81.446 | 81.410 |  | 22.05 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch16_384 | (384,384,3) | 83.724 | 83.788 |  | 22.20 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch32_224 | (224,224,3) | 75.716 | 75.926 |  | 22.88 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch32_384 | (384,384,3) | 80.412 | 80.460 |  | 22.92 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch8_224 | (224,224,3) | 86.348 | 86.270 |  | 86.58 | [Link](https://huggingface.co/timm/vit_base_patch8_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
-| ViT_Base_Patch16_224 | (224,224,3) | 85.040 | 85.114 |  | 86.57 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
-| ViT_Base_Patch16_384 | (384,384,3) | 86.002 | 86.028 |  | 86.86 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch32_224 | (224,224,3) | 80.598 | 80.694 |  | 88.22 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch32_384 | (384,384,3) | 83.322 | 83.394 |  | 88.30 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch16_224 | (224,224,3) | 85.886 | 85.872 |  | 304.33 | [Link](https://huggingface.co/timm/vit_large_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch16_384 | (384,384,3) | 86.976 | 87.084 |  | 304.72 | [Link](https://huggingface.co/timm/vit_large_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch32_384 | (384,384,3) | 81.494 | 81.510 |  | 306.63 | [Link](https://huggingface.co/timm/vit_large_patch32_384.orig_in21k_ft_in1k) | orig_in21k_ft_in1k |
+| ViT_Tiny_Patch16_224 | (224,224,3) | 75.308 | 75.458 | 2.53 | 5.72 | [Link](https://huggingface.co/timm/vit_tiny_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Tiny_Patch16_384 | (384,384,3) | 78.213 | 78.466 | 9.46 | 5.79 | [Link](https://huggingface.co/timm/vit_tiny_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch16_224 | (224,224,3) | 81.446 | 81.410 | 9.25 | 22.05 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch16_384 | (384,384,3) | 83.724 | 83.788 | 31.17 | 22.20 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch32_224 | (224,224,3) | 75.716 | 75.926 | 2.30 | 22.88 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch32_384 | (384,384,3) | 80.412 | 80.460 | 6.92 | 22.92 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch8_224 | (224,224,3) | 86.348 | 86.270 | 156.86 | 86.58 | [Link](https://huggingface.co/timm/vit_base_patch8_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
+| ViT_Base_Patch16_224 | (224,224,3) | 85.040 | 85.114 | 35.23 | 86.57 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
+| ViT_Base_Patch16_384 | (384,384,3) | 86.002 | 86.028 | 111.34 | 86.86 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch32_224 | (224,224,3) | 80.598 | 80.694 | 8.84 | 88.22 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch32_384 | (384,384,3) | 83.322 | 83.394 | 26.16 | 88.30 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch16_224 | (224,224,3) | 85.886 | 85.872 | 123.39 | 304.33 | [Link](https://huggingface.co/timm/vit_large_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch16_384 | (384,384,3) | 86.976 | 87.084 | 383.13 | 304.72 | [Link](https://huggingface.co/timm/vit_large_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch32_384 | (384,384,3) | 81.494 | 81.510 | 90.75 | 306.63 | [Link](https://huggingface.co/timm/vit_large_patch32_384.orig_in21k_ft_in1k) | orig_in21k_ft_in1k |
 | Wide_ResNet50_2 | (224,224,3) | 78.268 | 78.490 | 11.40 | 68.88 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V1 |
 | Wide_ResNet50_2 | (224,224,3) | 81.226 | 81.626 | 11.40 | 68.88 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V2 |
 | Wide_ResNet101_2 | (224,224,3) | 78.384 | 78.834 | 22.75 | 126.89 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
