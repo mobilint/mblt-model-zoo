@@ -61,7 +61,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class Wide_ResNet101_2_Set(ModelInfoSet):
@@ -123,7 +123,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def Wide_ResNet50_2(

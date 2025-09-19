@@ -127,7 +127,7 @@ class ResNet50_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class ResNet101_Set(ModelInfoSet):
@@ -189,7 +189,7 @@ class ResNet101_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class ResNet152_Set(ModelInfoSet):
@@ -251,7 +251,7 @@ class ResNet152_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def ResNet18(

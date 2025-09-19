@@ -61,7 +61,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class ResNext101_32x8d_Set(ModelInfoSet):
@@ -123,7 +123,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class ResNext101_64x4d_Set(ModelInfoSet):

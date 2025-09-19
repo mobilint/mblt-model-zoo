@@ -57,7 +57,7 @@ class RegNet_X_400MF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_800MF_Set(ModelInfoSet):
@@ -115,7 +115,7 @@ class RegNet_X_800MF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_1_6GF_Set(ModelInfoSet):
@@ -173,7 +173,7 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_3_2GF_Set(ModelInfoSet):
@@ -231,7 +231,7 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_8GF_Set(ModelInfoSet):
@@ -289,7 +289,7 @@ class RegNet_X_8GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_16GF_Set(ModelInfoSet):
@@ -347,7 +347,7 @@ class RegNet_X_16GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_X_32GF_Set(ModelInfoSet):
@@ -405,7 +405,7 @@ class RegNet_X_32GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_400MF_Set(ModelInfoSet):
@@ -463,7 +463,7 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_800MF_Set(ModelInfoSet):
@@ -521,7 +521,7 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_1_6GF_Set(ModelInfoSet):
@@ -579,7 +579,7 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_3_2GF_Set(ModelInfoSet):
@@ -637,7 +637,7 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_8GF_Set(ModelInfoSet):
@@ -695,7 +695,7 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_16GF_Set(ModelInfoSet):
@@ -753,7 +753,7 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class RegNet_Y_32GF_Set(ModelInfoSet):
@@ -811,7 +811,7 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def RegNet_X_400MF(

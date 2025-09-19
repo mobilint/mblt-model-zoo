@@ -57,7 +57,7 @@ class MobileNet_V2_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def MobileNet_V2(
