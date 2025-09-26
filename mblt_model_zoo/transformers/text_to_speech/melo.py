@@ -11,6 +11,23 @@ from .models import SynthesizerTrn
 from .split_utils import split_sentence
 from .download_utils import load_or_download_config, load_or_download_model
 
+def split_sentence_by_space(text: str, max_len: int = 30) -> list[str]:
+    words = text.split()
+    chunks = []
+    current_chunk = ""
+
+    for word in words:
+        if len(current_chunk) + len(word) + 1 > max_len:
+            chunks.append(current_chunk.strip())
+            current_chunk = word
+        else:
+            current_chunk += (" " + word) if current_chunk else word
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
 class TTS(nn.Module):
     def __init__(self, 
                 language,
@@ -68,6 +85,7 @@ class TTS(nn.Module):
     @staticmethod
     def split_sentences_into_pieces(text, language, quiet=False):
         texts = split_sentence(text, language_str=language)
+        texts = [piece for text in texts for piece in split_sentence_by_space(text, max_len=10000000)]
         if not quiet:
             print(" > Text split to sentences.")
             print('\n'.join(texts))
@@ -119,6 +137,15 @@ class TTS(nn.Module):
             audio_list.append(audio)
         torch.cuda.empty_cache()
         audio = self.audio_numpy_concat(audio_list, sr=self.hps.data.sampling_rate, speed=speed)
+
+        noise_reduce_sr = self.hps.data.sampling_rate
+        audio = nr.reduce_noise(y=audio, sr=noise_reduce_sr, stationary=True, padding=0, 
+                                    prop_decrease=0.7,         # moderate noise reduction for better volume
+                                    freq_mask_smooth_hz=100,   # tight frequency mask for precise processing
+                                    time_mask_smooth_ms=150,   # shorter time mask for better volume preservation
+                                    n_fft=1024,                # standard FFT resolution for balanced processing
+                                    n_std_thresh_stationary=1.5,  # lower threshold for better volume preservation
+                                    clip_noise_stationary=True)    # clip noise for cleaner output
 
         if output_path is None:
             return audio
