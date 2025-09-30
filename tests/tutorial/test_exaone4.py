@@ -1,6 +1,6 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
-from transformers import TextStreamer
 import random
+from transformers import TextStreamer
+from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForCausalLM
 
 model_name = "mobilint/EXAONE-4.0-1.2B"
 
@@ -12,8 +12,8 @@ print("\n - Non-reasoning mode\n")
 
 # Choose your prompt
 prompt = "Explain how wonderful you are"
-prompt = "Explica lo increíble que eres"
-prompt = "너가 얼마나 대단한지 설명해 봐"
+# prompt = "Explica lo increíble que eres"
+# prompt = "너가 얼마나 대단한지 설명해 봐"
 
 messages = [{"role": "user", "content": prompt}]
 

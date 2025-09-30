@@ -30,8 +30,8 @@ pip install -e .[transformers]
 **mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. You can use our overrided auto classes such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`.
 
 ```python
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -40,7 +40,10 @@ pipe = pipeline(
     "text-generation",
     model=model_path,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+    device="cpu",
 )
+
+pipe.generation_config.max_new_tokens = None
 
 messages = [
     {
@@ -52,20 +55,20 @@ messages = [
 
 outputs = pipe(
     messages,
-    max_new_tokens=2048,
+    max_length=4096,
 )
 ```
 
 You can also use `AutoModel` or `AutoModelForCausalLM` for initializing models.
 
 ```python
-from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path)
+model = AutoModelForCausalLM.from_pretrained(model_path).to("cpu")
 
 messages = [
     {
@@ -79,20 +82,20 @@ input_ids = tokenizer.apply_chat_template(
     messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
 )
 
+streamer = TextStreamer(tokenizer)
 outputs = model.generate(
-    inputs,
+    input_ids.to(model.device),
     max_new_tokens=2048,
     do_sample=True,
-    top_k=50,
-    top_p=0.95
+    streamer=streamer,
 )
 ```
 
 We also support the vision-language models associated with `AutoProcessor` and image format inputs.
 
 ```python
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
@@ -101,6 +104,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 
@@ -133,8 +137,8 @@ Further usage examples can be found in the [tutorial](../../tests/tutorial/) dir
 **mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `large_language_model`, `speech_to_text`, etc.):
 
 ```python
-from mblt_model_zoo.transformers import list_models
 from pprint import pprint
+from mblt_model_zoo.transformers import list_models
 
 available_models = list_models()
 pprint(available_models)

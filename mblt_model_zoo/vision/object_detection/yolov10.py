@@ -10,6 +10,8 @@ class YOLOv10b_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/object_detection/yolov10b/aries/single/yolov10b.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov10b/aries/multi/yolov10b.mxq",
                     "global": "https://dl.mobilint.com/model/vision/object_detection/yolov10b/aries/global/yolov10b.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

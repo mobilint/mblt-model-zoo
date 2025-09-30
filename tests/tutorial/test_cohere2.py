@@ -1,5 +1,5 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 model_path = "mobilint/c4ai-command-r7b-12-2024"
 tokenizer = AutoTokenizer.from_pretrained(model_path)

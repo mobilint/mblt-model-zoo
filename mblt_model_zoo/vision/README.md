@@ -115,38 +115,40 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 | Model | Input Size<br>(H,W,C) | mAP<br>(NPU) | mAP<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|----------------|---------------|-----------|------------|--------|------|
-| yolov3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
-| yolov3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
-| yolov3-sppu | (640,640,3) | 51.382 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
-| yolov5su | (640,640,3) | 42.206 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5s6u | (1280,1280,3) | 48.008 | 48.632 | 97,75 | 15.29 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5mu | (640,640,3) | 48.217 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5m6u | (1280,1280,3) | 52.938 | 53.475 | 261.56 | 41.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5lu | (640,640,3) | 51.718 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5l6 | (1280,1280,3) | 52.402 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
-| yolov5l6u | (1280,1280,3) | 54.974 | 55.465 | 549.86 | 80.05 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5xu | (640,640,3) | 52.600 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov5x6 | (1280, 1280,3) | 53.706 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
-| yolov5x6u | (1280,1280,3) | 56.141 | 56.489 | 1003.46 | 155.48 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
-| yolov7 | (640,640,3) | 50.402 | 50.941 | 104.67 | 36.91 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov7d6 | (1280,1280,3) | 55.635 | 55.792 | 702.30 | 133.76 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov7e6 | (1280,1280,3) | 55.304 | 55.567 | 514.89 | 97.20 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov7e6e | (1280,1280,3) | 55.768 | 56.295 | 842.87 | 151.69 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov7w6 | (1280,1280,3) | 53.783 | 54.131 | 359.99 | 70.39 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov7x | (640,640,3) | 52.103 | 52.706 | 189.88 | 71.31 | [Link](https://github.com/WongKinYiu/yolov7/) | |
-| yolov8s | (640,640,3) | 44.062 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8m | (640,640,3) | 49.657 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8l | (640,640,3) | 52.340 | 52.773 | 165.24 | 43.67 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8x | (640,640,3) | 53.365 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
-| yolov9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
-| yolov10b | (640,640,3) | 51.125 | 52.096 | 92.23 | 19.07 | [Link](https://docs.ultralytics.com/models/yolov10/) | |
-| yolo11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11l | (640,640,3) | 52.468 | 53.165 | 87.37 | 25.34 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11x | (640,640,3) | 54.059 | 54.478 | 195.67 | 56.92 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo12s | (640,640,3) | 46.746 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
-| yolo12m | (640,640,3) | 51.568 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| YOLOv3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
+| YOLOv3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
+| YOLOv3-sppu | (640,640,3) | 51.382 | 51.763 | 283.57 | 104.78 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
+| YOLOv5su | (640,640,3) | 42.206 | 42.871 | 24.03 | 9.14 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5s6u | (1280,1280,3) | 48.008 | 48.632 | 97,75 | 15.29 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5mu | (640,640,3) | 48.217 | 48.906 | 64.27 | 25.09 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5m6u | (1280,1280,3) | 52.938 | 53.475 | 261.56 | 41.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5lu | (640,640,3) | 51.718 | 52.171 | 135.09 | 53.19 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5l6 | (1280,1280,3) | 52.402 | 53.368 | 445.31 | 72.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| YOLOv5l6u | (1280,1280,3) | 54.974 | 55.465 | 549.86 | 80.05 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5xu | (640,640,3) | 52.600 | 53.090 | 246.55 | 97.23 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv5x6 | (1280, 1280,3) | 53.706 | 54.706 | 838.81 | 140.73 | [Link](https://github.com/ultralytics/yolov5/)| |
+| YOLOv5x6u | (1280,1280,3) | 56.141 | 56.489 | 1003.46 | 155.48 | [Link](https://docs.ultralytics.com/models/yolov5/)| |
+| YOLOv7 | (640,640,3) | 50.402 | 50.941 | 104.67 | 36.91 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv7d6 | (1280,1280,3) | 55.635 | 55.792 | 702.30 | 133.76 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv7e6 | (1280,1280,3) | 55.304 | 55.567 | 514.89 | 97.20 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv7e6e | (1280,1280,3) | 55.768 | 56.295 | 842.87 | 151.69 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv7w6 | (1280,1280,3) | 53.783 | 54.131 | 359.99 | 70.39 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv7x | (640,640,3) | 52.103 | 52.706 | 189.88 | 71.31 | [Link](https://github.com/WongKinYiu/yolov7/) | |
+| YOLOv8s | (640,640,3) | 44.062 | 44.918 | 28.64 | 11.16 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8m | (640,640,3) | 49.657 | 50.240 | 79.00 | 25.89 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8l | (640,640,3) | 52.340 | 52.773 | 165.24 | 43.67 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8x | (640,640,3) | 53.365 | 53.802 | 257.92 | 68.20 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| GELANm | (640,640,3) | 50.108 | 50.923 | 76.44 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| GELANc | (640,640,3) | 51.938 | 52.274 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv10b | (640,640,3) | 51.125 | 52.096 | 92.23 | 19.07 | [Link](https://docs.ultralytics.com/models/yolov10/) | |
+| YOLO11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11l | (640,640,3) | 52.468 | 53.165 | 87.37 | 25.34 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11x | (640,640,3) | 54.059 | 54.478 | 195.67 | 56.92 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO12s | (640,640,3) | 46.746 | 47.687 | 23.84 | 9.26 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| YOLO12m | (640,640,3) | 51.568 | 52.297 | 71.91 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 
 <details>
 <summary>Object Detection (COCO)</summary>
@@ -159,17 +161,17 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 | Model | Input Size<br>(H,W,C) | mAP<sup>mask</sup><br>(NPU) | mAP<sup>mask</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
-| yolov5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
-| yolov5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
-| yolov8s-seg | (640,640,3) | 36.072 | 36.582 | 42.64 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8m-seg | (640,640,3) | 39.978 | 40.444 | 110.26 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8l-seg | (640,640,3) | 41.993 | 42.316 | 220.55 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov8x-seg | (640,640,3) | 42.913 | 43.020 | 344.20 | 71.78 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolov9c-seg | (640,640,3) | 42.249 | 42.460 | 145.72 | 27.45 | [Link](https://docs.ultralytics.com/models/yolov9/) | |
-| yolo11s-seg | (640,640,3) | 36.874 | 37.602 | 35.69 | 10.10 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11m-seg | (640,640,3) | 41.031 | 41.546 | 123.56 | 22.40 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11l-seg | (640,640,3) | 42.509 | 42.831 | 142.68 | 27.65 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| yolo11x-seg | (640,640,3) | 43.614 | 43.746 | 319.78 | 62.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLOv5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv8s-seg | (640,640,3) | 36.072 | 36.582 | 42.64 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8m-seg | (640,640,3) | 39.978 | 40.444 | 110.26 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8l-seg | (640,640,3) | 41.993 | 42.316 | 220.55 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8x-seg | (640,640,3) | 42.913 | 43.020 | 344.20 | 71.78 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv9c-seg | (640,640,3) | 42.249 | 42.460 | 145.72 | 27.45 | [Link](https://docs.ultralytics.com/models/yolov9/) | |
+| YOLO11s-seg | (640,640,3) | 36.874 | 37.602 | 35.69 | 10.10 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11m-seg | (640,640,3) | 41.031 | 41.546 | 123.56 | 22.40 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11l-seg | (640,640,3) | 42.509 | 42.831 | 142.68 | 27.65 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11x-seg | (640,640,3) | 43.614 | 43.746 | 319.78 | 62.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 
 <details>
 <summary> Instance Segmentation (COCO)</summary>
@@ -182,8 +184,8 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 | Model | Input Size<br>(H,W,C) | mAP<sup>pose</sup><br>(NPU) | mAP<sup>pose</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
-| yolov8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| yolo11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLOv8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLO11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 
 <details>
 <summary>Pose Estimation (COCO)</summary>

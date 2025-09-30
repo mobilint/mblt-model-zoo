@@ -1,5 +1,5 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 model_name = "mobilint/EXAONE-3.5-2.4B-Instruct"
 

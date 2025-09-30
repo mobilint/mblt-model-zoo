@@ -10,6 +10,8 @@ class GoogLeNet_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/googlenet_IMAGENET1K_V1/aries/single/googlenet_IMAGENET1K_V1.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/googlenet_IMAGENET1K_V1/aries/multi/googlenet_IMAGENET1K_V1.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/googlenet_IMAGENET1K_V1/aries/global/googlenet_IMAGENET1K_V1.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

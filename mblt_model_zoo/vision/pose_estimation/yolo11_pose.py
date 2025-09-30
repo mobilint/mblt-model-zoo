@@ -10,6 +10,8 @@ class YOLO11xPose_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/single/yolo11x-pose.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/multi/yolo11x-pose.mxq",
                     "global": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/global/yolo11x-pose.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

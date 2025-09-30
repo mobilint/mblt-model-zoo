@@ -1,7 +1,7 @@
 import requests
 from PIL import Image
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 model_name = "mobilint/blip-image-captioning-large"
 

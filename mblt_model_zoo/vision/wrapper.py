@@ -124,7 +124,11 @@ class MXQ_Model:
                 mc.set_multi_core_mode(
                     [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
                 )
-            elif self.infer_mode == "global":
+            elif self.infer_mode == "global4":
+                mc.set_global4_core_mode(
+                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                )
+            elif self.infer_mode == "global" or self.infer_mode == "global8":
                 mc.set_global8_core_mode()
             else:
                 raise ValueError("Inappropriate inferece mode")

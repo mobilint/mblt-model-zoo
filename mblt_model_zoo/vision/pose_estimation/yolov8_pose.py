@@ -10,6 +10,8 @@ class YOLOv8xPose_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/pose_estimation/yolov8x-pose/aries/single/yolov8x-pose.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/pose_estimation/yolov8x-pose/aries/multi/yolov8x-pose.mxq",
                     "global": "https://dl.mobilint.com/model/vision/pose_estimation/yolov8x-pose/aries/global/yolov8x-pose.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

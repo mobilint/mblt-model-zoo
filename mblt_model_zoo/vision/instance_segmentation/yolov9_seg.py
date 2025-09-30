@@ -10,6 +10,8 @@ class YOLOv9cSeg_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/single/yolov9c-seg.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/multi/yolov9c-seg.mxq",
                     "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/global/yolov9c-seg.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

@@ -10,6 +10,8 @@ class Inception_V3_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/single/inception_v3_IMAGENET1K_V1.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/multi/inception_v3_IMAGENET1K_V1.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/global/inception_v3_IMAGENET1K_V1.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

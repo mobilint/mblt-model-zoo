@@ -1,5 +1,5 @@
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
