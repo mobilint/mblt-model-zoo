@@ -135,17 +135,17 @@ class MobilintBatchLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds.shape[2])
             cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+            batch_param = maccel.BatchParam(
+                sequence_lengths=[end_index - start_index + 1],
+                cache_sizes=[cache_size],
+                cache_ids=[0],
+                prefill_masks=[False], # not implemented in C++ yet.
+            )
 
-            # last infer
-            if i == num_of_chunks - 1:
-                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
-            else:
-                logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, cache_size)[0]
+            logits = self.mxq_model.infer([inputs_embeds[:, :, start_index:end_index, :]], None, None, batch_param)[0]
 
             if use_cache:
-                past_key_values.update_cache_position(
-                    cache_position[start_index:end_index]
-                )
+                past_key_values.update_cache_position(cache_position[start_index:end_index])
 
         logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
 
