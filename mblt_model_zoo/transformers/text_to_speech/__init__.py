@@ -1,1 +1,1 @@
-from .melo import *
+from .MeloTTS import *
