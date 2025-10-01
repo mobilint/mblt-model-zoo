@@ -136,7 +136,7 @@ class MobilintBatchLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
             end_index = min(start_index + chunk_size, inputs_embeds.shape[2])
             cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
             batch_param = maccel.BatchParam(
-                sequence_lengths=[end_index - start_index + 1],
+                sequence_lengths=[end_index - start_index],
                 cache_sizes=[cache_size],
                 cache_ids=[0],
                 prefill_masks=[False], # not implemented in C++ yet.
@@ -177,7 +177,7 @@ AutoModelForCausalLM.register(MobilintBatchLlamaConfig, MobilintBatchLlamaForCau
 
 from ..utils.types import TransformersModelInfo
 
-Llama_31_8B_Instruct = TransformersModelInfo(
+Llama_31_8B_Instruct_Batch = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.1-8B-Instruct-Batch",
     model_id="mobilint/Llama-3.1-8B-Instruct-Batch",
     download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct-Batch/",
