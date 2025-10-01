@@ -59,6 +59,7 @@ transformers = [
     "librosa", 
     "soundfile",
     "accelerate",
+    "noisereduce",
 ]
 
 # Tools setting -----------------------------------------
