@@ -56,6 +56,7 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 transformers = [
     "transformers>=4.54.0, <=4.57.1",
     "tf-keras",
+    "noisereduce",
 ]
 
 # Tools setting -----------------------------------------
