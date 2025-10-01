@@ -55,6 +55,7 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 [project.optional-dependencies]
 transformers = [
     "transformers>=4.54.0, <=4.57.1",
+    "noisereduce",
 ]
 
 # Tools setting -----------------------------------------
