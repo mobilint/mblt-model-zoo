@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import noisereduce as nr
 import torch
 
-from .models import SynthesizerTrn
+from .models import MobilintSynthesizerTrn
 from .download_utils import load_or_download_config, load_or_download_model
 
 MISSING_MSG = (
@@ -47,7 +47,7 @@ class TTS(OriginalTTS):
         num_tones = hps.num_tones
         symbols = hps.symbols
 
-        model = SynthesizerTrn(
+        model = MobilintSynthesizerTrn(
             len(symbols),
             hps.data.filter_length // 2 + 1,
             hps.train.segment_size // hps.data.hop_length,

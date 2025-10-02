@@ -4,7 +4,186 @@ from torch import nn
 from melo import commons
 from melo.models import PosteriorEncoder, ReferenceEncoder
 
-class SynthesizerTrn(nn.module):
+import maccel
+from maccel import Cluster, Core, CoreId
+import numpy as np
+
+class MobilintTextEncoderAndDurationPredictor:
+    def __init__(
+        self,
+        mxq_path,
+    ):
+        self.acc = maccel.Accelerator()
+        mc0 = maccel.ModelConfig()
+        mc0.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
+        self.model = maccel.Model(mxq_path, mc0)
+        self.model.launch(self.acc)
+    
+    def __call__(
+        self,
+        x,
+        tone,
+        language,
+        bert,
+        noise_scale,
+        axis=2
+    ):
+        phone_tone_lang_emb_0 = (
+            self.emb(x)
+            + self.tone_emb(tone)
+            + self.language_emb(language)
+        )
+        
+        z = (
+            torch.randn(phone_tone_lang_emb_0.size(0), 2, phone_tone_lang_emb_0.size(1)).to(
+                device=bert.device, dtype=bert.dtype
+            )
+            * noise_scale
+        )
+        
+        z0 = z.unsqueeze(1)
+        
+        z_concat_flip_split = z0[:, :, 1:2, :].permute(0, 1, 3, 2).numpy()
+        phone_tone_lang_emb_0 = phone_tone_lang_emb_0.unsqueeze(1).numpy()
+        ja_bert = ja_bert.unsqueeze(1).permute(0, 1, 3, 2).numpy()
+        z_flip_split = z0[:, :, 0:1, :].flip((2,)).permute(0, 1, 3, 2).numpy()
+        
+        allowed_chunks = [100, 200, 300, 400]  # largest-first
+        max_chunk = max(allowed_chunks)
+        
+        _, _, origin_seq, _ = z_concat_flip_split.shape
+        print(f"[DEBUG-TRN0] original_seq: {origin_seq}")
+        
+        m_p_chunks, logs_p_chunks, logs_w_chunks = [], [], []
+        
+        cur_seq_len = 0
+        while cur_seq_len < origin_seq:
+            print("cur_seq_len: ", cur_seq_len, " origin_seq: ", origin_seq)
+            remaining = origin_seq - cur_seq_len
+            
+            # Pick largest allowed chunk <= remaining
+            chunk_size = None
+            for chunk in allowed_chunks:
+                if chunk >= remaining:
+                    chunk_size = chunk
+                    break
+            if chunk_size is None:
+                # No chunk >= remaining → use max chunk
+                chunk_size = max_chunk
+            
+            next_seq_len = cur_seq_len + min(chunk_size, remaining)
+            # Slice inputs
+            slices = [slice(None)] * z_concat_flip_split.ndim
+            slices[axis] = slice(cur_seq_len, next_seq_len)
+            
+            input0_slice = z_concat_flip_split[tuple(slices)].astype(np.float32)
+            input1_slice = phone_tone_lang_emb_0[tuple(slices)].astype(np.float32)
+            input2_slice = ja_bert[tuple(slices)].astype(np.float32)
+            input3_slice = z_flip_split[tuple(slices)].astype(np.float32)
+
+            pad_len = chunk_size - (next_seq_len - cur_seq_len)
+            if remaining < chunk_size:
+                pad_width = [(0, 0)] * z_concat_flip_split.ndim
+                pad_width[axis] = (0, pad_len)
+                input0_slice = np.pad(input0_slice, pad_width, mode="constant", constant_values=0)
+                input1_slice = np.pad(input1_slice, pad_width, mode="constant", constant_values=0)
+                input2_slice = np.pad(input2_slice, pad_width, mode="constant", constant_values=0)
+                input3_slice = np.pad(input3_slice, pad_width, mode="constant", constant_values=0)
+            
+            # Inference
+            outputs = self.model.infer([input0_slice, input1_slice, input2_slice, input3_slice])
+            
+            m_p_chunks.append(outputs[0])
+            logs_p_chunks.append(outputs[1])
+            logs_w_chunks.append(outputs[2])
+            
+            cur_seq_len = next_seq_len
+        
+        # Concatenate along sequence axis
+        m_p = np.concatenate(m_p_chunks, axis=axis)
+        logs_p = np.concatenate(logs_p_chunks, axis=axis)
+        logs_w = np.concatenate(logs_w_chunks, axis=axis)
+        
+        # Trim to original sequence length
+        m_p = m_p[..., :origin_seq, :]
+        logs_p = logs_p[..., :origin_seq, :]
+        logs_w = logs_w[..., :origin_seq]
+        
+        # Convert to torch tensors
+        m_p = torch.from_numpy(m_p).squeeze(1).transpose(1, 2)
+        logs_p = torch.from_numpy(logs_p).squeeze(1).transpose(1, 2)
+        logs_w = torch.from_numpy(logs_w)
+        x_mask = torch.ones_like(logs_w)
+        
+        return m_p, logs_p, x_mask, logs_w
+
+class MobilintCouplingBlockAndGenerator(nn.Module):
+    def __init__(
+        self,
+        mxq_path,
+        language,
+    ):
+        self.acc = maccel.Accelerator()
+        mc1 = maccel.ModelConfig()
+        mc1.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core2)])
+        self.model = maccel.Model(mxq_path, mc1)
+        self.model.launch(self.acc)
+        input_shape_info = self.model.get_model_input_shape()
+        _, self.seq_len, self.channels = input_shape_info[0]  # (1, W, C)
+        if language == "KR":
+            self.allowed_chunks = [200, 300, 400, 500, 600, 900]
+        elif language == "EN":
+            self.allowed_chunks = [300]
+        else:
+            raise ValueError(f"language: {language} is not supported")
+        
+    def __call__(self, z_p, channels=96, axis=2):
+        z_p = z_p.unsqueeze(1).permute(0, 1, 3, 2) # (1, 1, W, C)
+        z_p = np.ascontiguousarray(z_p.to("cpu").numpy()) # (1, seq_len, 1)
+        
+        allowed_chunks = self.allowed_chunks
+        max_chunk = max(allowed_chunks)
+        _, _, origin_seq, _ = z_p.shape
+        # 1. Pad
+        output_chunks = []
+        cur_seq_len = 0
+        while cur_seq_len < origin_seq:
+            remaining = origin_seq - cur_seq_len
+            
+            # Pick largest allowed chunk <= remaining
+            chunk_size = None
+            for chunk in allowed_chunks:
+                if chunk >= remaining:
+                    chunk_size = chunk
+                    break
+            if chunk_size is None:
+                # No chunk >= remaining → use max chunk
+                chunk_size = max_chunk
+
+            next_seq_len = cur_seq_len + min(chunk_size, remaining)
+            slices = [slice(None)] * z_p.ndim
+            slices[axis] = slice(cur_seq_len, next_seq_len)
+            z_p_slice = z_p[tuple(slices)].astype(np.float32)
+            pad_len = chunk_size - (next_seq_len - cur_seq_len)
+            if remaining < chunk_size:
+                pad_width = [(0, 0)] * z_p_slice.ndim
+                pad_width[axis] = (0, pad_len)
+                z_p_slice = np.pad(z_p_slice, pad_width, mode="constant", constant_values=0)
+
+            x_0 = z_p_slice[0,..., channels :]
+            x_1 = z_p_slice[0,..., channels - 1 :: -1]
+            out = self.model.infer([x_0, x_1])
+            output_chunks.append(out[0])
+
+            cur_seq_len = next_seq_len
+
+        new_len = origin_seq*512
+        audio = np.concatenate(output_chunks, 1)[:,:new_len,:].transpose(0,2,1)
+        audio = torch.from_numpy(audio).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+
+        return None, audio
+
+class MobilintSynthesizerTrn(nn.Module):
     def __init__(
         self,
         n_vocab,
@@ -68,7 +247,12 @@ class SynthesizerTrn(nn.module):
             self.enc_gin_channels = gin_channels
         else:
             self.enc_gin_channels = 0
-
+        # self.enc_p, self.sdp, self.dp all in one mxq
+        self.enc_p_sdp_dp = MobilintTextEncoderAndDurationPredictor(
+        )
+        # self.dec, self.flow all in one mxq
+        self.dec_flow = MobilintCouplingBlockAndGenerator(
+        )
         self.enc_q = PosteriorEncoder(
             spec_channels,
             inter_channels,
@@ -113,28 +297,22 @@ class SynthesizerTrn(nn.module):
             g_p = None
         else:
             g_p = g
-        phone_tone_lang_emb_0 = (
-            self.enc_p.emb(x)
-            + self.enc_p.tone_emb(tone)
-            + self.enc_p.language_emb(language)
+        ###########################################
+        x, m_p, logs_p, x_mask = self.enc_p(
+            x, x_lengths, tone, language, bert, ja_bert, g=g_p
         )
-        z = (
-            torch.randn(phone_tone_lang_emb_0.size(0), 2, phone_tone_lang_emb_0.size(1)).to(
-                device=bert.device, dtype=bert.dtype
-            )
-            * noise_scale
+        logw = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w) * (
+            sdp_ratio
+        ) + self.dp(x, x_mask, g=g) * (1 - sdp_ratio)
+        ###########################################
+        m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
+            x,
+            tone,
+            language,
+            bert,
+            noise_scale,
         )
-
-        z0 = z.unsqueeze(1)
-
-        m_p, logs_p, logw = npu_model_0(
-            z0[:, :, 1:2, :].permute(0, 1, 3, 2),
-            phone_tone_lang_emb_0.unsqueeze(1),
-            ja_bert.unsqueeze(1).permute(0, 1, 3, 2),
-            z0[:, :, 0:1, :].flip((2,)).permute(0, 1, 3, 2),
-        )
-
-        x_mask = torch.ones_like(logw)
+        ###########################################
         w = torch.exp(logw) * x_mask * length_scale
         
         w_ceil = torch.ceil(w)
@@ -153,10 +331,11 @@ class SynthesizerTrn(nn.module):
         )  # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        
-        z_p = z_p.unsqueeze(1).permute(0, 1, 3, 2) # (1, 1, W, C)
-        npu_input = np.ascontiguousarray(z_p.to("cpu").numpy())
-        npu_out = npu_model_1(npu_input)  # (1, seq_len, 1)
-        o = torch.from_numpy(npu_out).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+        ###########################################
+        z = self.flow(z_p, y_mask, g=g, reverse=True)
+        o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+        ###########################################
+        z, o = self.flow_dec(z_p)
+        ###########################################
         # print('max/min of o:', o.max(), o.min())
-        return o, attn, y_mask, (None, z_p, m_p, logs_p)
+        return o, attn, y_mask, (z, z_p, m_p, logs_p)
