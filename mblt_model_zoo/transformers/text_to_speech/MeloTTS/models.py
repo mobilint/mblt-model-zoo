@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 
@@ -8,16 +9,57 @@ import maccel
 from maccel import Cluster, Core, CoreId
 import numpy as np
 
-class MobilintTextEncoderAndDurationPredictor:
+class MobilintTextEncoderAndDurationPredictor(nn.Module):
     def __init__(
         self,
         mxq_path,
     ):
+        super().__init__()
+        
         self.acc = maccel.Accelerator()
         mc0 = maccel.ModelConfig()
         mc0.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
         self.model = maccel.Model(mxq_path, mc0)
         self.model.launch(self.acc)
+    
+    def text_encoder_forward(self, x, x_lengths, tone, language, bert, ja_bert, g=None):
+        bert_emb = self.bert_proj(bert).transpose(1, 2)
+        ja_bert_emb = self.ja_bert_proj(ja_bert).transpose(1, 2)
+        x = (
+            self.emb(x)
+            + self.tone_emb(tone)
+            + self.language_emb(language)
+            + bert_emb
+            + ja_bert_emb
+        ) * math.sqrt(
+            self.hidden_channels
+        )  # [b, t, h]
+        x = torch.transpose(x, 1, -1)  # [b, h, t]
+        x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
+            x.dtype
+        )
+
+        x = self.encoder(x * x_mask, x_mask, g=g)
+        stats = self.proj(x) * x_mask
+
+        m, logs = torch.split(stats, self.out_channels, dim=1)
+        return x, m, logs, x_mask
+
+    def duraction_predictor_forward(self, x, x_mask, g=None):
+        x = torch.detach(x)
+        if g is not None:
+            g = torch.detach(g)
+            x = x + self.cond(g)
+        x = self.conv_1(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_1(x)
+        x = self.drop(x)
+        x = self.conv_2(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_2(x)
+        x = self.drop(x)
+        x = self.proj(x * x_mask)
+        return x * x_mask
     
     def __call__(
         self,
@@ -247,7 +289,7 @@ class MobilintSynthesizerTrn(nn.Module):
             self.enc_gin_channels = gin_channels
         else:
             self.enc_gin_channels = 0
-        # self.enc_p, self.sdp, self.dp all in one mxq
+        # self.enc_p, self.dp all in one mxq, self.sdp is not in because sdp_ratio = 0
         self.enc_p_sdp_dp = MobilintTextEncoderAndDurationPredictor(
         )
         # self.dec, self.flow all in one mxq
