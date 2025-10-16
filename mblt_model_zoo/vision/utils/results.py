@@ -34,6 +34,7 @@ class Results:
         if isinstance(source_path, Image.Image):  # PIL image open
             source_img = source_path.convert("RGB")
             source_img = np.array(source_img)
+            source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
         elif isinstance(source_path, cv2.typing.MatLike):
             source_img = np.array(
                 source_path
@@ -41,13 +42,11 @@ class Results:
             assert (
                 source_img.shape[2] == 3
             ), f"Got unexpected shape for source_img={source_img.shape}."
-            source_img = cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB)
         else:  # str image path
             assert os.path.exists(source_path) and os.path.isfile(
                 source_path
             ), f"File {source_path} does not exist or is not a file."
             source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
-            source_img = cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB)
 
         return source_img
 
@@ -158,7 +157,7 @@ class Results:
                     thickness=1,
                     lineType=cv2.LINE_AA,
                 )
-                cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(save_path, img)
                 cv2.destroyAllWindows()
 
             return img
@@ -219,7 +218,7 @@ class Results:
                 )
 
         if save_path is not None:
-            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(save_path, img)
             cv2.destroyAllWindows()
         return img
 
@@ -245,7 +244,7 @@ class Results:
         img = (img * inv_mask + overlay * ALPHA).astype(np.uint8)
 
         if save_path is not None:
-            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(save_path, img)
             cv2.destroyAllWindows()
         return img
 
@@ -293,6 +292,6 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
         if save_path is not None:
-            cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(save_path, img)
             cv2.destroyAllWindows()
         return img
