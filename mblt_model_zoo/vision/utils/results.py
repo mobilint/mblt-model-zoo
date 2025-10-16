@@ -1,7 +1,8 @@
+from typing import Union
+import os
 import numpy as np
 import torch
-from typing import Union, List
-import os
+from PIL import Image
 import cv2
 from .datasets import *
 from .postprocess.common import *
@@ -26,6 +27,29 @@ class Results:
         self.task = post_cfg["task"]
         self.set_output(output)
         self.conf_thres = kwargs.get("conf_thres", 0.25)
+
+    def _read_image(self, source_path: Union[str, cv2.typing.MatLike, Image.Image]):
+        source_img = None
+
+        if isinstance(source_path, Image.Image):  # PIL image open
+            source_img = source_path.convert("RGB")
+            source_img = np.array(source_img)
+        elif isinstance(source_path, cv2.typing.MatLike):
+            source_img = np.array(
+                source_path
+            )  # assume imread or video read is made in BGR format
+            assert (
+                source_img.shape[2] == 3
+            ), f"Got unexpected shape for source_img={source_img.shape}."
+            source_img = cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB)
+        else:  # str image path
+            assert os.path.exists(source_path) and os.path.isfile(
+                source_path
+            ), f"File {source_path} does not exist or is not a file."
+            source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
+            source_img = cv2.cvtColor(source_img, cv2.COLOR_BGR2RGB)
+
+        return source_img
 
     def set_output(self, output: Union[TensorLike, ListTensorLike]):
         self.acc = None
@@ -64,7 +88,12 @@ class Results:
             )
         self.output = output  # store raw output
 
-    def plot(self, source_path: str, save_path: str = None, **kwargs):
+    def plot(
+        self,
+        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        save_path: str = None,
+        **kwargs,
+    ):
         if save_path is not None:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
@@ -82,7 +111,11 @@ class Results:
             )
 
     def _plot_image_classification(
-        self, source_path: str, save_path: str = None, topk=5, **kwargs
+        self,
+        source_path: Union[str, cv2.typing.MatLike, Image.Image] = None,
+        save_path: str = None,
+        topk=5,
+        **kwargs,
     ):
         assert self.acc is not None, "No accuracy output found."
         if isinstance(self.acc, np.ndarray):
@@ -100,12 +133,8 @@ class Results:
             print(f"Label: {labels[i]}, Probability: {topk_probs[i]*100:.2f}%")
 
         if source_path is not None and save_path is not None:
-            assert os.path.exists(source_path) and os.path.isfile(
-                source_path
-            ), f"File {source_path} does not exist or is not a file."
             comments = "\n".join(comments)
-            img = cv2.imread(source_path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = self._read_image(source_path)
             avg_color = img.mean(axis=(0, 1))
             txt_color = (
                 int(255 - avg_color[0]),
@@ -136,17 +165,17 @@ class Results:
         else:
             return None
 
-    def _plot_object_detection(self, source_path: str, save_path: str = None, **kwargs):
-        assert os.path.exists(source_path) and os.path.isfile(
-            source_path
-        ), f"File {source_path} does not exist or is not a file."
-
+    def _plot_object_detection(
+        self,
+        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        save_path: str = None,
+        **kwargs,
+    ):
         assert self.box_cls.shape[1] == 6 + self.post_cfg.get(
             "n_extra", 0
         ), f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
 
-        img = cv2.imread(source_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = self._read_image(source_path)
 
         self.labels = self.box_cls[:, 5].to(torch.int64)
         self.scores = self.box_cls[:, 4]
@@ -194,7 +223,12 @@ class Results:
             cv2.destroyAllWindows()
         return img
 
-    def _plot_instance_segmentation(self, source_path, save_path=None, **kwargs):
+    def _plot_instance_segmentation(
+        self,
+        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        save_path=None,
+        **kwargs,
+    ):
         img = self._plot_object_detection(source_path, None, **kwargs)
         masks = scale_image(self.mask.permute(1, 2, 0), img.shape[:2])
         overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
@@ -215,7 +249,12 @@ class Results:
             cv2.destroyAllWindows()
         return img
 
-    def _plot_pose_estimation(self, source_path, save_path=None, **kwargs):
+    def _plot_pose_estimation(
+        self,
+        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        save_path=None,
+        **kwargs,
+    ):
         img = self._plot_object_detection(source_path, None, **kwargs)
         self.kpts = scale_coords(
             self.pre_cfg["YoloPre"]["img_size"],
