@@ -17,11 +17,9 @@ class MBLT_Engine:
         self.model_cfg = model_cfg
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
-
         self.model = MXQ_Model(**self.model_cfg)
         self._preprocess = build_preprocess(self.pre_cfg)
         self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
-
         self.device = torch.device("cpu")
 
     @classmethod
@@ -117,7 +115,6 @@ class MXQ_Model:
             url_dict[self.product] = {self.infer_mode: None}
 
         self.acc = maccel.Accelerator()
-
         # ----------------Core Allocation-------------------------
         mc = maccel.ModelConfig()
         if self.product == "aries":
@@ -127,7 +124,11 @@ class MXQ_Model:
                 mc.set_multi_core_mode(
                     [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
                 )
-            elif self.infer_mode == "global":
+            elif self.infer_mode == "global4":
+                mc.set_global4_core_mode(
+                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                )
+            elif self.infer_mode == "global" or self.infer_mode == "global8":
                 mc.set_global8_core_mode()
             else:
                 raise ValueError("Inappropriate inferece mode")
@@ -146,7 +147,7 @@ class MXQ_Model:
 
             if local_path is None:  # default option
                 model_dir = os.path.expanduser(
-                    f"~/.mblt_model_zoo/{product}/{infer_mode}"
+                    f"~/.mblt_model_zoo/vision/{product}/{infer_mode}"
                 )
                 os.makedirs(model_dir, exist_ok=True)
                 cached_file = os.path.join(model_dir, filename)

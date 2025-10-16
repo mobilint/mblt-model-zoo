@@ -10,6 +10,8 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/single/wide_resnet50_2_IMAGENET1K_V1.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/multi/wide_resnet50_2_IMAGENET1K_V1.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/global/wide_resnet50_2_IMAGENET1K_V1.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -39,6 +41,8 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/single/wide_resnet50_2_IMAGENET1K_V2.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/multi/wide_resnet50_2_IMAGENET1K_V2.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/global/wide_resnet50_2_IMAGENET1K_V2.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -61,7 +65,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 class Wide_ResNet101_2_Set(ModelInfoSet):
@@ -72,6 +76,8 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/single/wide_resnet101_2_IMAGENET1K_V1.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/multi/wide_resnet101_2_IMAGENET1K_V1.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/global/wide_resnet101_2_IMAGENET1K_V1.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -101,6 +107,8 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/single/wide_resnet101_2_IMAGENET1K_V2.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/multi/wide_resnet101_2_IMAGENET1K_V2.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/global/wide_resnet101_2_IMAGENET1K_V2.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -123,7 +131,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
             "task": "image_classification",
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def Wide_ResNet50_2(

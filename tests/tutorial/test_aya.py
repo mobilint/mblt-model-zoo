@@ -1,5 +1,5 @@
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 model_name = "mobilint/aya-vision-8b"
 
@@ -8,6 +8,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 

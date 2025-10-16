@@ -213,31 +213,45 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
         post_cfg: dict,
     ):
         super().__init__(pre_cfg, post_cfg)
-        raise NotImplementedError("Pose Estimation is under maintenance")
 
     def rearrange(self, x):
-        y = []
-        kpts = []
-        for xi in x:
+        y_det = []
+        y_cls = []
+        y_kpt = []
+        for xi in x:  # list of bchw outputs
             if xi.ndim == 3:
-                xi = xi.unsqueeze(0)
-            assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
-
-            if xi.shape[1] == self.no:
-                y.append(xi)
-            elif xi.shape[3] == self.no:
-                y.append(xi.permute(0, 3, 1, 2))
-            elif xi.shape[1] == self.n_extra:
-                kpts.append(xi)
-            elif xi.shape[3] == self.n_extra:
-                kpts.append(xi.permute(0, 3, 1, 2))
+                xi = xi[None]
+            elif xi.ndim == 4:
+                pass
             else:
-                raise ValueError(f"Got unexpected shape for x={xi.shape}.")
+                raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
 
-        y = sorted(y, key=lambda x: x.numel(), reverse=True)
-        kpts = sorted(kpts, key=lambda x: x.numel(), reverse=True)
+            if xi.shape[1] == self.reg_max * 4:
+                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[1] == self.nc:
+                y_cls.append(xi)  # (b, 1, 80, 80), (b, 1, 40, 40), ...
+            elif xi.shape[1] == self.n_extra:
+                y_kpt.append(xi.flatten(2))  # (b, 51, 80, 80), (b, 1, 40, 40), ...
+            else:
+                raise ValueError(f"Wrong shape of input: {xi.shape}")
 
-        y = [torch.cat([yi, kpt], dim=1) for (yi, kpt) in zip(y, kpts)]
+        # sort as box, scores
+        y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
+        y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+        y_kpt = sorted(
+            y_kpt, key=lambda x: x.numel(), reverse=True
+        )  # (b, 51, 6400), (b, 51, 1600), (b, 51, 400)
+
+        y_tmp = [
+            torch.cat((yi_det, yi_cls), dim=1).flatten(2)
+            for (yi_det, yi_cls) in zip(
+                y_det, y_cls
+            )  # (b, 65, 6400), (b, 65, 1600), (b, 65, 400)
+        ]
+        y = [
+            torch.cat((yi_tmp, yi_kpt), dim=1) for (yi_tmp, yi_kpt) in zip(y_tmp, y_kpt)
+        ]  # (b, 116, 6400), (b, 116, 1600), (b, 116, 400)
+
         return y
 
     def process_extra(self, kpt, ic):

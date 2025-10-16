@@ -1,5 +1,5 @@
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 from transformers import TextStreamer
+from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
 
@@ -8,6 +8,7 @@ pipe = pipeline(
     "text-generation",
     model=model_path,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 

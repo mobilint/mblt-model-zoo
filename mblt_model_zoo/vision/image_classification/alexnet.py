@@ -10,6 +10,8 @@ class AlexNet_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/alexnet_IMAGENET1K_V1/aries/single/alexnet_IMAGENET1K_V1.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/alexnet_IMAGENET1K_V1/aries/multi/alexnet_IMAGENET1K_V1.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/alexnet_IMAGENET1K_V1/aries/global/alexnet_IMAGENET1K_V1.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },

@@ -1,11 +1,12 @@
-from mblt_model_zoo.transformers import pipeline
 from datasets import load_dataset
+from mblt_model_zoo.transformers import pipeline
 
 model_path = "mobilint/whisper-small"
 
 pipe = pipeline(
     "automatic-speech-recognition",
     model=model_path,
+    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 
@@ -20,7 +21,7 @@ output = pipe(
     return_timestamps=True,
     generate_kwargs={
         "max_length": 4096,
-        "num_beams": 1, # Supports for beam search with reorder_cache is not implemented yet
+        "num_beams": 1,  # Supports for beam search with reorder_cache is not implemented yet
     },
 )
 

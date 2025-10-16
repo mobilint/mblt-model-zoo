@@ -18,10 +18,9 @@ class ClsPost(PostBase):
 
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).to(self.device)
-        elif isinstance(x, torch.Tensor):
-            x = x.to(self.device)
         else:
-            raise ValueError(f"Got unexpected type for x={type(x)}.")
+            x = x.to(self.device)
+
         if x.ndim == 3:
             x = x.unsqueeze(0)
         assert (

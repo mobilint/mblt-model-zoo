@@ -10,6 +10,8 @@ class MobileNet_V2_Set(ModelInfoSet):
                     "single": None,
                     "multi": None,
                     "global": None,
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -37,6 +39,8 @@ class MobileNet_V2_Set(ModelInfoSet):
                     "single": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/single/mobilenet_v2_IMAGENET1K_V2.mxq",
                     "multi": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/multi/mobilenet_v2_IMAGENET1K_V2.mxq",
                     "global": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/global/mobilenet_v2_IMAGENET1K_V2.mxq",
+                    "global4": None,
+                    "global8": None,
                 },
                 "regulus": {"single": None},
             },
@@ -57,7 +61,7 @@ class MobileNet_V2_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
+    DEFAULT = IMAGENET1K_V2  # Default model
 
 
 def MobileNet_V2(

@@ -20,7 +20,7 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             "/workspace/mblt-model-zoo/tests/tmp/",
-            "yolov8l_" + os.path.basename(image_path),
+            "yolo8l_" + os.path.basename(image_path),
         )
 
     yolo = YOLOv8l()

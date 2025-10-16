@@ -2,14 +2,14 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class DenseNet121_Set(ModelInfoSet):
-    IMAGENET1K_V1 = ModelInfo(
+class FlexiViT_Small_Set(ModelInfoSet):
+    DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/single/densenet121_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/multi/densenet121_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/global/densenet121_IMAGENET1K_V1.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/single/flexivit_small.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/multi/flexivit_small.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/global/flexivit_small.mxq",
                     "global4": None,
                     "global8": None,
                 },
@@ -21,28 +21,27 @@ class DenseNet121_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 252,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
-                "size": [224, 224],
+                "size": [240, 240],
             },
-            "Normalize": {"style": "torch"},
+            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class DenseNet169_Set(ModelInfoSet):
-    IMAGENET1K_V1 = ModelInfo(
+class FlexiViT_Base_Set(ModelInfoSet):
+    DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/single/densenet169_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/multi/densenet169_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/global/densenet169_IMAGENET1K_V1.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/single/flexivit_base.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/multi/flexivit_base.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/global/flexivit_base.mxq",
                     "global4": None,
                     "global8": None,
                 },
@@ -54,28 +53,27 @@ class DenseNet169_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 252,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
-                "size": [224, 224],
+                "size": [240, 240],
             },
-            "Normalize": {"style": "torch"},
+            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class DenseNet201_Set(ModelInfoSet):
-    IMAGENET1K_V1 = ModelInfo(
+class FlexiViT_Large_Set(ModelInfoSet):
+    DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/single/densenet201_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/multi/densenet201_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/global/densenet201_IMAGENET1K_V1.mxq",
+                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/single/flexivit_large.mxq",
+                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/multi/flexivit_large.mxq",
+                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/global/flexivit_large.mxq",
                     "global4": None,
                     "global8": None,
                 },
@@ -87,28 +85,27 @@ class DenseNet201_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 252,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
-                "size": [224, 224],
+                "size": [240, 240],
             },
-            "Normalize": {"style": "torch"},
+            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "CHW"},
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-def DenseNet121(
+def FlexiViT_Small(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        DenseNet121_Set,
+        FlexiViT_Small_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -116,14 +113,14 @@ def DenseNet121(
     )
 
 
-def DenseNet169(
+def FlexiViT_Base(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        DenseNet169_Set,
+        FlexiViT_Base_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -131,14 +128,14 @@ def DenseNet169(
     )
 
 
-def DenseNet201(
+def FlexiViT_Large(
     local_path: str = None,
     model_type: str = "DEFAULT",
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
-        DenseNet201_Set,
+        FlexiViT_Large_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
