@@ -242,8 +242,8 @@ class MobilintSynthesizerTrn(nn.Module):
         if n_speakers <= 0:
             logger.warning("`self.n_speakers` should be positive to use g with self.emb_g.")
         
-        if use_vc is False:
-            logger.warning("`self.use_vc` should be True to use g_p as None.")
+        if use_vc is True:
+            logger.warning("`self.use_vc` should be False to use g_p as g.")
 
     def infer(
         self,
