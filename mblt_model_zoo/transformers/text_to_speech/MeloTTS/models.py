@@ -183,10 +183,10 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             
             output_chunks.append(output_chunk)
 
-        audio = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
-        audio = torch.from_numpy(audio).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+        output = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
+        output = torch.from_numpy(output).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
 
-        return None, audio
+        return None, output
 
 class MobilintSynthesizerTrn(nn.Module):
     def __init__(
