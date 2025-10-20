@@ -3,7 +3,6 @@ import torch
 from torch import nn
 
 from melo import commons
-from melo.models import PosteriorEncoder, ReferenceEncoder
 
 import maccel
 from maccel import Cluster, Core, CoreId
@@ -18,34 +17,22 @@ logger = logging.get_logger(__name__)
 class MobilintTextEncoderAndDurationPredictor(nn.Module):
     def __init__(
         self,
-        mxq_path,
         
         n_vocab,
-        out_channels,
         hidden_channels,
-        filter_channels,
-        n_heads,
-        n_layers,
-        kernel_size,
-        p_dropout,
-        gin_channels=0,
         num_languages=None,
         num_tones=None,
+        
+        mxq_path="",
     ):
         super().__init__()
+        
         if num_languages is None:
             from melo.text import num_languages
         if num_tones is None:
             from melo.text import num_tones
         self.n_vocab = n_vocab
-        self.out_channels = out_channels
         self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
         self.emb = nn.Embedding(n_vocab, hidden_channels)
         nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
         self.tone_emb = nn.Embedding(num_tones, hidden_channels)
@@ -57,6 +44,11 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
         self.mxq_model = maccel.Model(mxq_path, mc)
+        num_model_variants = self.mxq_model.get_num_model_variants()
+        self.allowed_chunks = [
+            self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
+            for i in range(num_model_variants)
+        ]
         self.mxq_model.launch(self.acc)
     
     def __call__(
@@ -90,19 +82,18 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         z0 = z0.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
         z1 = z1.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
         
-        allowed_chunks = [100, 200, 300, 400]
-        max_chunk = max(allowed_chunks)
+        max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[2] / max_chunk)
         
         m_p_chunks, logs_p_chunks, logw_chunks = [], [], []
         
         for i in range(num_of_chunks):
-            start_index = i * chunk_size
-            end_index = start_index + chunk_size
+            start_index = i * max_chunk
+            end_index = start_index + max_chunk
             remaining_length = x.shape[2] - start_index
             
             if end_index > x.shape[2]:
-                chunk_size = min([chunk_size for chunk_size in allowed_chunks if chunk_size >= remaining_length])
+                chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
                 pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
                 
                 x_slice = np.pad(x[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
@@ -138,68 +129,61 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         
         return m_p, logs_p, x_mask, logw
 
-class MobilintCouplingBlockAndGenerator(nn.Module):
+class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __init__(
         self,
+        channels,
         mxq_path,
-        language,
     ):
+        assert channels % 2 == 0, "channels should be divisible by 2"
+        super().__init__()
+        self.channels = channels
+        self.half_channels = channels // 2
+        
         self.acc = maccel.Accelerator()
-        mc1 = maccel.ModelConfig()
-        mc1.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core2)])
-        self.mxq_model = maccel.Model(mxq_path, mc1)
+        mc = maccel.ModelConfig()
+        mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core2)])
+        self.mxq_model = maccel.Model(mxq_path, mc)
+        num_model_variants = self.mxq_model.get_num_model_variants()
+        self.allowed_chunks = [
+            self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
+            for i in range(num_model_variants)
+        ]
         self.mxq_model.launch(self.acc)
-        input_shape_info = self.mxq_model.get_model_input_shape()
-        _, self.seq_len, self.channels = input_shape_info[0]  # (1, W, C)
-        if language == "KR":
-            self.allowed_chunks = [200, 300, 400, 500, 600, 900]
-        elif language == "EN":
-            self.allowed_chunks = [300]
-        else:
-            raise ValueError(f"language: {language} is not supported")
         
-    def __call__(self, z_p, channels=96, axis=2):
-        z_p = z_p.unsqueeze(1).permute(0, 1, 3, 2) # (1, 1, W, C)
-        z_p = np.ascontiguousarray(z_p.to("cpu").numpy()) # (1, seq_len, 1)
+    def __call__(self, x):
+        x = x.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # (1, C, W) -> (1, W, C) -> (1, 1, W, C)
+        x = np.ascontiguousarray(x.to("cpu").numpy())
         
-        allowed_chunks = self.allowed_chunks
-        max_chunk = max(allowed_chunks)
-        _, _, origin_seq, _ = z_p.shape
-        # 1. Pad
+        max_chunk = max(self.allowed_chunks)
+        num_of_chunks = math.ceil(x.shape[2] / max_chunk)
+        
         output_chunks = []
-        cur_seq_len = 0
-        while cur_seq_len < origin_seq:
-            remaining = origin_seq - cur_seq_len
+        
+        for i in range(num_of_chunks):
+            start_index = i * max_chunk
+            end_index = start_index + max_chunk
+            remaining_length = x.shape[2] - start_index
             
-            # Pick largest allowed chunk <= remaining
-            chunk_size = None
-            for chunk in allowed_chunks:
-                if chunk >= remaining:
-                    chunk_size = chunk
-                    break
-            if chunk_size is None:
-                # No chunk >= remaining → use max chunk
-                chunk_size = max_chunk
+            if end_index > x.shape[2]:
+                chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
+                pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
+                
+                x_slice = np.pad(x[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+            else:
+                x_slice = x[:, :, start_index:end_index, :]
+            
+            x0, x1 = torch.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, 1, W, C // 2], [1, 1, W, C // 2]
+            x0 = x0.flip([3])
+            
+            output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
+            
+            if end_index > x.shape[2]:
+                output_chunk = output_chunk[:, :(remaining_length * self.upsample_initial_channel), :]
+            
+            output_chunks.append(output_chunk)
 
-            next_seq_len = cur_seq_len + min(chunk_size, remaining)
-            slices = [slice(None)] * z_p.ndim
-            slices[axis] = slice(cur_seq_len, next_seq_len)
-            z_p_slice = z_p[tuple(slices)].astype(np.float32)
-            pad_len = chunk_size - (next_seq_len - cur_seq_len)
-            if remaining < chunk_size:
-                pad_width = [(0, 0)] * z_p_slice.ndim
-                pad_width[axis] = (0, pad_len)
-                z_p_slice = np.pad(z_p_slice, pad_width, mode="constant", constant_values=0)
-
-            x_0 = z_p_slice[0,..., channels :]
-            x_1 = z_p_slice[0,..., channels - 1 :: -1]
-            out = self.mxq_model.infer([x_0, x_1])
-            output_chunks.append(out[0])
-
-            cur_seq_len = next_seq_len
-
-        new_len = origin_seq*512
-        audio = np.concatenate(output_chunks, 1)[:,:new_len,:].transpose(0,2,1)
+        audio = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
         audio = torch.from_numpy(audio).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
 
         return None, audio
@@ -239,71 +223,27 @@ class MobilintSynthesizerTrn(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.n_vocab = n_vocab
-        self.spec_channels = spec_channels
-        self.inter_channels = inter_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.resblock = resblock
-        self.resblock_kernel_sizes = resblock_kernel_sizes
-        self.resblock_dilation_sizes = resblock_dilation_sizes
-        self.upsample_rates = upsample_rates
-        self.upsample_initial_channel = upsample_initial_channel
-        self.upsample_kernel_sizes = upsample_kernel_sizes
-        self.segment_size = segment_size
-        self.n_speakers = n_speakers
-        self.gin_channels = gin_channels
-        self.n_layers_trans_flow = n_layers_trans_flow
-        self.use_spk_conditioned_encoder = kwargs.get(
-            "use_spk_conditioned_encoder", True
-        )
-        self.use_sdp = use_sdp
-        self.use_noise_scaled_mas = kwargs.get("use_noise_scaled_mas", False)
-        self.mas_noise_scale_initial = kwargs.get("mas_noise_scale_initial", 0.01)
-        self.noise_scale_delta = kwargs.get("noise_scale_delta", 2e-6)
-        self.current_mas_noise_scale = self.mas_noise_scale_initial
-        if self.use_spk_conditioned_encoder and gin_channels > 0:
-            self.enc_gin_channels = gin_channels
-        else:
-            self.enc_gin_channels = 0
+        
         # self.enc_p, self.dp, self.sdp all in one mxq
         self.enc_p_sdp_dp = MobilintTextEncoderAndDurationPredictor(
             n_vocab,
-            inter_channels,
             hidden_channels,
-            filter_channels,
-            n_heads,
-            n_layers,
-            kernel_size,
-            p_dropout,
-            gin_channels=self.enc_gin_channels,
             num_languages=num_languages,
             num_tones=num_tones,
             mxq_path=mxq_path_enc_p_sdp_dp,
         )
+        
         # self.dec, self.flow all in one mxq
-        self.dec_flow = MobilintCouplingBlockAndGenerator(
+        self.dec_flow = MobilintTransformerCouplingBlockAndGenerator(
+            inter_channels,
             mxq_path=mxq_path_dec_flow,
         )
-        self.enc_q = PosteriorEncoder(
-            spec_channels,
-            inter_channels,
-            hidden_channels,
-            5,
-            1,
-            16,
-            gin_channels=gin_channels,
-        )
-
-        if n_speakers > 0:
-            self.emb_g = nn.Embedding(n_speakers, gin_channels)
-        else:
-            self.ref_enc = ReferenceEncoder(spec_channels, gin_channels, layernorm=norm_refenc)
-        self.use_vc = use_vc
+        
+        if n_speakers <= 0:
+            logger.warning("`self.n_speakers` should be positive to use g with self.emb_g.")
+        
+        if use_vc is False:
+            logger.warning("`self.use_vc` should be True to use g_p as None.")
 
     def infer(
         self,
@@ -331,17 +271,14 @@ class MobilintSynthesizerTrn(nn.Module):
         if g is not None:
             logger.warning_once('Input `g` is calculated inside the mxq with assuming sid is 0.')
         
-        if self.n_speakers <= 0:
-            logger.warning_once("`self.n_speakers` should be positive to use g with self.emb_g.")
-        
-        if self.use_vc is False:
-            logger.warning_once("`self.use_vc` should be True to use g_p as None.")
-        
         if bert is not None:
             logger.warning_once('Input `bert` is not supported. Please make sure that the language_str is not "ZH".')
         
         if sdp_ratio != 0.2:
             logger.warning_once('Input `sdp_ratio` is set inside the mxq as 0.2.')
+        
+        if max_len is not None:
+            logger.warning_once('Input `max_len` is not supported.')
         
         m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
             x,
@@ -368,11 +305,6 @@ class MobilintSynthesizerTrn(nn.Module):
         )  # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        ###########################################
-        z = self.flow(z_p, y_mask, g=g, reverse=True)
-        o = self.dec((z * y_mask)[:, :, :max_len], g=g)
-        ###########################################
         z, o = self.flow_dec(z_p)
-        ###########################################
         # print('max/min of o:', o.max(), o.min())
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
