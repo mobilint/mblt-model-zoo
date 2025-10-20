@@ -31,17 +31,3 @@ def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
         download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
         ckpt_path = os.path.join(download_path, "checkpoint.pth")
     return torch.load(ckpt_path, map_location=device)
-
-from ...utils.types import TransformersModelInfo
-
-EN_NEWEST = TransformersModelInfo(
-    original_model_id="myshell-ai/MeloTTS-English-v3",
-    model_id="mobilint/MeloTTS-English-v3",
-    download_url_base="https://dl.mobilint.com/model/transformers/tts/MeloTTS-English-v3/",
-    file_list=[
-        "checkpoint.pth",
-        "config.json",
-        "MeloTTS-English-v3_enc_p_sdp_dp.mxq",
-        "MeloTTS-English-v3_dec_flow.mxq",
-    ],
-)

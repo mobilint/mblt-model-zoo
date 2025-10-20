@@ -1,14 +1,10 @@
+from __future__ import annotations
 import re
 from tqdm import tqdm
 import torch
 from torch import nn
-from __future__ import annotations
 from typing import TYPE_CHECKING
 import noisereduce as nr
-
-from . import utils
-from .models import MobilintSynthesizerTrn
-from .download_utils import load_or_download_config, load_or_download_model
 
 MISSING_MSG = (
     "Optional dependency 'melo' not found."
@@ -18,6 +14,9 @@ MISSING_MSG = (
 try:
     from melo.api import TTS as OriginalTTS
     import soundfile
+    from . import utils
+    from .models import MobilintSynthesizerTrn
+    from .download_utils import load_or_download_config, load_or_download_model
 except Exception:
     class OriginalTTS:
         def __init__(self, *args, **kwargs):
@@ -29,6 +28,9 @@ except Exception:
 if TYPE_CHECKING:
     from melo.api import TTS as OriginalTTS
     import soundfile
+    from . import utils
+    from .models import MobilintSynthesizerTrn
+    from .download_utils import load_or_download_config, load_or_download_model
 
 class TTS(OriginalTTS):
     def __init__(self, 
