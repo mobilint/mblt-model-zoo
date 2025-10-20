@@ -15,7 +15,12 @@ def load_or_download_config(locale, use_hf=False, config_path=None):
         assert language in LANG_TO_HF_REPO_ID
         download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
         config_path = os.path.join(download_path, "config.json")
-    return melo.utils.get_hparams_from_file(config_path)
+    
+    result = melo.utils.get_hparams_from_file(config_path)
+    result.model.mxq_path_enc_p_sdp_dp = os.path.join(os.path.dirname(config_path), result.model.mxq_path_enc_p_sdp_dp)
+    result.model.mxq_path_dec_flow = os.path.join(os.path.dirname(config_path), result.model.mxq_path_dec_flow)
+    
+    return result
 
 def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
     assert use_hf is False
@@ -24,7 +29,7 @@ def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
         language = locale.split('-')[0].upper()
         assert language in LANG_TO_HF_REPO_ID
         download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
-        config_path = os.path.join(download_path, "checkpoint.pth")
+        ckpt_path = os.path.join(download_path, "checkpoint.pth")
     return torch.load(ckpt_path, map_location=device)
 
 from ...utils.types import TransformersModelInfo
