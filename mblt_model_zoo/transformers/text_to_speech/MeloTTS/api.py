@@ -30,7 +30,7 @@ class TTS(OriginalTTS):
     def __init__(self, 
                 language,
                 device='auto',
-                use_hf=True,
+                use_hf=False,
                 config_path=None,
                 ckpt_path=None):
         if device == 'auto':
