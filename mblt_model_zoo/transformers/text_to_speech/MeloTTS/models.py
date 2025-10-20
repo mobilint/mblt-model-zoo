@@ -9,155 +9,134 @@ import maccel
 from maccel import Cluster, Core, CoreId
 import numpy as np
 
+from transformers.utils import logging
+
+
+logger = logging.get_logger(__name__)
+
+
 class MobilintTextEncoderAndDurationPredictor(nn.Module):
     def __init__(
         self,
         mxq_path,
+        
+        n_vocab,
+        out_channels,
+        hidden_channels,
+        filter_channels,
+        n_heads,
+        n_layers,
+        kernel_size,
+        p_dropout,
+        gin_channels=0,
+        num_languages=None,
+        num_tones=None,
     ):
         super().__init__()
+        if num_languages is None:
+            from melo.text import num_languages
+        if num_tones is None:
+            from melo.text import num_tones
+        self.n_vocab = n_vocab
+        self.out_channels = out_channels
+        self.hidden_channels = hidden_channels
+        self.filter_channels = filter_channels
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.kernel_size = kernel_size
+        self.p_dropout = p_dropout
+        self.gin_channels = gin_channels
+        self.emb = nn.Embedding(n_vocab, hidden_channels)
+        nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
+        self.tone_emb = nn.Embedding(num_tones, hidden_channels)
+        nn.init.normal_(self.tone_emb.weight, 0.0, hidden_channels**-0.5)
+        self.language_emb = nn.Embedding(num_languages, hidden_channels)
+        nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
         
         self.acc = maccel.Accelerator()
-        mc0 = maccel.ModelConfig()
-        mc0.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
-        self.model = maccel.Model(mxq_path, mc0)
-        self.model.launch(self.acc)
-    
-    def text_encoder_forward(self, x, x_lengths, tone, language, bert, ja_bert, g=None):
-        bert_emb = self.bert_proj(bert).transpose(1, 2)
-        ja_bert_emb = self.ja_bert_proj(ja_bert).transpose(1, 2)
-        x = (
-            self.emb(x)
-            + self.tone_emb(tone)
-            + self.language_emb(language)
-            + bert_emb
-            + ja_bert_emb
-        ) * math.sqrt(
-            self.hidden_channels
-        )  # [b, t, h]
-        x = torch.transpose(x, 1, -1)  # [b, h, t]
-        x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
-            x.dtype
-        )
-
-        x = self.encoder(x * x_mask, x_mask, g=g)
-        stats = self.proj(x) * x_mask
-
-        m, logs = torch.split(stats, self.out_channels, dim=1)
-        return x, m, logs, x_mask
-
-    def duraction_predictor_forward(self, x, x_mask, g=None):
-        x = torch.detach(x)
-        if g is not None:
-            g = torch.detach(g)
-            x = x + self.cond(g)
-        x = self.conv_1(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_1(x)
-        x = self.drop(x)
-        x = self.conv_2(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_2(x)
-        x = self.drop(x)
-        x = self.proj(x * x_mask)
-        return x * x_mask
+        mc = maccel.ModelConfig()
+        mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
+        self.mxq_model = maccel.Model(mxq_path, mc)
+        self.mxq_model.launch(self.acc)
     
     def __call__(
         self,
         x,
+        x_lengths,
         tone,
         language,
-        bert,
+        ja_bert,
         noise_scale,
-        axis=2
     ):
-        phone_tone_lang_emb_0 = (
+        # b = batch size, h = hidden_channels, t = time (dynamic dim)
+        # ja_bert [1, f, t]
+        x = (
             self.emb(x)
             + self.tone_emb(tone)
             + self.language_emb(language)
-        )
+        ) # [b, t, h]
+        x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.shape[1]), 1).to(
+            x.dtype
+        ) # [t, 1]
         
         z = (
-            torch.randn(phone_tone_lang_emb_0.size(0), 2, phone_tone_lang_emb_0.size(1)).to(
-                device=bert.device, dtype=bert.dtype
-            )
+            torch.randn(x.shape[0], 2, x.shape[1]).to(device=x.device, dtype=x.dtype)
             * noise_scale
-        )
+        ) # [b, 2, t]
+        z0, z1 = torch.split(z, [1, 1], 1) # [b, 1, t], [b, 1, t]
         
-        z0 = z.unsqueeze(1)
+        x = x.unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, h]
+        ja_bert = ja_bert.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, f]
+        z0 = z0.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
+        z1 = z1.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
         
-        z_concat_flip_split = z0[:, :, 1:2, :].permute(0, 1, 3, 2).numpy()
-        phone_tone_lang_emb_0 = phone_tone_lang_emb_0.unsqueeze(1).numpy()
-        ja_bert = ja_bert.unsqueeze(1).permute(0, 1, 3, 2).numpy()
-        z_flip_split = z0[:, :, 0:1, :].flip((2,)).permute(0, 1, 3, 2).numpy()
-        
-        allowed_chunks = [100, 200, 300, 400]  # largest-first
+        allowed_chunks = [100, 200, 300, 400]
         max_chunk = max(allowed_chunks)
+        num_of_chunks = math.ceil(x.shape[2] / max_chunk)
         
-        _, _, origin_seq, _ = z_concat_flip_split.shape
-        print(f"[DEBUG-TRN0] original_seq: {origin_seq}")
+        m_p_chunks, logs_p_chunks, logw_chunks = [], [], []
         
-        m_p_chunks, logs_p_chunks, logs_w_chunks = [], [], []
-        
-        cur_seq_len = 0
-        while cur_seq_len < origin_seq:
-            print("cur_seq_len: ", cur_seq_len, " origin_seq: ", origin_seq)
-            remaining = origin_seq - cur_seq_len
+        for i in range(num_of_chunks):
+            start_index = i * chunk_size
+            end_index = start_index + chunk_size
+            remaining_length = x.shape[2] - start_index
             
-            # Pick largest allowed chunk <= remaining
-            chunk_size = None
-            for chunk in allowed_chunks:
-                if chunk >= remaining:
-                    chunk_size = chunk
-                    break
-            if chunk_size is None:
-                # No chunk >= remaining → use max chunk
-                chunk_size = max_chunk
-            
-            next_seq_len = cur_seq_len + min(chunk_size, remaining)
-            # Slice inputs
-            slices = [slice(None)] * z_concat_flip_split.ndim
-            slices[axis] = slice(cur_seq_len, next_seq_len)
-            
-            input0_slice = z_concat_flip_split[tuple(slices)].astype(np.float32)
-            input1_slice = phone_tone_lang_emb_0[tuple(slices)].astype(np.float32)
-            input2_slice = ja_bert[tuple(slices)].astype(np.float32)
-            input3_slice = z_flip_split[tuple(slices)].astype(np.float32)
+            if end_index > x.shape[2]:
+                chunk_size = min([chunk_size for chunk_size in allowed_chunks if chunk_size >= remaining_length])
+                pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
+                
+                x_slice = np.pad(x[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+                ja_bert_slice = np.pad(ja_bert[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+                z0_slice = np.pad(z0[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+                z1_slice = np.pad(z1[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+            else:
+                x_slice = x[:, :, start_index:end_index, :]
+                ja_bert_slice = ja_bert[:, :, start_index:end_index, :]
+                z0_slice = z0[:, :, start_index:end_index, :]
+                z1_slice = z1[:, :, start_index:end_index, :]
 
-            pad_len = chunk_size - (next_seq_len - cur_seq_len)
-            if remaining < chunk_size:
-                pad_width = [(0, 0)] * z_concat_flip_split.ndim
-                pad_width[axis] = (0, pad_len)
-                input0_slice = np.pad(input0_slice, pad_width, mode="constant", constant_values=0)
-                input1_slice = np.pad(input1_slice, pad_width, mode="constant", constant_values=0)
-                input2_slice = np.pad(input2_slice, pad_width, mode="constant", constant_values=0)
-                input3_slice = np.pad(input3_slice, pad_width, mode="constant", constant_values=0)
+            m_p_chunk, logs_p_chunk, logw_chunk = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
             
-            # Inference
-            outputs = self.model.infer([input0_slice, input1_slice, input2_slice, input3_slice])
+            if end_index > x.shape[2]:
+                m_p_chunk = m_p_chunk[..., :remaining_length, :]
+                logs_p_chunk = logs_p_chunk[..., :remaining_length, :]
+                logw_chunk = logw_chunk[..., :remaining_length]
             
-            m_p_chunks.append(outputs[0])
-            logs_p_chunks.append(outputs[1])
-            logs_w_chunks.append(outputs[2])
-            
-            cur_seq_len = next_seq_len
+            m_p_chunks.append(m_p_chunk)
+            logs_p_chunks.append(logs_p_chunk)
+            logw_chunks.append(logw_chunk)
         
         # Concatenate along sequence axis
-        m_p = np.concatenate(m_p_chunks, axis=axis)
-        logs_p = np.concatenate(logs_p_chunks, axis=axis)
-        logs_w = np.concatenate(logs_w_chunks, axis=axis)
-        
-        # Trim to original sequence length
-        m_p = m_p[..., :origin_seq, :]
-        logs_p = logs_p[..., :origin_seq, :]
-        logs_w = logs_w[..., :origin_seq]
+        m_p = np.concatenate(m_p_chunks, axis=2)
+        logs_p = np.concatenate(logs_p_chunks, axis=2)
+        logw = np.concatenate(logw_chunks, axis=2)
         
         # Convert to torch tensors
         m_p = torch.from_numpy(m_p).squeeze(1).transpose(1, 2)
         logs_p = torch.from_numpy(logs_p).squeeze(1).transpose(1, 2)
-        logs_w = torch.from_numpy(logs_w)
-        x_mask = torch.ones_like(logs_w)
+        logw = torch.from_numpy(logw)
         
-        return m_p, logs_p, x_mask, logs_w
+        return m_p, logs_p, x_mask, logw
 
 class MobilintCouplingBlockAndGenerator(nn.Module):
     def __init__(
@@ -168,9 +147,9 @@ class MobilintCouplingBlockAndGenerator(nn.Module):
         self.acc = maccel.Accelerator()
         mc1 = maccel.ModelConfig()
         mc1.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core2)])
-        self.model = maccel.Model(mxq_path, mc1)
-        self.model.launch(self.acc)
-        input_shape_info = self.model.get_model_input_shape()
+        self.mxq_model = maccel.Model(mxq_path, mc1)
+        self.mxq_model.launch(self.acc)
+        input_shape_info = self.mxq_model.get_model_input_shape()
         _, self.seq_len, self.channels = input_shape_info[0]  # (1, W, C)
         if language == "KR":
             self.allowed_chunks = [200, 300, 400, 500, 600, 900]
@@ -214,7 +193,7 @@ class MobilintCouplingBlockAndGenerator(nn.Module):
 
             x_0 = z_p_slice[0,..., channels :]
             x_1 = z_p_slice[0,..., channels - 1 :: -1]
-            out = self.model.infer([x_0, x_1])
+            out = self.mxq_model.infer([x_0, x_1])
             output_chunks.append(out[0])
 
             cur_seq_len = next_seq_len
@@ -255,6 +234,8 @@ class MobilintSynthesizerTrn(nn.Module):
         num_languages=None,
         num_tones=None,
         norm_refenc=False,
+        mxq_path_enc_p_sdp_dp="",
+        mxq_path_dec_flow="",
         **kwargs
     ):
         super().__init__()
@@ -289,11 +270,24 @@ class MobilintSynthesizerTrn(nn.Module):
             self.enc_gin_channels = gin_channels
         else:
             self.enc_gin_channels = 0
-        # self.enc_p, self.dp all in one mxq, self.sdp is not in because sdp_ratio = 0
+        # self.enc_p, self.dp, self.sdp all in one mxq
         self.enc_p_sdp_dp = MobilintTextEncoderAndDurationPredictor(
+            n_vocab,
+            inter_channels,
+            hidden_channels,
+            filter_channels,
+            n_heads,
+            n_layers,
+            kernel_size,
+            p_dropout,
+            gin_channels=self.enc_gin_channels,
+            num_languages=num_languages,
+            num_tones=num_tones,
+            mxq_path=mxq_path_enc_p_sdp_dp,
         )
         # self.dec, self.flow all in one mxq
         self.dec_flow = MobilintCouplingBlockAndGenerator(
+            mxq_path=mxq_path_dec_flow,
         )
         self.enc_q = PosteriorEncoder(
             spec_channels,
@@ -328,33 +322,34 @@ class MobilintSynthesizerTrn(nn.Module):
         y=None,
         g=None,
     ):
-        # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert)
-        # g = self.gst(y)
-        if g is None:
-            if self.n_speakers > 0:
-                g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
-            else:
-                g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        if self.use_vc:
-            g_p = None
-        else:
-            g_p = g
-        ###########################################
-        x, m_p, logs_p, x_mask = self.enc_p(
-            x, x_lengths, tone, language, bert, ja_bert, g=g_p
-        )
-        logw = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w) * (
-            sdp_ratio
-        ) + self.dp(x, x_mask, g=g) * (1 - sdp_ratio)
-        ###########################################
+        if x_lengths.shape != [1] or x_lengths[0] != x.shape[1]:
+            logger.warning_once("Input `x_lengths` is set to `[x.shape[1]]` inside the mxq.")
+            
+        if sid != 0:
+            logger.warning_once("Input `sid` is set to 0 inside the mxq.")
+        
+        if g is not None:
+            logger.warning_once('Input `g` is calculated inside the mxq with assuming sid is 0.')
+        
+        if self.n_speakers <= 0:
+            logger.warning_once("`self.n_speakers` should be positive to use g with self.emb_g.")
+        
+        if self.use_vc is False:
+            logger.warning_once("`self.use_vc` should be True to use g_p as None.")
+        
+        if bert is not None:
+            logger.warning_once('Input `bert` is not supported. Please make sure that the language_str is not "ZH".')
+        
+        if sdp_ratio != 0.2:
+            logger.warning_once('Input `sdp_ratio` is set inside the mxq as 0.2.')
+        
         m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
             x,
             tone,
             language,
-            bert,
-            noise_scale,
+            ja_bert,
+            noise_scale_w,
         )
-        ###########################################
         w = torch.exp(logw) * x_mask * length_scale
         
         w_ceil = torch.ceil(w)
