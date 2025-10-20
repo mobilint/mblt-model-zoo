@@ -1,9 +1,12 @@
+import re
+from tqdm import tqdm
+import torch
+from torch import nn
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import noisereduce as nr
-import torch
-from torch import nn
 
+from . import utils
 from .models import MobilintSynthesizerTrn
 from .download_utils import load_or_download_config, load_or_download_model
 
@@ -71,9 +74,52 @@ class TTS(OriginalTTS):
         
         language = language.split('_')[0]
         self.language = 'ZH_MIX_EN' if language == 'ZH' else language # we support a ZH_MIX_EN model
-
+    
     def tts_to_file(self, text, speaker_id, output_path=None, sdp_ratio=0.2, noise_scale=0.6, noise_scale_w=0.8, speed=1.0, pbar=None, format=None, position=None, quiet=False,):
-        audio = super().tts_to_file(text, speaker_id, None, sdp_ratio, noise_scale, noise_scale_w, speed, pbar, format, position, quiet)
+        language = self.language
+        texts = self.split_sentences_into_pieces(text, language, quiet)
+        audio_list = []
+        if pbar:
+            tx = pbar(texts)
+        else:
+            if position:
+                tx = tqdm(texts, position=position)
+            elif quiet:
+                tx = texts
+            else:
+                tx = tqdm(texts)
+        for t in tx:
+            if language in ['EN', 'ZH_MIX_EN']:
+                t = re.sub(r'([a-z])([A-Z])', r'\1 \2', t)
+            device = self.device
+            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id)
+            with torch.no_grad():
+                x_tst = phones.to(device).unsqueeze(0)
+                tones = tones.to(device).unsqueeze(0)
+                lang_ids = lang_ids.to(device).unsqueeze(0)
+                bert = bert.to(device).unsqueeze(0)
+                ja_bert = ja_bert.to(device).unsqueeze(0)
+                x_tst_lengths = torch.LongTensor([phones.size(0)]).to(device)
+                del phones
+                speakers = torch.LongTensor([speaker_id]).to(device)
+                audio = self.model.infer(
+                        x_tst,
+                        x_tst_lengths,
+                        speakers,
+                        tones,
+                        lang_ids,
+                        bert,
+                        ja_bert,
+                        sdp_ratio=sdp_ratio,
+                        noise_scale=noise_scale,
+                        noise_scale_w=noise_scale_w,
+                        length_scale=1. / speed,
+                    )[0][0, 0].data.cpu().float().numpy()
+                del x_tst, tones, lang_ids, bert, ja_bert, x_tst_lengths, speakers
+                # 
+            audio_list.append(audio)
+        torch.cuda.empty_cache()
+        audio = self.audio_numpy_concat(audio_list, sr=self.hps.data.sampling_rate, speed=speed)
 
         audio = nr.reduce_noise(y=audio, sr=self.hps.data.sampling_rate, stationary=True, padding=0, 
                                 prop_decrease=0.7,         # moderate noise reduction for better volume
