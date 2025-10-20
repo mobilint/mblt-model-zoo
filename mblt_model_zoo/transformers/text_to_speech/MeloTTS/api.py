@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import noisereduce as nr
 import torch
+from torch import nn
 
 from .models import MobilintSynthesizerTrn
 from .download_utils import load_or_download_config, load_or_download_model
@@ -33,6 +34,7 @@ class TTS(OriginalTTS):
                 use_hf=False,
                 config_path=None,
                 ckpt_path=None):
+        nn.Module.__init__(self)
         if device == 'auto':
             device = 'cpu'
             if torch.cuda.is_available(): device = 'cuda'
@@ -71,7 +73,7 @@ class TTS(OriginalTTS):
         self.language = 'ZH_MIX_EN' if language == 'ZH' else language # we support a ZH_MIX_EN model
 
     def tts_to_file(self, text, speaker_id, output_path=None, sdp_ratio=0.2, noise_scale=0.6, noise_scale_w=0.8, speed=1.0, pbar=None, format=None, position=None, quiet=False,):
-        audio = super().tts_to_file(self, text, speaker_id, None, sdp_ratio, noise_scale, noise_scale_w, speed, pbar, format, position, quiet)
+        audio = super().tts_to_file(text, speaker_id, None, sdp_ratio, noise_scale, noise_scale_w, speed, pbar, format, position, quiet)
 
         audio = nr.reduce_noise(y=audio, sr=self.hps.data.sampling_rate, stationary=True, padding=0, 
                                 prop_decrease=0.7,         # moderate noise reduction for better volume
