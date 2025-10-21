@@ -178,6 +178,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
             
+            print(x1.shape, x0.shape)
             output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
             
             if end_index > x.shape[1]:
