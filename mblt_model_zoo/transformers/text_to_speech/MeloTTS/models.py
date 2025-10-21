@@ -106,7 +106,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 z0_slice = z0[:, :, start_index:end_index, :]
                 z1_slice = z1[:, :, start_index:end_index, :]
             
-            print(z1_slice.shape, x_slice.shape, ja_bert_slice.shape, z0_slice.shape)
+            print(self.allowed_chunks, start_index, end_index, remaining_length, z1_slice.shape, x_slice.shape, ja_bert_slice.shape, z0_slice.shape)
 
             m_p_chunk, logs_p_chunk, logw_chunk = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
             
