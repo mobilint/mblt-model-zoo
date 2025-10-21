@@ -123,9 +123,9 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         logw = np.concatenate(logw_chunks, axis=2)
         
         # Convert to torch tensors
-        m_p = torch.from_numpy(m_p).squeeze(1).transpose(1, 2)
-        logs_p = torch.from_numpy(logs_p).squeeze(1).transpose(1, 2)
-        logw = torch.from_numpy(logw)
+        m_p = torch.tensor(m_p, dtype=torch.float32, device=self.device).squeeze(1).transpose(1, 2)
+        logs_p = torch.tensor(logs_p, dtype=torch.float32, device=self.device).squeeze(1).transpose(1, 2)
+        logw = torch.tensor(logw, dtype=torch.float32, device=self.device)
         
         return m_p, logs_p, x_mask, logw
 
@@ -184,7 +184,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             output_chunks.append(output_chunk)
 
         output = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
-        output = torch.from_numpy(output).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+        output = torch.tensor(output, dtype=torch.float32, device=self.device).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
 
         return None, output
 
