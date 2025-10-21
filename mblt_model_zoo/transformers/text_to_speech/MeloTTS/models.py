@@ -267,7 +267,7 @@ class MobilintSynthesizerTrn(nn.Module):
         g=None,
     ):
         if x_lengths.shape != [1] or x_lengths[0] != int(x.shape[1]):
-            logger.warning_once(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length.shape={x_lengths.shape}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
+            logger.warning_once(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length.shape={x_lengths.shape}, x_lengths[0]={x_lengths[0]}, x.shape[1]={int(x.shape[1])}")
             
         if sid != 0:
             logger.warning_once("Input `sid` is set to 0 inside the mxq.")
