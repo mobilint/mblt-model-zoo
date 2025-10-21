@@ -18,8 +18,6 @@ from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler, B
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 from transformers.utils import logging
 
-from ..utils.cache_utils import MobilintCache
-
 
 logger = logging.get_logger(__name__)
 
@@ -87,7 +85,7 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         inputs_embeds: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[MobilintCache] = None,
+        past_key_values: Optional[list[torch.FloatTensor]] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -100,6 +98,11 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        if self.config.is_decoder:
+            use_cache = use_cache if use_cache is not None else self.config.use_cache
+        else:
+            use_cache = False
+        
         if attention_mask is not None:
             logger.warning_once("attention_mask is not supported.")
 
@@ -111,17 +114,18 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
             
         if encoder_attention_mask is not None:
             logger.warning_once("encoder_attention_mask is not supported.")
+        
+        if use_cache:
+            logger.warning_once("use_cache is not supported.")
 
         if output_attentions:
             logger.warning_once("output_attentions is not supported.")
 
         if output_hidden_states:
             logger.warning_once("output_hidden_states is not supported.")
-
-        if self.config.is_decoder:
-            use_cache = use_cache if use_cache is not None else self.config.use_cache
-        else:
-            use_cache = False
+        
+        if cache_position is not None:
+            logger.warning_once("cache_position is not supported.")
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
@@ -159,23 +163,8 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
-        
-        if use_cache and past_key_values is None:
-            past_key_values = MobilintCache(self.mxq_model)
-        
-        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-        
-        if cache_position is None:
-            cache_position = torch.arange(
-                past_seen_tokens,
-                past_seen_tokens + embedding_output.shape[1],
-                device=embedding_output.device,
-            )
 
-        sequence_output = self.mxq_model.infer([embedding_output], None, past_seen_tokens if use_cache else 0)[0]
-        if use_cache:
-            past_key_values.update_cache_position(cache_position)
-
+        sequence_output = self.mxq_model.infer([embedding_output])[0]
         sequence_output = torch.tensor(sequence_output, dtype=torch.float32).squeeze(0)
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
