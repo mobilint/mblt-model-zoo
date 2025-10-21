@@ -152,7 +152,8 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         self.mxq_model.launch(self.acc)
         
     def __call__(self, x):
-        x = x.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # (1, C, W) -> (1, W, C) -> (1, 1, W, C)
+        device = x.device
+        x = x.permute(0, 2, 1).type(torch.float32).cpu().numpy() # (1, C, W) -> (1, W, C)
         x = np.ascontiguousarray(x.to("cpu").numpy())
         
         max_chunk = max(self.allowed_chunks)
@@ -163,28 +164,28 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
-            remaining_length = x.shape[2] - start_index
+            remaining_length = x.shape[1] - start_index
             
-            if end_index > x.shape[2]:
+            if end_index > x.shape[1]:
                 chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
-                pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
+                pad_width = [(0, 0), (0, chunk_size - remaining_length), (0, 0)]
                 
-                x_slice = np.pad(x[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+                x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
             else:
-                x_slice = x[:, :, start_index:end_index, :]
+                x_slice = x[:, start_index:end_index, :]
             
-            x0, x1 = torch.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, 1, W, C // 2], [1, 1, W, C // 2]
+            x0, x1 = torch.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0 = x0.flip([3])
             
             output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
             
-            if end_index > x.shape[2]:
+            if end_index > x.shape[1]:
                 output_chunk = output_chunk[:, :(remaining_length * self.upsample_initial_channel), :]
             
             output_chunks.append(output_chunk)
 
         output = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
-        output = torch.tensor(output, dtype=torch.float32, device=self.device).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+        output = torch.tensor(output, dtype=torch.float32, device=device).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
 
         return None, output
 
@@ -303,6 +304,6 @@ class MobilintSynthesizerTrn(nn.Module):
         )  # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        z, o = self.flow_dec(z_p)
+        z, o = self.dec_flow(z_p)
         # print('max/min of o:', o.max(), o.min())
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
