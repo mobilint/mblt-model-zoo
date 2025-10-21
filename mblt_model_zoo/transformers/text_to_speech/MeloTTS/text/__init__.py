@@ -1,5 +1,4 @@
 import torch
-
 import sys
 
 models = {}
@@ -33,7 +32,8 @@ def get_bert_feature(text, word2ph, device=None, model_id=''):
         for i in inputs:
             inputs[i] = inputs[i].to(device)
         # bert models are compiled to output third-from-last hidden state
-        res = model(**inputs)[0].cpu()
+        res = model(**inputs)
+        res = torch.cat(res["last_hidden_state"], -1)[0].cpu()
         
     assert inputs["input_ids"].shape[-1] == len(word2ph)
     word2phone = word2ph
