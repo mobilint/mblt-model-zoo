@@ -282,6 +282,7 @@ class MobilintSynthesizerTrn(nn.Module):
         
         m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
             x,
+            x_lengths,
             tone,
             language,
             ja_bert,
