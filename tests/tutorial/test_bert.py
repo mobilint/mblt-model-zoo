@@ -1,4 +1,4 @@
-from transformers import pipeline
+from mblt_model_zoo.transformers import pipeline
 
 model_name = "mobilint/bert-base-uncased"
 
