@@ -20,6 +20,11 @@ def load_or_download_config(locale, use_hf=False, config_path=None):
     result.model.mxq_path_enc_p_sdp_dp = os.path.join(os.path.dirname(config_path), result.model.mxq_path_enc_p_sdp_dp)
     result.model.mxq_path_dec_flow = os.path.join(os.path.dirname(config_path), result.model.mxq_path_dec_flow)
     
+    # bert_model_id can be either model id such as `mobilint/bert-base-uncased` or path such as `bert-kor-base`
+    bert_model_path = os.path.join(os.path.dirname(config_path), result.model.bert_model_id)
+    if os.path.exists(bert_model_path):
+        result.model.bert_model_id = bert_model_path
+    
     return result
 
 def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
