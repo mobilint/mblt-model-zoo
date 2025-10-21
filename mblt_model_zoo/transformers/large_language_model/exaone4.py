@@ -167,7 +167,7 @@ class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, MobilintGenerationMixin
                     cache_position[start_index:end_index]
                 )
 
-        logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
+        logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
 
         loss = None
         if labels is not None:
