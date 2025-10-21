@@ -105,6 +105,8 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 ja_bert_slice = ja_bert[:, :, start_index:end_index, :]
                 z0_slice = z0[:, :, start_index:end_index, :]
                 z1_slice = z1[:, :, start_index:end_index, :]
+            
+            print(z1_slice.shape, x_slice.shape, ja_bert_slice.shape, z0_slice.shape)
 
             m_p_chunk, logs_p_chunk, logw_chunk = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
             
@@ -262,7 +264,7 @@ class MobilintSynthesizerTrn(nn.Module):
         y=None,
         g=None,
     ):
-        if x_lengths.shape != [1] or x_lengths[0] != x.shape[1]:
+        if x_lengths.shape != [1] or x_lengths[0] != int(x.shape[1]):
             logger.warning_once(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length.shape={x_lengths.shape}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
             
         if sid != 0:
