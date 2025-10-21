@@ -176,7 +176,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             
             x_slice = np.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
-            x0 = x0.flip([3])
+            x0 = np.flip(x0, 2)
             
             output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
             
