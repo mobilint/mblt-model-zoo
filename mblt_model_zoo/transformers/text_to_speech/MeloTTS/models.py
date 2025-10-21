@@ -96,7 +96,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
             
             if end_index > x.shape[2]:
                 chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
-                pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
+                pad_width = [(0, 0), (0, chunk_size - remaining_length), (0, 0)]
                 
                 x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
                 ja_bert_slice = np.pad(ja_bert[:, start_index:, :], pad_width, mode="constant", constant_values=0)
