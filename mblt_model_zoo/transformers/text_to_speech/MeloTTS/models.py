@@ -131,9 +131,9 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         logw = np.concatenate(logw_chunks, axis=2)
         
         # Convert to torch tensors
-        m_p = torch.tensor(m_p, dtype=torch.float32, device=self.emb.device).squeeze(1).transpose(1, 2)
-        logs_p = torch.tensor(logs_p, dtype=torch.float32, device=self.emb.device).squeeze(1).transpose(1, 2)
-        logw = torch.tensor(logw, dtype=torch.float32, device=self.emb.device)
+        m_p = torch.tensor(m_p, dtype=torch.float32, device=x.device).squeeze(1).transpose(1, 2)
+        logs_p = torch.tensor(logs_p, dtype=torch.float32, device=x.device).squeeze(1).transpose(1, 2)
+        logw = torch.tensor(logw, dtype=torch.float32, device=x.device)
         
         return m_p, logs_p, x_mask, logw
 
