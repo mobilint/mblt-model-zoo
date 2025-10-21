@@ -1,12 +1,14 @@
 import torch
-from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForMaskedLM
+
 import sys
 
 models = {}
 tokenizers = {}
-
 def get_bert_feature(text, word2ph, device=None, model_id=''):
+    from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForMaskedLM
     global model
+    global tokenizer
+    
     if (
         sys.platform == "darwin"
         and torch.backends.mps.is_available()
@@ -30,7 +32,7 @@ def get_bert_feature(text, word2ph, device=None, model_id=''):
         inputs = tokenizer(text, return_tensors="pt")
         for i in inputs:
             inputs[i] = inputs[i].to(device)
-        # just use last hidden state instead of third-from-last hidden state
+        # bert models are compiled to output third-from-last hidden state
         res = model(**inputs)[0].cpu()
         
     assert inputs["input_ids"].shape[-1] == len(word2ph)
