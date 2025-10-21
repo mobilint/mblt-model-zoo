@@ -133,12 +133,14 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __init__(
         self,
         channels,
+        upsample_initial_channel,
         mxq_path,
     ):
         assert channels % 2 == 0, "channels should be divisible by 2"
         super().__init__()
         self.channels = channels
         self.half_channels = channels // 2
+        self.upsample_initial_channel = upsample_initial_channel
         
         self.acc = maccel.Accelerator()
         mc = maccel.ModelConfig()
@@ -160,9 +162,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         num_of_chunks = math.ceil(x.shape[2] / max_chunk)
         
         output_chunks = []
-        
-        print(self.allowed_chunks, x.shape)
-        
+                
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
@@ -175,12 +175,11 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
                 x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
             else:
                 x_slice = x[:, start_index:end_index, :]
-            print(x_slice.shape)
+
             x_slice = np.split(x_slice, [self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
             
-            print(x1.shape, x0.shape)
             output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
             
             if end_index > x.shape[1]:
@@ -241,6 +240,7 @@ class MobilintSynthesizerTrn(nn.Module):
         # self.dec, self.flow all in one mxq
         self.dec_flow = MobilintTransformerCouplingBlockAndGenerator(
             inter_channels,
+            upsample_initial_channel,
             mxq_path=mxq_path_dec_flow,
         )
         
