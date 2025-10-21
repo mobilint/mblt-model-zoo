@@ -164,7 +164,7 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         embedding_output = embedding_output.type(torch.float32).cpu().numpy()
 
         sequence_output = self.mxq_model.infer([embedding_output])[0]
-        sequence_output = torch.tensor(sequence_output, dtype=torch.float32).squeeze(0)
+        sequence_output = torch.tensor(sequence_output, dtype=torch.float32)
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
