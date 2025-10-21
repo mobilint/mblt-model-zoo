@@ -6,6 +6,7 @@ import torch
 from transformers import (
     Cache,
     BertPreTrainedModel,
+    BertForMaskedLM,
     BertConfig,
     BertTokenizerFast,
     AutoConfig,
@@ -13,7 +14,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForMaskedLM,
 )
-from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler
+from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler, BertOnlyMLMHead
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 from transformers.utils import logging
 
@@ -43,9 +44,6 @@ class MobilintBertPreTrainedModel(BertPreTrainedModel):
     load_tf_weights = None
     supports_gradient_checkpointing = False
     _supports_sdpa = False
-
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
 
 
 class MobilintBertModel(MobilintBertPreTrainedModel):
@@ -77,8 +75,7 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         self.embeddings.word_embeddings = value
 
     def _prune_heads(self, heads_to_prune):
-        for layer, heads in heads_to_prune.items():
-            self.encoder.layer[layer].attention.prune_heads(heads)
+        raise NotImplementedError("_prune_heads is not available since self.encoder is implemented in mxq")
 
     def forward(
         self,
@@ -183,7 +180,7 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output, pooled_output)
+            return (sequence_output, pooled_output) + (past_key_values,)
 
         return BaseModelOutputWithPoolingAndCrossAttentions(
             last_hidden_state=sequence_output,
@@ -198,11 +195,11 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         self.mxq_model.dispose()
 
 
-class MobilintBertForMaskedLM(MobilintBertPreTrainedModel):
+class MobilintBertForMaskedLM(BertForMaskedLM, MobilintBertPreTrainedModel):
     _tied_weights_keys = ["predictions.decoder.bias", "cls.predictions.decoder.weight"]
 
     def __init__(self, config):
-        super().__init__(config)
+        MobilintBertPreTrainedModel.__init__(config)
 
         if config.is_decoder:
             logger.warning(
@@ -215,83 +212,9 @@ class MobilintBertForMaskedLM(MobilintBertPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
-
-    def get_output_embeddings(self):
-        return self.cls.predictions.decoder
-
-    def set_output_embeddings(self, new_embeddings):
-        self.cls.predictions.decoder = new_embeddings
-        self.cls.predictions.bias = new_embeddings.bias
-
-    def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple[torch.Tensor], MaskedLMOutput]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        outputs = self.bert(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = outputs[0]
-        prediction_scores = self.cls(sequence_output)
-
-        masked_lm_loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()  # -100 index = padding token
-            masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
-
-        if not return_dict:
-            output = (prediction_scores,) + outputs[2:]
-            return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
-
-        return MaskedLMOutput(
-            loss=masked_lm_loss,
-            logits=prediction_scores,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
-
-    def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **model_kwargs):
-        input_shape = input_ids.shape
-        effective_batch_size = input_shape[0]
-
-        #  add a dummy token
-        if self.config.pad_token_id is None:
-            raise ValueError("The PAD token should be defined for generation")
-
-        attention_mask = torch.cat([attention_mask, attention_mask.new_zeros((attention_mask.shape[0], 1))], dim=-1)
-        dummy_token = torch.full(
-            (effective_batch_size, 1), self.config.pad_token_id, dtype=torch.long, device=input_ids.device
-        )
-        input_ids = torch.cat([input_ids, dummy_token], dim=1)
-
-        return {"input_ids": input_ids, "attention_mask": attention_mask}
-
-    @classmethod
-    def can_generate(cls) -> bool:
-        return False
+    
+    def dispose(self):
+        self.bert.dispose()
 
 
 AutoConfig.register("mobilint-bert", MobilintBertConfig)
