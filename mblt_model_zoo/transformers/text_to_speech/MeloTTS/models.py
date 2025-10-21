@@ -77,10 +77,10 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         ) # [b, 2, t]
         z0, z1 = torch.split(z, [1, 1], 1) # [b, 1, t], [b, 1, t]
         
-        x = x.unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, h]
-        ja_bert = ja_bert.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, f]
-        z0 = z0.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
-        z1 = z1.permute(0, 2, 1).unsqueeze(1).type(torch.float32).cpu().numpy() # [b, 1, t, 1]
+        x = x.type(torch.float32).cpu().numpy() # [b, t, h]
+        ja_bert = ja_bert.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, f]
+        z0 = z0.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
+        z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
         
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[2] / max_chunk)
@@ -98,15 +98,15 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
                 pad_width = [(0, 0), (0, 0), (0, chunk_size - remaining_length), (0, 0)]
                 
-                x_slice = np.pad(x[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
-                ja_bert_slice = np.pad(ja_bert[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
-                z0_slice = np.pad(z0[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
-                z1_slice = np.pad(z1[:, :, start_index:, :], pad_width, mode="constant", constant_values=0)
+                x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
+                ja_bert_slice = np.pad(ja_bert[:, start_index:, :], pad_width, mode="constant", constant_values=0)
+                z0_slice = np.pad(z0[:, start_index:, :], pad_width, mode="constant", constant_values=0)
+                z1_slice = np.pad(z1[:, start_index:, :], pad_width, mode="constant", constant_values=0)
             else:
-                x_slice = x[:, :, start_index:end_index, :]
-                ja_bert_slice = ja_bert[:, :, start_index:end_index, :]
-                z0_slice = z0[:, :, start_index:end_index, :]
-                z1_slice = z1[:, :, start_index:end_index, :]
+                x_slice = x[:, start_index:end_index, :]
+                ja_bert_slice = ja_bert[:, start_index:end_index, :]
+                z0_slice = z0[:, start_index:end_index, :]
+                z1_slice = z1[:, start_index:end_index, :]
             
             print(start_index, end_index, remaining_length, z1_slice.shape, x_slice.shape, ja_bert_slice.shape, z0_slice.shape)
 
