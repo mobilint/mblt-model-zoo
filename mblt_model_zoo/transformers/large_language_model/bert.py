@@ -102,9 +102,6 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
             use_cache = use_cache if use_cache is not None else self.config.use_cache
         else:
             use_cache = False
-        
-        if attention_mask is not None:
-            logger.warning_once("attention_mask is not supported.")
 
         if head_mask is not None:
             logger.warning_once("head_mask is not supported.")
@@ -163,6 +160,8 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
+        
+        embedding_output = embedding_output.type(torch.float32).cpu().numpy()
 
         sequence_output = self.mxq_model.infer([embedding_output])[0]
         sequence_output = torch.tensor(sequence_output, dtype=torch.float32).squeeze(0)
@@ -184,11 +183,11 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         self.mxq_model.dispose()
 
 
-class MobilintBertForMaskedLM(BertForMaskedLM, MobilintBertPreTrainedModel):
+class MobilintBertForMaskedLM(MobilintBertPreTrainedModel, BertForMaskedLM):
     _tied_weights_keys = ["predictions.decoder.bias", "cls.predictions.decoder.weight"]
 
     def __init__(self, config):
-        MobilintBertPreTrainedModel.__init__(config)
+        MobilintBertPreTrainedModel.__init__(self, config)
 
         if config.is_decoder:
             logger.warning(
