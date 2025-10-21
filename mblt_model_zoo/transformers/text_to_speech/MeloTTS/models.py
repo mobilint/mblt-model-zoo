@@ -174,7 +174,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             else:
                 x_slice = x[:, start_index:end_index, :]
             
-            x0, x1 = torch.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
+            x0, x1 = np.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0 = x0.flip([3])
             
             output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
