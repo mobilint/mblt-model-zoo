@@ -83,7 +83,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
         
         max_chunk = max(self.allowed_chunks)
-        num_of_chunks = math.ceil(x.shape[2] / max_chunk)
+        num_of_chunks = math.ceil(x.shape[1] / max_chunk)
         
         m_p_chunks, logs_p_chunks, logw_chunks = [], [], []
         
@@ -92,9 +92,9 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
-            remaining_length = x.shape[2] - start_index
+            remaining_length = x.shape[1] - start_index
             
-            if end_index > x.shape[2]:
+            if end_index > x.shape[1]:
                 chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
                 pad_width = [(0, 0), (0, chunk_size - remaining_length), (0, 0)]
                 
@@ -112,7 +112,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
 
             m_p_chunk, logs_p_chunk, logw_chunk = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
             
-            if end_index > x.shape[2]:
+            if end_index > x.shape[1]:
                 m_p_chunk = m_p_chunk[..., :remaining_length, :]
                 logs_p_chunk = logs_p_chunk[..., :remaining_length, :]
                 logw_chunk = logw_chunk[..., :remaining_length]
