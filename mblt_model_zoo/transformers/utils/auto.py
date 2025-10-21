@@ -11,6 +11,7 @@ from transformers import (
     AutoProcessor as OriginalAutoProcessor,
     AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq,
     AutoModelForImageTextToText as OriginalAutoModelForImageTextToText,
+    AutoModelForMaskedLM as OriginalAutoModelForMaskedLM,
     AutoModelForCausalLM as OriginalAutoModelForCausalLM,
     AutoModelForVision2Seq as OriginalAutoModelForVision2Seq,
     PreTrainedModel,
@@ -158,6 +159,17 @@ class AutoModelForSpeechSeq2Seq(OriginalAutoModelForSpeechSeq2Seq):
 
 
 class AutoModelForImageTextToText(OriginalAutoModelForImageTextToText):
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        pretrained_model_name_or_path = convert_identifier_to_path(
+            pretrained_model_name_or_path
+        )
+        return super().from_pretrained(
+            pretrained_model_name_or_path, *model_args, **kwargs
+        )
+
+
+class AutoModelForMaskedLM(OriginalAutoModelForMaskedLM):
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         pretrained_model_name_or_path = convert_identifier_to_path(

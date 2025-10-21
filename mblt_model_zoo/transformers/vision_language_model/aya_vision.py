@@ -127,7 +127,7 @@ class MobilintAyaVisionForConditionalGeneration(
         image_features = pixel_values.type(torch.float32).cpu().numpy()
         image_features = self.mxq_model.infer([image_features])[0]
         image_features = np.transpose(image_features, (0, 2, 3, 1))
-        image_features = torch.from_numpy(image_features).to(pixel_values.device)
+        image_features = torch.from_numpy(image_features, dtype=torch.float32, device=self.device)
         return image_features
 
     def forward(

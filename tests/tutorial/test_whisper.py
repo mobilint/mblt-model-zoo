@@ -6,7 +6,6 @@ model_path = "mobilint/whisper-small"
 pipe = pipeline(
     "automatic-speech-recognition",
     model=model_path,
-    device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
 

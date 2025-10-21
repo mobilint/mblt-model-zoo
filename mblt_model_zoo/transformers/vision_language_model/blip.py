@@ -275,7 +275,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             [encoder_hidden_states, embedding_output],
             cache_size=int(past_key_values_length),
         )[0]
-        logits = torch.from_numpy(logits)[0]
+        logits = torch.from_numpy(logits, dtype=torch.float32, device=self.device).squeeze(0)
 
         past_key_values.update_cache_position(cache_position)
 

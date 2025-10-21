@@ -200,8 +200,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
 
         hidden_states = hidden_states.to(torch.float32).cpu().numpy()
         image_embeds = self.mxq_model.infer(hidden_states)[0]
-
-        image_embeds = torch.tensor(image_embeds[0], device=self.device).squeeze(0)
+        image_embeds = torch.tensor(image_embeds, dtype=torch.float32, device=self.device).squeeze(0).squeeze(0)
+        
         return image_embeds
 
     def dispose(self):
@@ -298,7 +298,7 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
             if use_cache:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
 
-        logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
+        logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
 
         if not return_dict:
             return tuple(

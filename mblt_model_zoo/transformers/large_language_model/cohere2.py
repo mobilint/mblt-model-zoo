@@ -181,7 +181,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
                     cache_position[start_index:end_index]
                 )
 
-        logits = torch.tensor(logits, dtype=torch.float32).squeeze(0)
+        logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
         logits = logits * self.logit_scale  # main diff from Llama
 
         loss = None
