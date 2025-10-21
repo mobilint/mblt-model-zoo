@@ -263,17 +263,14 @@ class MobilintSynthesizerTrn(nn.Module):
         g=None,
     ):
         if x_lengths.shape != [1] or x_lengths[0] != x.shape[1]:
-            logger.warning_once("Input `x_lengths` is set to `[x.shape[1]]` inside the mxq.")
+            logger.warning_once(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length.shape={x_lengths.shape}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
             
         if sid != 0:
             logger.warning_once("Input `sid` is set to 0 inside the mxq.")
         
         if g is not None:
             logger.warning_once('Input `g` is calculated inside the mxq with assuming sid is 0.')
-        
-        if bert is not None:
-            logger.warning_once('Input `bert` is not supported. Please make sure that the language_str is not "ZH".')
-        
+                
         if sdp_ratio != 0.2:
             logger.warning_once('Input `sdp_ratio` is set inside the mxq as 0.2.')
         
