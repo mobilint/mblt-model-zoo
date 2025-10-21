@@ -174,8 +174,6 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         sequence_output = torch.tensor(sequence_output, dtype=torch.float32, device=self.device)
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
         
-        print("bert", sequence_output.shape, pooled_output)
-
         if not return_dict:
             return (sequence_output, pooled_output) + (past_key_values, (sequence_output,))
 
