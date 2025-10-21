@@ -161,6 +161,8 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         
         output_chunks = []
         
+        print(self.allowed_chunks, x.shape)
+        
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
@@ -173,7 +175,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
                 x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
             else:
                 x_slice = x[:, start_index:end_index, :]
-            
+            print(x_slice.shape)
             x_slice = np.split(x_slice, [self.half_channels, self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
