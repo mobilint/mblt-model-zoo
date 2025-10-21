@@ -154,7 +154,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __call__(self, x):
         device = x.device
         x = x.permute(0, 2, 1).type(torch.float32).cpu().numpy() # (1, C, W) -> (1, W, C)
-        x = np.ascontiguousarray(x.to("cpu").numpy())
+        x = np.ascontiguousarray(x)
         
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[2] / max_chunk)
