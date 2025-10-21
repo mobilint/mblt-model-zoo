@@ -45,6 +45,10 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
         self.mxq_model = maccel.Model(mxq_path, mc)
         num_model_variants = self.mxq_model.get_num_model_variants()
+        
+        for i in range(num_model_variants):
+            print(self.mxq_model.get_model_variant_handle(i).get_model_input_shape())
+            
         self.allowed_chunks = [
             self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
             for i in range(num_model_variants)
