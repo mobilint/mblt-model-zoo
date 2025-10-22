@@ -7,8 +7,13 @@ from typing import TYPE_CHECKING
 import noisereduce as nr
 
 MISSING_MSG = (
-    "Optional dependency 'melo' not found."
-    "Please install MeloTTS (https://github.com/myshell-ai/MeloTTS)."
+    "",
+    "========================================================================================================",
+    "Optional dependency 'melo' not found. Please install MeloTTS (https://github.com/myshell-ai/MeloTTS).",
+    "NOTE: Default dependencies of MeloTTS contains old version of `transformers`, which is not compatible with our model zoo.",
+    "You can modify `requirements.txt` in MeloTTS repository to remove `transformers` dependency",
+    "========================================================================================================",
+    "",
 )
 
 try:
@@ -20,10 +25,14 @@ try:
 except Exception:
     class OriginalTTS:
         def __init__(self, *args, **kwargs):
-            raise ModuleNotFoundError(MISSING_MSG)
+            for msg in MISSING_MSG:
+                print(msg)
+            raise ModuleNotFoundError()
 
         def __getattr__(self, name):
-            raise ModuleNotFoundError(MISSING_MSG)
+            for msg in MISSING_MSG:
+                print(msg)
+            raise ModuleNotFoundError()
 
 if TYPE_CHECKING:
     from melo.api import TTS as OriginalTTS
