@@ -337,7 +337,7 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
         self.mxq_model.dispose()
 
 
-class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
+class MobilintQwen2VLModel(Qwen2VLModel, MobilintQwen2VLPreTrainedModel):
     def __init__(self, config: MobilintQwen2VLConfig):
         super().__init__(config)
         self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
@@ -349,7 +349,7 @@ class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
         self.language_model.dispose()
 
 
-class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
+class MobilintQwen2VLForConditionalGeneration(Qwen2VLForConditionalGeneration, MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin):
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
