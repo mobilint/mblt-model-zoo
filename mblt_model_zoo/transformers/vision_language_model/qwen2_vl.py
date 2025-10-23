@@ -339,7 +339,7 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
 
 class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
     def __init__(self, config: MobilintQwen2VLConfig):
-        super().__init__(config)
+        MobilintQwen2VLPreTrainedModel.__init__(self, config)
         self.visual = MobilintQwen2VisionTransformerPretrainedModel(config.vision_config)
         self.language_model = MobilintQwen2VLTextModel(config.text_config)
         self.rope_deltas = None  # cache rope_deltas here
@@ -353,7 +353,7 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
-        MobilintQwen2VLPreTrainedModel.__init__(config)
+        MobilintQwen2VLPreTrainedModel.__init__(self, config)
         
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model
