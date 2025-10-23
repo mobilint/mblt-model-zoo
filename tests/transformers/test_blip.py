@@ -3,36 +3,38 @@ from PIL import Image
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
-model_name = "mobilint/blip-image-captioning-large"
 
-processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
-pipe = pipeline(
-    "image-text-to-text",
-    model=model_name,
-    processor=processor,
-)
-pipe.generation_config.max_new_tokens = None
+def test_blip():
+    model_name = "mobilint/blip-image-captioning-large"
 
-img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
-raw_image = Image.open(requests.get(img_url, stream=True).raw).convert("RGB")
+    processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
+    pipe = pipeline(
+        "image-text-to-text",
+        model=model_name,
+        processor=processor,
+    )
+    pipe.generation_config.max_new_tokens = None
 
-# conditional image captioning
-text = "a photography of"
-pipe(
-    raw_image,
-    text,
-    generate_kwargs={
-        "max_length": 4096,
-        "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
-    },
-)
+    img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
+    raw_image = Image.open(requests.get(img_url, stream=True).raw).convert("RGB")
 
-# unconditional image captioning
-pipe(
-    raw_image,
-    "",
-    generate_kwargs={
-        "max_length": 4096,
-        "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
-    },
-)
+    # conditional image captioning
+    text = "a photography of"
+    pipe(
+        raw_image,
+        text,
+        generate_kwargs={
+            "max_length": 4096,
+            "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
+        },
+    )
+
+    # unconditional image captioning
+    pipe(
+        raw_image,
+        "",
+        generate_kwargs={
+            "max_length": 4096,
+            "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
+        },
+    )

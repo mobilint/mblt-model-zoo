@@ -1,27 +1,29 @@
 from datasets import load_dataset
 from mblt_model_zoo.transformers import pipeline
 
-model_path = "mobilint/whisper-small"
 
-pipe = pipeline(
-    "automatic-speech-recognition",
-    model=model_path,
-)
-pipe.generation_config.max_new_tokens = None
+def test_whisper():
+    model_path = "mobilint/whisper-small"
 
-ds = load_dataset(
-    "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
-)
-sample = ds[0]["audio"]
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        model=model_path,
+    )
+    pipe.generation_config.max_new_tokens = None
 
-output = pipe(
-    sample.copy(),
-    batch_size=8,
-    return_timestamps=True,
-    generate_kwargs={
-        "max_length": 4096,
-        "num_beams": 1,  # Supports for beam search with reorder_cache is not implemented yet
-    },
-)
+    ds = load_dataset(
+        "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
+    )
+    sample = ds[0]["audio"]
 
-print(output)
+    output = pipe(
+        sample.copy(),
+        batch_size=8,
+        return_timestamps=True,
+        generate_kwargs={
+            "max_length": 4096,
+            "num_beams": 1,  # Supports for beam search with reorder_cache is not implemented yet
+        },
+    )
+
+    print(output)
