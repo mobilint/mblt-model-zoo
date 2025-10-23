@@ -56,10 +56,17 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
     def from_dict(
         cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
     ) -> SpecificPretrainedConfigType:
-        config = super().from_dict(config_dict, **kwargs)
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        
+        config, kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)
+        
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
-        return config
+        
+        if return_unused_kwargs:
+            return config, kwargs
+        else:
+            return config
 
 
 class MobilintAyaVisionForConditionalGeneration(
