@@ -1,16 +1,21 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 
-def test_aya():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/aya-vision-8b"
-
     processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
     pipe = pipeline(
         "image-text-to-text",
         model=model_name,
         processor=processor,
     )
+    yield pipe
+    pipe.model.dispose()
+
+def test_aya(pipe):
     pipe.generation_config.max_new_tokens = None
 
     # Format message with the aya-vision chat template
@@ -34,5 +39,3 @@ def test_aya():
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )
-
-    pipe.model.dispose()

@@ -1,8 +1,10 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-def test_llama():
+@pytest.fixture
+def pipe():
     model_path = "mobilint/Llama-3.2-3B-Instruct"
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -11,6 +13,11 @@ def test_llama():
         model=model_path,
         streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_llama(pipe):
     pipe.generation_config.max_new_tokens = None
 
     messages = [

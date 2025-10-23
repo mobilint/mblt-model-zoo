@@ -1,8 +1,10 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-def test_clova():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -11,6 +13,11 @@ def test_clova():
         model=model_name,
         streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_clova(pipe):
     pipe.generation_config.max_new_tokens = None
 
     messages = [

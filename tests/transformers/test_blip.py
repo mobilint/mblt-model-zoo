@@ -1,10 +1,12 @@
+import pytest
 import requests
 from PIL import Image
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 
-def test_blip():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/blip-image-captioning-large"
 
     processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
@@ -13,6 +15,11 @@ def test_blip():
         model=model_name,
         processor=processor,
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_blip(pipe):
     pipe.generation_config.max_new_tokens = None
 
     img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
@@ -38,5 +45,3 @@ def test_blip():
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )
-
-    pipe.model.dispose()

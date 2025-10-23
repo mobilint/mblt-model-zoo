@@ -1,13 +1,16 @@
-from mblt_model_zoo.transformers import pipeline
+import pytest
 from pprint import pprint
+from mblt_model_zoo.transformers import pipeline
 
 
-def test_bert():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/bert-base-uncased"
-
     pipe = pipeline('fill-mask', model=model_name)
+    yield pipe
+    pipe.model.dispose()
 
+
+def test_bert(pipe):
     output = pipe("Hello I'm a [MASK] model.")
     pprint(output)
-
-    pipe.model.dispose()

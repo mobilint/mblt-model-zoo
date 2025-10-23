@@ -1,8 +1,10 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoProcessor
 
 
-def test_qwen2_vl():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
     processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
@@ -11,6 +13,11 @@ def test_qwen2_vl():
         model=model_name,
         processor=processor,
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_qwen2_vl(pipe):
     pipe.generation_config.max_new_tokens = None
 
     messages = [

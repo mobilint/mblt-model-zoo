@@ -1,8 +1,10 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-def test_cohere2():
+@pytest.fixture
+def pipe():
     model_path = "mobilint/c4ai-command-r7b-12-2024"
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
@@ -11,6 +13,11 @@ def test_cohere2():
         model=model_path,
         streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_cohere2(pipe):
     pipe.generation_config.max_new_tokens = None
 
     messages = [

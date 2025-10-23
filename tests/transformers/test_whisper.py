@@ -1,14 +1,21 @@
+import pytest
 from datasets import load_dataset
 from mblt_model_zoo.transformers import pipeline
 
 
-def test_whisper():
+@pytest.fixture
+def pipe():
     model_path = "mobilint/whisper-small"
 
     pipe = pipeline(
         "automatic-speech-recognition",
         model=model_path,
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_whisper(pipe):
     pipe.generation_config.max_new_tokens = None
 
     ds = load_dataset(

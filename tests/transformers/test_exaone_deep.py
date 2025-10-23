@@ -1,8 +1,10 @@
+import pytest
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-def test_exaone_deep():
+@pytest.fixture
+def pipe():
     model_name = "mobilint/EXAONE-Deep-2.4B"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -11,6 +13,11 @@ def test_exaone_deep():
         model=model_name,
         streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     )
+    yield pipe
+    pipe.model.dispose()
+
+
+def test_exaone_deep(pipe):
     pipe.generation_config.max_new_tokens = None
 
     # Choose your prompt:

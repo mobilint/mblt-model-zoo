@@ -1,12 +1,19 @@
+import pytest
 import random
 from transformers import TextStreamer
 from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-def test_exaone4():
-    model_name = "mobilint/EXAONE-4.0-1.2B"
+model_name = "mobilint/EXAONE-4.0-1.2B"
 
+
+@pytest.fixture
+def model():
     model = AutoModelForCausalLM.from_pretrained(model_name)
+    yield model
+    model.dispose()
+
+def test_exaone4(model):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
