@@ -39,12 +39,18 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
         self,
         mxq_path: str = "",
         dev_no: int = 0,
+        vision_config = None,
+        text_config = None,
         **kwargs,
     ):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
+        
+        if text_config is None:
+            text_config = {}
+            text_config["model_type"] = "mobilint-cohere2"
 
-        super().__init__(**kwargs)
+        super().__init__(vision_config, text_config, **kwargs)
 
         if self.vision_feature_select_strategy != "full":
             raise ValueError(
