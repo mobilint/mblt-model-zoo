@@ -1,6 +1,7 @@
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, TypeVar
 
 import maccel
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -17,7 +18,8 @@ from transformers import (
     Qwen2VLPreTrainedModel,
     Qwen2VLModel,
     Qwen2VLForConditionalGeneration,
-    
+
+    PretrainedConfig,
     AutoConfig,
     AutoTokenizer,
     AutoProcessor,
@@ -39,6 +41,10 @@ from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
+
+
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
 
 
 class MobilintQwen2VLProcessor(Qwen2VLProcessor):
@@ -122,14 +128,14 @@ class MobilintQwen2VLConfig(Qwen2VLConfig):
     sub_configs = {"vision_config": MobilintQwen2VLVisionConfig, "text_config": MobilintQwen2VLTextConfig}
     keys_to_ignore_at_inference = []
     
-    def __init__(
-        self,
+    @classmethod
+    def from_pretrained(
         **kwargs,
-    ):
-        super().__init__(**kwargs)
-        
-        self.vision_config.name_or_path = self.name_or_path
-        self.text_config.name_or_path = self.name_or_path
+    ) -> SpecificPretrainedConfigType:
+        config = super().from_pretrained(**kwargs)
+        config.vision_config.name_or_path = config.name_or_path
+        config.text_config.name_or_path = config.name_or_path
+        return config
 
 
 class MobilintQwen2VLPreTrainedModel(Qwen2VLPreTrainedModel):
