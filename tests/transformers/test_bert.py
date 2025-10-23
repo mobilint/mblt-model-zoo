@@ -9,3 +9,5 @@ def test_bert():
 
     output = pipe("Hello I'm a [MASK] model.")
     pprint(output)
+
+    pipe.model.dispose()

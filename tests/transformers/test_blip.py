@@ -38,3 +38,5 @@ def test_blip():
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )
+
+    pipe.model.dispose()
