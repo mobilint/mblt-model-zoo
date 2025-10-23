@@ -318,8 +318,8 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
 class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
     def __init__(self, config: MobilintQwen2VLConfig):
         super().__init__(config)
-        self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
-        self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config)
+        self.visual = MobilintQwen2VisionTransformerPretrainedModel(config.vision_config)
+        self.language_model = MobilintQwen2VLTextModel(config.text_config)
         self.rope_deltas = None  # cache rope_deltas here
     
     def dispose(self):
