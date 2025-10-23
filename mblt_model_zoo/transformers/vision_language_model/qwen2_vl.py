@@ -349,7 +349,7 @@ class MobilintQwen2VLModel(Qwen2VLModel, MobilintQwen2VLPreTrainedModel):
         self.language_model.dispose()
 
 
-class MobilintQwen2VLForConditionalGeneration(Qwen2VLForConditionalGeneration, MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin):
+class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Qwen2VLForConditionalGeneration, MobilintGenerationMixin):
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
