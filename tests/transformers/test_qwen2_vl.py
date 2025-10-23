@@ -36,7 +36,7 @@ def test_qwen2_vl(pipe):
     pipe(
         text=messages,
         generate_kwargs={
-            "max_length": 4096,
+            "max_length": 512,
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )

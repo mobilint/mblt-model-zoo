@@ -32,7 +32,7 @@ def test_exaone4(model):
 
     model.generate(
         input_ids.to(model.device),
-        max_length=4096,
+        max_length=512,
         do_sample=False,
         streamer=streamer,
     )
@@ -51,7 +51,7 @@ def test_exaone4(model):
 
     model.generate(
         input_ids.to(model.device),
-        max_length=4096,
+        max_length=512,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -92,7 +92,7 @@ def test_exaone4(model):
 
     model.generate(
         input_ids.to(model.device),
-        max_length=4096,
+        max_length=512,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,

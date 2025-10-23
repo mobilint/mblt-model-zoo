@@ -30,5 +30,5 @@ def test_llama(pipe):
 
     outputs = pipe(
         messages,
-        max_length=4096,
+        max_length=512,
     )

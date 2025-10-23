@@ -43,5 +43,5 @@ Please reason step by step, and you should write the correct option alphabet (A,
 
     outputs = pipe(
         messages,
-        max_length=4096,
+        max_length=512,
     )

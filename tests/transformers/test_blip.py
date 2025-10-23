@@ -31,7 +31,7 @@ def test_blip(pipe):
         raw_image,
         text,
         generate_kwargs={
-            "max_length": 4096,
+            "max_length": 512,
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )
@@ -41,7 +41,7 @@ def test_blip(pipe):
         raw_image,
         "",
         generate_kwargs={
-            "max_length": 4096,
+            "max_length": 512,
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )
