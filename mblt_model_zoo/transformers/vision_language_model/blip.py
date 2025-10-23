@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypeVar, Union, List
+from typing import Optional, Tuple, TypeVar, Union, List, Any
 
 import maccel
 import torch
@@ -39,10 +39,13 @@ from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 
+
 SpecificPreTrainedModelType = TypeVar(
     "SpecificPreTrainedModelType", bound="PreTrainedModel"
 )
 
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
 
 class MobilintBlipTextConfig(BlipTextConfig):
     model_type = "mobilint-blip_text_model"
@@ -135,8 +138,10 @@ class MobilintBlipConfig(PretrainedConfig):
         )
     
     @classmethod
-    def from_pretrained(**kwargs):
-        config = super().from_pretrained(**kwargs)
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> SpecificPretrainedConfigType:
+        config = super().from_dict(config_dict, **kwargs)
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
         return config

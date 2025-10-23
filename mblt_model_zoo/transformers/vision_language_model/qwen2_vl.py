@@ -129,14 +129,13 @@ class MobilintQwen2VLConfig(Qwen2VLConfig):
     keys_to_ignore_at_inference = []
     
     @classmethod
-    def from_pretrained(
-        **kwargs,
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
     ) -> SpecificPretrainedConfigType:
-        config = super().from_pretrained(**kwargs)
-        config.vision_config.name_or_path = config.name_or_path
+        config = super().from_dict(config_dict, **kwargs)
         config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
         return config
-
 
 class MobilintQwen2VLPreTrainedModel(Qwen2VLPreTrainedModel):
     config: MobilintQwen2VLConfig

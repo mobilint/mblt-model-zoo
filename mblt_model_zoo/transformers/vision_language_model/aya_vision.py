@@ -57,7 +57,6 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
         cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
     ) -> SpecificPretrainedConfigType:
         config = super().from_dict(config_dict, **kwargs)
-        print("config.name_or_path: ", config.name_or_path)
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
         return config
