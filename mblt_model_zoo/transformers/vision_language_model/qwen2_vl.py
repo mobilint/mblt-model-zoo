@@ -167,11 +167,11 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         self.gradient_checkpointing = False
                 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
+        # self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_multi_core_mode([maccel.Cluster.Cluster1])
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
-        self.mxq_model.launch(self.acc)
+        # self.mxq_model.launch(self.acc)
     
     def __getattribute__(self, name: str, /) -> Any:
         if name == 'dtype':
@@ -244,11 +244,11 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
         self.gradient_checkpointing = False
         
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
+        # self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
-        self.mxq_model.launch(self.acc)
+        # self.mxq_model.launch(self.acc)
     
     def forward(
         self,
@@ -353,7 +353,7 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
-        super().__init__(config)
+        MobilintQwen2VLPreTrainedModel.__init__(config)
         
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model
