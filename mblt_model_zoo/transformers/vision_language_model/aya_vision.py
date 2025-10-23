@@ -1,4 +1,4 @@
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Any, TypeVar
 
 import maccel
 from maccel import Cluster, Core, CoreId
@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 from transformers import (
+    PretrainedConfig,
     AyaVisionConfig,
     AyaVisionPreTrainedModel,
     AutoModelForCausalLM,
@@ -25,6 +26,10 @@ from transformers.utils import is_torchdynamo_compiling
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
 from ..utils.cache_utils import MobilintCache
+
+
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
 
 
 class MobilintAyaVisionConfig(AyaVisionConfig):
@@ -48,8 +53,10 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
             )
     
     @classmethod
-    def from_dict(**kwargs):
-        config = super().from_dict(**kwargs)
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> SpecificPretrainedConfigType:
+        config = super().from_dict(config_dict, **kwargs)
         print("config.name_or_path: ", config.name_or_path)
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
