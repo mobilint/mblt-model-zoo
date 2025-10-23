@@ -53,11 +53,9 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
 [project.optional-dependencies]
 transformers = [
+    "maccel",
     "transformers>=4.54.1, <4.56.0",
-    "datasets>=3.2.0, <=3.6.0",
     "tf-keras",
-    "librosa",
-    "soundfile",
 ]
 
 # Tools setting -----------------------------------------
@@ -66,3 +64,11 @@ packages = { find = { where = ["."], include = ["mblt_model_zoo","mblt_model_zoo
 
 [tool.setuptools.dynamic]
 version = { attr = "mblt_model_zoo.__version__" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "datasets>=3.2.0, <=3.6.0",
+    "librosa",
+    "soundfile",
+]
