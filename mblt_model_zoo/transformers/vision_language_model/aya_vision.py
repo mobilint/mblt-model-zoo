@@ -48,8 +48,8 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
             )
     
     @classmethod
-    def from_pretrained(**kwargs):
-        config = super().from_pretrained(**kwargs)
+    def from_dict(**kwargs):
+        config = super().from_dict(**kwargs)
         print("config.name_or_path: ", config.name_or_path)
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
