@@ -275,7 +275,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             [encoder_hidden_states, embedding_output],
             cache_size=int(past_key_values_length),
         )[0]
-        logits = torch.from_numpy(logits, dtype=torch.float32, device=self.device).squeeze(0)
+        logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
 
         past_key_values.update_cache_position(cache_position)
 
@@ -453,7 +453,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
             pixel_values.type(torch.float32).cpu().numpy()
         )[0]
         last_hidden_state = np.transpose(last_hidden_state[:, :, 0], (0, 2, 1))
-        last_hidden_state = torch.from_numpy(last_hidden_state).half()
+        last_hidden_state = torch.tensor(last_hidden_state, dtype=torch.float32, device=self.device)
 
         if not return_dict:
             return (last_hidden_state,)

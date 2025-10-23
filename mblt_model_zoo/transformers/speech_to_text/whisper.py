@@ -160,7 +160,7 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         output = self.mxq_model.infer(
             input_features.permute(0, 2, 1).type(torch.float32).cpu().numpy()
         )[0]
-        hidden_states = torch.from_numpy(output, dtype=torch.float32, device=self.device).unsqueeze(0)
+        hidden_states = torch.tensor(output, dtype=torch.float32, device=self.device).unsqueeze(0)
 
         if not return_dict:
             return (hidden_states,)
