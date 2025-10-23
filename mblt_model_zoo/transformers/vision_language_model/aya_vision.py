@@ -46,6 +46,13 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
                 "vision_feature_select_strategy should be 'full'."
                 f"Got: {self.vision_feature_select_strategy}"
             )
+    
+    @classmethod
+    def from_pretrained(**kwargs):
+        config = super().from_pretrained(**kwargs)
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        return config
 
 
 class MobilintAyaVisionForConditionalGeneration(
@@ -55,8 +62,6 @@ class MobilintAyaVisionForConditionalGeneration(
 
     def __init__(self, config: MobilintAyaVisionConfig):
         super().__init__(config)
-
-        config.text_config.name_or_path = config.name_or_path
 
         self.vocab_size = config.text_config.vocab_size
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)

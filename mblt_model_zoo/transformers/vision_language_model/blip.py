@@ -50,10 +50,6 @@ class MobilintBlipTextConfig(BlipTextConfig):
     def __init__(
         self,
         mxq_path: str = "",
-        layer_norm_bias_path: str = "",
-        layer_norm_weight_path: str = "",
-        position_embeddings_path: str = "",
-        word_embeddings_path: str = "",
         dev_no: int = 0,
         **kwargs,
     ):
@@ -137,6 +133,13 @@ class MobilintBlipConfig(PretrainedConfig):
             vision_config=vision_config.to_dict(),
             **kwargs,
         )
+    
+    @classmethod
+    def from_pretrained(**kwargs):
+        config = super().from_pretrained(**kwargs)
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        return config
 
 
 class MobilintBlipPreTrainedModel(BlipPreTrainedModel):
@@ -482,10 +485,7 @@ class MobilintBlipForConditionalGeneration(
 
     def __init__(self, config: MobilintBlipConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
-
-        config.vision_config.name_or_path = config.name_or_path
-        config.text_config.name_or_path = config.name_or_path
-
+        
         self.vision_model = MobilintBlipVisionModel(config.vision_config)
 
         self.text_decoder = MobilintBlipTextLMHeadModel(config.text_config)
