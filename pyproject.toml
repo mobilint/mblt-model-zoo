@@ -55,6 +55,9 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 transformers = [
     "transformers>=4.54.1, <4.56.0",
     "datasets>=3.2.0, <=3.6.0",
+    "tf-keras",
+    "librosa",
+    "soundfile",
 ]
 
 # Tools setting -----------------------------------------
