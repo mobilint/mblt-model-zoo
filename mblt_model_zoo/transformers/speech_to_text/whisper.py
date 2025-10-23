@@ -570,6 +570,9 @@ class MobilintWhisperForConditionalGeneration(
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
         )
+    
+    def dispose(self):
+        self.model.displose()
 
 
 AutoConfig.register("mobilint-whisper", MobilintWhisperConfig)
