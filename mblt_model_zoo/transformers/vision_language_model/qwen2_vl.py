@@ -121,6 +121,15 @@ class MobilintQwen2VLConfig(Qwen2VLConfig):
     model_type = "mobilint-qwen2_vl"
     sub_configs = {"vision_config": MobilintQwen2VLVisionConfig, "text_config": MobilintQwen2VLTextConfig}
     keys_to_ignore_at_inference = []
+    
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        
+        self.vision_config.name_or_path = self.name_or_path
+        self.text_config.name_or_path = self.name_or_path
 
 
 class MobilintQwen2VLPreTrainedModel(Qwen2VLPreTrainedModel):
@@ -318,8 +327,8 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
 class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
     def __init__(self, config: MobilintQwen2VLConfig):
         super().__init__(config)
-        self.visual = MobilintQwen2VisionTransformerPretrainedModel(config.vision_config)
-        self.language_model = MobilintQwen2VLTextModel(config.text_config)
+        self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
+        self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config)
         self.rope_deltas = None  # cache rope_deltas here
     
     def dispose(self):
@@ -332,9 +341,6 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
     
     def __init__(self, config: MobilintQwen2VLConfig):
         super().__init__(config)
-        
-        config.vision_config.name_or_path = config.name_or_path
-        config.text_config.name_or_path = config.name_or_path
         
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model
