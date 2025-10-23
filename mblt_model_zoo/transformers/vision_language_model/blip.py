@@ -453,7 +453,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
             pixel_values.type(torch.float32).cpu().numpy()
         )[0]
         last_hidden_state = np.transpose(last_hidden_state[:, :, 0], (0, 2, 1))
-        last_hidden_state = torch.tensor(last_hidden_state, dtype=torch.float32, device=self.device)
+        last_hidden_state = torch.tensor(last_hidden_state, dtype=torch.float32, device=pixel_values.device)
 
         if not return_dict:
             return (last_hidden_state,)
