@@ -24,7 +24,7 @@ def test_whisper(pipe):
     sample = ds[0]["audio"]
 
     output = pipe(
-        sample.copy(),
+        sample,
         batch_size=8,
         return_timestamps=True,
         generate_kwargs={
