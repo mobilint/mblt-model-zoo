@@ -572,7 +572,7 @@ class MobilintWhisperForConditionalGeneration(
         )
     
     def dispose(self):
-        self.model.displose()
+        self.model.dispose()
 
 
 AutoConfig.register("mobilint-whisper", MobilintWhisperConfig)
