@@ -297,6 +297,9 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             attentions=None,
             cross_attentions=None,
         )
+    
+    def launch(self):
+        self.mxq_model.launch()
 
     def dispose(self):
         self.mxq_model.dispose()
@@ -403,6 +406,9 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
 
         return model_inputs
 
+    def launch(self):
+        self.bert.launch()
+
     def dispose(self):
         self.bert.dispose()
 
@@ -475,6 +481,9 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
     def get_input_embeddings(self):
         logger.warning_once("get_input_embeddings is not implemented")
         return None
+
+    def launch(self):
+        self.mxq_model.launch()
 
     def dispose(self):
         self.mxq_model.dispose()
@@ -603,6 +612,10 @@ class MobilintBlipForConditionalGeneration(
         )
 
         return outputs
+
+    def launch(self):
+        self.vision_model.launch()
+        self.text_decoder.launch()
 
     def dispose(self):
         self.vision_model.dispose()

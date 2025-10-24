@@ -205,6 +205,9 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
             hidden_states=None,
             attentions=None,
         )
+    
+    def launch(self):
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()

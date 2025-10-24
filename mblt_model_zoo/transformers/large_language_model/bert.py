@@ -179,6 +179,9 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
             cross_attentions=None,
         )
 
+    def launch(self):
+        self.mxq_model.launch(self.acc)
+
     def dispose(self):
         self.mxq_model.dispose()
 
@@ -200,6 +203,9 @@ class MobilintBertForMaskedLM(MobilintBertPreTrainedModel, BertForMaskedLM):
 
         # Initialize weights and apply final processing
         self.post_init()
+    
+    def launch(self):
+        self.bert.launch()
     
     def dispose(self):
         self.bert.dispose()
