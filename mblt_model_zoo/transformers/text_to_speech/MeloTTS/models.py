@@ -42,7 +42,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         
         self.acc = maccel.Accelerator()
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core0)])
+        mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(mxq_path, mc)
         num_model_variants = self.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
@@ -144,7 +144,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         
         self.acc = maccel.Accelerator()
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(core_ids=[CoreId(Cluster.Cluster0, Core.Core2)])
+        mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(mxq_path, mc)
         num_model_variants = self.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
