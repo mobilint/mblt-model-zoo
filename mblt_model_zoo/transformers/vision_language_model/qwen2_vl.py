@@ -232,6 +232,9 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         
         return image_embeds
 
+    def launch(self):
+        self.mxq_model.launch(self.acc)
+
     def dispose(self):
         self.mxq_model.dispose()
 
@@ -341,6 +344,9 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
             attentions=None,
         )
     
+    def launch(self):
+        self.mxq_model.launch(self.acc)
+    
     def dispose(self):
         self.mxq_model.dispose()
 
@@ -351,6 +357,10 @@ class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
         self.visual = MobilintQwen2VisionTransformerPretrainedModel(config.vision_config)
         self.language_model = MobilintQwen2VLTextModel(config.text_config)
         self.rope_deltas = None  # cache rope_deltas here
+    
+    def launch(self):
+        self.visual.launch()
+        self.language_model.launch()
     
     def dispose(self):
         self.visual.dispose()
@@ -370,6 +380,9 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
     
     def get_cache_mxq_model(self):
         return self.model.language_model.mxq_model
+
+    def launch(self):
+        self.model.launch()
     
     def dispose(self):
         self.model.dispose()

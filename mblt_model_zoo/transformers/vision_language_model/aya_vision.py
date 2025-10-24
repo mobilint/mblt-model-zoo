@@ -329,7 +329,12 @@ class MobilintAyaVisionForConditionalGeneration(
         self.vocab_size = model_embeds.num_embeddings
         return model_embeds
 
+    def launch(self):
+        self.language_model.launch()
+        self.mxq_model.launch()
+
     def dispose(self):
+        self.language_model.dispose()
         self.mxq_model.dispose()
 
 

@@ -99,6 +99,9 @@ class MBLT_Engine:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. Please check your environment.")
         self.to(device=device)
+    
+    def launch(self):
+        self.model.launch()
 
     def dispose(self):
         self.model.dispose()
@@ -189,6 +192,10 @@ class MXQ_Model:
 
         npu_outs = self.model.infer(x)
         return npu_outs
+    
+    def launch(self):
+        """Launch the model."""
+        self.model.launch(self.acc)
 
     def dispose(self):
         """Dispose the model."""
