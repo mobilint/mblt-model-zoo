@@ -147,3 +147,9 @@ class TTS(OriginalTTS):
                 soundfile.write(output_path, audio, self.hps.data.sampling_rate, format=format)
             else:
                 soundfile.write(output_path, audio, self.hps.data.sampling_rate)
+
+    def launch(self):
+        self.model.launch()
+    
+    def dispose(self):
+        self.model.dispose()
