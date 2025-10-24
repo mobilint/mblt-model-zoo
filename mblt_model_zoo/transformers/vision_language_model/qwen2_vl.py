@@ -64,8 +64,6 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         # Image should be resized into (224, 224) to fit image token position
         size = (224, 224)
         
-        print("MobilintQwen2VLProcessor before: ", images)
-        
         if isinstance(images, Image.Image):
             images = images.resize(size)
         elif isinstance(images, np.ndarray):
@@ -84,12 +82,12 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             else:
                 raise ValueError(f"Unsupported tensor shape: {tuple(images.shape)}")
+        else:
+            raise TypeError(f"Unsupported type of image: {type(images)}")
         
         if videos is not None:
             raise NotImplementedError("Video inputs are not supported")
-    
-        print("MobilintQwen2VLProcessor after: ", images)
-                
+                    
         return super().__call__(images, text, videos, **kwargs)
 
 class MobilintQwen2VLTextConfig(Qwen2VLTextConfig):
