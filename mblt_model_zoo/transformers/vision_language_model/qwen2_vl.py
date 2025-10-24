@@ -34,6 +34,7 @@ from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
+from transformers.image_utils import load_image
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
@@ -56,10 +57,13 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         **kwargs: Unpack[Qwen2VLProcessorKwargs],
     ) -> BatchFeature:
         # Make sure images is only one instance of PIL.Image.Image, np.ndarray, torch.Tensor, or None
-        while isinstance(images, list):
+        if isinstance(images, list):
             if len(images) > 1:
                 raise NotImplementedError("Only one image input is supported")
             images = images[0]
+        
+        if isinstance(images, str):
+            images = load_image(images)
         
         # Image should be resized into (224, 224) to fit image token position
         size = (224, 224)
