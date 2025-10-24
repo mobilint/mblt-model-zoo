@@ -57,7 +57,7 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         **kwargs: Unpack[Qwen2VLProcessorKwargs],
     ) -> BatchFeature:
         # Make sure images is only one instance of PIL.Image.Image, np.ndarray, torch.Tensor, or None
-        if isinstance(images, list):
+        while isinstance(images, list):
             if len(images) > 1:
                 raise NotImplementedError("Only one image input is supported")
             images = images[0]
