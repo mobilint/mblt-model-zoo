@@ -173,9 +173,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(
-            None, [maccel.CoreId(maccel.Cluster.Cluster1, maccel.Core.Core1)]
-        )
+        mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
 
