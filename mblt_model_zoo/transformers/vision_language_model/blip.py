@@ -158,15 +158,9 @@ class MobilintBlipPreTrainedModel(BlipPreTrainedModel):
     config_class = MobilintBlipConfig
     supports_gradient_checkpointing = False
 
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
-
 
 class MobilintBlipTextPreTrainedModel(BlipTextPreTrainedModel):
     config_class = MobilintBlipTextConfig
-
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
 
 
 class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):

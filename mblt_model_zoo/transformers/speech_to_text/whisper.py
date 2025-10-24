@@ -71,9 +71,6 @@ class MobilintWhisperPreTrainedModel(WhisperPreTrainedModel):
     _supports_sdpa = False
     _supports_static_cache = False
 
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
-
 class Object(object):
     pass
 
