@@ -262,6 +262,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, MobilintGenerationMixin):
             hidden_states=None,
             attentions=None,
         )
+    
+    def launch(self):
+        self.mxq_model.launch()
 
     def dispose(self):
         self.mxq_model.dispose()
