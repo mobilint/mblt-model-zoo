@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypeVar, Union, List
+from typing import Optional, Tuple, TypeVar, Union, List, Any
 
 import maccel
 import torch
@@ -39,10 +39,13 @@ from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 
+
 SpecificPreTrainedModelType = TypeVar(
     "SpecificPreTrainedModelType", bound="PreTrainedModel"
 )
 
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
 
 class MobilintBlipTextConfig(BlipTextConfig):
     model_type = "mobilint-blip_text_model"
@@ -50,10 +53,6 @@ class MobilintBlipTextConfig(BlipTextConfig):
     def __init__(
         self,
         mxq_path: str = "",
-        layer_norm_bias_path: str = "",
-        layer_norm_weight_path: str = "",
-        position_embeddings_path: str = "",
-        word_embeddings_path: str = "",
         dev_no: int = 0,
         **kwargs,
     ):
@@ -137,21 +136,31 @@ class MobilintBlipConfig(PretrainedConfig):
             vision_config=vision_config.to_dict(),
             **kwargs,
         )
-
+    
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> SpecificPretrainedConfigType:
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        
+        config, kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)
+        
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        
+        if return_unused_kwargs:
+            return config, kwargs
+        else:
+            return config
+        
 
 class MobilintBlipPreTrainedModel(BlipPreTrainedModel):
     config_class = MobilintBlipConfig
     supports_gradient_checkpointing = False
 
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
-
 
 class MobilintBlipTextPreTrainedModel(BlipTextPreTrainedModel):
     config_class = MobilintBlipTextConfig
-
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
 
 
 class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
@@ -275,7 +284,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             [encoder_hidden_states, embedding_output],
             cache_size=int(past_key_values_length),
         )[0]
-        logits = torch.from_numpy(logits, dtype=torch.float32, device=self.device).squeeze(0)
+        logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
 
         past_key_values.update_cache_position(cache_position)
 
@@ -453,7 +462,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
             pixel_values.type(torch.float32).cpu().numpy()
         )[0]
         last_hidden_state = np.transpose(last_hidden_state[:, :, 0], (0, 2, 1))
-        last_hidden_state = torch.from_numpy(last_hidden_state).half()
+        last_hidden_state = torch.tensor(last_hidden_state, dtype=torch.float32, device=pixel_values.device)
 
         if not return_dict:
             return (last_hidden_state,)
@@ -482,10 +491,7 @@ class MobilintBlipForConditionalGeneration(
 
     def __init__(self, config: MobilintBlipConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
-
-        config.vision_config.name_or_path = config.name_or_path
-        config.text_config.name_or_path = config.name_or_path
-
+        
         self.vision_model = MobilintBlipVisionModel(config.vision_config)
 
         self.text_decoder = MobilintBlipTextLMHeadModel(config.text_config)

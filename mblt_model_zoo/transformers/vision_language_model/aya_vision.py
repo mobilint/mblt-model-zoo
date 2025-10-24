@@ -1,4 +1,4 @@
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Any, TypeVar
 
 import maccel
 from maccel import Cluster, Core, CoreId
@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 from transformers import (
+    PretrainedConfig,
     AyaVisionConfig,
     AyaVisionPreTrainedModel,
     AutoModelForCausalLM,
@@ -27,6 +28,10 @@ from mblt_model_zoo.transformers.utils.generation_utils import MobilintGeneratio
 from ..utils.cache_utils import MobilintCache
 
 
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
+
+
 class MobilintAyaVisionConfig(AyaVisionConfig):
     model_type = "mobilint-aya_vision"
 
@@ -34,18 +39,40 @@ class MobilintAyaVisionConfig(AyaVisionConfig):
         self,
         mxq_path: str = "",
         dev_no: int = 0,
+        vision_config = None,
+        text_config = None,
         **kwargs,
     ):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
+        
+        if text_config is None:
+            text_config = {}
+            text_config["model_type"] = "mobilint-cohere2"
 
-        super().__init__(**kwargs)
+        super().__init__(vision_config, text_config, **kwargs)
 
         if self.vision_feature_select_strategy != "full":
             raise ValueError(
                 "vision_feature_select_strategy should be 'full'."
                 f"Got: {self.vision_feature_select_strategy}"
             )
+    
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> SpecificPretrainedConfigType:
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        
+        config, kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)
+        
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        
+        if return_unused_kwargs:
+            return config, kwargs
+        else:
+            return config
 
 
 class MobilintAyaVisionForConditionalGeneration(
@@ -55,8 +82,6 @@ class MobilintAyaVisionForConditionalGeneration(
 
     def __init__(self, config: MobilintAyaVisionConfig):
         super().__init__(config)
-
-        config.text_config.name_or_path = config.name_or_path
 
         self.vocab_size = config.text_config.vocab_size
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
@@ -127,7 +152,7 @@ class MobilintAyaVisionForConditionalGeneration(
         image_features = pixel_values.type(torch.float32).cpu().numpy()
         image_features = self.mxq_model.infer([image_features])[0]
         image_features = np.transpose(image_features, (0, 2, 3, 1))
-        image_features = torch.from_numpy(image_features, dtype=torch.float32, device=self.device)
+        image_features = torch.tensor(image_features, dtype=torch.float32, device=self.device)
         return image_features
 
     def forward(

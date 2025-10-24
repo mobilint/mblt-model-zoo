@@ -1,6 +1,7 @@
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, TypeVar
 
 import maccel
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -17,7 +18,8 @@ from transformers import (
     Qwen2VLPreTrainedModel,
     Qwen2VLModel,
     Qwen2VLForConditionalGeneration,
-    
+
+    PretrainedConfig,
     AutoConfig,
     AutoTokenizer,
     AutoProcessor,
@@ -32,6 +34,7 @@ from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
+from transformers.image_utils import load_image
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 
@@ -39,6 +42,10 @@ from ..utils.cache_utils import MobilintCache
 
 
 logger = logging.get_logger(__name__)
+
+
+# type hinting: specifying the type of config class that inherits from PretrainedConfig
+SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
 
 
 class MobilintQwen2VLProcessor(Qwen2VLProcessor):
@@ -54,6 +61,9 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
             if len(images) > 1:
                 raise NotImplementedError("Only one image input is supported")
             images = images[0]
+        
+        if isinstance(images, str):
+            images = load_image(images)
         
         # Image should be resized into (224, 224) to fit image token position
         size = (224, 224)
@@ -76,10 +86,12 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             else:
                 raise ValueError(f"Unsupported tensor shape: {tuple(images.shape)}")
+        else:
+            raise TypeError(f"Unsupported type of image: {type(images)}")
         
         if videos is not None:
             raise NotImplementedError("Video inputs are not supported")
-                
+                    
         return super().__call__(images, text, videos, **kwargs)
 
 class MobilintQwen2VLTextConfig(Qwen2VLTextConfig):
@@ -121,8 +133,24 @@ class MobilintQwen2VLConfig(Qwen2VLConfig):
     model_type = "mobilint-qwen2_vl"
     sub_configs = {"vision_config": MobilintQwen2VLVisionConfig, "text_config": MobilintQwen2VLTextConfig}
     keys_to_ignore_at_inference = []
-
-
+    
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> SpecificPretrainedConfigType:
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        
+        config, kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)
+        
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        
+        if return_unused_kwargs:
+            return config, kwargs
+        else:
+            return config
+        
+        
 class MobilintQwen2VLPreTrainedModel(Qwen2VLPreTrainedModel):
     config: MobilintQwen2VLConfig
     supports_gradient_checkpointing = False
@@ -317,9 +345,9 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
 
 class MobilintQwen2VLModel(MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
     def __init__(self, config: MobilintQwen2VLConfig):
-        super().__init__(config)
-        self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
-        self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config)
+        MobilintQwen2VLPreTrainedModel.__init__(self, config)
+        self.visual = MobilintQwen2VisionTransformerPretrainedModel(config.vision_config)
+        self.language_model = MobilintQwen2VLTextModel(config.text_config)
         self.rope_deltas = None  # cache rope_deltas here
     
     def dispose(self):
@@ -331,10 +359,7 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
     _tied_weights_keys = []
     
     def __init__(self, config: MobilintQwen2VLConfig):
-        super().__init__(config)
-        
-        config.vision_config.name_or_path = config.name_or_path
-        config.text_config.name_or_path = config.name_or_path
+        MobilintQwen2VLPreTrainedModel.__init__(self, config)
         
         self.model = MobilintQwen2VLModel(config)
         # lm_head is done in self.model

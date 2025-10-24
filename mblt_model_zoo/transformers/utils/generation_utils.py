@@ -10,8 +10,11 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     def get_mxq_model(self) -> maccel.Model:
         pass
     
+    # Function arguments changed for transformers>=4.56.0
+    # args contain device and model_kwargs in transformers<4.56.0
+    # args contain only model_kwargs in transformers>=4.56.0
     def _get_cache(
-        self, cache_implementation: str, batch_size: int, max_cache_len: int, device: torch.device, model_kwargs
+        self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
     ) -> Cache:
         if not hasattr(self, "_cache"):
             self._cache = MobilintCache(self.get_mxq_model())
@@ -20,6 +23,9 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
             
         return self._cache
 
+    # Function arguments changed for transformers>=4.56.0
+    # args contain device in transformers<4.56.0
+    # args empty in transformers>=4.56.0
     def _prepare_cache_for_generation(
         self,
         generation_config: GenerationConfig,
@@ -27,7 +33,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         assistant_model: "PreTrainedModel",
         batch_size: int,
         max_cache_length: int,
-        device: torch.device,
+        *args,
     ) -> bool:
         super()._prepare_cache_for_generation(
             generation_config,
@@ -35,7 +41,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
             assistant_model,
             batch_size,
             max_cache_length,
-            device,
+            *args,
         )
 
         cache_name = "past_key_values"
@@ -45,4 +51,4 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
             return
         else:
-            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, device, model_kwargs)
+            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)

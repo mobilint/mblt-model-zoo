@@ -40,6 +40,11 @@ class MobilintCohere2Config(Cohere2Config):
         super().__init__(**kwargs)
 
         self.tie_word_embeddings = False
+    
+    @property
+    def sliding_window_pattern(self):
+        # Suppress warning only in transformers==4.54.1
+        return self._sliding_window_pattern
 
 
 class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin):

@@ -12,21 +12,14 @@ class MobilintLayer(CacheLayerMixin):
     def __init__(self, mxq_model: maccel.Model):
         self.mxq_model = mxq_model
         self._seen_tokens = 0
-    
+        
+    def lazy_initialization(self, key_states: torch.Tensor):
+        raise NotImplementedError("lazy_initialization is not implemented")
+
     def update(
-        self,
-        key_states: torch.Tensor,
-        value_states: torch.Tensor,
-        layer_idx: int,
-        cache_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self, key_states: torch.Tensor, value_states: torch.Tensor, cache_kwargs: Optional[dict[str, Any]] = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("update is not implemented")
-
-    def get_seq_length(self, cache_position=None) -> int:
-        return self._seen_tokens
-
-    def get_max_cache_shape(self) -> Optional[int]:
-        return self.mxq_model.get_input_buffer_info()[0].max_cache_size
 
     def get_mask_sizes(self, cache_position: torch.Tensor) -> tuple[int, int]:
         kv_offset = 0
@@ -35,6 +28,12 @@ class MobilintLayer(CacheLayerMixin):
         kv_length = query_length + past_seen_tokens
         return kv_length, kv_offset
 
+    def get_seq_length(self, cache_position=None) -> int:
+        return self._seen_tokens
+
+    def get_max_cache_shape(self) -> Optional[int]:
+        return self.mxq_model.get_input_buffer_info()[0].max_cache_size
+    
     def reset(self) -> None:
         self.mxq_model.reset_cache_memory()
         self._seen_tokens: int = 0

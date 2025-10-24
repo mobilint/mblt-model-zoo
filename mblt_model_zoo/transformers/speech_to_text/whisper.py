@@ -71,9 +71,6 @@ class MobilintWhisperPreTrainedModel(WhisperPreTrainedModel):
     _supports_sdpa = False
     _supports_static_cache = False
 
-    def _init_weights(self, module):
-        raise NotImplementedError("_init_weights is not implemented")
-
 class Object(object):
     pass
 
@@ -160,7 +157,7 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         output = self.mxq_model.infer(
             input_features.permute(0, 2, 1).type(torch.float32).cpu().numpy()
         )[0]
-        hidden_states = torch.from_numpy(output, dtype=torch.float32, device=self.device).unsqueeze(0)
+        hidden_states = torch.tensor(output, dtype=torch.float32, device=input_features.device).unsqueeze(0)
 
         if not return_dict:
             return (hidden_states,)
@@ -570,6 +567,9 @@ class MobilintWhisperForConditionalGeneration(
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
         )
+    
+    def dispose(self):
+        self.model.dispose()
 
 
 AutoConfig.register("mobilint-whisper", MobilintWhisperConfig)
