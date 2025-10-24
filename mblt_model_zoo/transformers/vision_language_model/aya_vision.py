@@ -101,16 +101,7 @@ class MobilintAyaVisionForConditionalGeneration(
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(
-            core_ids=[
-                CoreId(Cluster.Cluster0, Core.Core2),
-                CoreId(Cluster.Cluster0, Core.Core3),
-                CoreId(Cluster.Cluster1, Core.Core0),
-                CoreId(Cluster.Cluster1, Core.Core1),
-                CoreId(Cluster.Cluster1, Core.Core2),
-                CoreId(Cluster.Cluster1, Core.Core3),
-            ]
-        )
+        mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         print(f"Model Initialized")
         print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
