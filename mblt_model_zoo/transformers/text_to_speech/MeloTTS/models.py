@@ -5,7 +5,6 @@ from torch import nn
 from melo import commons
 
 import maccel
-from maccel import Cluster, Core, CoreId
 import numpy as np
 
 from transformers.utils import logging
