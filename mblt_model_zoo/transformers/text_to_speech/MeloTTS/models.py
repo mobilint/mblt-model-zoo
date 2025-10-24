@@ -129,7 +129,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         return m_p, logs_p, x_mask, logw
 
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
     
     def dispose(self):
         self.mxq_model.dispose()
@@ -198,7 +198,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         return None, output
 
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
     
     def dispose(self):
         self.mxq_model.dispose()
