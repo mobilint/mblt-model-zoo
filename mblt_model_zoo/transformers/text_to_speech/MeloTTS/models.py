@@ -129,6 +129,12 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         
         return m_p, logs_p, x_mask, logw
 
+    def launch(self):
+        self.mxq_model.launch()
+    
+    def dispose(self):
+        self.mxq_model.dispose()
+
 class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __init__(
         self,
@@ -191,6 +197,12 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         output = torch.tensor(output, dtype=torch.float32, device=device).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
 
         return None, output
+
+    def launch(self):
+        self.mxq_model.launch()
+    
+    def dispose(self):
+        self.mxq_model.dispose()
 
 class MobilintSynthesizerTrn(nn.Module):
     def __init__(
@@ -311,3 +323,11 @@ class MobilintSynthesizerTrn(nn.Module):
         z, o = self.dec_flow(z_p)
         # print('max/min of o:', o.max(), o.min())
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
+
+    def launch(self):
+        self.enc_p_sdp_dp.launch()
+        self.dec_flow.launch()
+    
+    def dispose(self):
+        self.enc_p_sdp_dp.dispose()
+        self.dec_flow.dispose()
