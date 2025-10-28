@@ -8,11 +8,12 @@ import noisereduce as nr
 
 MISSING_MSG = (
     "",
-    "========================================================================================================",
+    "==================================================================================================================",
     "Optional dependency 'melo' not found. Please install MeloTTS (https://github.com/myshell-ai/MeloTTS).",
-    "NOTE: Default dependencies of MeloTTS contains old version of `transformers`, which is not compatible with our model zoo.",
-    "You can modify `requirements.txt` in MeloTTS repository to remove `transformers` dependency",
-    "========================================================================================================",
+    "NOTE: Default dependencies of MeloTTS contains old version of `transformers`, `librosa`, and `tensorboard`.",
+    "These old versions are not compatible with our model zoo's dependency and the newest versions are compatible with MeloTTS."
+    "You can modify `requirements.txt` in MeloTTS repository to remove these three dependencies since our model zoo installs them.",
+    "==================================================================================================================",
     "",
 )
 
