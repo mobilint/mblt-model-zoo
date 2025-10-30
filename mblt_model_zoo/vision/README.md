@@ -141,7 +141,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | GELANm | (640,640,3) | 50.108 | 50.923 | 76.44 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | YOLOv9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | GELANc | (640,640,3) | 51.938 | 52.274 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
-| YOLOv9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv9c | (640,640,3) | 52.391 | 52.918 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | YOLOv10b | (640,640,3) | 51.125 | 52.096 | 92.23 | 19.07 | [Link](https://docs.ultralytics.com/models/yolov10/) | |
 | YOLO11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | YOLO11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
