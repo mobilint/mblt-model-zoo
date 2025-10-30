@@ -61,8 +61,8 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | RegNet_Y_16GF | (224,224,3) | 82.348 | 82.868 | 15.91 | 83.59 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html)| IMAGENET1K_V2 |
 | RegNet_Y_32GF | (224,224,3) | 80.510 | 80.840 | 32.28 | 145.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V1 |
 | RegNet_Y_32GF | (224,224,3) | 82.798 | 83.362 | 32.28 | 145.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V2 |
-| ResNet18 | (224,224,3) | 69.494 | 69.774 | 1.81 | 11.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
-| ResNet34 | (224,224,3) | 73.134 | 73.310 | 3.66 | 21.80 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
+| ResNet18 | (224,224,3) | 69.530 | 69.770 | 1.81 | 11.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
+| ResNet34 | (224,224,3) | 73.166 | 73.308 | 3.66 | 21.80 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
 | ResNet50 | (224,224,3) | 75.946 | 76.128 | 4.09 | 25.56 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
 | ResNet50 | (224,224,3) | 80.326 | 80.844 | 4.09 | 25.56 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
 | ResNet101 | (224,224,3) | 77.112 | 77.362 | 7.80 | 44.55 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
@@ -141,7 +141,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 | GELANm | (640,640,3) | 50.108 | 50.923 | 76.44 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | YOLOv9m | (640,640,3) | 50.351 | 51.191 | 76.43 | 19.98 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | GELANc | (640,640,3) | 51.938 | 52.274 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
-| YOLOv9c | (640,640,3) | 52.349 | 52.917 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv9c | (640,640,3) | 52.391 | 52.918 | 102.34 | 25.29 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | YOLOv10b | (640,640,3) | 51.125 | 52.096 | 92.23 | 19.07 | [Link](https://docs.ultralytics.com/models/yolov10/) | |
 | YOLO11s | (640,640,3) | 45.733 | 46.617 | 21.69 | 9.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | YOLO11m | (640,640,3) | 50.638 | 51.310 | 68.24 | 20.09 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
