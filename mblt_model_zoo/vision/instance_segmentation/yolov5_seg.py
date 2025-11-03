@@ -2,6 +2,114 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
+class YOLOv5nSeg_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": None,
+                    "global4": None,
+                    "global8": None,
+                },
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+class YOLOv5sSeg_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": None,
+                    "global4": None,
+                    "global8": None,
+                },
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+class YOLOv5mSeg_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": None,
+                    "global4": None,
+                    "global8": None,
+                },
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+    DEFAULT = COCO_V1
+
+
 class YOLOv5lSeg_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
@@ -74,6 +182,51 @@ class YOLOv5xSeg_Set(ModelInfoSet):
         },
     )
     DEFAULT = COCO_V1
+
+
+def YOLOv5nSeg(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5nSeg_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv5sSeg(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5sSeg_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv5mSeg(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv5mSeg_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
 
 
 def YOLOv5lSeg(
