@@ -13,6 +13,7 @@ def model():
     yield model
     model.dispose()
 
+
 def test_exaone4(model):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
@@ -73,7 +74,10 @@ def test_exaone4(model):
                     "type": "object",
                     "required": ["max_num"],
                     "properties": {
-                        "max_num": {"type": "int", "description": "Max number of the dice"}
+                        "max_num": {
+                            "type": "int",
+                            "description": "Max number of the dice",
+                        }
                     },
                 },
             },

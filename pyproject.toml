@@ -24,6 +24,8 @@ dependencies = [
     "setuptools>=70.0.0",
     "tqdm",
     "wheel",
+    "faster-coco-eval",
+    "PyYAML",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",

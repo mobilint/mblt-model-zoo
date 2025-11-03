@@ -15,6 +15,7 @@ def pipe():
     yield pipe
     pipe.model.dispose()
 
+
 def test_aya(pipe):
     pipe.generation_config.max_new_tokens = None
 
