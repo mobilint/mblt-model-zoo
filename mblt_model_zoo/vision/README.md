@@ -113,7 +113,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 ## Object Detection
 
-| Model | Input Size<br>(H,W,C) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{box}}}$<br>(NPU) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{box}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|----------------|---------------|-----------|------------|--------|------|
 | YOLOv3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
 | YOLOv3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
@@ -153,13 +153,13 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary>Object Detection (COCO)</summary>
 
-- $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{box}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
 
 </details>
 
 ## Instance Segmentation
 
-| Model | Input Size<br>(H,W,C) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{mask}}}$<br>(NPU) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{mask}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | YOLOv5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
@@ -182,7 +182,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 ## Pose Estimation
 
-| Model | Input Size<br>(H,W,C) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{pose}}}$<br>(NPU) | $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{pose}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | YOLOv8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLO11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
@@ -190,6 +190,6 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary>Pose Estimation (COCO)</summary>
 
-- $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{pose}}}$ values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$ values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
 
 </details>
