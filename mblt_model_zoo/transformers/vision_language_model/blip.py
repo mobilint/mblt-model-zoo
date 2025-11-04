@@ -302,7 +302,7 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         )
     
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()
@@ -488,7 +488,7 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         return None
 
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()
