@@ -165,7 +165,7 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         )
     
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()
@@ -338,7 +338,7 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         )
     
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()
