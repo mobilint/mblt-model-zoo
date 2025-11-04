@@ -164,7 +164,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         x = np.ascontiguousarray(x)
         
         max_chunk = max(self.allowed_chunks)
-        num_of_chunks = math.ceil(x.shape[2] / max_chunk)
+        num_of_chunks = math.ceil(x.shape[1] / max_chunk)
         
         output_chunks = []
                 
