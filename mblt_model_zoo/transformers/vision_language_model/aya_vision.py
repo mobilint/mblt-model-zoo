@@ -333,7 +333,7 @@ class MobilintAyaVisionForConditionalGeneration(
 
     def launch(self):
         self.language_model.launch()
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.language_model.dispose()

@@ -184,7 +184,7 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
         )
     
     def launch(self):
-        self.mxq_model.launch()
+        self.mxq_model.launch(self.acc)
 
     def dispose(self):
         self.mxq_model.dispose()
