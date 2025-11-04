@@ -177,6 +177,21 @@ AutoModelForCausalLM.register(MobilintBatchLlamaConfig, MobilintBatchLlamaForCau
 
 from ..utils.types import TransformersModelInfo
 
+Llama_32_3B_Instruct_Batch = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.1-8B-Instruct-Batch",
+    model_id="mobilint/Llama-3.1-8B-Instruct-Batch",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct-Batch/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "Llama-3.2-3B-Instruct-Batch.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
 Llama_31_8B_Instruct_Batch = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.1-8B-Instruct-Batch",
     model_id="mobilint/Llama-3.1-8B-Instruct-Batch",
