@@ -9,6 +9,9 @@ from .llama import (
     Llama_32_1B_Instruct,
     Llama_32_3B_Instruct,
 )
+from .llama_batch import (
+    Llama_31_8B_Instruct_Batch,
+)
 from .qwen2 import (
     Qwen_25_3B_Instruct,
     Qwen_25_05B_Instruct,
@@ -28,6 +31,7 @@ __all__ = [
     "Llama_31_8B_Instruct",
     "Llama_32_1B_Instruct",
     "Llama_32_3B_Instruct",
+    "Llama_31_8B_Instruct_Batch",
     "Qwen_25_05B_Instruct",
     "Qwen_25_15B_Instruct",
     "Qwen_25_3B_Instruct",
