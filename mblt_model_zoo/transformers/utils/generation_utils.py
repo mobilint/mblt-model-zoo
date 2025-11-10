@@ -47,8 +47,9 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         cache_name = "past_key_values"
 
         if model_kwargs.get(cache_name, None) is None:
-            return
-        elif model_kwargs[cache_name].__class__.__name__ == "MobilintCache":
-            return
+            return False
+        elif isinstance(model_kwargs[cache_name], "MobilintCache"):
+            return True
         else:
             model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)
+            return True
