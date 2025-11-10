@@ -39,7 +39,7 @@ class MobilintQwen2Config(Qwen2Config):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
 
-        super().__init__(**kwargs, tie_word_embeddings = False)
+        super().__init__(tie_word_embeddings=False, **kwargs)
 
 
 class MobilintQwen2ForCausalLM(Qwen2PreTrainedModel, MobilintGenerationMixin):
