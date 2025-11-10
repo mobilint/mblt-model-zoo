@@ -1,10 +1,11 @@
 from typing import Optional, Tuple, TypeVar, Union
 import math
 import maccel
+import hashlib
+import os
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
-
 
 from transformers import (
     WhisperTokenizer,
@@ -102,6 +103,9 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         self.mxq_model = maccel.Model(
             f"{config.name_or_path}/{config.encoder_mxq_path}", mc
         )
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.encoder_mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.encoder_mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def _freeze_parameters(self):
@@ -204,6 +208,9 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         self.mxq_model = maccel.Model(
             f"{config.name_or_path}/{config.decoder_mxq_path}", mc
         )
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.decoder_mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.decoder_mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):

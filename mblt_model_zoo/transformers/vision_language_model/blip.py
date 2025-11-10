@@ -1,6 +1,8 @@
 from typing import Optional, Tuple, TypeVar, Union, List, Any
 
 import maccel
+import hashlib
+import os
 import torch
 import numpy as np
 
@@ -177,6 +179,9 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
             None, [maccel.CoreId(maccel.Cluster.Cluster1, maccel.Core.Core1)]
         )
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):
@@ -422,6 +427,9 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         mc = maccel.ModelConfig()
         mc.set_global_core_mode([maccel.Cluster.Cluster0])
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def forward(
