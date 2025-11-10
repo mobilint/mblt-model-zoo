@@ -34,6 +34,7 @@ class MobilintQwen2Config(Qwen2Config):
         self,
         mxq_path: str = "",
         dev_no: int = 0,
+        tie_word_embeddings: bool = False,
         **kwargs,
     ):
         self.mxq_path = mxq_path
