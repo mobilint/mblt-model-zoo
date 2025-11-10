@@ -17,7 +17,7 @@ def pipe():
     pipe.model.dispose()
 
 
-def test_llama(pipe):
+def test_qwen2(pipe):
     pipe.generation_config.max_new_tokens = None
 
     prompt = "Give me a short introduction to large language model."
