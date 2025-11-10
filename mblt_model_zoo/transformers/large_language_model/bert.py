@@ -1,8 +1,8 @@
 from typing import Optional, Union
-
+import hashlib
+import os
 import maccel
 import torch
-
 from transformers import (
     Cache,
     BertPreTrainedModel,
@@ -64,6 +64,9 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
         self.mxq_model.launch(self.acc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.reset_cache_memory()
 
     def get_input_embeddings(self):
