@@ -1,5 +1,6 @@
 import os
 from argparse import ArgumentParser
+
 from mblt_model_zoo.vision import YOLOv9c
 
 if __name__ == "__main__":

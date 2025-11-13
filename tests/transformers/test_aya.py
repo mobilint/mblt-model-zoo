@@ -1,6 +1,7 @@
 import pytest
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
+
+from mblt_model_zoo.transformers import AutoProcessor, pipeline
 
 
 @pytest.fixture

@@ -1,10 +1,12 @@
-from typing import List, Union, Tuple
+from typing import List, Tuple, Union
+
 import numpy as np
 import torch
-from PIL import Image
 import torch.nn.functional as F
-from .base import PreOps
+from PIL import Image
+
 from ..types import TensorLike
+from .base import PreOps
 
 PIL_INTERP_CODES = {
     "nearest": Image.Resampling.NEAREST,

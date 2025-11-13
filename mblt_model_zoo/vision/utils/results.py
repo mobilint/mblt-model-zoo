@@ -1,12 +1,14 @@
-from typing import Union
 import os
+from typing import Union
+
+import cv2
 import numpy as np
 import torch
 from PIL import Image
-import cv2
+
 from .datasets import *
 from .postprocess.common import *
-from .types import TensorLike, ListTensorLike
+from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width
 RADIUS = 5  # circle radius

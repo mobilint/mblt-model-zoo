@@ -1,10 +1,12 @@
 from typing import List, Union
-from PIL import Image
-import torch
-import numpy as np
+
 import cv2
-from .base import PreOps
+import numpy as np
+import torch
+from PIL import Image
+
 from ..types import TensorLike
+from .base import PreOps
 
 
 class CenterCrop(PreOps):

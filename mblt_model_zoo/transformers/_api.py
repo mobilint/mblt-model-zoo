@@ -1,6 +1,7 @@
-from typing import Union, List, Dict
 import importlib
 import inspect
+from typing import Dict, List, Union
+
 from .utils import TransformersModelInfo
 
 TASKS = [

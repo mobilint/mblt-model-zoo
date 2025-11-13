@@ -1,9 +1,12 @@
-from typing import Dict
-import torch
-import maccel
 from abc import ABC, abstractmethod
+from typing import Dict
+
+import maccel
+import torch
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
+
 from mblt_model_zoo.transformers.utils.cache_utils import MobilintCache
+
 
 class MobilintGenerationMixin(ABC, GenerationMixin):        
     @abstractmethod

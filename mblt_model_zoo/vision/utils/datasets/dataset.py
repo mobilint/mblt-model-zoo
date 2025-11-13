@@ -1,7 +1,8 @@
 import os
+
 import cv2
-from PIL import Image
 from faster_coco_eval import COCO
+from PIL import Image
 
 
 class CustomCocodata:

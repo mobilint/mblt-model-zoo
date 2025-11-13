@@ -1,29 +1,34 @@
-from typing import Optional, Union, Dict, Any
-import torch, os
-from .._api import list_models
-from ...utils import download_url_to_folder
+import os
+from typing import Any, Dict, Optional, Union
+
+import torch
+from transformers import AutoConfig as OriginalAutoConfig
+from transformers import AutoFeatureExtractor as OriginalAutoFeatureExtractor
+from transformers import AutoModel as OriginalAutoModel
+from transformers import AutoModelForCausalLM as OriginalAutoModelForCausalLM
 from transformers import (
-    pipeline as original_pipeline,
-    AutoConfig as OriginalAutoConfig,
-    AutoModel as OriginalAutoModel,
-    AutoTokenizer as OriginalAutoTokenizer,
-    AutoFeatureExtractor as OriginalAutoFeatureExtractor,
-    AutoProcessor as OriginalAutoProcessor,
-    AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq,
     AutoModelForImageTextToText as OriginalAutoModelForImageTextToText,
-    AutoModelForMaskedLM as OriginalAutoModelForMaskedLM,
-    AutoModelForCausalLM as OriginalAutoModelForCausalLM,
-    AutoModelForVision2Seq as OriginalAutoModelForVision2Seq,
-    PreTrainedModel,
-    TFPreTrainedModel,
+)
+from transformers import AutoModelForMaskedLM as OriginalAutoModelForMaskedLM
+from transformers import AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq
+from transformers import AutoModelForVision2Seq as OriginalAutoModelForVision2Seq
+from transformers import AutoProcessor as OriginalAutoProcessor
+from transformers import AutoTokenizer as OriginalAutoTokenizer
+from transformers import (
+    BaseImageProcessor,
     PretrainedConfig,
+    PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
-    BaseImageProcessor,
     ProcessorMixin,
+    TFPreTrainedModel,
 )
-from transformers.pipelines.base import Pipeline
+from transformers import pipeline as original_pipeline
 from transformers.feature_extraction_utils import PreTrainedFeatureExtractor
+from transformers.pipelines.base import Pipeline
+
+from ...utils import download_url_to_folder
+from .._api import list_models
 
 
 def convert_identifier_to_path(identifier: Any):

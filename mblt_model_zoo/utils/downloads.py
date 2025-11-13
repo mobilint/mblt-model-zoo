@@ -1,12 +1,13 @@
+import errno
 import os
+import shutil
 import tempfile
 import uuid
-import errno
-import shutil
-from tqdm import tqdm
 from typing import List
-from urllib.request import Request, urlopen
 from urllib.parse import urljoin
+from urllib.request import Request, urlopen
+
+from tqdm import tqdm
 
 READ_DATA_CHUNK = 128 * 1024
 

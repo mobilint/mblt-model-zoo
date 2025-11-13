@@ -1,8 +1,10 @@
-import torch
-import numpy as np
 from typing import Union
+
+import numpy as np
+import torch
+
+from ..types import ListTensorLike, TensorLike
 from .base import PostBase
-from ..types import TensorLike, ListTensorLike
 
 
 class ClsPost(PostBase):

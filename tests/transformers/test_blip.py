@@ -2,7 +2,8 @@ import pytest
 import requests
 from PIL import Image
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
+
+from mblt_model_zoo.transformers import AutoProcessor, pipeline
 
 
 @pytest.fixture

@@ -1,8 +1,9 @@
-import pytest
 import random
-from transformers import TextStreamer
-from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForCausalLM
 
+import pytest
+from transformers import TextStreamer
+
+from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
 
 model_name = "mobilint/EXAONE-4.0-1.2B"
 

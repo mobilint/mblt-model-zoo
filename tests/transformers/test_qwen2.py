@@ -1,6 +1,7 @@
 import pytest
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+
+from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 
 
 @pytest.fixture
@@ -22,8 +23,11 @@ def test_qwen2(pipe):
 
     prompt = "Give me a short introduction to large language model."
     messages = [
-        {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
-        {"role": "user", "content": prompt}
+        {
+            "role": "system",
+            "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+        },
+        {"role": "user", "content": prompt},
     ]
 
     outputs = pipe(

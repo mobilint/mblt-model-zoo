@@ -1,9 +1,11 @@
+from typing import List
+
+import cv2
 import numpy as np
 import torch
-import cv2
-from typing import List
-from .base import PreOps
+
 from ..types import TensorLike
+from .base import PreOps
 
 
 class YoloPre(PreOps):

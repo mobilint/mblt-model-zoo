@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import List, Union
+
 import torch
-from typing import Union, List
 
 
 class PreOps(ABC):

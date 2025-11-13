@@ -1,10 +1,11 @@
 from collections import OrderedDict
+
 from .base import PreBase
-from .resize import Resize
 from .center_crop import CenterCrop
 from .normalize import Normalize
 from .order import SetOrder
 from .reader import Reader
+from .resize import Resize
 from .yolo_pre import YoloPre
 
 

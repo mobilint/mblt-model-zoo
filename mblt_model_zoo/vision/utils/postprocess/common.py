@@ -1,8 +1,9 @@
+from typing import Union
+
+import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-import cv2
-from typing import Union
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):

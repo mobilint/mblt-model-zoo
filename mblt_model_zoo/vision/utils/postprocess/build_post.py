@@ -2,9 +2,9 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
+    YOLOAnchorlessPosePost,
     YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
-    YOLOAnchorlessPosePost,
 )
 from .yolo_nmsfree_post import YOLONMSFreePost
 

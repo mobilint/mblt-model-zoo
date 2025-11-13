@@ -1,6 +1,7 @@
 import torch
-from .yolo_anchorless_post import YOLOAnchorlessPost
+
 from .common import *
+from .yolo_anchorless_post import YOLOAnchorlessPost
 
 
 class YOLONMSFreePost(YOLOAnchorlessPost):

@@ -1,5 +1,7 @@
-import pytest
 from pprint import pprint
+
+import pytest
+
 from mblt_model_zoo.transformers import pipeline
 
 

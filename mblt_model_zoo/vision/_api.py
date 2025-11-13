@@ -1,8 +1,8 @@
-from typing import Union, List
 import importlib
 import inspect
-from .wrapper import MBLT_Engine
+from typing import List, Union
 
+from .wrapper import MBLT_Engine
 
 TASKS = [
     "image_classification",
