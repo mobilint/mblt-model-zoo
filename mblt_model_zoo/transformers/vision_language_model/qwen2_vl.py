@@ -1,7 +1,7 @@
 from typing import Optional, Union, Any, TypeVar
-
-import maccel
 import os
+import hashlib
+import maccel
 import torch
 import torch.nn as nn
 import numpy as np
@@ -177,6 +177,9 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintQwen2VLPreTrainedMod
         mc = maccel.ModelConfig()
         mc.set_multi_core_mode([maccel.Cluster.Cluster1])
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
     
     def __getattribute__(self, name: str, /) -> Any:
@@ -254,6 +257,9 @@ class MobilintQwen2VLTextModel(MobilintQwen2VLPreTrainedModel):
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
     
     def forward(

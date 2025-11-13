@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, TypeVar, Union
-
+import hashlib
+import os
 import maccel
 import torch
 import torch.nn as nn
@@ -124,6 +125,9 @@ class MobilintExaoneForCausalLM(PreTrainedModel, MobilintGenerationMixin):
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
         self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
     
     def get_mxq_model(self):

@@ -1,7 +1,8 @@
-import numpy as np
-import torch
 import sys
 import os
+import hashlib
+import numpy as np
+import torch
 from typing import Union
 from urllib.parse import urlparse
 import maccel
@@ -176,6 +177,9 @@ class MXQ_Model:
 
         # ----------------Initialize Model----------------------
         self.model = maccel.Model(cached_file, mc)
+        print(f"Model Initialized")
+        print(f"Model Size: {os.path.getsize(cached_file) / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(cached_file, 'rb').read()).hexdigest()}")
         self.model.launch(self.acc)
 
     def __call__(self, x: TensorLike):
