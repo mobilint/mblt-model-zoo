@@ -1,4 +1,4 @@
-from .yolov3 import YOLOv3u, YOLOv3_sppu, YOLOv3_spp
+from .yolov3 import YOLOv3u, YOLOv3_sppu, YOLOv3, YOLOv3_spp
 from .yolov5 import (
     YOLOv5n,
     YOLOv5nu,

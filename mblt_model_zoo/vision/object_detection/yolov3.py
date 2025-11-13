@@ -66,6 +66,42 @@ class YOLOv3_sppu_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
+class YOLOv3_Set(ModelInfoSet):
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "url_dict": {
+                "aries": {
+                    "single": None,
+                    "multi": None,
+                    "global": None,
+                    "global4": None,
+                    "global8": None,
+                },
+                "regulus": {"single": None},
+            },
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "CHW"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+        },
+    )
+    DEFAULT = COCO_V1
+
+
 class YOLOv3_spp_Set(ModelInfoSet):
     COCO_V1 = ModelInfo(
         model_cfg={
@@ -125,6 +161,21 @@ def YOLOv3_sppu(
 ) -> MBLT_Engine:
     return MBLT_Engine.from_model_info_set(
         YOLOv3_sppu_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv3(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    return MBLT_Engine.from_model_info_set(
+        YOLOv3_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
