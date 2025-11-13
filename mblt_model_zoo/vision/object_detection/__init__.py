@@ -25,5 +25,15 @@ from .yolov5 import (
 )
 from .yolov7 import YOLOv7, YOLOv7d6, YOLOv7e6, YOLOv7e6e, YOLOv7w6, YOLOv7x
 from .yolov8 import YOLOv8l, YOLOv8m, YOLOv8n, YOLOv8s, YOLOv8x
-from .yolov9 import GELANc, GELANm, YOLOv9c, YOLOv9m
+from .yolov9 import (
+    GELANc,
+    GELANe,
+    GELANm,
+    GELANs,
+    YOLOv9c,
+    YOLOv9e,
+    YOLOv9m,
+    YOLOv9s,
+    YOLOv9t,
+)
 from .yolov10 import YOLOv10b, YOLOv10l, YOLOv10m, YOLOv10n, YOLOv10s, YOLOv10x
