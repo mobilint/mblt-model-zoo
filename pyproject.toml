@@ -26,6 +26,7 @@ dependencies = [
     "wheel",
     "faster-coco-eval",
     "PyYAML",
+    "scipy",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
