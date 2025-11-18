@@ -1,5 +1,4 @@
 from typing import Dict
-import torch
 import maccel
 from abc import ABC, abstractmethod
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
