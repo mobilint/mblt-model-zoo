@@ -370,7 +370,7 @@ class MobilintQwen2VLForConditionalGeneration(MobilintQwen2VLPreTrainedModel, Mo
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
     
-    def get_mxq_model(self):
+    def get_cache_mxq_model(self):
         return self.model.language_model.mxq_model
     
     def dispose(self):

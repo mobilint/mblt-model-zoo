@@ -465,7 +465,7 @@ class MobilintWhisperForConditionalGeneration(
         # for pipeline type checking
         self.config.model_type = "whisper"
     
-    def get_mxq_model(self):
+    def get_cache_mxq_model(self):
         return self.model.decoder.mxq_model
 
     def get_encoder(self):

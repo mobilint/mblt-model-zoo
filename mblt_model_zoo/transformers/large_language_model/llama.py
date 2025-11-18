@@ -74,7 +74,7 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     
-    def get_mxq_model(self):
+    def get_cache_mxq_model(self):
         return self.mxq_model
 
     def set_decoder(self, decoder):
