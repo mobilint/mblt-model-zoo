@@ -23,39 +23,35 @@ from transformers import (
     ProcessorMixin,
 )
 from transformers.pipelines.base import Pipeline
+from transformers.pipelines.audio_classification import AudioClassificationPipeline
+from transformers.pipelines.automatic_speech_recognition import AutomaticSpeechRecognitionPipeline
+from transformers.pipelines.depth_estimation import DepthEstimationPipeline
+from transformers.pipelines.document_question_answering import DocumentQuestionAnsweringPipeline
+from transformers.pipelines.feature_extraction import FeatureExtractionPipeline
+from transformers.pipelines.fill_mask import FillMaskPipeline
+from transformers.pipelines.image_classification import ImageClassificationPipeline
+from transformers.pipelines.image_feature_extraction import ImageFeatureExtractionPipeline
+from transformers.pipelines.image_segmentation import ImageSegmentationPipeline
+from transformers.pipelines.image_text_to_text import ImageTextToTextPipeline
+from transformers.pipelines.image_to_image import ImageToImagePipeline
+from transformers.pipelines.image_to_text import ImageToTextPipeline
+from transformers.pipelines.keypoint_matching import KeypointMatchingPipeline
+from transformers.pipelines.mask_generation import MaskGenerationPipeline
+from transformers.pipelines.object_detection import ObjectDetectionPipeline
+from transformers.pipelines.question_answering import QuestionAnsweringPipeline
+from transformers.pipelines.table_question_answering import TableQuestionAnsweringPipeline
+from transformers.pipelines.text2text_generation import SummarizationPipeline, Text2TextGenerationPipeline, TranslationPipeline
+from transformers.pipelines.text_classification import TextClassificationPipeline
+from transformers.pipelines.text_generation import TextGenerationPipeline
+from transformers.pipelines.text_to_audio import TextToAudioPipeline
+from transformers.pipelines.token_classification import TokenClassificationPipeline
+from transformers.pipelines.video_classification import VideoClassificationPipeline
+from transformers.pipelines.visual_question_answering import VisualQuestionAnsweringPipeline
+from transformers.pipelines.zero_shot_audio_classification import ZeroShotAudioClassificationPipeline
+from transformers.pipelines.zero_shot_classification import ZeroShotClassificationPipeline
+from transformers.pipelines.zero_shot_image_classification import ZeroShotImageClassificationPipeline
+from transformers.pipelines.zero_shot_object_detection import ZeroShotObjectDetectionPipeline
 from transformers.feature_extraction_utils import PreTrainedFeatureExtractor
-from transformers.pipelines import (
-    AudioClassificationPipeline,
-    AutomaticSpeechRecognitionPipeline,
-    DepthEstimationPipeline,
-    DocumentQuestionAnsweringPipeline,
-    FeatureExtractionPipeline,
-    FillMaskPipeline,
-    ImageClassificationPipeline,
-    ImageFeatureExtractionPipeline,
-    ImageSegmentationPipeline,
-    ImageTextToTextPipeline,
-    ImageToImagePipeline,
-    ImageToTextPipeline,
-    KeypointMatchingPipeline,
-    MaskGenerationPipeline,
-    ObjectDetectionPipeline,
-    QuestionAnsweringPipeline,
-    SummarizationPipeline,
-    TableQuestionAnsweringPipeline,
-    Text2TextGenerationPipeline,
-    TextClassificationPipeline,
-    TextGenerationPipeline,
-    TextToAudioPipeline,
-    TokenClassificationPipeline,
-    TranslationPipeline,
-    VideoClassificationPipeline,
-    VisualQuestionAnsweringPipeline,
-    ZeroShotAudioClassificationPipeline,
-    ZeroShotClassificationPipeline,
-    ZeroShotImageClassificationPipeline,
-    ZeroShotObjectDetectionPipeline,
-)
 
 T = TypeVar('T')
 
@@ -80,6 +76,7 @@ def convert_identifier_to_path(identifier: Union[str, T]) -> Union[str, T]:
     download_url_to_folder(model.download_url_base, model.file_list, download_path)
 
     return download_path
+
 
 @overload
 def pipeline(task: Literal[None], model: Optional[Union[str, "PreTrainedModel", "TFPreTrainedModel"]] = None, config: Optional[Union[str, PretrainedConfig]] = None, tokenizer: Optional[Union[str, PreTrainedTokenizer, "PreTrainedTokenizerFast"]] = None, feature_extractor: Optional[Union[str, PreTrainedFeatureExtractor]] = None, image_processor: Optional[Union[str, BaseImageProcessor]] = None, processor: Optional[Union[str, ProcessorMixin]] = None, framework: Optional[str] = None, revision: Optional[str] = None, use_fast: bool = True, token: Optional[Union[str, bool]] = None, device: Optional[Union[int, str, "torch.device"]] = None, device_map: Optional[Union[str, dict[str, Union[int, str]]]] = None, dtype: Optional[Union[str, "torch.dtype"]] = "auto", trust_remote_code: Optional[bool] = None, model_kwargs: Optional[dict[str, Any]] = None, pipeline_class: Optional[Any] = None, **kwargs: Any) -> Pipeline: ...
@@ -173,7 +170,7 @@ def pipeline(
     processor = convert_identifier_to_path(processor)
 
     return original_pipeline(
-        task,
+        task, # type: ignore
         model,
         config,
         tokenizer,
