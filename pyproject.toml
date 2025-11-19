@@ -55,7 +55,6 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 [project.optional-dependencies]
 transformers = [
     "transformers>=4.54.0, <=4.57.1",
-    "tf-keras",
 ]
 
 # Tools setting -----------------------------------------
@@ -69,6 +68,7 @@ version = { attr = "mblt_model_zoo.__version__" }
 dev = [
     "pytest>=8.4.2",
     "datasets>=3.2.0, <=3.6.0",
+    "torchvision",
     "librosa",
     "soundfile",
 ]
