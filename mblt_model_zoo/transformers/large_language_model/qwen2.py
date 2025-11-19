@@ -160,6 +160,54 @@ AutoModelForCausalLM.register(MobilintQwen2Config, MobilintQwen2ForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
+Qwen_25_05B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-0.5B-Instruct",
+    model_id="mobilint/Qwen2.5-0.5B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-0.5B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-0.5B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
+Qwen_25_15B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-1.5B-Instruct",
+    model_id="mobilint/Qwen2.5-1.5B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-1.5B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-1.5B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
+Qwen_25_3B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-3B-Instruct",
+    model_id="mobilint/Qwen2.5-3B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-3B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-3B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
 Qwen_25_7B_Instruct = TransformersModelInfo(
     original_model_id="Qwen/Qwen2.5-7B-Instruct",
     model_id="mobilint/Qwen2.5-7B-Instruct",

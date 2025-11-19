@@ -295,6 +295,23 @@ EXAONE_35_24B_Instruct = TransformersModelInfo(
     ],
 )
 
+EXAONE_35_78B_Instruct = TransformersModelInfo(
+    original_model_id="LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct",
+    model_id="mobilint/EXAONE-3.5-7.8B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-3.5-7.8B-Instruct/",
+    file_list=[
+        "config.json",
+        "EXAONE-3.5-7.8B-Instruct.mxq",
+        "generation_config.json",
+        "merges.txt",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
 EXAONE_Deep_24B = TransformersModelInfo(
     original_model_id="LGAI-EXAONE/EXAONE-Deep-2.4B",
     model_id="mobilint/EXAONE-Deep-2.4B",
@@ -302,6 +319,23 @@ EXAONE_Deep_24B = TransformersModelInfo(
     file_list=[
         "config.json",
         "EXAONE-Deep-2.4B.mxq",
+        "generation_config.json",
+        "merges.txt",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
+EXAONE_Deep_78B = TransformersModelInfo(
+    original_model_id="LGAI-EXAONE/EXAONE-Deep-7.8B",
+    model_id="mobilint/EXAONE-Deep-7.8B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-Deep-7.8B/",
+    file_list=[
+        "config.json",
+        "EXAONE-Deep-7.8B.mxq",
         "generation_config.json",
         "merges.txt",
         "model.safetensors",

@@ -239,6 +239,20 @@ Llama_31_8B_Instruct = TransformersModelInfo(
     ],
 )
 
+HyperCLOVAX_SEED_Text_Instruct_05B = TransformersModelInfo(
+    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-0.5B/",
+    file_list=[
+        "config.json",
+        "HyperCLOVAX-SEED-Text-Instruct-0.5B.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
 HyperCLOVAX_SEED_Text_Instruct_15B = TransformersModelInfo(
     original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
     model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
