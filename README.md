@@ -113,6 +113,17 @@ Currently, this optional functions are only available on environment equipped wi
 |-------|------|------|
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/transformers/README.md) |
 
+## Verbose Option
+
+By default, model initialization stays quiet. To print the model file size and MD5 hash whenever an MXQ model loads, set the environment variable `MBLT_MODEL_ZOO_VERBOSE` to a truthy value before running your script:
+
+```bash
+export MBLT_MODEL_ZOO_VERBOSE=true  # accepted values: true/1/yes/on (case-insensitive)
+python your_script.py
+```
+
+Unset or set the variable to any other value to suppress these messages.
+
 ## License
 
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
