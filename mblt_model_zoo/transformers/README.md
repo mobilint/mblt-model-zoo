@@ -153,14 +153,20 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 | Model | Model ID | Source | Note |
 | ----- | -------- | ------ | ---- |
 | EXAONE-3.5-2.4B-Instruct | `mobilint/EXAONE-3.5-2.4B-Instruct` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | |
+| EXAONE-3.5-7.8B-Instruct | `mobilint/EXAONE-3.5-7.8B-Instruct` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct) | |
 | EXAONE-4.0-1.2B | `mobilint/EXAONE-4.0-1.2B` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-4.0-1.2B) | |
 | EXAONE-Deep-2.4B | `mobilint/EXAONE-Deep-2.4B` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-Deep-2.4B) | |
+| EXAONE-Deep-7.8B | `mobilint/EXAONE-Deep-7.8B` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-Deep-7.8B) | |
+| HyperCLOVAX-SEED-Text-Instruct-0.5B | `mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B` | [Link](https://huggingface.co/naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B) | |
 | HyperCLOVAX-SEED-Text-Instruct-1.5B | `mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B` | [Link](https://huggingface.co/naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B) | |
 | Llama-3.1-8B-Instruct | `mobilint/Llama-3.1-8B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) | |
 | Llama-3.2-1B-Instruct | `mobilint/Llama-3.2-1B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) | |
 | Llama-3.2-3B-Instruct | `mobilint/Llama-3.2-3B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | |
 | c4ai-command-r7b-12-2024 | `mobilint/c4ai-command-r7b-12-2024` | [Link](https://huggingface.co/CohereLabs/c4ai-command-r7b-12-2024) | |
 | bert-base-uncased | `mobilint/bert-base-uncased` | [Link](https://huggingface.co/google-bert/bert-base-uncased) | |
+| Qwen2.5-0.5B-Instruct | `mobilint/Qwen2.5-0.5B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) | |
+| Qwen2.5-1.5B-Instruct | `mobilint/Qwen2.5-1.5B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) | |
+| Qwen2.5-3B-Instruct | `mobilint/Qwen2.5-3B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) | |
 | Qwen2.5-7B-Instruct | `mobilint/Qwen2.5-7B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) | |
 
 ### Speech-To-Text Models
