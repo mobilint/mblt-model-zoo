@@ -13,7 +13,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--mxqpath",
         action="store",
-        default=None,
+        default="",
         help="Override default mxq_path for pipeline loading.",
     )
 
