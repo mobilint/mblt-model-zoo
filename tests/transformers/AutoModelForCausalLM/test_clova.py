@@ -18,10 +18,14 @@ def pytest_addoption(parser):
     )
 
 
+@pytest.fixture
+def mxq_path(request):
+    return request.config.getoption("--mxq-path")
+
+
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request):
+def pipe(request, mxq_path):
     model_path = request.param
-    mxq_path = request.config.getoption("--mxq-path")
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if mxq_path:
