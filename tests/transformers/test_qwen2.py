@@ -3,9 +3,17 @@ from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-@pytest.fixture
-def pipe():
-    model_path = "mobilint/Qwen2.5-7B-Instruct"
+MODEL_PATHS = (
+    "mobilint/Qwen2.5-0.5B-Instruct",
+    "mobilint/Qwen2.5-1.5B-Instruct",
+    "mobilint/Qwen2.5-3B-Instruct",
+    "mobilint/Qwen2.5-7B-Instruct",
+)
+
+
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request):
+    model_path = request.param
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     pipe = pipeline(

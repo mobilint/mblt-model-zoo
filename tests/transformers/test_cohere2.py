@@ -3,9 +3,14 @@ from transformers import TextStreamer
 from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 
-@pytest.fixture
-def pipe():
-    model_path = "mobilint/c4ai-command-r7b-12-2024"
+MODEL_PATHS = (
+    "mobilint/c4ai-command-r7b-12-2024",
+)
+
+
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request):
+    model_path = request.param
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     pipe = pipeline(
