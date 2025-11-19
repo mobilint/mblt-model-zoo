@@ -11,7 +11,7 @@ MODEL_PATHS = (
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--mxq-path",
+        "--mxqpath",
         action="store",
         default=None,
         help="Override default mxq_path for pipeline loading.",
@@ -20,7 +20,7 @@ def pytest_addoption(parser):
 
 @pytest.fixture(scope="module")
 def mxq_path(request):
-    return request.config.getoption("--mxq-path")
+    return request.config.getoption("--mxqpath")
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
