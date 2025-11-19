@@ -18,8 +18,8 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
-def mxq_path(request, scope="module"):
+@pytest.fixture(scope="module")
+def mxq_path(request):
     return request.config.getoption("--mxq-path")
 
 
