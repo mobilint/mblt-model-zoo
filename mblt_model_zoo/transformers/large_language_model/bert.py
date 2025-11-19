@@ -1,5 +1,4 @@
 from typing import Optional, Union
-import hashlib
 import os
 import maccel
 import torch
@@ -17,6 +16,7 @@ from transformers import (
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler, BertOnlyMLMHead
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 from transformers.utils import logging
+from mblt_model_zoo.utils.logging import log_model_details
 
 
 logger = logging.get_logger(__name__)
@@ -62,11 +62,10 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
         self.mxq_model.launch(self.acc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
+        log_model_details(model_path)
         self.mxq_model.reset_cache_memory()
 
     def get_input_embeddings(self):

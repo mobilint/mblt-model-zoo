@@ -1,12 +1,12 @@
 import sys
 import os
-import hashlib
 import numpy as np
 import torch
 from typing import Union
 from urllib.parse import urlparse
 import maccel
 from ..utils.downloads import download_url_to_file
+from ..utils.logging import log_model_details
 from .utils.types import TensorLike, ModelInfoSet
 from .utils.preprocess import build_preprocess
 from .utils.postprocess import build_postprocess
@@ -177,9 +177,7 @@ class MXQ_Model:
 
         # ----------------Initialize Model----------------------
         self.model = maccel.Model(cached_file, mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(cached_file) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(cached_file, 'rb').read()).hexdigest()}")
+        log_model_details(cached_file)
         self.model.launch(self.acc)
 
     def __call__(self, x: TensorLike):

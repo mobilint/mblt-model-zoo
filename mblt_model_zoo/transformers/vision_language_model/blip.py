@@ -1,7 +1,6 @@
 from typing import Optional, Tuple, TypeVar, Union, List, Any
 
 import maccel
-import hashlib
 import os
 import torch
 import numpy as np
@@ -36,6 +35,7 @@ from transformers.modeling_outputs import (
 from transformers.utils import logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 from ..utils.cache_utils import MobilintCache
 
 
@@ -178,10 +178,9 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         mc.set_single_core_mode(
             None, [maccel.CoreId(maccel.Cluster.Cluster1, maccel.Core.Core1)]
         )
-        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):
@@ -426,10 +425,9 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_global_core_mode([maccel.Cluster.Cluster0])
-        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
     def forward(

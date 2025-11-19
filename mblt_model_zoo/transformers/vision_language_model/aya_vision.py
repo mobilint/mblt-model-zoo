@@ -1,5 +1,4 @@
 from typing import Optional, Union, List, Tuple, Any, TypeVar
-import hashlib
 import os
 import maccel
 from maccel import Cluster, Core, CoreId
@@ -25,6 +24,7 @@ from transformers.models.aya_vision.modeling_aya_vision import (
 from transformers.utils import is_torchdynamo_compiling
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache
 
@@ -111,10 +111,9 @@ class MobilintAyaVisionForConditionalGeneration(
                 CoreId(Cluster.Cluster1, Core.Core3),
             ]
         )
-        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     
     def get_mxq_model(self):

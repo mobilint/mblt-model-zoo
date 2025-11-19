@@ -1,5 +1,4 @@
 from typing import Optional, Union
-import hashlib
 import os
 import maccel
 import torch
@@ -21,6 +20,7 @@ from transformers import (
 )
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 from ..utils.cache_utils import MobilintCache
 
 
@@ -73,10 +73,9 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
         self.logit_scale = config.logit_scale
         self.tie_word_embeddings = config.tie_word_embeddings
