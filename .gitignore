@@ -23,3 +23,5 @@ build/
 *.torchscript
 *.safetensors
 *.whl
+.venv
+uv.lock
