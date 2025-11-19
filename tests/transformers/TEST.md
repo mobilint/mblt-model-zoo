@@ -1,11 +1,44 @@
 # Test `transformers`
 
-You can test basic operations of `mblt-model-zoo[transformers]` with [`pytest`](https://docs.pytest.org/en/stable/).
+You can validate Mobilint's Transformers integration with [`pytest`](https://docs.pytest.org/en/stable/). The snippets below assume your virtual environment is already activated.
 
-Run all tests by following command.
+## Install Development Dependencies
 
-    pytest tests/transformers
+Install the runtime extras plus the developer tooling (pytest, datasets, torchvision, audio libs, etc.) required by the test suite:
 
-Run single test like below.
+```bash
+pip install -e ".[transformers]"
+pip install pytest datasets torchvision librosa soundfile
+```
 
-    pytest tests/test_aya.py
+## Run All Tests
+
+Execute the entire Transformers test matrix (this may take a while because it loads every supported model):
+
+```bash
+pytest tests/transformers
+```
+
+## Run a Subdirectory of Tests
+
+Limit execution to a test category, e.g., only causal language-model tests:
+
+```bash
+pytest tests/transformers/AutoModelForCausalLM
+```
+
+## Run a Single Test File
+
+Target a specific file to focus on one model family:
+
+```bash
+pytest tests/transformers/AutoModelForImageTextToText/test_aya.py
+```
+
+## Run a Single Model Case
+
+Many tests are parameterized over multiple `mobilint/*` model IDs. Use `-k` to run just one of those cases, e.g., the smallest Qwen variant inside the causal LM suite:
+
+```bash
+pytest tests/transformers/AutoModelForCausalLM/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
+```
