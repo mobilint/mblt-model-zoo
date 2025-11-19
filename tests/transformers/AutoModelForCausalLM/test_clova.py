@@ -9,16 +9,34 @@ MODEL_PATHS = (
 )
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--mxq-path",
+        action="store",
+        default=None,
+        help="Override default mxq_path for pipeline loading.",
+    )
+
+
 @pytest.fixture(params=MODEL_PATHS, scope="module")
 def pipe(request):
     model_path = request.param
+    mxq_path = request.config.getoption("--mxq-path")
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    pipe = pipeline(
-        "text-generation",
-        model=model_path,
-        streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-    )
+    if mxq_path:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            model_kwargs={"mxq_path": mxq_path},
+        )
+    else:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+        )
     yield pipe
     pipe.model.dispose()
 
