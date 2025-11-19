@@ -73,10 +73,10 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
+        self.mxq_model = maccel.Model(os.path.join(config.name_or_path, config.mxq_path), mc)
         print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
+        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.mxq_path)) / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.mxq_path), 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
         self.logit_scale = config.logit_scale
         self.tie_word_embeddings = config.tie_word_embeddings

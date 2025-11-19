@@ -101,11 +101,11 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         mc = maccel.ModelConfig()
         mc.set_global_core_mode([maccel.Cluster.Cluster1])
         self.mxq_model = maccel.Model(
-            f"{config.name_or_path}/{config.encoder_mxq_path}", mc
+            os.path.join(config.name_or_path, config.encoder_mxq_path), mc
         )
         print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.encoder_mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.encoder_mxq_path}', 'rb').read()).hexdigest()}")
+        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.encoder_mxq_path)) / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.encoder_mxq_path), 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def _freeze_parameters(self):
@@ -206,11 +206,11 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
             None, [maccel.CoreId(maccel.Cluster.Cluster0, maccel.Core.Core3)]
         )
         self.mxq_model = maccel.Model(
-            f"{config.name_or_path}/{config.decoder_mxq_path}", mc
+            os.path.join(config.name_or_path, config.encoder_mxq_path), mc
         )
         print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.decoder_mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.decoder_mxq_path}', 'rb').read()).hexdigest()}")
+        print(f"Model Size: {os.path.getsize(os.path.join(config.name_or_path, config.encoder_mxq_path)) / 1024 / 1024:.2f} MB")
+        print(f"Model Hash: {hashlib.md5(open(os.path.join(config.name_or_path, config.encoder_mxq_path), 'rb').read()).hexdigest()}")
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):
