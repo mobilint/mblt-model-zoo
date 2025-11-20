@@ -28,7 +28,7 @@ def list_models(
         available_models[task] = []
         try:
             module = importlib.import_module(
-                f".{task}", package=__name__.replace("._api", "")
+                f"..{task}", package=__name__.replace("._api", "")
             )
         except ImportError as e:
             print(f"Failed to import module for task '{task}': {e}")
