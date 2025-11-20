@@ -80,7 +80,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.logit_scale = config.logit_scale
         self.tie_word_embeddings = config.tie_word_embeddings
     
-    def get_mxq_model(self):
+    def get_cache_mxq_model(self):
         return self.mxq_model
 
     def set_decoder(self, decoder):

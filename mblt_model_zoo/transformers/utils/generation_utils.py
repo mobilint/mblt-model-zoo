@@ -1,13 +1,12 @@
 from typing import Dict
-import torch
 import maccel
 from abc import ABC, abstractmethod
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 from mblt_model_zoo.transformers.utils.cache_utils import MobilintCache
 
-class MobilintGenerationMixin(ABC, GenerationMixin):        
+class MobilintGenerationMixin(ABC, GenerationMixin):
     @abstractmethod
-    def get_mxq_model(self) -> maccel.Model:
+    def get_cache_mxq_model(self) -> maccel.Model:
         pass
     
     # Function arguments changed for transformers>=4.56.0
@@ -17,7 +16,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
     ) -> Cache:
         if not hasattr(self, "_cache"):
-            self._cache = MobilintCache(self.get_mxq_model())
+            self._cache = MobilintCache(self.get_cache_mxq_model())
             self._cache.reset()
         else:
             self._cache.reset()

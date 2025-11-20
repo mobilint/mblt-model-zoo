@@ -17,12 +17,12 @@ def list_tasks():
 
 def list_models(
     tasks: Union[str, List[str]] = TASKS,
-) -> Dict[str, TransformersModelInfo]:
+) -> Dict[str, List[TransformersModelInfo]]:
     if isinstance(tasks, str):
         tasks = [tasks]
     assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"
 
-    available_models = {}
+    available_models: Dict[str, List[TransformersModelInfo]] = {}
     for task in tasks:
         available_models[task] = []
         try:

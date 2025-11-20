@@ -315,7 +315,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
         self.bert = MobilintBlipTextModel(config)
         self.label_smoothing = config.label_smoothing
     
-    def get_mxq_model(self):
+    def get_cache_mxq_model(self):
         return self.bert.mxq_model
 
     def get_input_embeddings(self):
@@ -505,8 +505,8 @@ class MobilintBlipForConditionalGeneration(
         self.decoder_input_ids = config.text_config.bos_token_id
         self.decoder_pad_token_id = config.text_config.pad_token_id
     
-    def get_mxq_model(self):
-        return self.text_decoder.get_mxq_model()
+    def get_cache_mxq_model(self):
+        return self.text_decoder.get_cache_mxq_model()
 
     def get_input_embeddings(self):
         return self.text_decoder.get_input_embeddings()
