@@ -3,5 +3,5 @@ from . import utils, vision
 
 try:  # optional
     from . import transformers
-except ImportError:
+except Exception as e:
     pass
