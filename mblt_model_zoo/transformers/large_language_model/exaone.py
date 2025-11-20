@@ -327,20 +327,3 @@ EXAONE_Deep_24B = TransformersModelInfo(
         "vocab.json",
     ],
 )
-
-EXAONE_Deep_78B = TransformersModelInfo(
-    original_model_id="LGAI-EXAONE/EXAONE-Deep-7.8B",
-    model_id="mobilint/EXAONE-Deep-7.8B",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-Deep-7.8B/",
-    file_list=[
-        "config.json",
-        "EXAONE-Deep-7.8B.mxq",
-        "generation_config.json",
-        "merges.txt",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "vocab.json",
-    ],
-)
