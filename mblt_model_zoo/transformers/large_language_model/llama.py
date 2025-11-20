@@ -1,5 +1,4 @@
 from typing import Optional, Tuple, Union
-import hashlib
 import os
 import maccel
 import torch
@@ -21,6 +20,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.utils import TransformersKwargs, logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 from ..utils.cache_utils import MobilintCache
 
 
@@ -69,10 +69,9 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     
     def get_mxq_model(self):
@@ -232,6 +231,20 @@ Llama_31_8B_Instruct = TransformersModelInfo(
         "config.json",
         "generation_config.json",
         "Llama-3.1-8B-Instruct.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
+HyperCLOVAX_SEED_Text_Instruct_05B = TransformersModelInfo(
+    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-0.5B/",
+    file_list=[
+        "config.json",
+        "HyperCLOVAX-SEED-Text-Instruct-0.5B.mxq",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",

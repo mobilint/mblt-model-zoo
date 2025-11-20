@@ -1,7 +1,6 @@
 from typing import Optional, Tuple, TypeVar, Union
 import math
 import maccel
-import hashlib
 import os
 import torch
 from torch import nn
@@ -36,6 +35,7 @@ from transformers.modeling_outputs import (
 from transformers.utils import logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 from ..utils.cache_utils import MobilintCache
 
 
@@ -99,13 +99,10 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_global_core_mode([maccel.Cluster.Cluster1])
-        self.mxq_model = maccel.Model(
-            f"{config.name_or_path}/{config.encoder_mxq_path}", mc
-        )
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.encoder_mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.encoder_mxq_path}', 'rb').read()).hexdigest()}")
+        mc.set_global4_core_mode([maccel.Cluster.Cluster1])
+        model_path = os.path.join(config.name_or_path, config.encoder_mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
     def _freeze_parameters(self):
@@ -205,12 +202,9 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         mc.set_single_core_mode(
             None, [maccel.CoreId(maccel.Cluster.Cluster0, maccel.Core.Core3)]
         )
-        self.mxq_model = maccel.Model(
-            f"{config.name_or_path}/{config.decoder_mxq_path}", mc
-        )
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.decoder_mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.decoder_mxq_path}', 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.decoder_mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
     def get_input_embeddings(self):

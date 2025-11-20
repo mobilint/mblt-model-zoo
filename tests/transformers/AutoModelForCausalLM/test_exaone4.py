@@ -4,17 +4,31 @@ from transformers import TextStreamer
 from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-model_name = "mobilint/EXAONE-4.0-1.2B"
+MODEL_PATHS = (
+    "mobilint/EXAONE-4.0-1.2B",
+)
 
 
-@pytest.fixture
-def model():
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def model(request, mxq_path):
+    model_path = request.param
+    if mxq_path:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            mxq_path=mxq_path,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_path)
     yield model
     model.dispose()
 
-def test_exaone4(model):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def tokenizer(request):
+    model_path = request.param
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    yield tokenizer
+
+def test_exaone4(model, tokenizer):
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     print("\n - Non-reasoning mode\n")

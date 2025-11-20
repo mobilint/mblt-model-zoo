@@ -92,4 +92,4 @@ def download_url_to_folder(
                 download_url_to_file(u, d, progress)
 
         except Exception:
-            print(f"{url_file} download failed")
+            print(f"{u} download failed")

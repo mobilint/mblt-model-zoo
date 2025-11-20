@@ -1,5 +1,4 @@
 from typing import Optional, Tuple, Union
-import hashlib
 import os
 import maccel
 import torch
@@ -21,6 +20,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.utils.generic import TransformersKwargs, logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.utils.logging import log_model_details
 from ..utils.cache_utils import MobilintCache
 
 
@@ -66,10 +66,9 @@ class MobilintQwen2ForCausalLM(Qwen2PreTrainedModel, MobilintGenerationMixin):
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(f"{config.name_or_path}/{config.mxq_path}", mc)
-        print(f"Model Initialized")
-        print(f"Model Size: {os.path.getsize(f'{config.name_or_path}/{config.mxq_path}') / 1024 / 1024:.2f} MB")
-        print(f"Model Hash: {hashlib.md5(open(f'{config.name_or_path}/{config.mxq_path}', 'rb').read()).hexdigest()}")
+        model_path = os.path.join(config.name_or_path, config.mxq_path)
+        self.mxq_model = maccel.Model(model_path, mc)
+        log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     
     def get_mxq_model(self):
@@ -159,6 +158,54 @@ AutoTokenizer.register(MobilintQwen2Config, fast_tokenizer_class=Qwen2TokenizerF
 AutoModelForCausalLM.register(MobilintQwen2Config, MobilintQwen2ForCausalLM)
 
 from ..utils.types import TransformersModelInfo
+
+Qwen_25_05B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-0.5B-Instruct",
+    model_id="mobilint/Qwen2.5-0.5B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-0.5B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-0.5B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
+Qwen_25_15B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-1.5B-Instruct",
+    model_id="mobilint/Qwen2.5-1.5B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-1.5B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-1.5B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+
+Qwen_25_3B_Instruct = TransformersModelInfo(
+    original_model_id="Qwen/Qwen2.5-3B-Instruct",
+    model_id="mobilint/Qwen2.5-3B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Qwen2.5-3B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "merges.txt",
+        "Qwen2.5-3B-Instruct.mxq",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
 
 Qwen_25_7B_Instruct = TransformersModelInfo(
     original_model_id="Qwen/Qwen2.5-7B-Instruct",
