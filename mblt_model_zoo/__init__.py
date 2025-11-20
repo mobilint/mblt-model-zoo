@@ -1,7 +1,7 @@
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 from . import utils, vision
 
 try:  # optional
     from . import transformers
-except ImportError:
+except Exception as e:
     pass

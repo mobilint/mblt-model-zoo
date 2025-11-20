@@ -6,7 +6,7 @@ from mblt_model_zoo.vision import YOLOv9c
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
-        "--image_path", type=str, default="/workspace/mblt-model-zoo/tests/rc/cr7.jpg"
+        "--image_path", type=str, default=os.path.join("tests", "rc", "cr7.jpg")
     )
     parser.add_argument(
         "--save_path",
@@ -20,7 +20,8 @@ if __name__ == "__main__":
         save_path = args.save_path
     else:
         save_path = os.path.join(
-            "/workspace/mblt-model-zoo/tests/tmp/",
+            "tests",
+            "tmp",
             "yolov9c_" + os.path.basename(image_path),
         )
 
