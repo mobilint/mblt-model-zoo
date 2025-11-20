@@ -99,7 +99,7 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_global_core_mode([maccel.Cluster.Cluster1])
+        mc.set_global4_core_mode([maccel.Cluster.Cluster1])
         model_path = os.path.join(config.name_or_path, config.encoder_mxq_path)
         self.mxq_model = maccel.Model(model_path, mc)
         log_model_details(model_path)
@@ -202,7 +202,7 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         mc.set_single_core_mode(
             None, [maccel.CoreId(maccel.Cluster.Cluster0, maccel.Core.Core3)]
         )
-        model_path = os.path.join(config.name_or_path, config.encoder_mxq_path)
+        model_path = os.path.join(config.name_or_path, config.decoder_mxq_path)
         self.mxq_model = maccel.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
