@@ -1,16 +1,18 @@
-import sys
 import os
-import numpy as np
-import torch
+import sys
 from typing import Union
 from urllib.parse import urlparse
+
 import maccel
+import numpy as np
+import torch
+
 from ..utils.downloads import download_url_to_file
 from ..utils.logging import log_model_details
-from .utils.types import TensorLike, ModelInfoSet
-from .utils.preprocess import build_preprocess
 from .utils.postprocess import build_postprocess
+from .utils.preprocess import build_preprocess
 from .utils.results import Results
+from .utils.types import ModelInfoSet, TensorLike
 
 
 class MBLT_Engine:

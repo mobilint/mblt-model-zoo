@@ -1,36 +1,45 @@
-from typing import Optional, Union, Any, TypeVar, Literal, overload
-import torch, os
-from .._api import list_models
-from ...utils import download_url_to_folder
+import os
+from typing import Any, Literal, Optional, TypeVar, Union, overload
+
+import torch
+from transformers import AutoConfig as OriginalAutoConfig
+from transformers import AutoFeatureExtractor as OriginalAutoFeatureExtractor
+from transformers import AutoModel as OriginalAutoModel
+from transformers import AutoModelForCausalLM as OriginalAutoModelForCausalLM
 from transformers import (
-    pipeline as original_pipeline,
-    AutoConfig as OriginalAutoConfig,
-    AutoModel as OriginalAutoModel,
-    AutoTokenizer as OriginalAutoTokenizer,
-    AutoFeatureExtractor as OriginalAutoFeatureExtractor,
-    AutoProcessor as OriginalAutoProcessor,
-    AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq,
     AutoModelForImageTextToText as OriginalAutoModelForImageTextToText,
-    AutoModelForMaskedLM as OriginalAutoModelForMaskedLM,
-    AutoModelForCausalLM as OriginalAutoModelForCausalLM,
-    AutoModelForVision2Seq as OriginalAutoModelForVision2Seq,
-    PreTrainedModel,
-    TFPreTrainedModel,
+)
+from transformers import AutoModelForMaskedLM as OriginalAutoModelForMaskedLM
+from transformers import AutoModelForSpeechSeq2Seq as OriginalAutoModelForSpeechSeq2Seq
+from transformers import AutoModelForVision2Seq as OriginalAutoModelForVision2Seq
+from transformers import AutoProcessor as OriginalAutoProcessor
+from transformers import AutoTokenizer as OriginalAutoTokenizer
+from transformers import (
+    BaseImageProcessor,
     PretrainedConfig,
+    PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
-    BaseImageProcessor,
     ProcessorMixin,
+    TFPreTrainedModel,
+)
+from transformers import pipeline as original_pipeline
+from transformers.feature_extraction_utils import PreTrainedFeatureExtractor
+from transformers.pipelines.audio_classification import AudioClassificationPipeline
+from transformers.pipelines.automatic_speech_recognition import (
+    AutomaticSpeechRecognitionPipeline,
 )
 from transformers.pipelines.base import Pipeline
-from transformers.pipelines.audio_classification import AudioClassificationPipeline
-from transformers.pipelines.automatic_speech_recognition import AutomaticSpeechRecognitionPipeline
 from transformers.pipelines.depth_estimation import DepthEstimationPipeline
-from transformers.pipelines.document_question_answering import DocumentQuestionAnsweringPipeline
+from transformers.pipelines.document_question_answering import (
+    DocumentQuestionAnsweringPipeline,
+)
 from transformers.pipelines.feature_extraction import FeatureExtractionPipeline
 from transformers.pipelines.fill_mask import FillMaskPipeline
 from transformers.pipelines.image_classification import ImageClassificationPipeline
-from transformers.pipelines.image_feature_extraction import ImageFeatureExtractionPipeline
+from transformers.pipelines.image_feature_extraction import (
+    ImageFeatureExtractionPipeline,
+)
 from transformers.pipelines.image_segmentation import ImageSegmentationPipeline
 from transformers.pipelines.image_text_to_text import ImageTextToTextPipeline
 from transformers.pipelines.image_to_image import ImageToImagePipeline
@@ -39,19 +48,37 @@ from transformers.pipelines.keypoint_matching import KeypointMatchingPipeline
 from transformers.pipelines.mask_generation import MaskGenerationPipeline
 from transformers.pipelines.object_detection import ObjectDetectionPipeline
 from transformers.pipelines.question_answering import QuestionAnsweringPipeline
-from transformers.pipelines.table_question_answering import TableQuestionAnsweringPipeline
-from transformers.pipelines.text2text_generation import SummarizationPipeline, Text2TextGenerationPipeline, TranslationPipeline
+from transformers.pipelines.table_question_answering import (
+    TableQuestionAnsweringPipeline,
+)
+from transformers.pipelines.text2text_generation import (
+    SummarizationPipeline,
+    Text2TextGenerationPipeline,
+    TranslationPipeline,
+)
 from transformers.pipelines.text_classification import TextClassificationPipeline
 from transformers.pipelines.text_generation import TextGenerationPipeline
 from transformers.pipelines.text_to_audio import TextToAudioPipeline
 from transformers.pipelines.token_classification import TokenClassificationPipeline
 from transformers.pipelines.video_classification import VideoClassificationPipeline
-from transformers.pipelines.visual_question_answering import VisualQuestionAnsweringPipeline
-from transformers.pipelines.zero_shot_audio_classification import ZeroShotAudioClassificationPipeline
-from transformers.pipelines.zero_shot_classification import ZeroShotClassificationPipeline
-from transformers.pipelines.zero_shot_image_classification import ZeroShotImageClassificationPipeline
-from transformers.pipelines.zero_shot_object_detection import ZeroShotObjectDetectionPipeline
-from transformers.feature_extraction_utils import PreTrainedFeatureExtractor
+from transformers.pipelines.visual_question_answering import (
+    VisualQuestionAnsweringPipeline,
+)
+from transformers.pipelines.zero_shot_audio_classification import (
+    ZeroShotAudioClassificationPipeline,
+)
+from transformers.pipelines.zero_shot_classification import (
+    ZeroShotClassificationPipeline,
+)
+from transformers.pipelines.zero_shot_image_classification import (
+    ZeroShotImageClassificationPipeline,
+)
+from transformers.pipelines.zero_shot_object_detection import (
+    ZeroShotObjectDetectionPipeline,
+)
+
+from ...utils import download_url_to_folder
+from ._api import list_models
 
 T = TypeVar('T')
 

@@ -1,9 +1,10 @@
-from typing import Union, List, Any
-import torch
-import numpy as np
-from dataclasses import dataclass
 from collections import OrderedDict
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, List, Union
+
+import numpy as np
+import torch
 
 TensorLike = Union[torch.Tensor, np.ndarray]
 ListTensorLike = List[TensorLike]

@@ -1,7 +1,8 @@
-from typing import Union, List, Dict
 import importlib
 import inspect
-from .utils import TransformersModelInfo
+from typing import Dict, List, Union
+
+from .types import TransformersModelInfo
 
 TASKS = [
     "large_language_model",
@@ -27,7 +28,7 @@ def list_models(
         available_models[task] = []
         try:
             module = importlib.import_module(
-                f".{task}", package=__name__.replace("._api", "")
+                f"..{task}", package=__name__.replace("._api", "")
             )
         except ImportError as e:
             print(f"Failed to import module for task '{task}': {e}")

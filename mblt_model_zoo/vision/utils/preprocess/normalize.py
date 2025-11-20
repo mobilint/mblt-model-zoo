@@ -1,9 +1,11 @@
+from typing import Union
+
 import numpy as np
 import torch
 from PIL import Image
-from typing import Union
-from .base import PreOps
+
 from ..types import TensorLike
+from .base import PreOps
 
 
 class Normalize(PreOps):

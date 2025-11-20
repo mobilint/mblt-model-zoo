@@ -1,11 +1,9 @@
 import pytest
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
+from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 
-MODEL_PATHS = (
-    "mobilint/EXAONE-Deep-2.4B",
-)
+MODEL_PATHS = ("mobilint/EXAONE-Deep-2.4B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
@@ -28,6 +26,7 @@ def pipe(request, mxq_path):
         )
     yield pipe
     pipe.model.dispose()
+
 
 @pytest.mark.timeout(300)
 def test_exaone_deep(pipe):

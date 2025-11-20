@@ -4,7 +4,7 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 
 ## Image Classification
 
-| Model | Input Size<br>(H,W,C) | Top1 Acc<br>(NPU) | Top1 Acc<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |------------|------------|-----------|--------------------|--------|-------|------|------|
 | AlexNet | (224,224,3)| 56.022 | 56.552 | 0.71 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |
 | ConvNeXt_Tiny | (224,224,3) | 82.302 | 82.460| 4.46 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) |  |
@@ -107,13 +107,13 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary>Image Classification (ImageNet)</summary>
 
-- **Acc** values are model accuracies on the [ImageNet](https://www.image-net.org/index.php) dataset validation set.
+- Acc<sup>Top1</sup> values are model accuracies on the [ImageNet](https://www.image-net.org/index.php) dataset validation set.
 
 </details>
 
 ## Object Detection
 
-| Model | Input Size<br>(H,W,C) | mAP<br>(NPU) | mAP<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|----------------|---------------|-----------|------------|--------|------|
 | YOLOv3u | (640,640,3) | 51.053 | 51.577 | 282.68  | 103.73 | [Link](https://docs.ultralytics.com/models/yolov3/)| |
 | YOLOv3-spp | (640,640,3) | 46.715 | 47.613 | 156.91 | 62.97 | [Link](https://github.com/ultralytics/yolov3/)| |
@@ -153,13 +153,13 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary>Object Detection (COCO)</summary>
 
-- **mAP** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
 
 </details>
 
 ## Instance Segmentation
 
-| Model | Input Size<br>(H,W,C) | mAP<sup>mask</sup><br>(NPU) | mAP<sup>mask</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | YOLOv5l-seg | (640,640,3) | 39.041 | 39.784 | 147.83 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5x-seg | (640,640,3) | 40.697 | 41.137 | 265.81 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
@@ -176,13 +176,13 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary> Instance Segmentation (COCO)</summary>
 
-- **mAP<sup>mask</sup>** values refer to single-model single-scale performance on the [COCO val2017](https://cocodataset.org/) dataset.
+- $\underset{50\text{–}95}{\text{mAP}_{\text{val}}^{\text{mask}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
 
 </details>
 
 ## Pose Estimation
 
-| Model | Input Size<br>(H,W,C) | mAP<sup>pose</sup><br>(NPU) | mAP<sup>pose</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 |-------|--------------------------|--------------------|-------------------|-----------|------------|------|------|
 | YOLOv8x-pose | (640,640,3) | 66.416 | 68.367 | 263.33 | 69.46 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLO11x-pose | (640,640,3) | 67.220 | 68.599 | 203.54 | 58.75 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
@@ -190,6 +190,6 @@ Here, we give the full list of publicly pre-trained models supported by the Mobi
 <details>
 <summary>Pose Estimation (COCO)</summary>
 
-- **mAP<sup>pose</sup>** values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$ values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
 
 </details>

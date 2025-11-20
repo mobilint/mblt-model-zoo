@@ -2,7 +2,8 @@ import pytest
 import requests
 from PIL import Image
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
+
+from mblt_model_zoo.transformers import AutoProcessor, pipeline
 
 
 @pytest.fixture
@@ -22,7 +23,9 @@ def pipe():
 def test_blip(pipe):
     pipe.generation_config.max_new_tokens = None
 
-    img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
+    img_url = (
+        "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
+    )
     raw_image = Image.open(requests.get(img_url, stream=True).raw).convert("RGB")
 
     # conditional image captioning

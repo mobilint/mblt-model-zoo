@@ -1,7 +1,8 @@
 import numpy as np
 import torch
-from .base import PreOps
+
 from ..types import TensorLike
+from .base import PreOps
 
 
 class SetOrder(PreOps):

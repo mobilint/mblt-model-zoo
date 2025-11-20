@@ -1,32 +1,32 @@
-from typing import Optional, Tuple, TypeVar, Union
+import math
 import os
+from typing import Optional, Tuple, TypeVar, Union
+
 import maccel
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import math
 from torch.nn import CrossEntropyLoss
-
 from transformers import (
-    PretrainedConfig,
-    PreTrainedModel,
-    GPT2Tokenizer,
-    GPT2TokenizerFast,
     AutoConfig,
     AutoModel,
-    AutoTokenizer,
     AutoModelForCausalLM,
+    AutoTokenizer,
+    GPT2Tokenizer,
+    GPT2TokenizerFast,
+    PretrainedConfig,
+    PreTrainedModel,
 )
 from transformers.modeling_outputs import (
-    CausalLMOutputWithPast,
     BaseModelOutputWithPast,
+    CausalLMOutputWithPast,
 )
 from transformers.utils import logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from mblt_model_zoo.utils.logging import log_model_details
-from ..utils.cache_utils import MobilintCache
 
+from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 

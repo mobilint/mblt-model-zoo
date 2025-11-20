@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Union
+
 import numpy as np
 import torch
-from ..types import TensorLike, ListTensorLike
+
+from ..types import ListTensorLike, TensorLike
 from .common import *
 
 

@@ -1,1 +1,3 @@
-from .whisper import *
+from .whisper import whisper_small
+
+__all__ = ["whisper_small"]

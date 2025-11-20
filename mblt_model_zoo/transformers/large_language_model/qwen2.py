@@ -1,28 +1,28 @@
-from typing import Optional, Tuple, Union
+import math
 import os
+from typing import Optional, Tuple, Union
+
 import maccel
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import math
-
 from transformers import (
-    Qwen2PreTrainedModel,
-    Qwen2Config,
-    Qwen2TokenizerFast,
     AutoConfig,
     AutoModel,
-    AutoTokenizer,
     AutoModelForCausalLM,
+    AutoTokenizer,
+    Qwen2Config,
+    Qwen2PreTrainedModel,
+    Qwen2TokenizerFast,
 )
-from transformers.processing_utils import Unpack
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from mblt_model_zoo.utils.logging import log_model_details
-from ..utils.cache_utils import MobilintCache
 
+from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 

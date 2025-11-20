@@ -1,28 +1,28 @@
-from typing import Optional, Union
+import math
 import os
+from typing import Optional, Union
+
 import maccel
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import math
-
-from transformers.models.cohere2.configuration_cohere2 import Cohere2Config
-from transformers.models.cohere2 import Cohere2PreTrainedModel
-from transformers.utils import TransformersKwargs, logging
-from transformers.processing_utils import Unpack
-from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers import (
     AutoConfig,
     AutoModel,
-    AutoTokenizer,
     AutoModelForCausalLM,
+    AutoTokenizer,
     CohereTokenizerFast,
 )
+from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.models.cohere2 import Cohere2PreTrainedModel
+from transformers.models.cohere2.configuration_cohere2 import Cohere2Config
+from transformers.processing_utils import Unpack
+from transformers.utils import TransformersKwargs, logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from mblt_model_zoo.utils.logging import log_model_details
-from ..utils.cache_utils import MobilintCache
 
+from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 
