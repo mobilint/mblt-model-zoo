@@ -10,9 +10,15 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def model(request):
+def model(request, mxq_path):
     model_path = request.param
-    model = AutoModelForCausalLM.from_pretrained(model_path)
+    if mxq_path:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            mxq_path=mxq_path,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_path)
     yield model
     model.dispose()
 

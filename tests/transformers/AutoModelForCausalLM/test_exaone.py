@@ -10,15 +10,23 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request):
+def pipe(request, mxq_path):
     model_path = request.param
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    pipe = pipeline(
-        "text-generation",
-        model=model_path,
-        streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-    )
+    if mxq_path:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            model_kwargs={"mxq_path": mxq_path},
+        )
+    else:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+        )
     yield pipe
     pipe.model.dispose()
 
