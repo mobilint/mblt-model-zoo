@@ -34,7 +34,11 @@ def test_cohere2(pipe):
     pipe.generation_config.max_new_tokens = None
 
     messages = [
-        {"role": "user", "content": "Hello, how are you?"},
+        {
+            "role": "system",
+            "content": "You are a pirate chatbot who always responds in pirate speak!",
+        },
+        {"role": "user", "content": "Who are you?"},
     ]
 
     outputs = pipe(
