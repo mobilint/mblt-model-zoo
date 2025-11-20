@@ -18,6 +18,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     ) -> Cache:
         if not hasattr(self, "_cache"):
             self._cache = MobilintCache(self.get_mxq_model())
+            self._cache.reset()
         else:
             self._cache.reset()
             
