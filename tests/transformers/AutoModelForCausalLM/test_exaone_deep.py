@@ -30,7 +30,7 @@ def pipe(request, mxq_path):
     yield pipe
     pipe.model.dispose()
 
-
+@pytest.mark.timeout(300)
 def test_exaone_deep(pipe):
     pipe.generation_config.max_new_tokens = None
 
@@ -57,5 +57,5 @@ Please reason step by step, and you should write the correct option alphabet (A,
 
     outputs = pipe(
         messages,
-        max_length=512,
+        max_length=4096,
     )
