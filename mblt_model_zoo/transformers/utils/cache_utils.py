@@ -2,8 +2,7 @@ from typing import Any, Optional
 
 import maccel
 import torch
-
-from transformers.cache_utils import CacheLayerMixin, Cache
+from transformers.cache_utils import Cache, CacheLayerMixin
 
 
 class MobilintLayer(CacheLayerMixin):

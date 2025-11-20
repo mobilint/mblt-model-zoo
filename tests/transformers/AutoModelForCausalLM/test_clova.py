@@ -1,7 +1,7 @@
 import pytest
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
+from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 
 MODEL_PATHS = (
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",

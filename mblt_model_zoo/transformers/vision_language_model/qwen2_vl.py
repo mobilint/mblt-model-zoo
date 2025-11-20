@@ -1,45 +1,43 @@
-from typing import Optional, Union, Any, TypeVar
+import math
 import os
+from typing import Any, Optional, TypeVar, Union
+
 import maccel
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import math
-from PIL import Image
-from cv2 import resize as cv2_resize, INTER_CUBIC
 import torch.nn.functional as F
-
+from cv2 import INTER_CUBIC
+from cv2 import resize as cv2_resize
+from PIL import Image
 from transformers import (
-    Qwen2VLTextConfig,
-    Qwen2VLConfig,
-    Qwen2TokenizerFast,
-    Qwen2VLProcessor,
-    Qwen2VLPreTrainedModel,
-    Qwen2VLModel,
-    Qwen2VLForConditionalGeneration,
-
-    PretrainedConfig,
     AutoConfig,
-    AutoTokenizer,
-    AutoProcessor,
     AutoModelForImageTextToText,
+    AutoProcessor,
+    AutoTokenizer,
+    PretrainedConfig,
+    Qwen2TokenizerFast,
+    Qwen2VLConfig,
+    Qwen2VLForConditionalGeneration,
+    Qwen2VLModel,
+    Qwen2VLPreTrainedModel,
+    Qwen2VLProcessor,
+    Qwen2VLTextConfig,
 )
-from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
-from transformers.utils import logging
+from transformers.feature_extraction_utils import BatchFeature
+from transformers.image_utils import ImageInput, load_image
 from transformers.modeling_outputs import BaseModelOutputWithPast
-from transformers.image_utils import ImageInput
-from transformers.video_utils import VideoInput
+from transformers.models.qwen2_vl.configuration_qwen2_vl import Qwen2VLVisionConfig
+from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
 from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
-from transformers.feature_extraction_utils import BatchFeature
-from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessorKwargs
-from transformers.image_utils import load_image
+from transformers.utils import logging
+from transformers.video_utils import VideoInput
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache
-
 
 logger = logging.get_logger(__name__)
 

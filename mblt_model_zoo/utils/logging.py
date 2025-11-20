@@ -1,7 +1,6 @@
 import hashlib
 import os
 
-
 _VERBOSE_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 

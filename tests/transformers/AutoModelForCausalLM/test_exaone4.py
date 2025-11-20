@@ -1,12 +1,11 @@
-import pytest
 import random
+
+import pytest
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import AutoTokenizer, AutoModelForCausalLM
 
+from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_PATHS = (
-    "mobilint/EXAONE-4.0-1.2B",
-)
+MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
@@ -22,11 +21,13 @@ def model(request, mxq_path):
     yield model
     model.dispose()
 
+
 @pytest.fixture(params=MODEL_PATHS, scope="module")
 def tokenizer(request):
     model_path = request.param
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     yield tokenizer
+
 
 def test_exaone4(model, tokenizer):
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
@@ -87,7 +88,10 @@ def test_exaone4(model, tokenizer):
                     "type": "object",
                     "required": ["max_num"],
                     "properties": {
-                        "max_num": {"type": "int", "description": "Max number of the dice"}
+                        "max_num": {
+                            "type": "int",
+                            "description": "Max number of the dice",
+                        }
                     },
                 },
             },

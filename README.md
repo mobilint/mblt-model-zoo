@@ -14,7 +14,11 @@ Designed to help developers accelerate deployment, Mobilint's Model Zoo offers a
 
 ## Installation
 
-- Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
+[![PyPI - Version](https://img.shields.io/pypi/v/mblt-model-zoo?logo=pypi&logoColor=white)](https://pypi.org/project/mblt-model-zoo/)
+[![PyPI Downloads](https://static.pepy.tech/badge/mblt-model-zoo?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://clickpy.clickhouse.com/dashboard/mblt-model-zoo)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mblt-model-zoo?logo=python&logoColor=gold)](https://pypi.org/project/mblt-model-zoo/)
+
+- Prepare environment equipped with Mobilint's NPU. In case you are not a Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
 - Install **mblt-model-zoo** using pip:
 
 ```bash
@@ -42,8 +46,8 @@ from mblt_model_zoo.vision import ResNet50
 # Automatically download the model if not found in the local cache.
 resnet50 = ResNet50() 
 
-# Load the model trained with different recipe
-# Currently, default is "DEFAULT", or "IMAGENET1K_V1.
+# Load the model trained with a different recipe
+# Currently, the default is "DEFAULT", or "IMAGENET1K_V1".
 resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
 
 # Download the model to local directory and load it
@@ -53,7 +57,7 @@ resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
 
 # Set inference mode for better performance
-# Aries supports "single", "multi" and "global" inferece mode. Default is "global"
+# Aries supports "single", "multi", "global", "global4", and "global8" inference mode. Default is "global"
 resnet50 = ResNet50(infer_mode = "global")
 
 # (Beta) If you are holding a model compiled for Regulus, enable inference on the Regulus device.
@@ -72,7 +76,7 @@ resnet50 = ResNet50(
 
 ### Working with Quantized Model
 
-With the image given as path, PIL image, numpy array, or torch tensor, you can perform inference with the quantized model. The following code snippet shows how to use the quantized model for inference:
+With the image given as a path, PIL image, numpy array, or torch tensor, you can perform inference with the quantized model. The following code snippet shows how to use the quantized model for inference:
 
 ```python
 image_path = "path/to/image.jpg"
@@ -101,13 +105,13 @@ pprint(available_models)
 
 ## Model List
 
-We provide the models that are quantized with our advanced quantization techniques. List of available vision models are [here](mblt_model_zoo/vision/README.md).
+We provide the models that are quantized with our advanced quantization techniques. A list of available vision models is [here](mblt_model_zoo/vision/README.md).
 
 ## Optional Extras
 
 When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.
 
-Currently, this optional functions are only available on environment equipped with Mobilint's [Aries](https://www.mobilint.com/aries).
+Currently, these optional functions are only available on environment equipped with Mobilint's [Aries](https://www.mobilint.com/aries).
 
 |Name|Use|Details|
 |-------|------|------|

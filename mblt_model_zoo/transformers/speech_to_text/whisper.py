@@ -1,43 +1,41 @@
-from typing import Optional, Tuple, TypeVar, Union
 import math
-import maccel
 import os
+from typing import Optional, Tuple, TypeVar, Union
+
+import maccel
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
-
 from transformers import (
-    WhisperTokenizer,
-    WhisperFeatureExtractor,
-    WhisperProcessor,
+    AutoConfig,
+    AutoFeatureExtractor,
+    AutoModelForSpeechSeq2Seq,
+    AutoProcessor,
+    AutoTokenizer,
     PreTrainedModel,
     WhisperConfig,
+    WhisperFeatureExtractor,
     WhisperPreTrainedModel,
-    AutoConfig,
-    AutoTokenizer,
-    AutoFeatureExtractor,
-    AutoProcessor,
-    AutoModelForSpeechSeq2Seq,
-)
-from transformers.models.whisper.modeling_whisper import (
-    WhisperPositionalEmbedding,
-    shift_tokens_right,
-)
-from transformers.models.whisper.generation_whisper import (
-    WhisperGenerationMixin,
+    WhisperProcessor,
+    WhisperTokenizer,
 )
 from transformers.modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPastAndCrossAttentions,
-    Seq2SeqModelOutput,
     Seq2SeqLMOutput,
+    Seq2SeqModelOutput,
+)
+from transformers.models.whisper.generation_whisper import WhisperGenerationMixin
+from transformers.models.whisper.modeling_whisper import (
+    WhisperPositionalEmbedding,
+    shift_tokens_right,
 )
 from transformers.utils import logging
 
 from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
 from mblt_model_zoo.utils.logging import log_model_details
-from ..utils.cache_utils import MobilintCache
 
+from ..utils.cache_utils import MobilintCache
 
 logger = logging.get_logger(__name__)
 

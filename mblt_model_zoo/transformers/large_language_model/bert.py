@@ -1,23 +1,28 @@
-from typing import Optional, Union
 import os
+from typing import Optional, Union
+
 import maccel
 import torch
 from transformers import (
-    Cache,
-    BertPreTrainedModel,
-    BertForMaskedLM,
-    BertConfig,
-    BertTokenizerFast,
     AutoConfig,
     AutoModel,
-    AutoTokenizer,
     AutoModelForMaskedLM,
+    AutoTokenizer,
+    BertConfig,
+    BertForMaskedLM,
+    BertPreTrainedModel,
+    BertTokenizerFast,
+    Cache,
 )
-from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler, BertOnlyMLMHead
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
+from transformers.models.bert.modeling_bert import (
+    BertEmbeddings,
+    BertOnlyMLMHead,
+    BertPooler,
+)
 from transformers.utils import logging
-from mblt_model_zoo.utils.logging import log_model_details
 
+from mblt_model_zoo.utils.logging import log_model_details
 
 logger = logging.get_logger(__name__)
 

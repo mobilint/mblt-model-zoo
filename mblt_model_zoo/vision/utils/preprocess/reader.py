@@ -1,10 +1,12 @@
-import numpy as np
+from typing import Union
+
 import cv2
+import numpy as np
 import torch
 from PIL import Image
-from typing import Union
-from .base import PreOps
+
 from ..types import TensorLike
+from .base import PreOps
 
 
 class Reader(PreOps):

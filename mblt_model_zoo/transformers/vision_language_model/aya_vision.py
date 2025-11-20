@@ -1,22 +1,22 @@
-from typing import Optional, Union, List, Tuple, Any, TypeVar
 import os
+from typing import Any, List, Optional, Tuple, TypeVar, Union
+
 import maccel
-from maccel import Cluster, Core, CoreId
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-
+from maccel import Cluster, Core, CoreId
 from transformers import (
-    PretrainedConfig,
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoProcessor,
+    AutoTokenizer,
     AyaVisionConfig,
     AyaVisionPreTrainedModel,
-    AutoModelForCausalLM,
-    AutoConfig,
-    AutoTokenizer,
-    CohereTokenizerFast,
-    AutoProcessor,
     AyaVisionProcessor,
-    AutoModelForImageTextToText,
+    CohereTokenizerFast,
+    PretrainedConfig,
 )
 from transformers.models.aya_vision.modeling_aya_vision import (
     AyaVisionCausalLMOutputWithPast,
@@ -27,7 +27,6 @@ from mblt_model_zoo.transformers.utils.generation_utils import MobilintGeneratio
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache
-
 
 # type hinting: specifying the type of config class that inherits from PretrainedConfig
 SpecificPretrainedConfigType = TypeVar("SpecificPretrainedConfigType", bound="PretrainedConfig")
