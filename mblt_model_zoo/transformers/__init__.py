@@ -1,4 +1,4 @@
-from ._api import list_models, list_tasks
+from .utils._api import list_models, list_tasks
 from .large_language_model import *
 from .speech_to_text import *
 from .text_to_speech import *

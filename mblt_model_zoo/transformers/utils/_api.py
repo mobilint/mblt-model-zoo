@@ -2,7 +2,7 @@ import importlib
 import inspect
 from typing import Dict, List, Union
 
-from .utils.types import TransformersModelInfo
+from .types import TransformersModelInfo
 
 TASKS = [
     "large_language_model",
