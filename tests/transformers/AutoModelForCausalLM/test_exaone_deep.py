@@ -5,7 +5,6 @@ from mblt_model_zoo.transformers import pipeline, AutoTokenizer
 
 MODEL_PATHS = (
     "mobilint/EXAONE-Deep-2.4B",
-    "mobilint/EXAONE-Deep-7.8B",
 )
 
 
