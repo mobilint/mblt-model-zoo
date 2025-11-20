@@ -78,7 +78,7 @@ from transformers.pipelines.zero_shot_object_detection import (
 )
 
 from ...utils import download_url_to_folder
-from .._api import list_models
+from ._api import list_models
 
 T = TypeVar('T')
 
