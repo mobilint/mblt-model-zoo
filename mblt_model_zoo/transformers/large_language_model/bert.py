@@ -3,6 +3,7 @@ from typing import Optional, Union
 
 import maccel
 import torch
+import torchvision
 from transformers import (
     AutoConfig,
     AutoModel,
