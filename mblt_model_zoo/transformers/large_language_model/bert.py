@@ -8,17 +8,17 @@ from transformers import (
     AutoModel,
     AutoModelForMaskedLM,
     AutoTokenizer,
-    BertConfig,
-    BertForMaskedLM,
-    BertPreTrainedModel,
     BertTokenizerFast,
     Cache,
 )
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
+from transformers.models.bert.configuration_bert import BertConfig
 from transformers.models.bert.modeling_bert import (
     BertEmbeddings,
+    BertForMaskedLM,
     BertOnlyMLMHead,
     BertPooler,
+    BertPreTrainedModel,
 )
 from transformers.utils import logging
 
