@@ -20,5 +20,5 @@ def test_melo(pipe):
     speaker_ids = pipe.hps.data.spk2id
 
     # American accent
-    output_path = "en-us.wav"
+    output_path = "tests/tmp/en-us.wav"
     pipe.tts_to_file(text, speaker_ids["EN-Newest"], output_path, speed=speed)
