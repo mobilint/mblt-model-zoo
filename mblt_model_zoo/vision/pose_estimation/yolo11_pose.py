@@ -13,6 +13,7 @@ class YOLO11nPose_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -111,6 +112,7 @@ class YOLO11lPose_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={

@@ -13,6 +13,7 @@ class YOLOv5n_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -48,6 +49,7 @@ class YOLOv5nu_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -79,6 +81,7 @@ class YOLOv5n6_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -115,6 +118,7 @@ class YOLOv5n6u_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -146,6 +150,7 @@ class YOLOv5s_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -181,6 +186,7 @@ class YOLOv5s6_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -281,6 +287,7 @@ class YOLOv5m_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -316,6 +323,7 @@ class YOLOv5m6_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -416,6 +424,7 @@ class YOLOv5l_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -552,6 +561,7 @@ class YOLOv5x_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={

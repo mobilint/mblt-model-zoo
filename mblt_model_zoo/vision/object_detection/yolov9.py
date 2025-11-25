@@ -13,6 +13,7 @@ class YOLOv9t_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -236,6 +237,7 @@ class YOLOv9e_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -267,6 +269,7 @@ class GELANe_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
