@@ -46,6 +46,7 @@ class YOLOv9eSeg_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={

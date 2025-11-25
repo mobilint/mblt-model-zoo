@@ -13,6 +13,7 @@ class YOLOv5nSeg_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -49,6 +50,7 @@ class YOLOv5sSeg_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
@@ -85,6 +87,7 @@ class YOLOv5mSeg_Set(ModelInfoSet):
                     "global4": None,
                     "global8": None,
                 },
+                "regulus": {"single": None},
             },
         },
         pre_cfg={
