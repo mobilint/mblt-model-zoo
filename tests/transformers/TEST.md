@@ -8,7 +8,7 @@ Install the runtime extras plus the developer tooling (pytest, datasets, torchvi
 
 ```bash
 pip install -e ".[transformers]"
-pip install pytest datasets torchvision librosa soundfile
+pip install pytest datasets torchvision librosa soundfile torchcodec
 ```
 
 ## Run All Tests
