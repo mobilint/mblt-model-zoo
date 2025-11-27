@@ -4,49 +4,50 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import ResNet50
+from mblt_model_zoo.vision import YOLO11xPose
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
-def resnet50():
-    model = ResNet50()
+def yolo_pose():
+    model = YOLO11xPose()
     yield model
     model.dispose()
 
 
-def run_inference(model, image_path, save_path):
+def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
     """Run inference with the given model and image."""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     input_img = model.preprocess(image_path)
     output = model(input_img)
-    result = model.postprocess(output)
+    result = model.postprocess(output, conf_thres=conf_thres, iou_thres=iou_thres)
 
     result.plot(
         source_path=image_path,
         save_path=save_path,
-        topk=5,
     )
 
 
-def test_resnet50(resnet50):
-    image_path = os.path.join(TEST_DIR, "rc", "volcano.jpg")
+def test_yolo_pose(yolo_pose):
+    image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
-        TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}"
+        TEST_DIR,
+        "tmp",
+        f"yolov11x_pose_{os.path.basename(image_path)}",
     )
 
-    run_inference(resnet50, image_path, save_path)
+    run_inference(yolo_pose, image_path, save_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run ResNet50 inference")
+    parser = argparse.ArgumentParser(description="Run YOLO11xPose inference")
     parser.add_argument(
         "--mxq_path",
         type=str,
         default=None,
-        help="Path to the ResNet50 model file (.mxq)",
+        help="Path to the YOLO11xPose model file (.mxq)",
     )
     parser.add_argument(
         "--model_type",
@@ -69,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--input_path",
         type=str,
-        default=os.path.join(TEST_DIR, "rc", "volcano.jpg"),
+        default=os.path.join(TEST_DIR, "rc", "cr7.jpg"),
         help="Path to the input image",
     )
     parser.add_argument(
@@ -78,11 +79,23 @@ if __name__ == "__main__":
         default=None,
         help="Path to save the output image",
     )
+    parser.add_argument(
+        "--conf_thres",
+        type=float,
+        default=0.5,
+        help="Confidence threshold",
+    )
+    parser.add_argument(
+        "--iou_thres",
+        type=float,
+        default=0.5,
+        help="IoU threshold",
+    )
 
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = ResNet50(
+    model = YOLO11xPose(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -90,10 +103,12 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov11x_pose_{os.path.basename(args.input_path)}"
         )
 
     try:
-        run_inference(model, args.input_path, args.save_path)
+        run_inference(
+            model, args.input_path, args.save_path, args.conf_thres, args.iou_thres
+        )
     finally:
         model.dispose()
