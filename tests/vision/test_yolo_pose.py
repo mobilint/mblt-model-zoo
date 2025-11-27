@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 
@@ -15,6 +16,20 @@ def yolo_pose():
     model.dispose()
 
 
+def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
+    """Run inference with the given model and image."""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    input_img = model.preprocess(image_path)
+    output = model(input_img)
+    result = model.postprocess(output, conf_thres=conf_thres, iou_thres=iou_thres)
+
+    result.plot(
+        source_path=image_path,
+        save_path=save_path,
+    )
+
+
 def test_yolo_pose(yolo_pose):
     image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
@@ -23,13 +38,77 @@ def test_yolo_pose(yolo_pose):
         f"yolov11x_pose_{os.path.basename(image_path)}",
     )
 
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    run_inference(yolo_pose, image_path, save_path)
 
-    input_img = yolo_pose.preprocess(image_path)
-    output = yolo_pose(input_img)
-    result = yolo_pose.postprocess(output, conf_thres=0.5, iou_thres=0.5)
 
-    result.plot(
-        source_path=image_path,
-        save_path=save_path,
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run YOLO11xPose inference")
+    parser.add_argument(
+        "--mxq_path",
+        type=str,
+        default=None,
+        help="Path to the YOLO11xPose model file (.mxq)",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="DEFAULT",
+        help="Model type",
+    )
+    parser.add_argument(
+        "--infer_mode",
+        type=str,
+        default="global",
+        help="Inference mode",
+    )
+    parser.add_argument(
+        "--product",
+        type=str,
+        default="aries",
+        help="Product",
+    )
+    parser.add_argument(
+        "--input_path",
+        type=str,
+        default=os.path.join(TEST_DIR, "rc", "cr7.jpg"),
+        help="Path to the input image",
+    )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default=None,
+        help="Path to save the output image",
+    )
+    parser.add_argument(
+        "--conf_thres",
+        type=float,
+        default=0.5,
+        help="Confidence threshold",
+    )
+    parser.add_argument(
+        "--iou_thres",
+        type=float,
+        default=0.5,
+        help="IoU threshold",
+    )
+
+    args = parser.parse_args()
+
+    # Load model with the specified mxq_path
+    model = YOLO11xPose(
+        local_path=args.mxq_path,
+        model_type=args.model_type,
+        infer_mode=args.infer_mode,
+        product=args.product,
+    )
+    if args.save_path is None:
+        args.save_path = os.path.join(
+            TEST_DIR, "tmp", f"yolov11x_pose_{os.path.basename(args.input_path)}"
+        )
+
+    try:
+        run_inference(
+            model, args.input_path, args.save_path, args.conf_thres, args.iou_thres
+        )
+    finally:
+        model.dispose()

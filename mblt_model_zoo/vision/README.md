@@ -2,6 +2,8 @@
 
 Here, we give the full list of publicly pre-trained models supported by the Mobilint Model Zoo.
 
+Further usage examples can be found in the [tests](../../tests/vision) directory.
+
 ## Image Classification
 
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |

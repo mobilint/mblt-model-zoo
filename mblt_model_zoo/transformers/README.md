@@ -130,7 +130,7 @@ pipe(
 )
 ```
 
-Further usage examples can be found in the [tutorial](../../tests/tutorial/) directory.
+Further usage examples can be found in the [tests](../../tests/transformers) directory.
 
 ### Listing Available Models
 
