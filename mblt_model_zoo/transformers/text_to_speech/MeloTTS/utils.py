@@ -8,7 +8,7 @@ from .text import cleaned_text_to_sequence, get_bert
 from .text.cleaner import clean_text
 
 
-def get_text_for_tts_infer(text, language_str, hps, device, symbol_to_id=None):
+def get_text_for_tts_infer(text, language_str, hps, device, symbol_to_id=None, dispose_bert_after_use=False):
     norm_text, phone, tone, word2ph = clean_text(text, language_str)
     phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
 
@@ -24,7 +24,7 @@ def get_text_for_tts_infer(text, language_str, hps, device, symbol_to_id=None):
         bert = torch.zeros(1024, len(phone))
         ja_bert = torch.zeros(768, len(phone))
     else:
-        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id)
+        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id, dispose_after_use=dispose_bert_after_use)
         del word2ph
         assert bert.shape[-1] == len(phone), phone
 
