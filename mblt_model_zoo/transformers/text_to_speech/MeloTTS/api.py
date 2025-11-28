@@ -1,48 +1,19 @@
-from __future__ import annotations
 import re
-from tqdm import tqdm
+
+import noisereduce as nr
+import numpy as np
+import soundfile
 import torch
 from torch import nn
-from typing import TYPE_CHECKING
-import noisereduce as nr
+from tqdm import tqdm
 
-MISSING_MSG = (
-    "",
-    "==================================================================================================================",
-    "Optional dependency 'melo' not found. Please install MeloTTS (https://github.com/myshell-ai/MeloTTS).",
-    "NOTE: Default dependencies of MeloTTS contains old version of `transformers`, `librosa`, and `tensorboard`.",
-    "These old versions are not compatible with our model zoo's dependency and the newest versions are compatible with MeloTTS."
-    "You can modify `requirements.txt` in MeloTTS repository to remove these three dependencies since our model zoo installs them.",
-    "==================================================================================================================",
-    "",
-)
+from . import utils
+from .download_utils import load_or_download_config, load_or_download_model
+from .models import MobilintSynthesizerTrn
+from .split_utils import split_sentence
 
-try:
-    from melo.api import TTS as OriginalTTS
-    import soundfile
-    from . import utils
-    from .models import MobilintSynthesizerTrn
-    from .download_utils import load_or_download_config, load_or_download_model
-except Exception:
-    class OriginalTTS:
-        def __init__(self, *args, **kwargs):
-            for msg in MISSING_MSG:
-                print(msg)
-            raise ModuleNotFoundError()
 
-        def __getattr__(self, name):
-            for msg in MISSING_MSG:
-                print(msg)
-            raise ModuleNotFoundError()
-
-if TYPE_CHECKING:
-    from melo.api import TTS as OriginalTTS
-    import soundfile
-    from . import utils
-    from .models import MobilintSynthesizerTrn
-    from .download_utils import load_or_download_config, load_or_download_model
-
-class TTS(OriginalTTS):
+class TTS(nn.Module):
     def __init__(self, 
                 language,
                 device='auto',
@@ -86,6 +57,24 @@ class TTS(OriginalTTS):
         
         language = language.split('_')[0]
         self.language = 'ZH_MIX_EN' if language == 'ZH' else language # we support a ZH_MIX_EN model
+    
+    @staticmethod
+    def audio_numpy_concat(segment_data_list, sr, speed=1.):
+        audio_segments = []
+        for segment_data in segment_data_list:
+            audio_segments += segment_data.reshape(-1).tolist()
+            audio_segments += [0] * int((sr * 0.05) / speed)
+        audio_segments = np.array(audio_segments).astype(np.float32)
+        return audio_segments
+
+    @staticmethod
+    def split_sentences_into_pieces(text, language, quiet=False):
+        texts = split_sentence(text, language_str=language)
+        if not quiet:
+            print(" > Text split to sentences.")
+            print('\n'.join(texts))
+            print(" > ===========================")
+        return texts
     
     def tts_to_file(self, text, speaker_id, output_path=None, sdp_ratio=0.2, noise_scale=0.6, noise_scale_w=0.8, speed=1.0, pbar=None, format=None, position=None, quiet=False,):
         language = self.language

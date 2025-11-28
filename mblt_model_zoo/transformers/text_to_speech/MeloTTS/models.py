@@ -1,14 +1,12 @@
 import math
-import torch
-from torch import nn
-
-from melo import commons
 
 import maccel
 import numpy as np
-
+import torch
+from torch import nn
 from transformers.utils import logging
 
+from . import commons
 
 logger = logging.get_logger(__name__)
 
@@ -27,9 +25,9 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         super().__init__()
         
         if num_languages is None:
-            from melo.text import num_languages
+            from .text import num_languages
         if num_tones is None:
-            from melo.text import num_tones
+            from .text import num_tones
         self.n_vocab = n_vocab
         self.hidden_channels = hidden_channels
         self.emb = nn.Embedding(n_vocab, hidden_channels)
@@ -105,7 +103,9 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 z0_slice = z0[:, start_index:end_index, :]
                 z1_slice = z1[:, start_index:end_index, :]
             
-            m_p_chunk, logs_p_chunk, logw_chunk = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
+            outputs = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
+            assert outputs is not None, "No output from mxq model inference."
+            m_p_chunk, logs_p_chunk, logw_chunk = outputs
             
             if end_index > x.shape[1]:
                 m_p_chunk = m_p_chunk[..., :remaining_length, :]
@@ -185,7 +185,9 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
             
-            output_chunk = self.mxq_model.infer([x1, x0])[0] # (1, seq_len, 1)
+            outputs = self.mxq_model.infer([x1, x0]) # [(1, seq_len, 1)]
+            assert outputs is not None, "No output from mxq model inference."
+            output_chunk = outputs[0]
             
             if end_index > x.shape[1]:
                 output_chunk = output_chunk[:, :(remaining_length * self.upsample_initial_channel), :]
@@ -271,27 +273,27 @@ class MobilintSynthesizerTrn(nn.Module):
         bert,
         ja_bert,
         noise_scale=0.667,
-        length_scale=1,
+        length_scale=1.0,
         noise_scale_w=0.8,
         max_len=None,
-        sdp_ratio=0,
+        sdp_ratio=0.0,
         y=None,
         g=None,
     ):
         if x_lengths.shape != torch.Size([1]) or x_lengths[0] != int(x.shape[1]):
-            logger.warning_once(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length={x_lengths}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
+            logger.warning(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length={x_lengths}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
             
         if sid != 0:
-            logger.warning_once("Input `sid` is set to 0 inside the mxq.")
+            logger.warning("Input `sid` is set to 0 inside the mxq.")
         
         if g is not None:
-            logger.warning_once('Input `g` is calculated inside the mxq with assuming sid is 0.')
+            logger.warning('Input `g` is calculated inside the mxq with assuming sid is 0.')
                 
         if sdp_ratio != 0.2:
-            logger.warning_once('Input `sdp_ratio` is set inside the mxq as 0.2.')
+            logger.warning('Input `sdp_ratio` is set inside the mxq as 0.2.')
         
         if max_len is not None:
-            logger.warning_once('Input `max_len` is not supported.')
+            logger.warning('Input `max_len` is not supported.')
         
         m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
             x,
