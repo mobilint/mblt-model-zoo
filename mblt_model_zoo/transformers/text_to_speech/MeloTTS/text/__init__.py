@@ -2,6 +2,10 @@ import sys
 
 import torch
 
+from mblt_model_zoo.transformers.large_language_model.bert import (
+    MobilintBertForMaskedLM,
+)
+
 from .symbols import *
 
 _symbol_to_id = {s: i for i, s in enumerate(symbols)}
@@ -22,9 +26,10 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
     lang_ids = [lang_id for i in phones]
     return phones, tones, lang_ids
 
+
 models = {}
 tokenizers = {}
-def get_bert_feature(text, word2ph, device=None, model_id=''):
+def get_bert_feature(text, word2ph, device=None, model_id='', dispose_after_use=False):
     from mblt_model_zoo.transformers import AutoModelForMaskedLM, AutoTokenizer
     global model
     global tokenizer
@@ -47,6 +52,8 @@ def get_bert_feature(text, word2ph, device=None, model_id=''):
     else:
         model = models[model_id]
         tokenizer = tokenizers[model_id]
+        if isinstance(model, MobilintBertForMaskedLM) and dispose_after_use == True:
+            model.launch()
         
     with torch.no_grad():
         inputs = tokenizer(text, return_tensors="pt")
@@ -55,6 +62,8 @@ def get_bert_feature(text, word2ph, device=None, model_id=''):
         # bert models are compiled to output third-from-last hidden state
         res = model(**inputs)
         res = torch.cat(res["hidden_states"][0:1], -1)[0].cpu()
+        if isinstance(model, MobilintBertForMaskedLM) and dispose_after_use == True:
+            model.dispose()
         
     assert inputs["input_ids"].shape[-1] == len(word2ph)
     word2phone = word2ph
@@ -67,6 +76,7 @@ def get_bert_feature(text, word2ph, device=None, model_id=''):
 
     return phone_level_feature.T
 
-def get_bert(norm_text, word2ph, language, device, model_id):
-    bert = get_bert_feature(norm_text, word2ph, device, model_id)
+
+def get_bert(norm_text, word2ph, language, device, model_id, dispose_after_use=False):
+    bert = get_bert_feature(norm_text, word2ph, device, model_id, dispose_after_use=dispose_after_use)
     return bert

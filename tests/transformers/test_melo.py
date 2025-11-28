@@ -21,4 +21,10 @@ def test_melo(pipe):
 
     # American accent
     output_path = "tests/tmp/en-us.wav"
-    pipe.tts_to_file(text, speaker_ids["EN-Newest"], output_path, speed=speed)
+    pipe.tts_to_file(
+        text,
+        speaker_ids["EN-Newest"],
+        output_path,
+        speed=speed,
+        dispose_bert_after_use=True,
+    )
