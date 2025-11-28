@@ -1,4 +1,4 @@
-from .bert import bert_base_uncased
+from .bert import bert_base_uncased, bert_kor_base
 from .cohere2 import c4ai_command_r7b_12_2024
 from .exaone import EXAONE_35_24B_Instruct, EXAONE_35_78B_Instruct, EXAONE_Deep_24B
 from .exaone4 import EXAONE_40_12B
@@ -18,6 +18,7 @@ from .qwen2 import (
 
 __all__ = [
     "bert_base_uncased",
+    "bert_kor_base",
     "c4ai_command_r7b_12_2024",
     "EXAONE_35_24B_Instruct",
     "EXAONE_35_78B_Instruct",

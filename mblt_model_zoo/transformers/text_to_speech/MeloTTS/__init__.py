@@ -24,3 +24,9 @@ KR = TransformersModelInfo(
         "MeloTTS-Korean_dec_flow.mxq",
     ],
 )
+
+__all__ = [
+    "TTS",
+    "EN_NEWEST",
+    "KR",
+]
