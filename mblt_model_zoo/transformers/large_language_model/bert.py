@@ -239,3 +239,16 @@ bert_base_uncased = TransformersModelInfo(
         "vocab.txt",
     ],
 )
+
+bert_kor_base = TransformersModelInfo(
+    original_model_id="kykim/bert-kor-base",
+    model_id="mobilint/bert-kor-base",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/bert-kor-base/",
+    file_list=[
+        "bert-kor-base.mxq",
+        "config.json",
+        "model.safetensors",
+        "tokenizer_config.json",
+        "vocab.txt",
+    ],
+)
