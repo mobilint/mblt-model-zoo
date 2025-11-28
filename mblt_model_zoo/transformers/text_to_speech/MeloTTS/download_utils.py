@@ -1,11 +1,14 @@
 import os
+
 import torch
-import melo.utils
+
 from ...utils.auto import convert_identifier_to_path
+from . import utils
 
 LANG_TO_HF_REPO_ID = {
     'EN_NEWEST': 'mobilint/MeloTTS-English-v3',
 }
+
 
 def load_or_download_config(locale, use_hf=False, config_path=None):
     assert use_hf is False
@@ -16,7 +19,7 @@ def load_or_download_config(locale, use_hf=False, config_path=None):
         download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
         config_path = os.path.join(download_path, "config.json")
     
-    result = melo.utils.get_hparams_from_file(config_path)
+    result = utils.get_hparams_from_file(config_path)
     result.model.mxq_path_enc_p_sdp_dp = os.path.join(os.path.dirname(config_path), result.model.mxq_path_enc_p_sdp_dp)
     result.model.mxq_path_dec_flow = os.path.join(os.path.dirname(config_path), result.model.mxq_path_dec_flow)
     
@@ -26,6 +29,7 @@ def load_or_download_config(locale, use_hf=False, config_path=None):
         result.model.bert_model_id = bert_model_path
     
     return result
+
 
 def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
     assert use_hf is False
