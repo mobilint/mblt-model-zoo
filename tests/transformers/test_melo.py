@@ -23,7 +23,7 @@ def test_melo(pipe):
 
     # English
     texts = {
-        "EN_NEWEST": "Did you ever hear a folk tale about a giant turtle?",
+        "EN": "Did you ever hear a folk tale about a giant turtle?",
         "KR": "안녕하세요! 오늘은 날씨가 정말 좋네요.",
     }
     text = texts[pipe.language]
@@ -31,7 +31,7 @@ def test_melo(pipe):
     speaker_ids = pipe.hps.data.spk2id
 
     speakers = {
-        "EN_NEWEST": "EN-Newest",
+        "EN": "EN-Newest",
         "KR": "KR",
     }
     speaker = speakers[pipe.language]
