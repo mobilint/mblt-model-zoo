@@ -1,5 +1,5 @@
 import json
-from abc import ABCMeta
+from abc import ABCMeta, abstractmethod
 
 import torch
 
@@ -56,7 +56,11 @@ def get_hparams_from_file(config_path):
     return hparams
 
 
-class HParamsBase(ABCMeta):
+class HParamsBase(metaclass=ABCMeta):
+    @abstractmethod
+    def __init__(self, **kwargs):
+        pass
+    
     def keys(self):
         return self.__dict__.keys()
 
