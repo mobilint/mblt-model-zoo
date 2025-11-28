@@ -7,6 +7,7 @@ from . import utils
 
 LANG_TO_HF_REPO_ID = {
     'EN_NEWEST': 'mobilint/MeloTTS-English-v3',
+    'KR': 'mobilint/MeloTTS-Korean',
 }
 
 
