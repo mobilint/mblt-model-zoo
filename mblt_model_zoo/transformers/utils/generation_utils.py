@@ -4,7 +4,10 @@ from typing import Dict
 import maccel
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 
-from mblt_model_zoo.transformers.utils.cache_utils import MobilintCache
+from mblt_model_zoo.transformers.utils.cache_utils import (
+    MobilintBatchCache,
+    MobilintCache,
+)
 
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
@@ -40,7 +43,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         super()._prepare_cache_for_generation(
             generation_config,
             model_kwargs,
-            assistant_model,
+            assistant_model, # type: ignore
             batch_size,
             max_cache_length,
             *args,
@@ -51,6 +54,48 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         if model_kwargs.get(cache_name, None) is None:
             return False
         elif isinstance(model_kwargs[cache_name], MobilintCache):
+            return True
+        else:
+            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)
+            return True
+
+class MobilintBatchGenerationMixin(MobilintGenerationMixin):
+    def _get_cache(
+        self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
+    ) -> Cache:
+        if not hasattr(self, "_cache"):
+            self._cache = MobilintBatchCache(self.get_cache_mxq_model(), batch_size)
+        else:
+            self._cache.reset()
+            
+        return self._cache
+
+    # Function arguments changed for transformers>=4.56.0
+    # args contain device in transformers<4.56.0
+    # args empty in transformers>=4.56.0
+    def _prepare_cache_for_generation(
+        self,
+        generation_config: GenerationConfig,
+        model_kwargs: Dict,
+        assistant_model: "PreTrainedModel",
+        batch_size: int,
+        max_cache_length: int,
+        *args,
+    ) -> bool:
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model,
+            batch_size,
+            max_cache_length,
+            *args,
+        )
+
+        cache_name = "past_key_values"
+
+        if model_kwargs.get(cache_name, None) is None:
+            return False
+        elif isinstance(model_kwargs[cache_name], MobilintBatchCache):
             return True
         else:
             model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)
