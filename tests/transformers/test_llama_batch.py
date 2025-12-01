@@ -3,6 +3,9 @@ from pprint import pprint
 import pytest
 
 from mblt_model_zoo.transformers import AutoTokenizer, pipeline
+from mblt_model_zoo.transformers.large_language_model.llama_batch import (
+    MobilintLlamaBatchForCausalLM,
+)
 
 
 @pytest.fixture
@@ -23,7 +26,8 @@ def pipe():
         device_map="auto",
     )
     yield pipe
-    pipe.model.dispose()
+    if isinstance(pipe.model, MobilintLlamaBatchForCausalLM):
+        pipe.model.dispose()
 
 
 def test_llama(pipe):
