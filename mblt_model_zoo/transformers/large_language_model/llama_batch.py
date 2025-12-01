@@ -154,7 +154,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             past_key_values.update_seen_tokens(sequence_lengths)
         
         assert outputs is not None
-        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).squeeze(0))
+        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).reshape([batch_size, 1, -1]))
 
         loss = None
         if labels is not None:
