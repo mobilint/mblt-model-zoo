@@ -133,7 +133,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         cache_sizes = [past_key_values.get_seq_length(i) if past_key_values is not None else 0 for i in range(batch_size)]
         
         batch_param = maccel.BatchParam(
-            sequence_lengths=cast(list[int], attention_mask.sum(dim=1)),
+            sequence_lengths=cast(list[int], attention_mask.sum(dim=1).tolist()),
             cache_sizes=cache_sizes,
             cache_ids=[i for i in range(batch_size)],
             prefill_masks=[False for i in range(batch_size)], # not implemented in C++ yet.
