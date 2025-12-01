@@ -8,7 +8,7 @@ from rich.table import Table
 from transformers import BaseStreamer
 
 
-class BatchStreamer(BaseStreamer):
+class BatchTextStreamer(BaseStreamer):
     def __init__(self, tokenizer, request_ids: List[str], skip_prompt: bool = True):
         self.tokenizer = tokenizer
         self.request_ids = request_ids

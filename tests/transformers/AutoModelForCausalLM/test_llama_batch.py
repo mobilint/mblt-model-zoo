@@ -4,7 +4,7 @@ from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
-from tests.transformers.utils import BatchStreamer
+from tests.transformers.utils import BatchTextStreamer
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def test_llama(pipe):
         messages,
         batch_size=2,
         max_new_tokens=512,
-        streamer=BatchStreamer(
+        streamer=BatchTextStreamer(
             tokenizer=pipe.tokenizer, request_ids=["0", "1"], skip_prompt=False
         ),
     )
