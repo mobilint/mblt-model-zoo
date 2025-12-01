@@ -73,4 +73,5 @@ dev = [
     "torchvision",
     "librosa",
     "soundfile",
+    "rich",
 ]
