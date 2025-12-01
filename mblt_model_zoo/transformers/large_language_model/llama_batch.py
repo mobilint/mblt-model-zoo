@@ -36,11 +36,13 @@ class MobilintLlamaBatchConfig(LlamaConfig):
         mxq_path: str = "",
         dev_no: int = 0,
         num_cores: int = 8,
+        max_batch_size: int = 16,
         **kwargs,
     ):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
         self.num_cores = num_cores
+        self.max_batch_size = max_batch_size
 
         super().__init__(**kwargs)
 
@@ -172,17 +174,17 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
         self.get_cache_mxq_model().dispose()
 
 
-AutoConfig.register("mobilint-batch-llama", MobilintLlamaBatchConfig)
+AutoConfig.register("mobilint-llama-batch", MobilintLlamaBatchConfig)
 AutoModel.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
 AutoTokenizer.register(MobilintLlamaBatchConfig, fast_tokenizer_class=LlamaTokenizerFast)
 AutoModelForCausalLM.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-Llama_32_3B_Instruct_Batch = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-2B-Instruct-Batch",
-    model_id="mobilint/Llama-3.2-3B-Instruct-Batch",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct-Batch/",
+Llama_32_3B_Instruct_Batch16 = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.2-3B-Instruct",
+    model_id="mobilint/Llama-3.2-3B-Instruct-Batch16",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct-Batch16/",
     file_list=[
         "config.json",
         "generation_config.json",
@@ -194,10 +196,10 @@ Llama_32_3B_Instruct_Batch = TransformersModelInfo(
     ],
 )
 
-Llama_31_8B_Instruct_Batch = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.1-8B-Instruct-Batch",
-    model_id="mobilint/Llama-3.1-8B-Instruct-Batch",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct-Batch/",
+Llama_31_8B_Instruct_Batch16 = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
+    model_id="mobilint/Llama-3.1-8B-Instruct-Batch16",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct-Batch16/",
     file_list=[
         "config.json",
         "generation_config.json",
