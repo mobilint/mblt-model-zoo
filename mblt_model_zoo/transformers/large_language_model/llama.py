@@ -28,29 +28,26 @@ from ..utils.cache_utils import MobilintCache
 logger = logging.get_logger(__name__)
 
 
-class MobilintLlamaBatchConfig(LlamaConfig):
-    model_type = "mobilint-llama-batch"
+class MobilintLlamaConfig(LlamaConfig):
+    model_type = "mobilint-llama"
 
     def __init__(
         self,
         mxq_path: str = "",
         dev_no: int = 0,
-        num_cores: int = 8,
         **kwargs,
     ):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
-        self.num_cores = num_cores
 
         super().__init__(**kwargs)
 
         self.tie_word_embeddings = False
 
 
-class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
-    config: MobilintLlamaBatchConfig
+class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
+    config: MobilintLlamaConfig
     supports_gradient_checkpointing = False
-    _no_split_modules = []
     _supports_flash_attn = False
     _supports_sdpa = False
     _supports_flex_attn = False
@@ -59,18 +56,20 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
     _supports_attention_backend = False
     _can_record_outputs = {}
 
-    def __init__(self, config: MobilintLlamaBatchConfig, *inputs, **kwargs):
+    def __init__(self, config: MobilintLlamaConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        self.embed_tokens = nn.Embedding(
+            config.vocab_size, config.hidden_size, self.padding_idx
+        )
         self.gradient_checkpointing = False
-        
+
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
-        mc.set_single_core_mode(config.num_cores)
+        mc.set_single_core_mode(1)
         assert config.name_or_path is not None
         model_path = os.path.join(config.name_or_path, config.mxq_path)
         self.mxq_model = maccel.Model(model_path, mc)
@@ -138,18 +137,12 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds_numpy.shape[2])
             cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
-            batch_param = maccel.BatchParam(
-                sequence_lengths=[end_index - start_index],
-                cache_sizes=[cache_size],
-                cache_ids=[0],
-                prefill_masks=[False], # not implemented in C++ yet.
-            )
 
-            outputs = self.mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, None, batch_param)
+            outputs = self.mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
 
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
-        
+
         assert outputs is not None
         logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).squeeze(0))
 
@@ -164,7 +157,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
             hidden_states=None,
             attentions=None,
         )
-
+    
     def launch(self):
         self.get_cache_mxq_model().launch(self.acc)
 
@@ -172,21 +165,21 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
         self.get_cache_mxq_model().dispose()
 
 
-AutoConfig.register("mobilint-batch-llama", MobilintLlamaBatchConfig)
-AutoModel.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
-AutoTokenizer.register(MobilintLlamaBatchConfig, fast_tokenizer_class=LlamaTokenizerFast)
-AutoModelForCausalLM.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
+AutoConfig.register("mobilint-llama", MobilintLlamaConfig)
+AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
+AutoTokenizer.register(MobilintLlamaConfig, fast_tokenizer_class=LlamaTokenizerFast)
+AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-Llama_32_3B_Instruct_Batch = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-2B-Instruct-Batch",
-    model_id="mobilint/Llama-3.2-3B-Instruct-Batch",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct-Batch/",
+Llama_32_1B_Instruct = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.2-1B-Instruct",
+    model_id="mobilint/Llama-3.2-1B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-1B-Instruct/",
     file_list=[
         "config.json",
         "generation_config.json",
-        "Llama-3.2-3B-Instruct-Batch.mxq",
+        "Llama-3.2-1B-Instruct.mxq",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
@@ -194,14 +187,57 @@ Llama_32_3B_Instruct_Batch = TransformersModelInfo(
     ],
 )
 
-Llama_31_8B_Instruct_Batch = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.1-8B-Instruct-Batch",
-    model_id="mobilint/Llama-3.1-8B-Instruct-Batch",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct-Batch/",
+Llama_32_3B_Instruct = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.2-3B-Instruct",
+    model_id="mobilint/Llama-3.2-3B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct/",
     file_list=[
         "config.json",
         "generation_config.json",
-        "Llama-3.1-8B-Instruct-Batch.mxq",
+        "Llama-3.2-3B-Instruct.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
+Llama_31_8B_Instruct = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
+    model_id="mobilint/Llama-3.1-8B-Instruct",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "Llama-3.1-8B-Instruct.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
+HyperCLOVAX_SEED_Text_Instruct_05B = TransformersModelInfo(
+    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-0.5B/",
+    file_list=[
+        "config.json",
+        "HyperCLOVAX-SEED-Text-Instruct-0.5B.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)
+
+HyperCLOVAX_SEED_Text_Instruct_15B = TransformersModelInfo(
+    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-1.5B/",
+    file_list=[
+        "config.json",
+        "HyperCLOVAX-SEED-Text-Instruct-1.5B.mxq",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
