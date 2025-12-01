@@ -4,3 +4,8 @@ from .image_classification import *
 from .instance_segmentation import *
 from .object_detection import *
 from .pose_estimation import *
+
+try:
+    from .benchmark import *
+except Exception as e:
+    pass

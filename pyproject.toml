@@ -56,6 +56,12 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 transformers = [
     "transformers>=4.54.0, <=4.57.1",
 ]
+vision-bench=[
+    "datasets",
+    "faster-coco-eval",
+    "huggingface_hub",
+    "scipy",
+]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]
