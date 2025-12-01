@@ -3,7 +3,7 @@ import os
 
 import torch
 
-from mblt_model_zoo.vision import ResNet34, eval_imagenet
+from mblt_model_zoo.vision import ResNet50, eval_imagenet
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ResNet50 Benchmark")
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # --- Model Initialization ---
-    model = ResNet34(args.mxq_path, args.model_type, args.infer_mode, args.product)
+    model = ResNet50(args.mxq_path, args.model_type, args.infer_mode, args.product)
 
     # --- Benchmark Execution ---
     eval_imagenet(model, args.data_path, args.batch_size)

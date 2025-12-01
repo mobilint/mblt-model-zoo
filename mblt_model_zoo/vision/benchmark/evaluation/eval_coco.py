@@ -1,20 +1,23 @@
 import json
 import logging
 import math
+import os
 from time import time
 
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
+from ..dataloader import CustomCocodata, get_coco_loader
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
 
 
-def eval_coco(model):
+def eval_coco(model, data_path, batch_size):
     pass
 
 
-def evaluate_predictions_on_coco(coco_gt, coco_results, task):
+def evaluate_predictions_on_coco(coco_gt, coco_results: dict, task: str):
     """Evaluate the predictions on the coco dataset
 
     Args:

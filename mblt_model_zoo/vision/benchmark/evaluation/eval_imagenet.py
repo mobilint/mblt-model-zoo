@@ -13,7 +13,7 @@ def eval_imagenet(model, data_path, batch_size):
 
     num_data = len(dataset)
     total_iter = math.ceil(num_data / batch_size)
-    pbar = tqdm(dataloader, total=total_iter)
+    pbar = tqdm(dataloader, total=total_iter, desc="Evaluating ImageNet")
 
     inference_time = 0
     infer_post_time = 0
@@ -34,7 +34,9 @@ def eval_imagenet(model, data_path, batch_size):
         acc = cum_correct / cum_num_data
         total_time += time() - tic
         pbar.set_postfix_str(
-            f"Top 1 Acc.: {acc:.3f}, FPS: {cum_num_data / inference_time:.3f}"
+            f"Top 1 Acc.: {100*acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}"
         )
-
-    print(f"Top 1 Acc.: {acc:.5f}, FPS: {cum_num_data / inference_time:.3f}")
+    pbar.close()
+    print("ImageNet evaluation completed")
+    print(f"Top 1 Acc.: {100*acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}")
+    return acc

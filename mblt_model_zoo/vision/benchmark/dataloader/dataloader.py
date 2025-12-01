@@ -44,6 +44,31 @@ class CustomCocodata:
         return len(self.ids)
 
 
+def get_coco_loader(dataset, batch_size, preprocess_fn: Callable):
+
+    def loader(batch):
+        batch = filter(lambda x: x is not None, batch)
+        images, idx, height, width = zip(*batch)
+
+        processed_images = []
+        for img in images:
+            img = preprocess_fn(img)
+            processed_images.append(img)
+
+        height = np.array(height)
+        width = np.array(width)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((height, width), axis=1),
+            idx,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=loader
+    )
+
+
 class CustomImageFolder:
     def __init__(self, root):
         self.root = root
@@ -95,7 +120,7 @@ def get_imagenet_loader(dataset, batch_size, preprocess_fn: Callable):
             processed_images.append(img)
 
         return (
-            np.concatenate(processed_images, axis=0),
+            np.stack(processed_images, axis=0),
             np.array(labels),
         )  # BHWC, labels
 
@@ -156,3 +181,28 @@ class CustomWiderface:
     def __len__(self):
         """Return the total number of images"""
         return len(self.samples)
+
+
+def get_widerface_loader(dataset, batch_size, preprocess_fn: Callable):
+    def loader(batch):
+        batch = filter(lambda x: x is not None, batch)
+        images, target_classes, fnames = zip(*batch)
+        processed_images = []
+        heights = []
+        widths = []
+        for img in images:
+            height, width = img.shape[:2]
+            processed_images.append(preprocess_fn(img))
+            heights.append(height)
+            widths.append(width)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((heights, widths), axis=1),
+            target_classes,
+            fnames,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=loader
+    )
