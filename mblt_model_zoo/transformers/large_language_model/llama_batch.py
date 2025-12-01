@@ -122,7 +122,8 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         assert attention_mask is not None
         attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
         batch_size = attention_mask_bool.shape[0]
-        inputs_embeds_masked = inputs_embeds[attention_mask_bool, :]
+        # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
+        inputs_embeds_masked = inputs_embeds[attention_mask_bool, :].unsqueeze(0)
 
         inputs_embeds_numpy: np.ndarray = inputs_embeds_masked.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
