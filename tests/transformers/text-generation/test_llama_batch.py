@@ -5,7 +5,7 @@ from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
 
-from .utils import BatchTextStreamer
+from ..utils import BatchTextStreamer
 
 
 @pytest.fixture
