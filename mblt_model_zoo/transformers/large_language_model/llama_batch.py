@@ -120,10 +120,19 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             past_key_values = MobilintBatchCache(self.get_cache_mxq_model(), self.config.max_batch_size)
         
         assert attention_mask is not None
-        attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
-        batch_size = attention_mask_bool.shape[0]
-        # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
-        inputs_embeds_masked = inputs_embeds[attention_mask_bool, :].unsqueeze(0)
+        batch_size = attention_mask.shape[0]
+        
+        # Prefill
+        if attention_mask.shape == inputs_embeds.shape[:-1]:
+            attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
+            # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
+            inputs_embeds_masked = inputs_embeds[attention_mask_bool, :].unsqueeze(0)
+            sequence_lengths = cast(list[int], attention_mask.sum(dim=1).tolist())
+        # Decode
+        else:
+            # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
+            inputs_embeds_masked = inputs_embeds.reshape([1, inputs_embeds.shape[0] * inputs_embeds.shape[1], inputs_embeds.shape[2]])
+            sequence_lengths = [inputs_embeds.shape[1] for _ in range(batch_size)]
 
         inputs_embeds_numpy: np.ndarray = inputs_embeds_masked.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
@@ -133,7 +142,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         cache_sizes = [past_key_values.get_seq_length(i) if past_key_values is not None else 0 for i in range(batch_size)]
         
         batch_param = maccel.BatchParam(
-            sequence_lengths=cast(list[int], attention_mask.sum(dim=1).tolist()),
+            sequence_lengths=sequence_lengths,
             cache_sizes=cache_sizes,
             cache_ids=[i for i in range(batch_size)],
             prefill_masks=[False for i in range(batch_size)], # not implemented in C++ yet.
