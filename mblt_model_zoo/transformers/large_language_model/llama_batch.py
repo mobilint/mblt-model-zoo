@@ -20,10 +20,12 @@ from transformers.processing_utils import Unpack
 from transformers.utils import logging
 from transformers.utils.generic import TransformersKwargs
 
-from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.transformers.utils.generation_utils import (
+    MobilintBatchGenerationMixin,
+)
 from mblt_model_zoo.utils.logging import log_model_details
 
-from ..utils.cache_utils import MobilintCache
+from ..utils.cache_utils import MobilintBatchCache
 
 logger = logging.get_logger(__name__)
 
@@ -49,7 +51,7 @@ class MobilintLlamaBatchConfig(LlamaConfig):
         self.tie_word_embeddings = False
 
 
-class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
+class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGenerationMixin):
     config: MobilintLlamaBatchConfig
     supports_gradient_checkpointing = False
     _no_split_modules = []
@@ -97,13 +99,12 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[MobilintCache] = None,
+        past_key_values: Optional[MobilintBatchCache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        chunk_size: int = 0,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         if logits_to_keep > 1:
@@ -116,41 +117,31 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
             inputs_embeds: torch.FloatTensor = self.embed_tokens(input_ids)
         
         if use_cache and past_key_values is None:
-            past_key_values = MobilintCache(self.get_cache_mxq_model())
+            past_key_values = MobilintBatchCache(self.get_cache_mxq_model(), self.config.max_batch_size)
+        
+        assert attention_mask is not None
+        attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
+        batch_size = attention_mask_bool.shape[0]
+        inputs_embeds_masked = inputs_embeds[attention_mask_bool, :]
 
-        if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position: torch.Tensor = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            )
-
-        inputs_embeds_numpy: np.ndarray = inputs_embeds.type(torch.float32).cpu().numpy()
-
+        inputs_embeds_numpy: np.ndarray = inputs_embeds_masked.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
-            # (batch, 1, seqlen, hidden_size)
+            # (1, 1, batch * seqlen, hidden_size)
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
 
-        # max width should be appropriate number for chunking (ex. 192 for Llama 3.2 3B)
-        # it should be searched experimentally
-        if chunk_size == 0:
-            chunk_size = self.mxq_model.get_input_buffer_info()[0].max_width
-        num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / chunk_size)
+        cache_sizes = [past_key_values.get_seq_length(i) if past_key_values is not None else 0 for i in range(batch_size)]
+        
+        batch_param = maccel.BatchParam(
+            sequence_lengths=cast(list[int], attention_mask.sum(dim=1)),
+            cache_sizes=cache_sizes,
+            cache_ids=[i for i in range(batch_size)],
+            prefill_masks=[False for i in range(batch_size)], # not implemented in C++ yet.
+        )
 
-        for i in range(num_of_chunks):
-            start_index = i * chunk_size
-            end_index = min(start_index + chunk_size, inputs_embeds_numpy.shape[2])
-            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
-            batch_param = maccel.BatchParam(
-                sequence_lengths=[end_index - start_index],
-                cache_sizes=[cache_size],
-                cache_ids=[0],
-                prefill_masks=[False], # not implemented in C++ yet.
-            )
+        outputs = self.mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
 
-            outputs = self.mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, 0, batch_param)
-
-            if past_key_values is not None:
-                past_key_values.update_cache_position(cache_position[start_index:end_index])
+        if past_key_values is not None:
+            past_key_values.update_seen_tokens(0, 0)
         
         assert outputs is not None
         logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).squeeze(0))
