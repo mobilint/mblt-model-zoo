@@ -41,7 +41,6 @@ class BatchTextStreamer(BaseStreamer):
         if batch_size != self.batch_size:
             return
 
-        # 각 배치 아이템별 디코딩
         for i in range(batch_size):
             if self.finished[i]:
                 continue
