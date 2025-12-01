@@ -1,5 +1,3 @@
-from pprint import pprint
-
 import pytest
 
 from mblt_model_zoo.transformers import AutoTokenizer, pipeline
@@ -49,7 +47,7 @@ def test_llama(pipe):
     outputs = pipe(
         messages,
         batch_size=2,
-        max_new_tokens=30,
+        max_new_tokens=512,
     )
 
     print("\n--- Batch Result 1 (Pirate) ---")
