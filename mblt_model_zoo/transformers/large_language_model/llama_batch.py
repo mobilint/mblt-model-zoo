@@ -147,7 +147,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixi
                 prefill_masks=[False], # not implemented in C++ yet.
             )
 
-            outputs = self.mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, None, batch_param)
+            outputs = self.mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, 0, batch_param)
 
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
