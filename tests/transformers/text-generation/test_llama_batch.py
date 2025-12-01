@@ -43,13 +43,19 @@ def test_llama(pipe):
             {"role": "system", "content": "You are Shakespeare."},
             {"role": "user", "content": "Write a short poem about coding."},
         ],
+        [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Could you explain about LLM?"},
+        ],
     ]
+
+    batch_size = len(messages)
 
     pipe(
         messages,
-        batch_size=2,
+        batch_size=batch_size,
         max_new_tokens=512,
         streamer=BatchTextStreamer(
-            tokenizer=pipe.tokenizer, batch_size=2, skip_prompt=False
+            tokenizer=pipe.tokenizer, batch_size=batch_size, skip_prompt=False
         ),
     )
