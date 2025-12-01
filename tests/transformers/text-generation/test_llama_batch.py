@@ -1,11 +1,10 @@
 import pytest
+from utils import BatchTextStreamer
 
 from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
-
-from ..utils import BatchTextStreamer
 
 
 @pytest.fixture

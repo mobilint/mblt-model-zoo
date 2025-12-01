@@ -5,7 +5,7 @@ from rich import box
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
-from transformers import BaseStreamer
+from transformers.generation.streamers import BaseStreamer
 
 
 class BatchTextStreamer(BaseStreamer):
