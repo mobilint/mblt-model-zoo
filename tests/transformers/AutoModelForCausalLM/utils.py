@@ -24,7 +24,7 @@ class BatchTextStreamer(BaseStreamer):
         self.live = Live(
             self.make_table(),
             console=self.console,
-            refresh_per_second=10,
+            refresh_per_second=0,
             transient=False,
         )
 
