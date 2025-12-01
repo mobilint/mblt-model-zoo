@@ -23,7 +23,6 @@ def pipe():
         "text-generation",
         model=model_path,
         tokenizer=tokenizer,
-        device_map="auto",
     )
     yield pipe
     if isinstance(pipe.model, MobilintLlamaBatchForCausalLM):
