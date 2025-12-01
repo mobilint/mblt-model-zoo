@@ -107,6 +107,9 @@ dev = [
     "hf_xet",
     "build",
     "ruff",
+    "torchvision",
+    "soundfile",
+    "rich",
 ]
 
 [tool.ruff]
