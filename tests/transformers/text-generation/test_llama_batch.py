@@ -50,7 +50,7 @@ def test_llama(pipe):
         batch_size=2,
         max_new_tokens=512,
         streamer=BatchTextStreamer(
-            tokenizer=pipe.tokenizer, request_ids=["0", "1"], skip_prompt=False
+            tokenizer=pipe.tokenizer, batch_size=2, skip_prompt=False
         ),
     )
 
