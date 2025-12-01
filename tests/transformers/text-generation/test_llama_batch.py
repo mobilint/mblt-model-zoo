@@ -9,7 +9,7 @@ from mblt_model_zoo.transformers.large_language_model.llama_batch import (
 
 @pytest.fixture
 def pipe():
-    model_path = "mobilint/Llama-3.1-8B-Instruct-Batch16"
+    model_path = "mobilint/Llama-3.2-3B-Instruct"
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
@@ -45,7 +45,7 @@ def test_llama(pipe):
         ],
     ]
 
-    outputs = pipe(
+    pipe(
         messages,
         batch_size=2,
         max_new_tokens=512,
@@ -53,9 +53,3 @@ def test_llama(pipe):
             tokenizer=pipe.tokenizer, batch_size=2, skip_prompt=False
         ),
     )
-
-    print("\n--- Batch Result 1 (Pirate) ---")
-    print(outputs[0][0]["generated_text"][-1]["content"])
-
-    print("\n--- Batch Result 2 (Shakespeare) ---")
-    print(outputs[1][0]["generated_text"][-1]["content"])

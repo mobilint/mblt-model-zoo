@@ -32,8 +32,8 @@ class BatchTextStreamer(BaseStreamer):
         if self.live and not self.live.is_started:
             self.live.start()
 
-        if value.dim() == 1:
-            value = value.view(1, -1)
+        if value.dim() == 1 or value.shape[0] == 1:
+            value = value.view(self.batch_size, -1)
 
         batch_size, _ = value.shape
 
@@ -46,13 +46,13 @@ class BatchTextStreamer(BaseStreamer):
             tokens = value[i].tolist()
             self.token_cache[i].extend(tokens)
 
-            text = self.tokenizer.decode(self.token_cache[i], skip_special_tokens=True)
+            text = self.tokenizer.decode(self.token_cache[i], skip_special_tokens=False)
 
             new_text = text[len(self.text_buffers[i]) :]
             self.text_buffers[i] = text
             self.print_buffers[i] += new_text
 
-            if self.tokenizer.eos_token_id in tokens:
+            if self.tokenizer.eos_token_id in tokens and value[i].numel() == 1:
                 self.finished[i] = True
 
         self.live.update(self.make_table())
@@ -63,17 +63,29 @@ class BatchTextStreamer(BaseStreamer):
 
     def make_table(self) -> Table:
         table = Table(
-            show_header=True, header_style="bold magenta", box=box.ROUNDED, expand=True
+            show_header=True,
+            header_style="bold magenta",
+            box=box.ROUNDED,
+            expand=True,
+            show_lines=True,
         )
-        table.add_column("Req ID", style="cyan", width=12, no_wrap=True)
-        table.add_column("Generated Output", style="white")
-        table.add_column("State", width=8, justify="center")
+        table.add_column("ID", style="cyan", width=18, no_wrap=True)
+        for i in range(self.batch_size):
+            table.add_column(str(i), style="white")
+
+        outputs: List[str] = []
+        states: List[str] = []
 
         for i in range(self.batch_size):
             status = "DONE" if self.finished[i] else "GEN"
             style = "green" if self.finished[i] else "yellow"
 
-            display_text = self.print_buffers[i].replace("\n", "⏎ ")
+            display_text = self.print_buffers[i]
 
-            table.add_row(str(i), display_text, f"[{style}]{status}[/{style}]")
+            outputs.append(display_text)
+            states.append(f"[{style}]{status}[/{style}]")
+
+        table.add_row("State", *states)
+        table.add_row("Generated Output", *outputs)
+
         return table
