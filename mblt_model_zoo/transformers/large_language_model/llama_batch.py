@@ -189,7 +189,7 @@ Llama_32_3B_Instruct_Batch16 = TransformersModelInfo(
     file_list=[
         "config.json",
         "generation_config.json",
-        "Llama-3.2-3B-Instruct-Batch.mxq",
+        "Llama-3.2-3B-Instruct-Batch16.mxq",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
@@ -204,7 +204,7 @@ Llama_31_8B_Instruct_Batch16 = TransformersModelInfo(
     file_list=[
         "config.json",
         "generation_config.json",
-        "Llama-3.1-8B-Instruct-Batch.mxq",
+        "Llama-3.1-8B-Instruct-Batch16.mxq",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
