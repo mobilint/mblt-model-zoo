@@ -151,7 +151,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         outputs = self.mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
 
         if past_key_values is not None:
-            past_key_values.update_seen_tokens(0, 0)
+            past_key_values.update_seen_tokens(sequence_lengths)
         
         assert outputs is not None
         logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).squeeze(0))
