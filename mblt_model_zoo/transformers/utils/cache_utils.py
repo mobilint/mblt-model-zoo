@@ -91,8 +91,9 @@ class MobilintBatchCache(Cache):
     def get_seq_length(self, index: int = 0) -> int:
         return self.layers[index].get_seq_length()
     
-    def update_seen_tokens(self, index: int, num_new_seen_tokens: int):
-        self.layers[index].update_seen_tokens(num_new_seen_tokens)
+    def update_seen_tokens(self, sequence_lengths: list[int]):
+        for i, seq_len in enumerate(sequence_lengths):
+            self.layers[i].update_seen_tokens(seq_len)
     
     def dump_cache_memory(self, cache_id: int):
         self.layers[cache_id].dump_cache_memory()
