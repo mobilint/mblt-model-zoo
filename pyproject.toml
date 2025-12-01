@@ -106,4 +106,7 @@ dev = [
     "numba>=0.60.0, <=0.60.0",
     "hf_xet",
     "build",
+    "torchvision",
+    "soundfile",
+    "rich",
 ]
