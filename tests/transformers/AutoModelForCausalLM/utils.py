@@ -24,8 +24,8 @@ class BatchTextStreamer(BaseStreamer):
         self.live = Live(
             self.make_table(),
             console=self.console,
-            refresh_per_second=1,
             transient=False,
+            vertical_overflow="visible",
         )
 
     def put(self, value: torch.Tensor):
