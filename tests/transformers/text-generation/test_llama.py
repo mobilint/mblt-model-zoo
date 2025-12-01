@@ -1,5 +1,10 @@
 import pytest
-from transformers import AutoTokenizer, TextStreamer, pipeline
+from transformers import TextStreamer
+
+from mblt_model_zoo.transformers import AutoTokenizer, pipeline
+from mblt_model_zoo.transformers.large_language_model.llama import (
+    MobilintLlamaForCausalLM,
+)
 
 MODEL_PATHS = (
     "mobilint/Llama-3.2-1B-Instruct",
@@ -33,7 +38,8 @@ def pipe(request, revision, npu_params):
             revision=revision,
         )
     yield pipe
-    del pipe
+    if isinstance(pipe.model, MobilintLlamaForCausalLM):
+        pipe.model.dispose()
 
 
 def test_llama(pipe):
