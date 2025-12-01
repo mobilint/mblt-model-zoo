@@ -53,7 +53,7 @@ def test_llama(pipe):
     )
 
     print("\n--- Batch Result 1 (Pirate) ---")
-    pprint(outputs[0])
+    pprint(outputs[0][0]["generated_text"][-1]["content"])
 
     print("\n--- Batch Result 2 (Shakespeare) ---")
-    pprint(outputs[1])
+    pprint(outputs[1][0]["generated_text"][-1]["content"])
