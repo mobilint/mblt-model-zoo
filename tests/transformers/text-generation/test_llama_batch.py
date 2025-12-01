@@ -4,7 +4,8 @@ from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
-from tests.transformers.utils import BatchTextStreamer
+
+from .utils import BatchTextStreamer
 
 
 @pytest.fixture
