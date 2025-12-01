@@ -9,12 +9,11 @@ from transformers.generation.streamers import BaseStreamer
 
 
 class BatchTextStreamer(BaseStreamer):
-    def __init__(self, tokenizer, request_ids: List[str], skip_prompt: bool = True):
+    def __init__(self, tokenizer, batch_size: int = 1, skip_prompt: bool = True):
         self.tokenizer = tokenizer
-        self.request_ids = request_ids
         self.skip_prompt = skip_prompt
 
-        self.batch_size = len(request_ids)
+        self.batch_size = batch_size
         self.token_cache = [[] for _ in range(self.batch_size)]
         self.text_buffers = [""] * self.batch_size
         self.print_buffers = [""] * self.batch_size
@@ -36,10 +35,9 @@ class BatchTextStreamer(BaseStreamer):
         if value.dim() == 1:
             value = value.view(1, -1)
 
-        batch_size, seq_len = value.shape
+        batch_size, _ = value.shape
 
-        if batch_size != self.batch_size:
-            return
+        assert batch_size == self.batch_size
 
         for i in range(batch_size):
             if self.finished[i]:
@@ -71,11 +69,11 @@ class BatchTextStreamer(BaseStreamer):
         table.add_column("Generated Output", style="white")
         table.add_column("State", width=8, justify="center")
 
-        for i, rid in enumerate(self.request_ids):
+        for i in range(self.batch_size):
             status = "DONE" if self.finished[i] else "GEN"
             style = "green" if self.finished[i] else "yellow"
 
             display_text = self.print_buffers[i].replace("\n", "⏎ ")
 
-            table.add_row(rid, display_text, f"[{style}]{status}[/{style}]")
+            table.add_row(str(i), display_text, f"[{style}]{status}[/{style}]")
         return table
