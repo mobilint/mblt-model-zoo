@@ -9,7 +9,7 @@ from mblt_model_zoo.transformers.large_language_model.llama_batch import (
 
 @pytest.fixture
 def pipe():
-    model_path = "mobilint/Llama-3.2-3B-Instruct"
+    model_path = "mobilint/Llama-3.1-8B-Instruct"
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
