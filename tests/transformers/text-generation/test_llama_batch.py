@@ -36,7 +36,7 @@ def test_llama(pipe):
         [
             {
                 "role": "system",
-                "content": "You are a pirate chatbot who always responds in pirate speak!",
+                "content": "You are a pirate chatbot with pirate speak!",
             },
             {"role": "user", "content": "Who are you?"},
         ],
@@ -46,7 +46,7 @@ def test_llama(pipe):
         ],
         [
             {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Could you explain about LLM?"},
+            {"role": "user", "content": "Hi, my name is James."},
         ],
     ]
 
@@ -56,7 +56,7 @@ def test_llama(pipe):
         batch_size=pipe.model.config.max_batch_size,
     )
 
-    conversations = pipe(
+    outputs = pipe(
         messages,
         batch_size=batch_size,
         max_new_tokens=512,
@@ -66,7 +66,23 @@ def test_llama(pipe):
         ),
     )
 
-    output = pipe(
+    questions = [
+        [
+            {"role": "user", "content": "Where is your ship?"},
+        ],
+        [
+            {"role": "user", "content": "Now make it sadder"},
+        ],
+        [
+            {"role": "user", "content": "Do you know my name?"},
+        ],
+    ]
+
+    conversations = [
+        output["generated_text"] + questions[i] for i, output in enumerate(outputs)
+    ]
+
+    pipe(
         conversations,
         batch_size=batch_size,
         max_new_tokens=512,
