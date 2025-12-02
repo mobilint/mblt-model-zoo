@@ -94,3 +94,4 @@ def download_url_to_folder(
 
         except Exception:
             print(f"{u} download failed")
+            raise
