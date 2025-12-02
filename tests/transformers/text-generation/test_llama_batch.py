@@ -56,7 +56,7 @@ def test_llama(pipe):
         batch_size=pipe.model.config.max_batch_size,
     )
 
-    output = pipe(
+    conversations = pipe(
         messages,
         batch_size=batch_size,
         max_new_tokens=512,
@@ -66,4 +66,12 @@ def test_llama(pipe):
         ),
     )
 
-    print(output, past_key_values)
+    output = pipe(
+        conversations,
+        batch_size=batch_size,
+        max_new_tokens=512,
+        past_key_values=past_key_values,
+        streamer=BatchTextStreamer(
+            tokenizer=pipe.tokenizer, batch_size=batch_size, skip_prompt=False
+        ),
+    )
