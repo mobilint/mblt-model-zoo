@@ -77,7 +77,7 @@ def test_llama(pipe):
     ]
 
     conversations = [
-        output["generated_text"] + questions[i] for i, output in enumerate(outputs)
+        output[0]["generated_text"] + questions[i] for i, output in enumerate(outputs)
     ]
 
     pipe(
