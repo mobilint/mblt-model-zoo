@@ -5,6 +5,7 @@ from mblt_model_zoo.transformers import AutoTokenizer, pipeline
 from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
+from mblt_model_zoo.transformers.utils.cache_utils import MobilintBatchCache
 
 
 @pytest.fixture
@@ -50,12 +51,19 @@ def test_llama(pipe):
     ]
 
     batch_size = len(messages)
+    past_key_values = MobilintBatchCache(
+        mxq_model=pipe.model.get_cache_mxq_model(),
+        batch_size=pipe.model.config.max_batch_size,
+    )
 
-    pipe(
+    output = pipe(
         messages,
         batch_size=batch_size,
         max_new_tokens=512,
+        past_key_values=past_key_values,
         streamer=BatchTextStreamer(
             tokenizer=pipe.tokenizer, batch_size=batch_size, skip_prompt=False
         ),
     )
+
+    print(output, past_key_values)
