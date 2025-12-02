@@ -2,7 +2,7 @@
 
 You can run the benchmark as the following steps:
 
-1. Download the vision benchmark dataset.
+1. Download the vision benchmark dataset and organize the dataset.
 2. Prepare the model for benchmark.
 3. Run the benchmark and evaluate the performance.
 

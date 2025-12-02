@@ -36,6 +36,8 @@ class VGG11_Set(ModelInfoSet):
 
 
 class VGG11_BN_Set(ModelInfoSet):
+    """VGG11_BN model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -69,6 +71,8 @@ class VGG11_BN_Set(ModelInfoSet):
 
 
 class VGG13_Set(ModelInfoSet):
+    """VGG13 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -102,6 +106,8 @@ class VGG13_Set(ModelInfoSet):
 
 
 class VGG13_BN_Set(ModelInfoSet):
+    """VGG13_BN model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -135,6 +141,8 @@ class VGG13_BN_Set(ModelInfoSet):
 
 
 class VGG16_Set(ModelInfoSet):
+    """VGG16 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -168,6 +176,8 @@ class VGG16_Set(ModelInfoSet):
 
 
 class VGG16_BN_Set(ModelInfoSet):
+    """VGG16_BN model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -201,6 +211,8 @@ class VGG16_BN_Set(ModelInfoSet):
 
 
 class VGG19_Set(ModelInfoSet):
+    """VGG19 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -234,6 +246,8 @@ class VGG19_Set(ModelInfoSet):
 
 
 class VGG19_BN_Set(ModelInfoSet):
+    """VGG19_BN model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -272,6 +286,7 @@ def VGG11(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG11 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG11_Set,
         local_path=local_path,
@@ -287,6 +302,7 @@ def VGG11_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG11_BN model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG11_BN_Set,
         local_path=local_path,
@@ -302,6 +318,7 @@ def VGG13(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG13 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG13_Set,
         local_path=local_path,
@@ -317,6 +334,7 @@ def VGG13_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG13_BN model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG13_BN_Set,
         local_path=local_path,
@@ -332,6 +350,7 @@ def VGG16(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG16 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG16_Set,
         local_path=local_path,
@@ -347,6 +366,7 @@ def VGG16_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG16_BN model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG16_BN_Set,
         local_path=local_path,
@@ -362,6 +382,7 @@ def VGG19(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG19 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG19_Set,
         local_path=local_path,
@@ -377,6 +398,7 @@ def VGG19_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the VGG19_BN model for image classification."""
     return MBLT_Engine.from_model_info_set(
         VGG19_BN_Set,
         local_path=local_path,

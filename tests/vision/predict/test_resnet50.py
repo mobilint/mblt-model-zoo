@@ -81,8 +81,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Load model with the specified mxq_path
-    model = ResNet50(
+    # Load model
+    resnet50_model = ResNet50(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -94,6 +94,6 @@ if __name__ == "__main__":
         )
 
     try:
-        run_inference(model, args.input_path, args.save_path)
+        run_inference(resnet50_model, args.input_path, args.save_path)
     finally:
-        model.dispose()
+        resnet50_model.dispose()

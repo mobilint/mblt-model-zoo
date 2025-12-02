@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class AlexNet_Set(ModelInfoSet):
+    """AlexNet model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -41,6 +43,7 @@ def AlexNet(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the AlexNet model for image classification."""
     return MBLT_Engine.from_model_info_set(
         AlexNet_Set,
         local_path=local_path,

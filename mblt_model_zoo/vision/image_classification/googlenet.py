@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class GoogLeNet_Set(ModelInfoSet):
+    """GoogLeNet model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -41,6 +43,7 @@ def GoogLeNet(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the GoogLeNet model for image classification."""
     return MBLT_Engine.from_model_info_set(
         GoogLeNet_Set,
         local_path=local_path,

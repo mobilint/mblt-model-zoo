@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv9cSeg_Set(ModelInfoSet):
+    """YOLOv9cSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -36,6 +38,8 @@ class YOLOv9cSeg_Set(ModelInfoSet):
 
 
 class YOLOv9eSeg_Set(ModelInfoSet):
+    """YOLOv9eSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -74,6 +78,7 @@ def YOLOv9cSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv9cSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv9cSeg_Set,
         local_path=local_path,
@@ -89,6 +94,7 @@ def YOLOv9eSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv9eSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv9eSeg_Set,
         local_path=local_path,

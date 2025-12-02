@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv5nSeg_Set(ModelInfoSet):
+    """YOLOv5nSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -40,6 +42,8 @@ class YOLOv5nSeg_Set(ModelInfoSet):
 
 
 class YOLOv5sSeg_Set(ModelInfoSet):
+    """YOLOv5sSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -77,6 +81,8 @@ class YOLOv5sSeg_Set(ModelInfoSet):
 
 
 class YOLOv5mSeg_Set(ModelInfoSet):
+    """YOLOv5mSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -114,6 +120,8 @@ class YOLOv5mSeg_Set(ModelInfoSet):
 
 
 class YOLOv5lSeg_Set(ModelInfoSet):
+    """YOLOv5lSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -151,6 +159,8 @@ class YOLOv5lSeg_Set(ModelInfoSet):
 
 
 class YOLOv5xSeg_Set(ModelInfoSet):
+    """YOLOv5xSeg model for instance segmentation."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -193,6 +203,7 @@ def YOLOv5nSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv5nSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv5nSeg_Set,
         local_path=local_path,
@@ -208,6 +219,7 @@ def YOLOv5sSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv5sSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv5sSeg_Set,
         local_path=local_path,
@@ -223,6 +235,7 @@ def YOLOv5mSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv5mSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv5mSeg_Set,
         local_path=local_path,
@@ -238,6 +251,7 @@ def YOLOv5lSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv5lSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv5lSeg_Set,
         local_path=local_path,
@@ -253,6 +267,7 @@ def YOLOv5xSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the YOLOv5xSeg model for instance segmentation."""
     return MBLT_Engine.from_model_info_set(
         YOLOv5xSeg_Set,
         local_path=local_path,

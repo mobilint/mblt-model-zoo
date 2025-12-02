@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class Wide_ResNet50_2_Set(ModelInfoSet):
+    """Wide_ResNet50_2 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -69,6 +71,8 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
 
 
 class Wide_ResNet101_2_Set(ModelInfoSet):
+    """Wide_ResNet101_2 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -140,6 +144,7 @@ def Wide_ResNet50_2(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the Wide_ResNet50_2 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         Wide_ResNet50_2_Set,
         local_path=local_path,
@@ -155,6 +160,7 @@ def Wide_ResNet101_2(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the Wide_ResNet101_2 model for image classification."""
     return MBLT_Engine.from_model_info_set(
         Wide_ResNet101_2_Set,
         local_path=local_path,

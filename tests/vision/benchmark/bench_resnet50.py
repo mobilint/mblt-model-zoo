@@ -1,8 +1,6 @@
 import argparse
 import os
 
-import torch
-
 from mblt_model_zoo.vision import ResNet50, eval_imagenet
 
 if __name__ == "__main__":
@@ -22,7 +20,10 @@ if __name__ == "__main__":
     # --- Benchmark Configuration ---
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
     parser.add_argument(
-        "--data_path", type=str, default=None, help="Path to the ImageNet data"
+        "--data_path",
+        type=str,
+        default=os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
+        help="Path to the ImageNet data",
     )
     args = parser.parse_args()
 

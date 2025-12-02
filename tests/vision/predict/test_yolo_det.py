@@ -94,8 +94,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Load model with the specified mxq_path
-    model = YOLOv9c(
+    # Load model
+    yolo9c_model = YOLOv9c(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -108,7 +108,11 @@ if __name__ == "__main__":
 
     try:
         run_inference(
-            model, args.input_path, args.save_path, args.conf_thres, args.iou_thres
+            yolo9c_model,
+            args.input_path,
+            args.save_path,
+            args.conf_thres,
+            args.iou_thres,
         )
     finally:
-        model.dispose()
+        yolo9c_model.dispose()

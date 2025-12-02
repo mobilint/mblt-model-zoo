@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class ConvNeXt_Tiny_Set(ModelInfoSet):
+    """ConvNeXt_Tiny model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -38,6 +40,8 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
 
 
 class ConvNeXt_Small_Set(ModelInfoSet):
+    """ConvNeXt_Small model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -73,6 +77,8 @@ class ConvNeXt_Small_Set(ModelInfoSet):
 
 
 class ConvNeXt_Base_Set(ModelInfoSet):
+    """ConvNeXt_Base model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -108,6 +114,8 @@ class ConvNeXt_Base_Set(ModelInfoSet):
 
 
 class ConvNeXt_Large_Set(ModelInfoSet):
+    """ConvNeXt_Large model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -148,6 +156,7 @@ def ConvNeXt_Tiny(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ConvNeXt_Tiny model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Tiny_Set,
         local_path=local_path,
@@ -163,6 +172,7 @@ def ConvNeXt_Small(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ConvNeXt_Small model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Small_Set,
         local_path=local_path,
@@ -178,6 +188,7 @@ def ConvNeXt_Base(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ConvNeXt_Base model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Base_Set,
         local_path=local_path,
@@ -193,6 +204,7 @@ def ConvNeXt_Large(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ConvNeXt_Large model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ConvNeXt_Large_Set,
         local_path=local_path,

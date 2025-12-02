@@ -16,7 +16,7 @@ pip install pytest
 Execute the entire Vision test matrix (this may take a while because it loads every supported model):
 
 ```bash
-pytest tests/vision
+pytest tests/vision # or pytest tests/vision/predict
 ```
 
 ## Run a Single Test File

@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class ResNext50_32x4d_Set(ModelInfoSet):
+    """ResNext50_32x4d model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -69,6 +71,8 @@ class ResNext50_32x4d_Set(ModelInfoSet):
 
 
 class ResNext101_32x8d_Set(ModelInfoSet):
+    """ResNext101_32x8d model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -135,6 +139,8 @@ class ResNext101_32x8d_Set(ModelInfoSet):
 
 
 class ResNext101_64x4d_Set(ModelInfoSet):
+    """ResNext101_64x4d model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -175,6 +181,7 @@ def ResNext50_32x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ResNext50_32x4d model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ResNext50_32x4d_Set,
         local_path=local_path,
@@ -190,6 +197,7 @@ def ResNext101_32x8d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ResNext101_32x8d model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ResNext101_32x8d_Set,
         local_path=local_path,
@@ -205,6 +213,7 @@ def ResNext101_64x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """Load the ResNext101_64x4d model for image classification."""
     return MBLT_Engine.from_model_info_set(
         ResNext101_64x4d_Set,
         local_path=local_path,

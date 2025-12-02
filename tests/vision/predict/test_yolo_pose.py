@@ -94,8 +94,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Load model with the specified mxq_path
-    model = YOLO11xPose(
+    # Load model
+    yolo11xpose_model = YOLO11xPose(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -108,7 +108,11 @@ if __name__ == "__main__":
 
     try:
         run_inference(
-            model, args.input_path, args.save_path, args.conf_thres, args.iou_thres
+            yolo11xpose_model,
+            args.input_path,
+            args.save_path,
+            args.conf_thres,
+            args.iou_thres,
         )
     finally:
-        model.dispose()
+        yolo11xpose_model.dispose()
