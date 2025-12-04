@@ -211,3 +211,18 @@ Llama_31_8B_Instruct_Batch16 = TransformersModelInfo(
         "tokenizer_config.json",
     ],
 )
+
+Llama_31_8B_Instruct_Batch32 = TransformersModelInfo(
+    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
+    model_id="mobilint/Llama-3.1-8B-Instruct-Batch32",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct-Batch32/",
+    file_list=[
+        "config.json",
+        "generation_config.json",
+        "Llama-3.1-8B-Instruct-Batch32.mxq",
+        "model.safetensors",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ],
+)

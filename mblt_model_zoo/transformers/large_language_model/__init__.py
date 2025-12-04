@@ -11,6 +11,7 @@ from .llama import (
 )
 from .llama_batch import (
     Llama_31_8B_Instruct_Batch16,
+    Llama_31_8B_Instruct_Batch32,
     Llama_32_3B_Instruct_Batch16,
 )
 from .qwen2 import (
@@ -34,6 +35,7 @@ __all__ = [
     "Llama_32_3B_Instruct",
     "Llama_32_3B_Instruct_Batch16",
     "Llama_31_8B_Instruct_Batch16",
+    "Llama_31_8B_Instruct_Batch32",
     "Qwen_25_05B_Instruct",
     "Qwen_25_15B_Instruct",
     "Qwen_25_3B_Instruct",

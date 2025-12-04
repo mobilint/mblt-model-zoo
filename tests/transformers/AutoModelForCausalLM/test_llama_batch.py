@@ -6,10 +6,16 @@ from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
 
+MODEL_PATHS = (
+    "mobilint/Llama-3.2-3B-Instruct-Batch16",
+    "mobilint/Llama-3.1-8B-Instruct-Batch16",
+    "mobilint/Llama-3.1-8B-Instruct-Batch32",
+)
 
-@pytest.fixture
-def pipe():
-    model_path = "mobilint/Llama-3.1-8B-Instruct-Batch16"
+
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request):
+    model_path = request.param
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
