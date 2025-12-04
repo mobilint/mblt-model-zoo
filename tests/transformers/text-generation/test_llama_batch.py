@@ -53,7 +53,11 @@ def test_llama(pipe):
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Hi, my name is James."},
         ],
-    ]
+        [
+            {"role": "system", "content": "You are James."},
+            {"role": "user", "content": "Hi, my name is John."},
+        ],
+    ] * 4
 
     batch_size = len(messages)
 
