@@ -1,3 +1,4 @@
+import math
 from typing import List
 
 import torch
@@ -14,6 +15,8 @@ class BatchTextStreamer(BaseStreamer):
         self.skip_prompt = skip_prompt
 
         self.batch_size = batch_size
+        self.num_columns = math.ceil(math.sqrt(self.batch_size))
+        self.num_rows = math.ceil(batch_size / self.num_columns)
         self.token_cache = [[] for _ in range(self.batch_size)]
         self.text_buffers = [""] * self.batch_size
         self.print_buffers = [""] * self.batch_size
@@ -69,6 +72,7 @@ class BatchTextStreamer(BaseStreamer):
             expand=True,
             show_lines=True,
         )
+
         table.add_column("ID", style="cyan", width=18, no_wrap=True)
         for i in range(self.batch_size):
             table.add_column(str(i), style="white")
@@ -85,7 +89,10 @@ class BatchTextStreamer(BaseStreamer):
             outputs.append(display_text)
             states.append(f"[{style}]{status}[/{style}]")
 
-        table.add_row("State", *states)
-        table.add_row("Generated Output", *outputs)
+        for i in range(self.num_rows):
+            sliced_states = states[i * self.num_columns : (1 + i) * self.num_columns]
+            sliced_outputs = outputs[i * self.num_columns : (1 + i) * self.num_columns]
+            table.add_row("State", *sliced_states)
+            table.add_row("Generated Output", *sliced_outputs)
 
         return table
