@@ -65,7 +65,7 @@ class BatchTextStreamer(BaseStreamer):
 
     def make_table(self) -> Table:
         table = Table(
-            show_header=True,
+            show_header=False,
             header_style="bold magenta",
             box=box.ROUNDED,
             expand=True,
