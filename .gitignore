@@ -17,9 +17,12 @@
 *.pyc
 *.safetensors
 *.so
+*.tar
+*.tgz
 *.tflite
 *.torchscript
 *.whl
+*.zip
 *__pycache__*
 build/
 dist/

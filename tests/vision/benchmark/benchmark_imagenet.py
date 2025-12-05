@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ResNet50 Benchmark")
     # --- Model Configuration ---
     parser.add_argument(
-        "--mxq_path",
+        "--local_path",
         type=str,
         default=None,
         help="Path to the ResNet50 model file (.mxq)",
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # --- Model Initialization ---
-    model = ResNet50(args.mxq_path, args.model_type, args.infer_mode, args.product)
+    model = ResNet50(args.local_path, args.model_type, args.infer_mode, args.product)
 
     # --- Benchmark Execution ---
     eval_imagenet(model, args.data_path, args.batch_size)

@@ -116,7 +116,7 @@ def organize_coco(
     if image_dir.endswith(".zip") and annotation_dir.endswith(".zip"):
         with TemporaryDirectory() as temp_dir:
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(image_dir, os.path.join(temp_dir, "val2017"))
+            shutil.unpack_archive(image_dir, temp_dir)
             shutil.unpack_archive(
                 annotation_dir, os.path.join(temp_dir, "annotations_trainval2017")
             )
