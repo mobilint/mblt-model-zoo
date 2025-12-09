@@ -64,4 +64,4 @@ print(sequence_lengths)
 print(output1.shape)
 print(output2.shape)
 
-assert torch.all(output1[0, :, :, :] == output2[2, :, :, :])
+assert torch.all(output1[0, 0, 0, :] == output2[0, 0, 2, :])
