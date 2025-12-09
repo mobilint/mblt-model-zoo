@@ -18,6 +18,7 @@ texts = [
     "This is sample text.",
     "Hello! My name is ",
     "LLM is",
+    "Harry Potter, the famous ",
 ]
 
 inputs = tokenizer(texts)
@@ -32,17 +33,15 @@ sequence_lengths = [int(embed.shape[0]) for embed in input_embeds]
 
 batch_param = maccel.BatchParam(
     sequence_lengths=sequence_lengths,
-    cache_sizes=[0, 0, 0],
-    cache_ids=[0, 1, 2],
-    prefill_masks=[False, False, False],  # not implemented in C++ yet.
+    cache_sizes=[0 for _ in sequence_lengths],
+    cache_ids=[i for i in range(len(sequence_lengths))],
+    prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
 )
 
 output = model.get_cache_mxq_model().infer(
     [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
-output1 = output[0]
-
-print(sequence_lengths)
+output1 = output[0][0, 0, :, :]
 
 input_embeds.reverse()
 
@@ -50,19 +49,16 @@ sequence_lengths = [int(embed.shape[0]) for embed in input_embeds]
 
 batch_param = maccel.BatchParam(
     sequence_lengths=sequence_lengths,
-    cache_sizes=[0, 0, 0],
-    cache_ids=[0, 1, 2],
-    prefill_masks=[False, False, False],  # not implemented in C++ yet.
+    cache_sizes=[0 for _ in sequence_lengths],
+    cache_ids=[i for i in range(len(sequence_lengths))],
+    prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
 )
 
 output = model.get_cache_mxq_model().infer(
     [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
-output2 = output[0]
+output2 = output[0][0, 0, :, :]
 
-print(sequence_lengths)
-
-print(output1.shape)
-print(output2.shape)
-
-assert np.all(output1[0, 0, 0, :] == output2[0, 0, 2, :])
+assert np.all(output1[0, :] == output2[2, :])
+assert np.all(output1[1, :] == output2[1, :])
+assert np.all(output1[2, :] == output2[0, :])
