@@ -130,6 +130,9 @@ def test_llama(pipe):
         chunk_size=16,
         max_new_tokens=512,
         streamer=BatchTextStreamer(
-            tokenizer=pipe.tokenizer, batch_size=batch_size, skip_prompt=False
+            tokenizer=pipe.tokenizer,
+            batch_size=batch_size,
+            skip_prompt=False,
+            alert_token_length=[256, 260, 270, 280],
         ),
     )

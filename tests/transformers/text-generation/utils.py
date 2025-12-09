@@ -10,7 +10,13 @@ from transformers.generation.streamers import BaseStreamer
 
 
 class BatchTextStreamer(BaseStreamer):
-    def __init__(self, tokenizer, batch_size: int = 1, skip_prompt: bool = True):
+    def __init__(
+        self,
+        tokenizer,
+        batch_size: int = 1,
+        skip_prompt: bool = True,
+        alert_token_length: list[int] = [],
+    ):
         self.tokenizer = tokenizer
         self.skip_prompt = skip_prompt
 
@@ -22,6 +28,7 @@ class BatchTextStreamer(BaseStreamer):
         self.print_buffers = [""] * self.batch_size
         self.finished = [False] * self.batch_size
         self.next_tokens_are_prompt = True
+        self.alert_token_length = alert_token_length
 
         self.console = Console()
         self.live = Live(
@@ -54,8 +61,10 @@ class BatchTextStreamer(BaseStreamer):
 
             new_text = text[len(self.text_buffers[i]) :]
             self.text_buffers[i] = text
-            self.print_buffers[i] = (
-                text + f" (total tokens: {len(self.token_cache[i])})"
+            self.print_buffers[i] += new_text + (
+                f"<{len(self.token_cache[i])} tokens used>"
+                if len(self.token_cache[i]) in self.alert_token_length
+                else ""
             )
 
             if self.tokenizer.eos_token_id in tokens and value[i].numel() == 1:
