@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Optional, Tuple, Union, cast
 
@@ -25,6 +26,7 @@ from mblt_model_zoo.transformers.utils.generation_utils import (
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintBatchCache
+from ..utils.types import TransformersModelInfo
 
 logger = logging.get_logger(__name__)
 
@@ -69,7 +71,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.gradient_checkpointing = False
-        
+
         self.dev_no = config.dev_no
         self.acc = maccel.Accelerator(self.dev_no)
         mc = maccel.ModelConfig()
@@ -79,7 +81,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         self.mxq_model = maccel.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
-    
+
     def get_cache_mxq_model(self):
         return self.mxq_model
 
@@ -104,6 +106,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+        chunk_size: int = 0,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         if logits_to_keep > 1:
@@ -114,13 +117,13 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
 
         if inputs_embeds is None:
             inputs_embeds: torch.FloatTensor = self.embed_tokens(input_ids)
-        
+
         if use_cache and past_key_values is None:
             past_key_values = MobilintBatchCache(self.get_cache_mxq_model(), self.config.max_batch_size)
-        
+
         assert attention_mask is not None
         batch_size = attention_mask.shape[0]
-        
+
         # Prefill
         if attention_mask.shape == inputs_embeds.shape[:-1]:
             attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
@@ -130,30 +133,71 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         # Decode
         else:
             # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
-            inputs_embeds_masked = inputs_embeds.reshape([1, inputs_embeds.shape[0] * inputs_embeds.shape[1], inputs_embeds.shape[2]])
+            inputs_embeds_masked = inputs_embeds.reshape(
+                [1, inputs_embeds.shape[0] * inputs_embeds.shape[1], inputs_embeds.shape[2]]
+            )
             sequence_lengths = [inputs_embeds.shape[1] for _ in range(batch_size)]
 
-        inputs_embeds_numpy: np.ndarray = inputs_embeds_masked.type(torch.float32).cpu().numpy()
-        if inputs_embeds_numpy.ndim == 3:
-            # (1, 1, batch * seqlen, hidden_size)
-            inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+        # batch length list of (1, seqlen, hidden_size) tensor
+        inputs_embeds_list = [
+            inputs_embeds_masked[
+                :,
+                (sequence_lengths[i - 1] if i != 0 else 0) : (sequence_lengths[i - 1] if i != 0 else 0)
+                + sequence_length,
+                :,
+            ]
+            for i, sequence_length in enumerate(sequence_lengths)
+        ]
+        max_sequence_length = max(sequence_lengths)
 
-        cache_sizes = [past_key_values.get_seq_length(i) if past_key_values is not None else 0 for i in range(batch_size)]
-        
-        batch_param = maccel.BatchParam(
-            sequence_lengths=sequence_lengths,
-            cache_sizes=cache_sizes,
-            cache_ids=[i for i in range(batch_size)],
-            prefill_masks=[False for i in range(batch_size)], # not implemented in C++ yet.
-        )
+        if chunk_size == 0:
+            chunk_size = self.mxq_model.get_input_buffer_info()[0].max_width
+        num_of_chunks = math.ceil(max_sequence_length / chunk_size)
 
-        outputs = self.mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
+        for i in range(num_of_chunks):
+            start_index = i * chunk_size
+            end_index = min(start_index + chunk_size, max_sequence_length)
 
-        if past_key_values is not None:
-            past_key_values.update_seen_tokens(sequence_lengths)
-        
+            sequence_lengths_chunks: list[int] = []
+            cache_sizes_chunks: list[int] = []
+            cache_ids: list[int] = []
+            prefill_masks: list[bool] = []
+            inputs_embeds_chunks: list[torch.Tensor] = []
+            seen_tokens: dict[int, int] = {}
+
+            for j in range(batch_size):
+                if start_index <= sequence_lengths[j] and sequence_lengths[j] < end_index:
+                    sequence_lengths_chunks.append(end_index - start_index)
+                    cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
+                    cache_ids.append(j)
+                    prefill_masks.append(end_index < inputs_embeds_list[j].shape[1])
+                    inputs_embeds_chunks.append(inputs_embeds_list[j][:, start_index:end_index, :])
+                    seen_tokens[j] = end_index - start_index
+
+            # list of (1, seqlen, hidden_size) tensor -> (1, seqlens, hidden_size) tensor
+            inputs_embeds_concat = torch.concat(inputs_embeds_chunks, dim=1)
+            inputs_embeds_numpy: np.ndarray = inputs_embeds_concat.type(torch.float32).cpu().numpy()
+
+            if inputs_embeds_numpy.ndim == 3:
+                # (1, 1, batch * seqlen, hidden_size)
+                inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+
+            batch_param = maccel.BatchParam(
+                sequence_lengths=sequence_lengths_chunks,
+                cache_sizes=cache_sizes_chunks,
+                cache_ids=cache_ids,
+                prefill_masks=prefill_masks,  # not implemented in C++ yet.
+            )
+
+            outputs = self.mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
+
+            if past_key_values is not None:
+                past_key_values.update_seen_tokens(seen_tokens)
+
         assert outputs is not None
-        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).reshape([batch_size, 1, -1]))
+        logits: torch.FloatTensor = cast(
+            torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).reshape([batch_size, 1, -1])
+        )
 
         loss = None
         if labels is not None:
@@ -178,8 +222,6 @@ AutoConfig.register("mobilint-llama-batch", MobilintLlamaBatchConfig)
 AutoModel.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
 AutoTokenizer.register(MobilintLlamaBatchConfig, fast_tokenizer_class=LlamaTokenizerFast)
 AutoModelForCausalLM.register(MobilintLlamaBatchConfig, MobilintLlamaBatchForCausalLM)
-
-from ..utils.types import TransformersModelInfo
 
 Llama_32_3B_Instruct_Batch16 = TransformersModelInfo(
     original_model_id="meta-llama/Llama-3.2-3B-Instruct",
@@ -225,4 +267,3 @@ Llama_31_8B_Instruct_Batch32 = TransformersModelInfo(
         "tokenizer_config.json",
     ],
 )
-
