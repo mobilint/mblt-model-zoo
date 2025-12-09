@@ -145,7 +145,6 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         
         for i in range(num_of_chunks):
             start_index = i * chunk_size
-            end_index = min(start_index + chunk_size, max_sequence_length)
             
             sequence_lengths_chunks: list[int] = []
             cache_sizes_chunks: list[int] = []
@@ -155,7 +154,8 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             seen_tokens: dict[int, int] = {}
             
             for j in range(batch_size):
-                if start_index <= sequence_lengths[j] and sequence_lengths[j] < end_index:
+                end_index = min(start_index + chunk_size, sequence_lengths[j])
+                if start_index <= sequence_lengths[j] and end_index <= sequence_lengths[j]:
                     sequence_lengths_chunks.append(end_index - start_index)
                     cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
                     cache_ids.append(j)
