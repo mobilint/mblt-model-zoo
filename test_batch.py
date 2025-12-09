@@ -59,6 +59,8 @@ output = model.get_cache_mxq_model().infer(
 )
 output2 = output[0][0, 0, :, :]
 
+print(output1[0, :], output2[2, :])
+
 assert np.all(output1[0, :] == output2[2, :])
 assert np.all(output1[1, :] == output2[1, :])
 assert np.all(output1[2, :] == output2[0, :])
