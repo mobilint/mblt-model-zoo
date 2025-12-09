@@ -1,3 +1,4 @@
+import torch
 from transformers import AutoTokenizer
 
 from mblt_model_zoo.transformers.large_language_model.llama_batch import (
@@ -21,6 +22,6 @@ input_ids = inputs["input_ids"]
 
 embeddings = model.get_input_embeddings()
 
-input_embeds = [embeddings(input_id) for input_id in input_ids]
+input_embeds = [embeddings(torch.tensor(input_id)) for input_id in input_ids]
 
 print(input_embeds)
