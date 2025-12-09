@@ -62,7 +62,7 @@ print([embed.shape for embed in next_embeds])
 sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
 
 batch_param = maccel.BatchParam(
-    sequence_lengths=sequence_lengths,
+    sequence_lengths=sequence_lengths_new,
     cache_sizes=[seqlen for seqlen in sequence_lengths],
     cache_ids=[i for i in range(len(sequence_lengths))],
     prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
@@ -106,7 +106,7 @@ print([embed.shape for embed in next_embeds])
 sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
 
 batch_param = maccel.BatchParam(
-    sequence_lengths=sequence_lengths,
+    sequence_lengths=sequence_lengths_new,
     cache_sizes=[seqlen for seqlen in sequence_lengths],
     cache_ids=[i for i in range(len(sequence_lengths))],
     prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
