@@ -54,7 +54,9 @@ class BatchTextStreamer(BaseStreamer):
 
             new_text = text[len(self.text_buffers[i]) :]
             self.text_buffers[i] = text
-            self.print_buffers[i] += new_text
+            self.print_buffers[i] = (
+                text + f" (total tokens: {len(self.token_cache[i])})"
+            )
 
             if self.tokenizer.eos_token_id in tokens and value[i].numel() == 1:
                 self.finished[i] = True
