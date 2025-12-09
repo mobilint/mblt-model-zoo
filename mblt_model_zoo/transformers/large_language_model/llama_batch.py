@@ -194,7 +194,7 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
                 past_key_values.update_seen_tokens(seen_tokens)
         
         logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
-        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.concat(logits_list, dim=0))
+        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
         
         loss = None
         if labels is not None:
