@@ -1,4 +1,5 @@
 import maccel
+import numpy as np
 import torch
 from transformers import AutoTokenizer
 
@@ -64,4 +65,4 @@ print(sequence_lengths)
 print(output1.shape)
 print(output2.shape)
 
-assert torch.all(output1[0, 0, 0, :] == output2[0, 0, 2, :])
+assert np.all(output1[0, 0, 0, :] == output2[0, 0, 2, :])
