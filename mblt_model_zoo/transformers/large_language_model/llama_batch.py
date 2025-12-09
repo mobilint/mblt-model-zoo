@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 from typing import Optional, Tuple, Union, cast
@@ -143,6 +144,8 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             chunk_size = self.mxq_model.get_input_buffer_info()[0].max_width
         num_of_chunks = math.ceil(max_sequence_length / chunk_size)
         
+        logits_dict: dict[int, torch.Tensor] = {}
+        
         for i in range(num_of_chunks):
             start_index = i * chunk_size
             
@@ -179,13 +182,20 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             )
 
             outputs = self.mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
+            
+            assert outputs is not None
+            logits_chunks: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).reshape([len(cache_ids), 1, -1]))
+            
+            for j, prefill_mask in enumerate(prefill_masks):
+                if prefill_mask is False:
+                    logits_dict[j] = copy.deepcopy(logits_chunks[j, :, :])
 
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
         
-        assert outputs is not None
-        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.tensor(outputs[0], dtype=torch.float32).reshape([batch_size, 1, -1]))
-
+        logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
+        logits: torch.FloatTensor = cast(torch.FloatTensor, torch.concat(logits_list, dim=0))
+        
         loss = None
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
