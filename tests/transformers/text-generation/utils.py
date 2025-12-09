@@ -75,7 +75,7 @@ class BatchTextStreamer(BaseStreamer):
         )
 
         for _ in range(self.num_columns):
-            table.add_column(no_wrap=False)
+            table.add_column(overflow="fold", no_wrap=False)
 
         outputs: List[str] = []
         states: List[str] = []
