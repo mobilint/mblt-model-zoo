@@ -27,7 +27,7 @@ embeddings = model.get_input_embeddings()
 
 input_embeds = [embeddings(torch.tensor(input_id)).detach() for input_id in input_ids]
 
-sequence_lengths = [embed.shape[0] for embed in input_embeds]
+sequence_lengths = [int(embed.shape[0]) for embed in input_embeds]
 
 batch_param = maccel.BatchParam(
     sequence_lengths=sequence_lengths,
