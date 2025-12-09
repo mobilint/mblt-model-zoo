@@ -25,7 +25,7 @@ input_ids = inputs["input_ids"]
 
 embeddings = model.get_input_embeddings()
 
-input_embeds = [embeddings(torch.tensor(input_id)) for input_id in input_ids]
+input_embeds = [embeddings(torch.tensor(input_id)).detach() for input_id in input_ids]
 
 sequence_lengths = [embed.shape for embed in input_embeds]
 
