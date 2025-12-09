@@ -59,7 +59,7 @@ class BatchTextStreamer(BaseStreamer):
             if self.tokenizer.eos_token_id in tokens and value[i].numel() == 1:
                 self.finished[i] = True
 
-        self.live.update(self.make_table())
+        self.live.update(self.make_table(), refresh=True)
 
     def end(self):
         if self.live:
