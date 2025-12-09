@@ -51,9 +51,7 @@ output1 = copy.deepcopy(output[0][0, 0, :, :])
 
 next_token_ids = torch.argmax(torch.tensor(output1), dim=1)
 
-next_embeds = [
-    embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
-]
+next_embeds = [embeddings(input_id).detach() for input_id in next_token_ids]
 
 sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
 
@@ -91,9 +89,7 @@ output2 = copy.deepcopy(output[0][0, 0, :, :])
 
 next_token_ids = torch.argmax(torch.tensor(output2), dim=1)
 
-next_embeds = [
-    embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
-]
+next_embeds = [embeddings(input_id).detach() for input_id in next_token_ids]
 
 sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
 
