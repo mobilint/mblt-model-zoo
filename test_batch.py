@@ -49,7 +49,7 @@ output1 = copy.deepcopy(output[0][0, 0, :, :])
 
 # Try 1 with cache
 
-next_token_ids = torch.argmax(output1, dim=1)
+next_token_ids = torch.argmax(torch.tensor(output1), dim=1)
 
 next_embeds = [
     embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
@@ -89,7 +89,7 @@ output2 = copy.deepcopy(output[0][0, 0, :, :])
 
 # Try 2 with cache
 
-next_token_ids = torch.argmax(output2, dim=1)
+next_token_ids = torch.argmax(torch.tensor(output2), dim=1)
 
 next_embeds = [
     embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
