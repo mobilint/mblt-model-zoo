@@ -28,6 +28,7 @@ class BatchTextStreamer(BaseStreamer):
             console=self.console,
             transient=False,
             vertical_overflow="visible",
+            auto_refresh=False,
         )
 
     def put(self, value: torch.Tensor):
