@@ -62,4 +62,4 @@ output = model.get_cache_mxq_model().infer(
 output2 = copy.deepcopy(output[0][0, 0, :, :])
 
 for i in range(output1.shape[0]):
-    assert np.all(output1[i, :] == output2[output1.shape[0] - i, :])
+    assert np.all(output1[i, :] == output2[output1.shape[0] - i - 1, :])
