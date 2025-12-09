@@ -1,3 +1,5 @@
+import copy
+
 import maccel
 import numpy as np
 import torch
@@ -41,7 +43,7 @@ batch_param = maccel.BatchParam(
 output = model.get_cache_mxq_model().infer(
     [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
-output1 = output[0][0, 0, :, :]
+output1 = copy.deepcopy(output[0][0, 0, :, :])
 
 input_embeds.reverse()
 
@@ -57,7 +59,7 @@ batch_param = maccel.BatchParam(
 output = model.get_cache_mxq_model().infer(
     [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
-output2 = output[0][0, 0, :, :]
+output2 = copy.deepcopy(output[0][0, 0, :, :])
 
 print(output1[0, :], output2[2, :], output1.shape, output2.shape)
 
