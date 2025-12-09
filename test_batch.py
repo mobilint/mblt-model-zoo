@@ -4,7 +4,7 @@ from mblt_model_zoo.transformers.large_language_model.llama_batch import (
     MobilintLlamaBatchForCausalLM,
 )
 
-model_path = "~/.mblt_model_zoo/transformers/Llama-3.1-8B-Instruct-Batch16"
+model_path = "/home/mobilint/.mblt_model_zoo/transformers/Llama-3.1-8B-Instruct-Batch16"
 
 model = MobilintLlamaBatchForCausalLM.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -17,4 +17,10 @@ texts = [
 
 inputs = tokenizer(texts)
 
-print(inputs)
+input_ids = inputs["input_ids"]
+
+embeddings = model.get_input_embeddings()
+
+input_embeds = embeddings(input_ids)
+
+print(input_embeds)
