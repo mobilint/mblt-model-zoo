@@ -77,22 +77,10 @@ class BatchTextStreamer(BaseStreamer):
         for _ in range(self.num_columns):
             table.add_column(overflow="fold", no_wrap=False)
 
-        outputs: List[str] = []
-        states: List[str] = []
-
-        for i in range(self.batch_size):
-            status = "DONE" if self.finished[i] else "GEN"
-            style = "green" if self.finished[i] else "yellow"
-
-            display_text = self.print_buffers[i]
-
-            outputs.append(display_text)
-            states.append(f"[{style}]{status}[/{style}]")
-
         for i in range(self.num_rows):
-            sliced_states = states[i * self.num_columns : (1 + i) * self.num_columns]
-            sliced_outputs = outputs[i * self.num_columns : (1 + i) * self.num_columns]
-            table.add_row("State", *sliced_states)
-            table.add_row("Generated Output", *sliced_outputs)
+            sliced_outputs = self.print_buffers[
+                i * self.num_columns : (1 + i) * self.num_columns
+            ]
+            table.add_row(*sliced_outputs)
 
         return table
