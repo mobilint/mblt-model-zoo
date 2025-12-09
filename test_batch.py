@@ -45,7 +45,7 @@ print(sequence_lengths)
 
 input_embeds.reverse()
 
-sequence_lengths = [embed.shape for embed in input_embeds]
+sequence_lengths = [int(embed.shape[0]) for embed in input_embeds]
 
 batch_param = maccel.BatchParam(
     sequence_lengths=sequence_lengths,
