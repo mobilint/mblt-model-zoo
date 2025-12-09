@@ -188,7 +188,8 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
             
             for j, prefill_mask in enumerate(prefill_masks):
                 if prefill_mask is False:
-                    logits_dict[j] = copy.deepcopy(logits_chunks[j, :, :])
+                    cache_id = cache_ids[j]
+                    logits_dict[cache_id] = copy.deepcopy(logits_chunks[j, :, :])
 
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
