@@ -29,6 +29,8 @@ input_ids = inputs["input_ids"]
 
 embeddings = model.get_input_embeddings()
 
+# Try 1
+
 input_embeds = [embeddings(torch.tensor(input_id)).detach() for input_id in input_ids]
 
 sequence_lengths = [int(embed.shape[0]) for embed in input_embeds]
@@ -44,6 +46,30 @@ output = model.get_cache_mxq_model().infer(
     [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
 output1 = copy.deepcopy(output[0][0, 0, :, :])
+
+# Try 1 with cache
+
+next_token_ids = torch.argmax(output1, dim=1)
+
+next_embeds = [
+    embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
+]
+
+sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
+
+batch_param = maccel.BatchParam(
+    sequence_lengths=sequence_lengths,
+    cache_sizes=[seqlen for seqlen in sequence_lengths],
+    cache_ids=[i for i in range(len(sequence_lengths))],
+    prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
+)
+
+output = model.get_cache_mxq_model().infer(
+    [torch.concat(next_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
+)
+output1_cache = copy.deepcopy(output[0][0, 0, :, :])
+
+# Try 2
 
 input_embeds.reverse()
 
@@ -61,5 +87,30 @@ output = model.get_cache_mxq_model().infer(
 )
 output2 = copy.deepcopy(output[0][0, 0, :, :])
 
+# Try 2 with cache
+
+next_token_ids = torch.argmax(output2, dim=1)
+
+next_embeds = [
+    embeddings(torch.tensor(input_id)).detach() for input_id in next_token_ids
+]
+
+sequence_lengths_new = [int(embed.shape[0]) for embed in next_embeds]
+
+batch_param = maccel.BatchParam(
+    sequence_lengths=sequence_lengths,
+    cache_sizes=[seqlen for seqlen in sequence_lengths],
+    cache_ids=[i for i in range(len(sequence_lengths))],
+    prefill_masks=[False for _ in sequence_lengths],  # not implemented in C++ yet.
+)
+
+output = model.get_cache_mxq_model().infer(
+    [torch.concat(next_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
+)
+output2_cache = copy.deepcopy(output[0][0, 0, :, :])
+
+# Compare
+
 for i in range(output1.shape[0]):
     assert np.all(output1[i, :] == output2[output1.shape[0] - i - 1, :])
+    assert np.all(output1_cache[i, :] == output2_cache[output1.shape[0] - i - 1, :])
