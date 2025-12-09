@@ -128,16 +128,16 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
         if attention_mask.shape == inputs_embeds.shape[:-1]:
             attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
             # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
-            inputs_embeds_masked = inputs_embeds[attention_mask_bool, :].unsqueeze(0)
+            inputs_embeds_masked = [inputs_embeds[i, attention_mask_bool[i, :], :] for i in range(batch_size)]
             sequence_lengths = cast(list[int], attention_mask.sum(dim=1).tolist())
         # Decode
         else:
+            assert inputs_embeds.shape[1] == 1
             # (batch, seqlen, hidden_size) -> (1, batch * seqlen, hidden_size)
-            inputs_embeds_masked = inputs_embeds.reshape([1, inputs_embeds.shape[0] * inputs_embeds.shape[1], inputs_embeds.shape[2]])
-            sequence_lengths = [inputs_embeds.shape[1] for _ in range(batch_size)]
+            inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
+            sequence_lengths = [1 for _ in range(batch_size)]
         
         # batch length list of (1, seqlen, hidden_size) tensor
-        inputs_embeds_list = [inputs_embeds_masked[:, (sequence_lengths[i-1] if i != 0 else 0):(sequence_lengths[i-1] if i != 0 else 0)+sequence_length, :] for i, sequence_length in enumerate(sequence_lengths)]
         max_sequence_length = max(sequence_lengths)
         
         if chunk_size == 0:
@@ -162,8 +162,8 @@ class MobilintLlamaBatchForCausalLM(LlamaPreTrainedModel, MobilintBatchGeneratio
                     sequence_lengths_chunks.append(end_index - start_index)
                     cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
                     cache_ids.append(j)
-                    prefill_masks.append(end_index < inputs_embeds_list[j].shape[1])
-                    inputs_embeds_chunks.append(inputs_embeds_list[j][:, start_index:end_index, :])
+                    prefill_masks.append(end_index < inputs_embeds_masked[j].shape[1])
+                    inputs_embeds_chunks.append(inputs_embeds_masked[j][:, start_index:end_index, :])
                     seen_tokens[j] = end_index - start_index
 
             # list of (1, seqlen, hidden_size) tensor -> (1, seqlens, hidden_size) tensor
