@@ -73,6 +73,9 @@ class BatchTextStreamer(BaseStreamer):
             show_lines=True,
         )
 
+        for _ in range(self.num_columns):
+            table.add_column(no_wrap=False)
+
         outputs: List[str] = []
         states: List[str] = []
 

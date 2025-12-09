@@ -64,6 +64,7 @@ def test_llama(pipe):
     outputs = pipe(
         messages,
         batch_size=batch_size,
+        chunk_size=32,
         max_new_tokens=512,
         streamer=BatchTextStreamer(
             tokenizer=pipe.tokenizer, batch_size=batch_size, skip_prompt=False
