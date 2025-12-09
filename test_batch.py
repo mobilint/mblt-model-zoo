@@ -37,7 +37,7 @@ batch_param = maccel.BatchParam(
 )
 
 output = model.get_cache_mxq_model().infer(
-    [torch.concat(input_embeds, dim=0).unsqueeze(0)], None, 0, batch_param
+    [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
 output1 = output[0]
 
@@ -55,7 +55,7 @@ batch_param = maccel.BatchParam(
 )
 
 output = model.get_cache_mxq_model().infer(
-    [torch.concat(input_embeds, dim=0).unsqueeze(0)], None, 0, batch_param
+    [torch.concat(input_embeds, dim=0).unsqueeze(0).cpu().numpy()], None, 0, batch_param
 )
 output2 = output[0]
 
