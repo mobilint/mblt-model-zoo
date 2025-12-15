@@ -27,7 +27,7 @@ class ClsPost(PostBase):
             x = x.unsqueeze(0)
         assert (
             x.ndim == 4
-        ), f"Assume that the result is always in form of NCHW. But the shape is {x.shape}"
+        ), f"Assume that the result is always in form of NHWC. But the shape is {x.shape}"
 
         x = x.flatten(1)  # assume that the shape can be made to (b, 1000)
         return x.softmax(dim=-1)

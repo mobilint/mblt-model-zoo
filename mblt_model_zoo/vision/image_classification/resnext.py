@@ -30,7 +30,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -61,7 +61,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -98,7 +98,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -129,7 +129,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -166,7 +166,7 @@ class ResNext101_64x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

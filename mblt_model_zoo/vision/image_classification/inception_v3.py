@@ -28,7 +28,7 @@ class Inception_V3_Set(ModelInfoSet):
                 "size": [299, 299],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

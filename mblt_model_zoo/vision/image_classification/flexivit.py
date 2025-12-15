@@ -28,7 +28,7 @@ class FlexiViT_Small_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -60,7 +60,7 @@ class FlexiViT_Base_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -92,7 +92,7 @@ class FlexiViT_Large_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

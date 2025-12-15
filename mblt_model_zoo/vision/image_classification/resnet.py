@@ -28,7 +28,7 @@ class ResNet18_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -63,7 +63,7 @@ class ResNet34_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -98,7 +98,7 @@ class ResNet50_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -129,7 +129,7 @@ class ResNet50_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -164,7 +164,7 @@ class ResNet101_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -195,7 +195,7 @@ class ResNet101_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -230,7 +230,7 @@ class ResNet152_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -261,7 +261,7 @@ class ResNet152_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

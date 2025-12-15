@@ -32,9 +32,9 @@ class SetOrder(PreOps):
         is_tensor = isinstance(x, torch.Tensor)
         permute_fn = torch.permute if is_tensor else np.transpose
 
-        if cdim == 0 and self.shape.lower() == "hwc":
+        if cdim == 0 and self.shape.lower() == "hwc":  # convert CHW to HWC
             return permute_fn(x, (1, 2, 0))
-        elif cdim == 2 and self.shape.lower() == "chw":
+        elif cdim == 2 and self.shape.lower() == "chw":  # convert HWC to CHW
             return permute_fn(x, (2, 0, 1))
 
         return x

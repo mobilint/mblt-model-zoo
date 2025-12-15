@@ -6,7 +6,7 @@ from time import time
 
 import numpy as np
 import torch
-from faster_coco_eval import COCO, COCOeval_faster
+from faster_coco_eval import COCO, COCOeval_faster, mask
 from tqdm import tqdm
 
 from ...utils.datasets.coco import get_coco_inv

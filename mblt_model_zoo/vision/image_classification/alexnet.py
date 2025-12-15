@@ -30,7 +30,7 @@ class AlexNet_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
