@@ -73,6 +73,12 @@ packages = { find = { where = ["."], include = ["mblt_model_zoo","mblt_model_zoo
 [tool.setuptools.dynamic]
 version = { attr = "mblt_model_zoo.__version__" }
 
+[tool.setuptools.package-data]
+"mblt_model_zoo" = [
+    "transformers/text_to_speech/MeloTTS/text/cmudict.rep",
+    "transformers/text_to_speech/MeloTTS/text/cmudict_cache.pickle"
+]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",
