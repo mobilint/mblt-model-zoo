@@ -23,7 +23,7 @@ class YOLOv3u_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -55,7 +55,7 @@ class YOLOv3_sppu_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -87,7 +87,7 @@ class YOLOv3_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -123,7 +123,7 @@ class YOLOv3_spp_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",

@@ -339,13 +339,16 @@ def get_coco_det_palette(idx: int) -> tuple:
     return DET_PALETTE[idx]
 
 
-def get_coco_pose_palette() -> tuple:
-    """Get the COCO pose palette.
+def get_coco_pose_palette(idx: int) -> tuple:
+    """Get the COCO pose palette by index.
+
+    Args:
+        idx (int): The index of the COCO pose palette.
 
     Returns:
-        tuple: The COCO pose palette.
+        tuple: The COCO pose palette. (R, G, B)
     """
-    return POSE_PALETTE
+    return POSE_PALETTE[idx]
 
 
 def get_coco_pose_skeleton() -> list:
@@ -357,19 +360,25 @@ def get_coco_pose_skeleton() -> list:
     return POSE_SKELETON
 
 
-def get_coco_limb_palette() -> list:
-    """Get the COCO limb palette.
+def get_coco_limb_palette(idx: int) -> list:
+    """Get the COCO limb palette by index.
+
+    Args:
+        idx (int): The index of the COCO limb palette.
 
     Returns:
         list: The COCO limb palette.
     """
-    return LIMB_PALLETE
+    return LIMB_PALLETE[idx]
 
 
-def get_coco_keypoint_palette() -> list:
+def get_coco_keypoint_palette(idx: int) -> list:
     """Get the COCO keypoint palette.
+
+    Args:
+        idx (int): The index of the COCO keypoint palette.
 
     Returns:
         list: The COCO keypoint palette.
     """
-    return KEYPOINT_PALLETE
+    return KEYPOINT_PALLETE[idx]

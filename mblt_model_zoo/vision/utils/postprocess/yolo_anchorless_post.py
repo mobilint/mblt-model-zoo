@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from .base import YOLOPostBase
-from .common import *
+from .common import dist2bbox, non_max_suppression
 
 
 class YOLOAnchorlessPost(YOLOPostBase):
@@ -53,10 +53,10 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
             assert xi.ndim == 4, f"Got unexpected shape for x={x.shape}."
 
-            if xi.shape[1] == self.reg_max * 4:
-                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
-            elif xi.shape[1] == self.nc:
-                y_cls.append(xi)  # (b, 80, 80, 80), (b, 80, 40, 40), ...
+            if xi.shape[-1] == self.reg_max * 4:
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[-1] == self.nc:
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 80, 80, 80), (b, 80, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
 
@@ -180,12 +180,12 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
             else:
                 raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
 
-            if xi.shape[1] == self.n_extra:
-                y_ext.append(xi)  # (b, 32, 160, 160), (b, 32, 80, 80), ...
-            elif xi.shape[1] == self.reg_max * 4:
-                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
-            elif xi.shape[1] == self.nc:
-                y_cls.append(xi)  # (b, 80, 80, 80), (b, 80, 40, 40), ...
+            if xi.shape[-1] == self.n_extra:
+                y_ext.append(xi.permute(0, 3, 1, 2))  # (b, 32, 160, 160), (b, 32, 80, 80), ...
+            elif xi.shape[-1] == self.reg_max * 4:
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[-1] == self.nc:
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 80, 80, 80), (b, 80, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
 
@@ -227,12 +227,12 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
             else:
                 raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
 
-            if xi.shape[1] == self.reg_max * 4:
-                y_det.append(xi)  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
-            elif xi.shape[1] == self.nc:
-                y_cls.append(xi)  # (b, 1, 80, 80), (b, 1, 40, 40), ...
-            elif xi.shape[1] == self.n_extra:
-                y_kpt.append(xi.flatten(2))  # (b, 51, 80, 80), (b, 1, 40, 40), ...
+            if xi.shape[-1] == self.reg_max * 4:
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+            elif xi.shape[-1] == self.nc:
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 1, 80, 80), (b, 1, 40, 40), ...
+            elif xi.shape[-1] == self.n_extra:
+                y_kpt.append(xi.permute(0, 3, 1, 2).flatten(2))  # (b, 51, 80, 80), (b, 1, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
 

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from ..types import ListTensorLike, TensorLike
-from .common import *
+from .common import process_mask_upsample
 
 
 class PostBase(ABC):

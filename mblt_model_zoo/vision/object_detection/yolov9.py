@@ -23,7 +23,7 @@ class YOLOv9t_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -55,7 +55,7 @@ class YOLOv9s_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -87,7 +87,7 @@ class GELANs_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -119,7 +119,7 @@ class YOLOv9m_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -151,7 +151,7 @@ class GELANm_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -183,7 +183,7 @@ class YOLOv9c_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -215,7 +215,7 @@ class GELANc_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -247,7 +247,7 @@ class YOLOv9e_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -279,7 +279,7 @@ class GELANe_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",

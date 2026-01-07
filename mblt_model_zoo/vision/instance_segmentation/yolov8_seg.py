@@ -25,7 +25,7 @@ class YOLOv8nSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -60,7 +60,7 @@ class YOLOv8sSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -95,7 +95,7 @@ class YOLOv8mSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -130,7 +130,7 @@ class YOLOv8lSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -165,7 +165,7 @@ class YOLOv8xSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",

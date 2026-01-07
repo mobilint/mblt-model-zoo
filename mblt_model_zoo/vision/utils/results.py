@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .datasets import *
-from .postprocess.common import *
+from .datasets import get_imagenet_label, get_coco_label, get_coco_class_num, get_coco_det_palette, get_coco_limb_palette, get_coco_keypoint_palette, get_coco_pose_skeleton
+from .postprocess.common import scale_coords, scale_boxes, scale_image
 from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width
@@ -264,7 +264,7 @@ class Results:
         )
         for kpt in self.kpts:
             for i, (x, y, v) in enumerate(kpt):
-                color_k = KEYPOINT_PALLETE[i]
+                color_k = get_coco_keypoint_palette(i)
                 if v < self.conf_thres:
                     continue
                 cv2.circle(
@@ -276,7 +276,7 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
 
-            for j, sk in enumerate(POSE_SKELETON):
+            for j, sk in enumerate(get_coco_pose_skeleton()):
                 pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
                 pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
 
@@ -289,7 +289,7 @@ class Results:
                     img,
                     pos1,
                     pos2,
-                    LIMB_PALLETE[j],
+                    get_coco_limb_palette(j),
                     thickness=int(np.ceil(LW / 2)),
                     lineType=cv2.LINE_AA,
                 )

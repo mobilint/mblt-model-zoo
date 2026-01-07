@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLOv9c
+from mblt_model_zoo.vision import YOLOv7x
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_det():
-    model = YOLOv9c()
+    model = YOLOv7x()
     yield model
     model.dispose()
 
@@ -35,7 +35,7 @@ def test_yolo_det(yolo_det):
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolov9c_{os.path.basename(image_path)}",
+        f"yolov7x_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model
-    yolo9c_model = YOLOv9c(
+    yolo7x_model = YOLOv7x(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -103,16 +103,16 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolov9c_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov7x_{os.path.basename(args.input_path)}"
         )
 
     try:
         run_inference(
-            yolo9c_model,
+            yolo7x_model,
             args.input_path,
             args.save_path,
             args.conf_thres,
             args.iou_thres,
         )
     finally:
-        yolo9c_model.dispose()
+        yolo7x_model.dispose()

@@ -1,6 +1,6 @@
 import torch
 
-from .common import *
+from .common import dist2bbox
 from .yolo_anchorless_post import YOLOAnchorlessPost
 
 
@@ -78,5 +78,5 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
         return y
 
-    def nms(self, x):  # Do nothing on NMS Free model
+    def nms(self, x, *args, **kwargs):  # Do nothing on NMS Free model
         return x

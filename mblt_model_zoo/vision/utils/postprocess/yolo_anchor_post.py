@@ -1,8 +1,7 @@
 import torch
 
 from .base import YOLOPostBase
-from .common import *
-
+from .common import non_max_suppression, xywh2xyxy
 
 class YOLOAnchorPost(YOLOPostBase):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
@@ -54,10 +53,10 @@ class YOLOAnchorPost(YOLOPostBase):
                 xi = xi.unsqueeze(0)
 
             assert (
-                xi.ndim == 4 and xi.shape[1] == self.no * self.na
+                xi.ndim == 4 and xi.shape[-1] == self.no * self.na
             ), f"Got unexpected shape for x={xi.shape}."
 
-            y.append(xi)
+            y.append(xi.permute(0, 3, 1, 2))
 
         y = sorted(
             y, key=lambda x: x.numel(), reverse=True
@@ -155,8 +154,8 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
             assert xi.ndim == 4, f"Got unexpected shape for x={xi.shape}."
-            if self.n_extra == xi.shape[1]:
-                proto = xi  # (bs, 32, 160, 160)
+            if self.n_extra == xi.shape[-1]:
+                proto = xi.permute(0, 2, 3, 1)  # (bs, 160, 160, 32)
                 x.pop(i)
                 proto_exist = True
                 break
