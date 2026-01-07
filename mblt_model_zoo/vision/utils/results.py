@@ -6,8 +6,16 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .datasets import get_imagenet_label, get_coco_label, get_coco_class_num, get_coco_det_palette, get_coco_limb_palette, get_coco_keypoint_palette, get_coco_pose_skeleton
-from .postprocess.common import scale_coords, scale_boxes, scale_image
+from .datasets import (
+    get_coco_class_num,
+    get_coco_det_palette,
+    get_coco_keypoint_palette,
+    get_coco_label,
+    get_coco_limb_palette,
+    get_coco_pose_skeleton,
+    get_imagenet_label,
+)
+from .postprocess.common import scale_boxes, scale_coords, scale_image
 from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width

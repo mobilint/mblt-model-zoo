@@ -3,6 +3,7 @@ import torch
 from .base import YOLOPostBase
 from .common import non_max_suppression, xywh2xyxy
 
+
 class YOLOAnchorPost(YOLOPostBase):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
         super().__init__(pre_cfg, post_cfg)
