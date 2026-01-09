@@ -126,7 +126,7 @@ python benchmark_coco.py --local_path {path to local mxq(optional)}\
 Example:
 
 ```bash
-python benchmark_coco.py --local_path ./yolov11m_single.mxq --model_type COCO_V1 --infer_mode single --product aries --batch_size 8 --data_path ~/.mblt_model_zoo/datasets/coco --conf_thres 0.001 --iou_thres 0.7
+python benchmark_coco.py --infer_mode single --product aries --batch_size 8 --data_path ~/.mblt_model_zoo/datasets/coco --conf_thres 0.001 --iou_thres 0.7
 ```
 
 ## Benchmark with WiderFace Dataset

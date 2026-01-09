@@ -1,16 +1,16 @@
 import argparse
 import os
 
-from mblt_model_zoo.vision import YOLO11mSeg, eval_coco
+from mblt_model_zoo.vision import YOLO11m, eval_coco
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO11mSeg Benchmark")
+    parser = argparse.ArgumentParser(description="Run YOLO11m Benchmark")
     # --- Model Configuration ---
     parser.add_argument(
         "--local_path",
         type=str,
         default=None,
-        help="Path to the YOLO11mSeg model file (.mxq)",
+        help="Path to the YOLO11m model file (.mxq)",
     )
     parser.add_argument("--model_type", type=str, default="DEFAULT", help="Model type")
     parser.add_argument(
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # --- Model Initialization ---
-    model = YOLO11mSeg(args.local_path, args.model_type, args.infer_mode, args.product)
+    model = YOLO11m(args.local_path, args.model_type, args.infer_mode, args.product)
 
     # --- Benchmark Execution ---
     acc = eval_coco(
