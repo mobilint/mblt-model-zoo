@@ -94,31 +94,15 @@ class Results:
         self.mask = None
 
         if self.task.lower() == "image_classification":
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
             self.acc = output
         elif (
             self.task.lower() == "object_detection"
             or self.task.lower() == "pose_estimation"
         ):
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
-            self.box_cls = output
-        elif self.task.lower() == "instance_segmentation":
-            assert isinstance(
-                output, list
-            ), f"Got unexpected output={output}. It should be a list."
-            if len(output) == 2:  # [box_cls, mask]
-                pass
-            elif len(output) == 1:  # [[box_cls, mask]]
-                assert len(output[0]) == 2, f"Got unexpected output={output}."
-                output = output[0]
-            else:
-                raise ValueError(f"Got unexpected output={output}.")
             self.box_cls = output[0]
-            self.mask = output[1]
+        elif self.task.lower() == "instance_segmentation":
+            self.box_cls = output[0][0]
+            self.mask = output[0][1]
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."

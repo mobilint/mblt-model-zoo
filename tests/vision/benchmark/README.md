@@ -112,6 +112,22 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 You can run the COCO benchmark with the following command:
 
+```bash
+python benchmark_coco.py --local_path {path to local mxq(optional)}\
+--model_type {model type(optional)}\
+--infer_mode {single, multi, global, global4, global8(optional). Default is global}\
+--product {aries, regulus(optional). Default is aries}\
+--batch_size {batch size(optional). Default is 1}\
+--data_path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco}
+--conf_thres {confidence threshold for object detection(optional). Default is 0.001}\
+--iou_thres {IOU threshold for object detection(optional). Default is 0.7}
+```
+
+Example:
+
+```bash
+python benchmark_coco.py --local_path ./yolov11m_single.mxq --model_type COCO_V1 --infer_mode single --product aries --batch_size 8 --data_path ~/.mblt_model_zoo/datasets/coco --conf_thres 0.001 --iou_thres 0.7
+```
 
 ## Benchmark with WiderFace Dataset
 
@@ -154,4 +170,4 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the WiderFace Benchmark
 
-You can run the WiderFace benchmark with the following command:
+Pending

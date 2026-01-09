@@ -1,3 +1,4 @@
 from .eval_coco import eval_coco
 from .eval_imagenet import eval_imagenet
-from .eval_widerface import eval_widerface
+
+# from .eval_widerface import eval_widerface

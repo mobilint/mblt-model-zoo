@@ -303,9 +303,9 @@ def scale_image(masks, im0_shape, ratio_pad=None):
         masks = masks.cpu().numpy()
 
     im1_shape = masks.shape
-    if im1_shape[:2] == im0_shape[:2]:
+    if (im1_shape[0] == im0_shape[0]) and (im1_shape[1] == im0_shape[1]):
         return masks
-    elif im1_shape[2] == 0:
+    if im1_shape[2] == 0:
         return np.zeros((im0_shape[0], im0_shape[1], 0), dtype=np.float32)
 
     if ratio_pad is None:  # calculate from im0_shape
