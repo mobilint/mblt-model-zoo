@@ -13,6 +13,19 @@ def build_postprocess(
     pre_cfg: dict,
     post_cfg: dict,
 ) -> PostBase:
+    """
+    Build a post-processing object based on the task and configuration.
+
+    Args:
+        pre_cfg (dict): Preprocessing configuration.
+        post_cfg (dict): Postprocessing configuration, including 'task'.
+
+    Returns:
+        PostBase: A post-processor object for the specified task.
+
+    Raises:
+        NotImplementedError: If the task is not supported.
+    """
     task_lower = post_cfg["task"].lower()
     if task_lower == "image_classification":
         return ClsPost(pre_cfg, post_cfg)

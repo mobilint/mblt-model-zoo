@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class MNasNet1_0_Set(ModelInfoSet):
+    """MNasNet1_0 model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -36,6 +38,8 @@ class MNasNet1_0_Set(ModelInfoSet):
 
 
 class MNasNet1_3_Set(ModelInfoSet):
+    """MNasNet1_3 model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -74,6 +78,18 @@ def MNasNet1_0(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the MNasNet1_0 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         MNasNet1_0_Set,
         local_path=local_path,
@@ -89,6 +105,18 @@ def MNasNet1_3(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the MNasNet1_3 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         MNasNet1_3_Set,
         local_path=local_path,

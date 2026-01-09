@@ -8,6 +8,12 @@ from tqdm import tqdm
 
 
 def eval_widerface(model):
+    """
+    Placeholder for WiderFace evaluation.
+
+    Args:
+        model: The model to evaluate.
+    """
     pass
 
 
@@ -155,6 +161,18 @@ def image_eval(pred, gt, ignore, iou_thresh):
 
 
 def img_pr_info(thresh_num, pred_info, proposal_list, pred_recall):
+    """
+    Compute precision and recall information for a single image.
+
+    Args:
+        thresh_num (int): Number of thresholds to use.
+        pred_info (np.ndarray): Predicted bounding boxes and scores.
+        proposal_list (np.ndarray): Indicator of whether each prediction is a proposal.
+        pred_recall (np.ndarray): Cumulative recall for each prediction.
+
+    Returns:
+        np.ndarray: Array containing precision and recall info for each threshold.
+    """
     pr_info = np.zeros((thresh_num, 2), dtype=np.float32)
     for t in range(thresh_num):
         thresh = 1 - (t + 1) / thresh_num
@@ -171,6 +189,17 @@ def img_pr_info(thresh_num, pred_info, proposal_list, pred_recall):
 
 
 def dataset_pr_info(thresh_num, pr_curve, count_face):
+    """
+    Compute precision and recall information for the entire dataset.
+
+    Args:
+        thresh_num (int): Number of thresholds used.
+        pr_curve (np.ndarray): Accumulated precision-recall curve data.
+        count_face (int): Total number of ground truth faces in the dataset.
+
+    Returns:
+        np.ndarray: Normalized precision-recall curve.
+    """
     _pr_curve = np.zeros((thresh_num, 2), dtype=np.float32)
     for i in range(thresh_num):
         _pr_curve[i, 0] = pr_curve[i, 1] / pr_curve[i, 0]
@@ -179,6 +208,16 @@ def dataset_pr_info(thresh_num, pr_curve, count_face):
 
 
 def voc_ap(rec, prec):
+    """
+    Compute VOC Average Precision (AP).
+
+    Args:
+        rec (np.ndarray): Recall values.
+        prec (np.ndarray): Precision values.
+
+    Returns:
+        float: Computed Average Precision.
+    """
     # correct AP calculation
     # first append sentinel values at the end
     mrec = np.concatenate((np.array([0.0]), rec, np.array([1.0])))
@@ -198,6 +237,17 @@ def voc_ap(rec, prec):
 
 
 def evaluation(pred, gt_path, iou_thresh=0.5):
+    """
+    Evaluate predictions against WiderFace ground truth.
+
+    Args:
+        pred (dict): Dictionary of predictions for each event and image.
+        gt_path (str): Path to the ground truth directory.
+        iou_thresh (float, optional): IoU threshold for evaluation. Defaults to 0.5.
+
+    Returns:
+        list: List of AP values for [Easy, Medium, Hard] settings.
+    """
     (
         facebox_list,
         event_list,

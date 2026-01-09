@@ -25,6 +25,15 @@ class CenterCrop(PreOps):
             self.size = [size, size]
 
     def __call__(self, x: Union[TensorLike, Image.Image]):
+        """
+        Center crop the image.
+
+        Args:
+            x (Union[TensorLike, Image.Image]): Image to be cropped.
+
+        Returns:
+            np.ndarray: The center-cropped image.
+        """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         elif isinstance(x, Image.Image):

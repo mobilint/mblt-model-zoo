@@ -13,10 +13,29 @@ TASKS = [
 
 
 def list_tasks():
+    """
+    List the supported vision tasks.
+
+    Returns:
+        List[str]: A list of supported task names.
+    """
     return TASKS
 
 
-def list_models(tasks: Union[str, List[str]] = TASKS):
+def list_models(tasks: Union[str, List[str]] = None):
+    """
+    List available models for the specified tasks.
+
+    Args:
+        tasks (Union[str, List[str]], optional): The task or list of tasks to query.
+            Defaults to all TASKS.
+
+    Returns:
+        Dict[str, List[str]]: A dictionary mapping task names to lists of available model names.
+    """
+    if tasks is None:
+        tasks = TASKS
+
     if isinstance(tasks, str):
         tasks = [tasks]
     assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"

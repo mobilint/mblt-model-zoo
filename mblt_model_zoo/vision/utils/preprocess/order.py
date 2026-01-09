@@ -19,6 +19,18 @@ class SetOrder(PreOps):
         self.shape = shape
 
     def __call__(self, x: TensorLike):
+        """
+        Set the channel order of the image.
+
+        Args:
+            x (TensorLike): The image tensor or array.
+
+        Returns:
+            TensorLike: The image with the specified channel order.
+
+        Raises:
+            ValueError: If the input shape is not HWC or CHW with 3 channels.
+        """
         assert x.ndim == 3, "Assume that x is a color image"
         if x.shape[0] == 3:
             cdim = 0

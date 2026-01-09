@@ -181,7 +181,18 @@ def ResNext50_32x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the ResNext50_32x4d model for image classification."""
+    """
+    Load the ResNext50_32x4d model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext50_32x4d_Set,
         local_path=local_path,
@@ -197,7 +208,18 @@ def ResNext101_32x8d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the ResNext101_32x8d model for image classification."""
+    """
+    Load the ResNext101_32x8d model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext101_32x8d_Set,
         local_path=local_path,
@@ -213,7 +235,18 @@ def ResNext101_64x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the ResNext101_64x4d model for image classification."""
+    """
+    Load the ResNext101_64x4d model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext101_64x4d_Set,
         local_path=local_path,

@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
+    """DeiT3_Small_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -35,6 +37,8 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
 
 
 class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
+    """DeiT3_Small_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -67,6 +71,8 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
 
 
 class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
+    """DeiT3_Medium_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -99,6 +105,8 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
 
 
 class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
+    """DeiT3_Base_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -131,6 +139,8 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
 
 
 class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
+    """DeiT3_Base_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -163,6 +173,8 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
 
 
 class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
+    """DeiT3_Large_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -195,6 +207,8 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
 
 
 class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
+    """DeiT3_Large_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -232,6 +246,18 @@ def DeiT3_Small_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Small_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Small_Patch16_224_Set,
         local_path=local_path,
@@ -247,6 +273,18 @@ def DeiT3_Small_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Small_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Small_Patch16_384_Set,
         local_path=local_path,
@@ -262,6 +300,18 @@ def DeiT3_Medium_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Medium_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Medium_Patch16_224_Set,
         local_path=local_path,
@@ -277,6 +327,18 @@ def DeiT3_Base_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Base_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Base_Patch16_224_Set,
         local_path=local_path,
@@ -292,6 +354,18 @@ def DeiT3_Base_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Base_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Base_Patch16_384_Set,
         local_path=local_path,
@@ -307,6 +381,18 @@ def DeiT3_Large_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Large_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Large_Patch16_224_Set,
         local_path=local_path,
@@ -322,6 +408,18 @@ def DeiT3_Large_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the DeiT3_Large_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Large_Patch16_384_Set,
         local_path=local_path,

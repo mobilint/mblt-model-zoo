@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLO11nPose_Set(ModelInfoSet):
+    """Model information set for YOLO11n-pose."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -36,6 +38,8 @@ class YOLO11nPose_Set(ModelInfoSet):
 
 
 class YOLO11sPose_Set(ModelInfoSet):
+    """Model information set for YOLO11s-pose."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -69,6 +73,8 @@ class YOLO11sPose_Set(ModelInfoSet):
 
 
 class YOLO11mPose_Set(ModelInfoSet):
+    """Model information set for YOLO11m-pose."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -102,6 +108,8 @@ class YOLO11mPose_Set(ModelInfoSet):
 
 
 class YOLO11lPose_Set(ModelInfoSet):
+    """Model information set for YOLO11l-pose."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -135,6 +143,8 @@ class YOLO11lPose_Set(ModelInfoSet):
 
 
 class YOLO11xPose_Set(ModelInfoSet):
+    """Model information set for YOLO11x-pose."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -173,6 +183,18 @@ def YOLO11nPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Create an MBLT_Engine for YOLO11n-pose.
+
+    Args:
+        local_path (str, optional): Path to local model file.
+        model_type (str): Type of model (e.g., 'DEFAULT').
+        infer_mode (str): Inference mode (e.g., 'global').
+        product (str): Target product (e.g., 'aries').
+
+    Returns:
+        MBLT_Engine: The pose estimation engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLO11nPose_Set,
         local_path=local_path,
@@ -188,6 +210,18 @@ def YOLO11sPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Create an MBLT_Engine for YOLO11s-pose.
+
+    Args:
+        local_path (str, optional): Path to local model file.
+        model_type (str): Type of model (e.g., 'DEFAULT').
+        infer_mode (str): Inference mode (e.g., 'global').
+        product (str): Target product (e.g., 'aries').
+
+    Returns:
+        MBLT_Engine: The pose estimation engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLO11sPose_Set,
         local_path=local_path,
@@ -203,6 +237,18 @@ def YOLO11mPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Create an MBLT_Engine for YOLO11m-pose.
+
+    Args:
+        local_path (str, optional): Path to local model file.
+        model_type (str): Type of model (e.g., 'DEFAULT').
+        infer_mode (str): Inference mode (e.g., 'global').
+        product (str): Target product (e.g., 'aries').
+
+    Returns:
+        MBLT_Engine: The pose estimation engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLO11mPose_Set,
         local_path=local_path,
@@ -218,6 +264,18 @@ def YOLO11lPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Create an MBLT_Engine for YOLO11l-pose.
+
+    Args:
+        local_path (str, optional): Path to local model file.
+        model_type (str): Type of model (e.g., 'DEFAULT').
+        infer_mode (str): Inference mode (e.g., 'global').
+        product (str): Target product (e.g., 'aries').
+
+    Returns:
+        MBLT_Engine: The pose estimation engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLO11lPose_Set,
         local_path=local_path,
@@ -233,6 +291,18 @@ def YOLO11xPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Create an MBLT_Engine for YOLO11x-pose.
+
+    Args:
+        local_path (str, optional): Path to local model file.
+        model_type (str): Type of model (e.g., 'DEFAULT').
+        infer_mode (str): Inference mode (e.g., 'global').
+        product (str): Target product (e.g., 'aries').
+
+    Returns:
+        MBLT_Engine: The pose estimation engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLO11xPose_Set,
         local_path=local_path,

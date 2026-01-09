@@ -16,7 +16,29 @@ from .utils.types import ModelInfoSet, TensorLike
 
 
 class MBLT_Engine:
+    """
+    Engine for running MBLT models, handling preprocessing, inference, and postprocessing.
+
+    This class wraps the underlying MXQ model and provides a unified interface for
+    running inference with associated pre- and post-processing steps.
+
+    Attributes:
+        model_cfg (dict): Configuration for the model.
+        pre_cfg (dict): Configuration for preprocessing.
+        post_cfg (dict): Configuration for postprocessing.
+        model (MXQ_Model): The underlying MXQ model instance.
+        device (torch.device): The device to run preprocessing/postprocessing on.
+    """
+
     def __init__(self, model_cfg: dict, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the MBLT_Engine.
+
+        Args:
+            model_cfg (dict): Configuration dictionary for the model.
+            pre_cfg (dict): Configuration dictionary for preprocessing.
+            post_cfg (dict): Configuration dictionary for postprocessing.
+        """
         self.model_cfg = model_cfg
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
@@ -35,7 +57,17 @@ class MBLT_Engine:
         product: str = "aries",
     ):
         """
-        Create an instance of the model from a ModelInfoSet.
+        Create an instance of MBLT_Engine from a ModelInfoSet.
+
+        Args:
+            model_info_set (ModelInfoSet): The set of model information.
+            local_path (str, optional): Path to the local model file. Defaults to None.
+            model_type (str, optional): The type of model to load. Defaults to "DEFAULT".
+            infer_mode (str, optional): The inference mode to use. Defaults to "global".
+            product (str, optional): The target product. Defaults to "aries".
+
+        Returns:
+            MBLT_Engine: An initialized MBLT_Engine instance.
         """
 
         assert (
@@ -63,16 +95,51 @@ class MBLT_Engine:
         return cls(model_cfg, pre_cfg, post_cfg)
 
     def __call__(self, x: TensorLike):
+        """
+        Run inference on the input.
+
+        Args:
+            x (TensorLike): Input tensor or array.
+
+        Returns:
+            Any: The output of the model.
+        """
         return self.model(x)
 
     def preprocess(self, x, **kwargs):
+        """
+        Preprocess the input.
+
+        Args:
+            x: Input data.
+            **kwargs: Additional arguments for preprocessing.
+
+        Returns:
+            Any: Preprocessed data.
+        """
         return self._preprocess(x, **kwargs)
 
     def postprocess(self, x, **kwargs):
+        """
+        Postprocess the model output.
+
+        Args:
+            x: Model output data.
+            **kwargs: Additional arguments for postprocessing.
+
+        Returns:
+            Results: processed results.
+        """
         pre_result = self._postprocess(x, **kwargs)
         return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
 
     def to(self, device: Union[str, torch.device]):
+        """
+        Move the preprocessing and postprocessing modules to the specified device.
+
+        Args:
+            device (Union[str, torch.device]): The target device (e.g., 'cpu', 'cuda:0').
+        """
         self._preprocess.to(device)
         self._postprocess.to(device)
 
@@ -84,12 +151,20 @@ class MBLT_Engine:
             raise TypeError(f"Got unexpected type for device={type(device)}.")
 
     def cpu(self):
+        """Move the modules to CPU."""
         self.to(device="cpu")
 
     def gpu(self):
+        """Move the modules to GPU (CUDA)."""
         self.to(device="cuda")
 
     def cuda(self, device: Union[str, int] = 0):
+        """
+        Move the modules to the specified CUDA device.
+
+        Args:
+            device (Union[str, int], optional): The CUDA device index or string. Defaults to 0.
+        """
         if isinstance(device, int):
             device = f"cuda:{device}"
         elif isinstance(device, str):
@@ -101,10 +176,17 @@ class MBLT_Engine:
         self.to(device=device)
 
     def dispose(self):
+        """Dispose of the model resources."""
         self.model.dispose()
 
 
 class MXQ_Model:
+    """
+    Wrapper for the MXQ model.
+
+    Handles model loading, core allocation, and inference execution on the accelerator.
+    """
+
     def __init__(
         self,
         url_dict,
@@ -112,6 +194,15 @@ class MXQ_Model:
         infer_mode: str = "global",
         product: str = "aries",
     ):
+        """
+        Initialize the MXQ_Model.
+
+        Args:
+            url_dict (dict): Dictionary mapping products/modes to model URLs.
+            local_path (str, optional): Path to local model file. Defaults to None.
+            infer_mode (str, optional): Inference mode. Defaults to "global".
+            product (str, optional): Target product. Defaults to "aries".
+        """
         self.infer_mode = infer_mode
         self.product = product
         if self.product not in url_dict.keys():  # execption handling
@@ -183,6 +274,15 @@ class MXQ_Model:
         self.model.launch(self.acc)
 
     def __call__(self, x: TensorLike):
+        """
+        Run inference on the input.
+
+        Args:
+            x (TensorLike): Input data, can be numpy array or torch tensor.
+
+        Returns:
+            numpy.ndarray: Inference results from the NPU.
+        """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         assert isinstance(x, np.ndarray), "Input should be a numpy array"
@@ -191,5 +291,5 @@ class MXQ_Model:
         return npu_outs
 
     def dispose(self):
-        """Dispose the model."""
+        """Dispose the model resources."""
         self.model.dispose()

@@ -17,10 +17,23 @@ class YoloPre(PreOps):
     """
 
     def __init__(self, img_size: List[int]):
+        """
+        Args:
+            img_size (List[int]): Target image size [height, width].
+        """
         super().__init__()
         self.img_size = img_size
 
     def __call__(self, x: TensorLike):
+        """
+        Preprocess the input image.
+
+        Args:
+            x (TensorLike): Input image tensor or numpy array (H, W, C).
+
+        Returns:
+            torch.Tensor: Preprocessed image tensor (C, H, W).
+        """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         img = x

@@ -6,11 +6,19 @@ from .common import non_max_suppression, xywh2xyxy
 
 class YOLOAnchorPost(YOLOPostBase):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the YOLOAnchorPost class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__(pre_cfg, post_cfg)
         self.no = self.nc + 5 + self.n_extra
         self.make_anchor_grid()
 
     def make_anchor_grid(self):
+        """Build the anchor grids for each output level."""
         self.grid, self.anchor_grid, self.stride = [], [], []
 
         strides = [2 ** (3 + i) for i in range(self.nl)]
@@ -48,6 +56,15 @@ class YOLOAnchorPost(YOLOPostBase):
         ).to(self.device)
 
     def rearrange(self, x):
+        """
+        Rearrange raw output tensors for anchored YOLO.
+
+        Args:
+            x (list): Raw model output tensors.
+
+        Returns:
+            list: Rearranged tensors, sorted by size.
+        """
         y = []
         for xi in x:
             if xi.ndim == 3:
@@ -65,6 +82,15 @@ class YOLOAnchorPost(YOLOPostBase):
         return y
 
     def decode(self, x):
+        """
+        Decode the rearranged tensors into box and class predictions.
+
+        Args:
+            x (list): Rearranged tensors.
+
+        Returns:
+            list: Decoded detections for each image.
+        """
         x = torch.cat(
             [
                 xi.reshape(xi.shape[0], self.na, self.no, xi.shape[2], xi.shape[3])
@@ -102,6 +128,18 @@ class YOLOAnchorPost(YOLOPostBase):
         return y
 
     def nms(self, x, max_det=300, max_nms=30000, max_wh=7680):
+        """
+        Apply Non-Maximum Suppression (NMS) to the decoded detections.
+
+        Args:
+            x (list): Decoded detections.
+            max_det (int): Maximum number of detections to return per image.
+            max_nms (int): Maximum number of boxes to consider for NMS.
+            max_wh (int): Maximum box width and height (used for offset).
+
+        Returns:
+            list: NMS-filtered detections.
+        """
         mi = 5 + self.nc  # mask index
         output = []
         for xi in x:
@@ -142,6 +180,17 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
         super().__init__(pre_cfg, post_cfg)
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """
+        Run the full YOLO Anchor Segment post-processing pipeline.
+
+        Args:
+            x (list): Raw model output.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold for NMS.
+
+        Returns:
+            list: List of [detections, masks] for each image.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x, proto_outs = self.rearrange(x)
@@ -150,6 +199,18 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
         return self.masking(x, proto_outs)
 
     def rearrange(self, x):
+        """
+        Rearrange raw output tensors for anchored YOLO segmentation.
+
+        Args:
+            x (list): Raw model output tensors.
+
+        Returns:
+            tuple: (rearranged_tensors, prototype_output)
+
+        Raises:
+            ValueError: If prototype output is missing.
+        """
         proto_exist = False
         for i, xi in enumerate(x):
             if xi.ndim == 3:

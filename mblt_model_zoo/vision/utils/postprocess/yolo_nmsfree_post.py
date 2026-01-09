@@ -6,12 +6,31 @@ from .yolo_anchorless_post import YOLOAnchorlessPost
 
 class YOLONMSFreePost(YOLOAnchorlessPost):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the YOLONMSFreePost class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+
+        Raises:
+            AssertionError: If n_extra is not 0 (YOLOv10 is only for detection).
+        """
         super().__init__(pre_cfg, post_cfg)
         assert (
             self.n_extra == 0
         ), "YOLOv10 is not implemented for segmentation, pose estimation"
 
     def decode(self, x):
+        """
+        Decode the rearranged tensors into box and class predictions (top-k based).
+
+        Args:
+            x (list): Rearranged tensors.
+
+        Returns:
+            list: Decoded and filtered detections for each image.
+        """
         batch_box_cls = torch.cat(x, axis=-1)  # (b, no=144, 8400)
 
         y = []
@@ -78,5 +97,16 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
         return y
 
-    def nms(self, x, *args, **kwargs):  # Do nothing on NMS Free model
+    def nms(self, x, *_args, **_kwargs):
+        """
+        NMS-free post-processing (just returns the input as boxes are already filtered).
+
+        Args:
+            x: Decoded detections.
+            *_args: Placeholder arguments.
+            **_kwargs: Placeholder arguments.
+
+        Returns:
+            list: Input detections.
+        """
         return x

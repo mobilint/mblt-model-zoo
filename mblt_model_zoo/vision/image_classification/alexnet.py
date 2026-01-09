@@ -43,7 +43,18 @@ def AlexNet(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the AlexNet model for image classification."""
+    """
+    Load the AlexNet model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         AlexNet_Set,
         local_path=local_path,

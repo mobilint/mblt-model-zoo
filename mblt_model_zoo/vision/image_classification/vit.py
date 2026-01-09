@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
+    """ViT_Tiny_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -35,6 +37,8 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
 
 
 class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
+    """ViT_Tiny_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -67,6 +71,8 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
 
 
 class ViT_Small_Patch16_224_Set(ModelInfoSet):
+    """ViT_Small_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -99,6 +105,8 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
 
 
 class ViT_Small_Patch16_384_Set(ModelInfoSet):
+    """ViT_Small_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -131,6 +139,8 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
 
 
 class ViT_Small_Patch32_224_Set(ModelInfoSet):
+    """ViT_Small_Patch32_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -163,6 +173,8 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
 
 
 class ViT_Small_Patch32_384_Set(ModelInfoSet):
+    """ViT_Small_Patch32_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -195,6 +207,8 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
 
 
 class ViT_Base_Patch8_224_Set(ModelInfoSet):
+    """ViT_Base_Patch8_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -227,6 +241,8 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
 
 
 class ViT_Base_Patch16_224_Set(ModelInfoSet):
+    """ViT_Base_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -259,6 +275,8 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
 
 
 class ViT_Base_Patch16_384_Set(ModelInfoSet):
+    """ViT_Base_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -291,6 +309,8 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
 
 
 class ViT_Base_Patch32_224_Set(ModelInfoSet):
+    """ViT_Base_Patch32_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -323,6 +343,8 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
 
 
 class ViT_Base_Patch32_384_Set(ModelInfoSet):
+    """ViT_Base_Patch32_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -355,6 +377,8 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
 
 
 class ViT_Large_Patch16_224_Set(ModelInfoSet):
+    """ViT_Large_Patch16_224 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -387,6 +411,8 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
 
 
 class ViT_Large_Patch16_384_Set(ModelInfoSet):
+    """ViT_Large_Patch16_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -419,6 +445,8 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
 
 
 class ViT_Large_Patch32_384_Set(ModelInfoSet):
+    """ViT_Large_Patch32_384 model info set."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -456,6 +484,18 @@ def ViT_Tiny_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Tiny_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Tiny_Patch16_224_Set,
         local_path=local_path,
@@ -471,6 +511,18 @@ def ViT_Tiny_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Tiny_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Tiny_Patch16_384_Set,
         local_path=local_path,
@@ -486,6 +538,18 @@ def ViT_Small_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Small_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Small_Patch16_224_Set,
         local_path=local_path,
@@ -501,6 +565,18 @@ def ViT_Small_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Small_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Small_Patch16_384_Set,
         local_path=local_path,
@@ -516,6 +592,18 @@ def ViT_Small_Patch32_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Small_Patch32_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Small_Patch32_224_Set,
         local_path=local_path,
@@ -531,6 +619,18 @@ def ViT_Small_Patch32_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Small_Patch32_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Small_Patch32_384_Set,
         local_path=local_path,
@@ -546,6 +646,18 @@ def ViT_Base_Patch8_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Base_Patch8_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Base_Patch8_224_Set,
         local_path=local_path,
@@ -561,6 +673,18 @@ def ViT_Base_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Base_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Base_Patch16_224_Set,
         local_path=local_path,
@@ -576,6 +700,18 @@ def ViT_Base_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Base_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Base_Patch16_384_Set,
         local_path=local_path,
@@ -591,6 +727,18 @@ def ViT_Base_Patch32_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Base_Patch32_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Base_Patch32_224_Set,
         local_path=local_path,
@@ -606,6 +754,18 @@ def ViT_Base_Patch32_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Base_Patch32_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Base_Patch32_384_Set,
         local_path=local_path,
@@ -621,6 +781,18 @@ def ViT_Large_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Large_Patch16_224 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Large_Patch16_224_Set,
         local_path=local_path,
@@ -636,6 +808,18 @@ def ViT_Large_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Large_Patch16_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Large_Patch16_384_Set,
         local_path=local_path,
@@ -651,6 +835,18 @@ def ViT_Large_Patch32_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the ViT_Large_Patch32_384 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         ViT_Large_Patch32_384_Set,
         local_path=local_path,

@@ -20,6 +20,19 @@ class Reader(PreOps):
         self.style = style.lower()
 
     def __call__(self, x: Union[str, TensorLike, Image.Image]):
+        """
+        Read the image and convert it to the specified style (numpy or PIL).
+
+        Args:
+            x (Union[str, TensorLike, Image.Image]): Image source (path, tensor, or PIL image).
+
+        Returns:
+            Union[np.ndarray, Image.Image]: The processed image.
+
+        Raises:
+            ValueError: If the input type is unsupported.
+            NotImplementedError: If the style is unsupported.
+        """
         if self.style == "numpy":
             if isinstance(x, np.ndarray):
                 return x

@@ -26,6 +26,13 @@ class Resize(PreOps):
         size: Union[int, List[int]],
         interpolation: str,
     ):
+        """
+        Initialize the Resize operation.
+
+        Args:
+            size (Union[int, List[int]]): Target size. If int, the shorter side is matched.
+            interpolation (str): Interpolation mode (e.g., 'bilinear', 'nearest').
+        """
         # Note that this behaves different for npy image and PIL image
         super().__init__()
         self.size = size  # h, w
@@ -86,6 +93,16 @@ class Resize(PreOps):
             raise TypeError(f"Got unexpected type for x={type(x)}.")
 
     def _compute_resized_output_size(self, img_h: int, img_w: int):
+        """
+        Compute the output size for resizing while maintaining aspect ratio if needed.
+
+        Args:
+            img_h (int): Original image height.
+            img_w (int): Original image width.
+
+        Returns:
+            list: [new_h, new_w]
+        """
         if isinstance(self.size, int):
             # to match the shortest side to self.size with the same ratio
             ratio = max(self.size / img_h, self.size / img_w)
@@ -101,6 +118,16 @@ class Resize(PreOps):
     def _cast_squeeze_in(
         self, img: torch.Tensor, req_dtypes: List[torch.dtype]
     ) -> Tuple[torch.Tensor, bool, bool, torch.dtype]:
+        """
+        Prepare the input tensor for interpolation (add batch dim, cast if needed).
+
+        Args:
+            img (torch.Tensor): Input image tensor.
+            req_dtypes (List[torch.dtype]): Required dtypes for interpolation.
+
+        Returns:
+            tuple: (processed_img, need_cast, need_squeeze, original_dtype)
+        """
         need_squeeze = False
         # make image NCHW
         if img.ndim < 4:
@@ -122,6 +149,18 @@ class Resize(PreOps):
         need_squeeze: bool,
         out_dtype: torch.dtype,
     ) -> torch.Tensor:
+        """
+        Post-process the output tensor (remove batch dim, cast back to original dtype).
+
+        Args:
+            img (torch.Tensor): Output image tensor from interpolation.
+            need_cast (bool): Whether the image was cast during pre-processing.
+            need_squeeze (bool): Whether a batch dimension was added.
+            out_dtype (torch.dtype): Original data type.
+
+        Returns:
+            torch.Tensor: The post-processed image tensor.
+        """
         if need_squeeze:
             img = img.squeeze(dim=0)
 

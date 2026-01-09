@@ -7,6 +7,17 @@ from ..dataloader import CustomImageFolder, get_imagenet_loader
 
 
 def eval_imagenet(model, data_path, batch_size):
+    """
+    Evaluate a model on the ImageNet dataset.
+
+    Args:
+        model: The model to evaluate.
+        data_path (str): Path to the ImageNet data.
+        batch_size (int): Batch size for evaluation.
+
+    Returns:
+        float: Top-1 accuracy of the model.
+    """
 
     dataset = CustomImageFolder(data_path)
     dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)

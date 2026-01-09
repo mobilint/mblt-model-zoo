@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class RegNet_X_400MF_Set(ModelInfoSet):
+    """RegNet_X_400MF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -65,6 +67,8 @@ class RegNet_X_400MF_Set(ModelInfoSet):
 
 
 class RegNet_X_800MF_Set(ModelInfoSet):
+    """RegNet_X_800MF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -127,6 +131,8 @@ class RegNet_X_800MF_Set(ModelInfoSet):
 
 
 class RegNet_X_1_6GF_Set(ModelInfoSet):
+    """RegNet_X_1_6GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -189,6 +195,8 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
 
 
 class RegNet_X_3_2GF_Set(ModelInfoSet):
+    """RegNet_X_3_2GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -251,6 +259,8 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
 
 
 class RegNet_X_8GF_Set(ModelInfoSet):
+    """RegNet_X_8GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -313,6 +323,8 @@ class RegNet_X_8GF_Set(ModelInfoSet):
 
 
 class RegNet_X_16GF_Set(ModelInfoSet):
+    """RegNet_X_16GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -375,6 +387,8 @@ class RegNet_X_16GF_Set(ModelInfoSet):
 
 
 class RegNet_X_32GF_Set(ModelInfoSet):
+    """RegNet_X_32GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -437,6 +451,8 @@ class RegNet_X_32GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_400MF_Set(ModelInfoSet):
+    """RegNet_Y_400MF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -499,6 +515,8 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
 
 
 class RegNet_Y_800MF_Set(ModelInfoSet):
+    """RegNet_Y_800MF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -561,6 +579,8 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
 
 
 class RegNet_Y_1_6GF_Set(ModelInfoSet):
+    """RegNet_Y_1_6GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -623,6 +643,8 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_3_2GF_Set(ModelInfoSet):
+    """RegNet_Y_3_2GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -685,6 +707,8 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_8GF_Set(ModelInfoSet):
+    """RegNet_Y_8GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -747,6 +771,8 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_16GF_Set(ModelInfoSet):
+    """RegNet_Y_16GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -809,6 +835,8 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_32GF_Set(ModelInfoSet):
+    """RegNet_Y_32GF model info set."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -876,6 +904,18 @@ def RegNet_X_400MF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_400MF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_400MF_Set,
         local_path=local_path,
@@ -891,6 +931,18 @@ def RegNet_X_800MF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_800MF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_800MF_Set,
         local_path=local_path,
@@ -906,6 +958,18 @@ def RegNet_X_1_6GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_1_6GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_1_6GF_Set,
         local_path=local_path,
@@ -921,6 +985,18 @@ def RegNet_X_3_2GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_3_2GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_3_2GF_Set,
         local_path=local_path,
@@ -936,6 +1012,18 @@ def RegNet_X_8GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_8GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_8GF_Set,
         local_path=local_path,
@@ -951,6 +1039,18 @@ def RegNet_X_16GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_16GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_16GF_Set,
         local_path=local_path,
@@ -966,6 +1066,18 @@ def RegNet_X_32GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_X_32GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_X_32GF_Set,
         local_path=local_path,
@@ -981,6 +1093,18 @@ def RegNet_Y_400MF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_400MF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_400MF_Set,
         local_path=local_path,
@@ -996,6 +1120,18 @@ def RegNet_Y_800MF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_800MF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_800MF_Set,
         local_path=local_path,
@@ -1011,6 +1147,18 @@ def RegNet_Y_1_6GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_1_6GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_1_6GF_Set,
         local_path=local_path,
@@ -1026,6 +1174,18 @@ def RegNet_Y_3_2GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_3_2GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_3_2GF_Set,
         local_path=local_path,
@@ -1041,6 +1201,18 @@ def RegNet_Y_8GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_8GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_8GF_Set,
         local_path=local_path,
@@ -1056,6 +1228,18 @@ def RegNet_Y_16GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_16GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_16GF_Set,
         local_path=local_path,
@@ -1071,6 +1255,18 @@ def RegNet_Y_32GF(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the RegNet_Y_32GF model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1", "IMAGENET1K_V2"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         RegNet_Y_32GF_Set,
         local_path=local_path,

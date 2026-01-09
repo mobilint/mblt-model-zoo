@@ -103,6 +103,14 @@ def nmsout2eval_pose(nms_out, img1_shape, img0_shape):
 
 
 def eval_coco(model, data_path, batch_size):
+    """
+    Evaluate a model on the COCO dataset.
+
+    Args:
+        model: The model to evaluate.
+        data_path (str): Path to the COCO data.
+        batch_size (int): Batch size for evaluation.
+    """
 
     if model.post_cfg["task"] in ["object_detection", "instance_segmentation"]:
         dataset = CustomCocodata(

@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class YOLOv5n_Set(ModelInfoSet):
+    """YOLOv5n model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -39,6 +41,8 @@ class YOLOv5n_Set(ModelInfoSet):
 
 
 class YOLOv5nu_Set(ModelInfoSet):
+    """YOLOv5nu model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -71,6 +75,8 @@ class YOLOv5nu_Set(ModelInfoSet):
 
 
 class YOLOv5n6_Set(ModelInfoSet):
+    """YOLOv5n6 model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -108,6 +114,8 @@ class YOLOv5n6_Set(ModelInfoSet):
 
 
 class YOLOv5n6u_Set(ModelInfoSet):
+    """YOLOv5n6u model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -140,6 +148,8 @@ class YOLOv5n6u_Set(ModelInfoSet):
 
 
 class YOLOv5s_Set(ModelInfoSet):
+    """YOLOv5s model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -176,6 +186,8 @@ class YOLOv5s_Set(ModelInfoSet):
 
 
 class YOLOv5s6_Set(ModelInfoSet):
+    """YOLOv5s6 model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -213,6 +225,8 @@ class YOLOv5s6_Set(ModelInfoSet):
 
 
 class YOLOv5su_Set(ModelInfoSet):
+    """YOLOv5su model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -245,6 +259,8 @@ class YOLOv5su_Set(ModelInfoSet):
 
 
 class YOLOv5s6u_Set(ModelInfoSet):
+    """YOLOv5s6u model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -277,6 +293,8 @@ class YOLOv5s6u_Set(ModelInfoSet):
 
 
 class YOLOv5m_Set(ModelInfoSet):
+    """YOLOv5m model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -313,6 +331,8 @@ class YOLOv5m_Set(ModelInfoSet):
 
 
 class YOLOv5m6_Set(ModelInfoSet):
+    """YOLOv5m6 model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -350,6 +370,8 @@ class YOLOv5m6_Set(ModelInfoSet):
 
 
 class YOLOv5mu_Set(ModelInfoSet):
+    """YOLOv5mu model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -382,6 +404,8 @@ class YOLOv5mu_Set(ModelInfoSet):
 
 
 class YOLOv5m6u_Set(ModelInfoSet):
+    """YOLOv5m6u model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -414,6 +438,8 @@ class YOLOv5m6u_Set(ModelInfoSet):
 
 
 class YOLOv5l_Set(ModelInfoSet):
+    """YOLOv5l model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -450,6 +476,8 @@ class YOLOv5l_Set(ModelInfoSet):
 
 
 class YOLOv5lu_Set(ModelInfoSet):
+    """YOLOv5lu model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -482,6 +510,8 @@ class YOLOv5lu_Set(ModelInfoSet):
 
 
 class YOLOv5l6_Set(ModelInfoSet):
+    """YOLOv5l6 model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -519,6 +549,8 @@ class YOLOv5l6_Set(ModelInfoSet):
 
 
 class YOLOv5l6u_Set(ModelInfoSet):
+    """YOLOv5l6u model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -551,6 +583,8 @@ class YOLOv5l6u_Set(ModelInfoSet):
 
 
 class YOLOv5x_Set(ModelInfoSet):
+    """YOLOv5x model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -587,6 +621,8 @@ class YOLOv5x_Set(ModelInfoSet):
 
 
 class YOLOv5xu_Set(ModelInfoSet):
+    """YOLOv5xu model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -619,6 +655,8 @@ class YOLOv5xu_Set(ModelInfoSet):
 
 
 class YOLOv5x6_Set(ModelInfoSet):
+    """YOLOv5x6 model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -656,6 +694,8 @@ class YOLOv5x6_Set(ModelInfoSet):
 
 
 class YOLOv5x6u_Set(ModelInfoSet):
+    """YOLOv5x6u model information set."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -693,6 +733,18 @@ def YOLOv5n(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5n model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5n_Set,
         local_path=local_path,
@@ -708,8 +760,20 @@ def YOLOv5nu(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5nu model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
-        YOLOv5n6_Set,
+        YOLOv5nu_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,
@@ -723,6 +787,18 @@ def YOLOv5n6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5n6 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5n6_Set,
         local_path=local_path,
@@ -738,6 +814,18 @@ def YOLOv5n6u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5n6u model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5n6u_Set,
         local_path=local_path,
@@ -753,6 +841,18 @@ def YOLOv5s(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5s model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5s_Set,
         local_path=local_path,
@@ -768,6 +868,18 @@ def YOLOv5su(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5su model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5su_Set,
         local_path=local_path,
@@ -783,6 +895,18 @@ def YOLOv5s6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5s6 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5s6_Set,
         local_path=local_path,
@@ -798,6 +922,18 @@ def YOLOv5s6u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5s6u model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5s6u_Set,
         local_path=local_path,
@@ -813,6 +949,18 @@ def YOLOv5m(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5m model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5m_Set,
         local_path=local_path,
@@ -828,6 +976,18 @@ def YOLOv5mu(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5mu model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5mu_Set,
         local_path=local_path,
@@ -843,6 +1003,18 @@ def YOLOv5m6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5m6 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5m6_Set,
         local_path=local_path,
@@ -858,6 +1030,18 @@ def YOLOv5m6u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5m6u model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5m6u_Set,
         local_path=local_path,
@@ -873,6 +1057,18 @@ def YOLOv5l(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5l model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5l_Set,
         local_path=local_path,
@@ -888,6 +1084,18 @@ def YOLOv5lu(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5lu model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5lu_Set,
         local_path=local_path,
@@ -903,6 +1111,18 @@ def YOLOv5l6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5l6 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5l6_Set,
         local_path=local_path,
@@ -918,6 +1138,18 @@ def YOLOv5l6u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5l6u model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5l6u_Set,
         local_path=local_path,
@@ -933,6 +1165,18 @@ def YOLOv5x(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5x model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5x_Set,
         local_path=local_path,
@@ -948,6 +1192,18 @@ def YOLOv5xu(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5xu model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5xu_Set,
         local_path=local_path,
@@ -963,6 +1219,18 @@ def YOLOv5x6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5x6 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5x6_Set,
         local_path=local_path,
@@ -978,6 +1246,18 @@ def YOLOv5x6u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Load the YOLOv5x6u model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "COCO_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv5x6u_Set,
         local_path=local_path,

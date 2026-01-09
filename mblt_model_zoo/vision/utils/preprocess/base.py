@@ -14,9 +14,24 @@ class PreOps(ABC):
 
     @abstractmethod
     def __call__(self, x):
+        """
+        Apply the operation to the input.
+
+        Args:
+            x: Input data.
+        """
         pass
 
     def to(self, device: Union[str, torch.device]):
+        """
+        Move the operation to the specified device.
+
+        Args:
+            device (Union[str, torch.device]): Device to move the operation to.
+
+        Raises:
+            TypeError: If the device type is unexpected.
+        """
         if isinstance(device, str):
             self.device = torch.device(device)
         elif isinstance(device, torch.device):

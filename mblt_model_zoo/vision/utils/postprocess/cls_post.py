@@ -8,10 +8,26 @@ from .base import PostBase
 
 
 class ClsPost(PostBase):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
+    def __init__(self, _pre_cfg: dict, _post_cfg: dict):
+        """
+        Initialize the ClsPost class.
+
+        Args:
+            _pre_cfg (dict): Preprocessing configuration.
+            _post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__()
 
     def __call__(self, x: Union[TensorLike, ListTensorLike]):
+        """
+        Apply softmax to classification outputs.
+
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Raw model output.
+
+        Returns:
+            torch.Tensor: Softmax probabilities.
+        """
         if isinstance(x, list):
             assert (
                 len(x) == 1

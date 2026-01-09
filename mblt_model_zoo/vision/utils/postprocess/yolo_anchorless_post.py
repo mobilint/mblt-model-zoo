@@ -7,6 +7,13 @@ from .common import dist2bbox, non_max_suppression
 
 class YOLOAnchorlessPost(YOLOPostBase):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the YOLOAnchorlessPost class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__(pre_cfg, post_cfg)
         self.make_anchors()
         self.reg_max = 16
@@ -16,6 +23,15 @@ class YOLOAnchorlessPost(YOLOPostBase):
         ).reshape(1, -1, 1, 1)
 
     def dfl(self, x):
+        """
+        Distribution Focal Loss (DFL) decoding.
+
+        Args:
+            x (torch.Tensor): Bounding box predictions.
+
+        Returns:
+            torch.Tensor: Decoded box coordinates.
+        """
         assert x.ndim == 3, "Assume that x is a 3d tensor"
         b, _, a = x.shape
         return F.conv2d(
@@ -23,9 +39,25 @@ class YOLOAnchorlessPost(YOLOPostBase):
         ).view(b, 4, a)
 
     def process_extra(self, x, ic):
+        """
+        Process extra outputs (e.g., masks, keypoints).
+
+        Args:
+            x: Raw extra outputs.
+            ic: Candidate indices.
+
+        Returns:
+            Processed extra outputs.
+        """
         return x
 
     def make_anchors(self, offset=0.5):
+        """
+        Generate anchor points and stride tensors.
+
+        Args:
+            offset (float, optional): Anchor point offset. Defaults to 0.5.
+        """
         anchor_points, stride_tensor = [], []
         strides = [2 ** (3 + i) for i in range(self.nl)]
         if self.nl == 2:
@@ -76,6 +108,15 @@ class YOLOAnchorlessPost(YOLOPostBase):
         return y
 
     def decode(self, x):
+        """
+        Decode the rearranged tensors into box and class predictions.
+
+        Args:
+            x (list): Rearranged tensors.
+
+        Returns:
+            list: Decoded detections for each image.
+        """
         batch_box_cls = torch.cat(x, axis=-1)  # (b, no=144, 8400)
 
         y = []
@@ -120,6 +161,18 @@ class YOLOAnchorlessPost(YOLOPostBase):
         return y
 
     def nms(self, x, max_det=300, max_nms=30000, max_wh=7680):
+        """
+        Apply Non-Maximum Suppression (NMS) to the decoded detections.
+
+        Args:
+            x (list): Decoded detections.
+            max_det (int): Maximum number of detections to return per image.
+            max_nms (int): Maximum number of boxes to consider for NMS.
+            max_wh (int): Maximum box width and height (used for offset).
+
+        Returns:
+            list: NMS-filtered detections.
+        """
         output = []
 
         for xi in x:
@@ -159,12 +212,30 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
 class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the YOLOAnchorlessSegPost class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__(
             pre_cfg,
             post_cfg,
         )
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """
+        Run the full YOLO Anchorless Segment post-processing pipeline.
+
+        Args:
+            x (list): Raw model output.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold for NMS.
+
+        Returns:
+            list: List of [detections, masks] for each image.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x, proto_outs = self.rearrange(x)
@@ -223,6 +294,13 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
         pre_cfg: dict,
         post_cfg: dict,
     ):
+        """
+        Initialize the YOLOAnchorlessPosePost class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__(pre_cfg, post_cfg)
 
     def rearrange(self, x):
@@ -272,6 +350,16 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
         return y
 
     def process_extra(self, kpt, ic):
+        """
+        Process keypoints for pose estimation.
+
+        Args:
+            kpt: Raw keypoint data.
+            ic: Candidate indices.
+
+        Returns:
+            torch.Tensor: Processed keypoints.
+        """
         kpt = kpt.squeeze(0)
         assert kpt.shape[0] == self.n_extra, "keypoint shape mismatch"
 

@@ -10,6 +10,18 @@ from .yolo_pre import YoloPre
 
 
 def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
+    """
+    Build a preprocessing pipeline from a configuration dictionary.
+
+    Args:
+        pre_cfg (OrderedDict): Configuration for preprocessing operations.
+
+    Returns:
+        PreBase: A pipeline object containing the ordered operations.
+
+    Raises:
+        ValueError: If an unsupported preprocessing type is encountered.
+    """
     res = []
     for pre_type, pre_attr in pre_cfg.items():
         pre_type_lower = pre_type.lower()

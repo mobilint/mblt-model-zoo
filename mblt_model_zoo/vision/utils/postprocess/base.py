@@ -10,11 +10,18 @@ from .common import process_mask_upsample
 
 class PostBase(ABC):
     def __init__(self):
+        """Initialize the PostBase class."""
         super().__init__()
         self.device = torch.device("cpu")
 
     @abstractmethod
     def __call__(self, x):
+        """
+        Apply post-processing to the input.
+
+        Args:
+            x: Raw model output.
+        """
         pass
 
     def to(self, device: Union[str, torch.device]):
@@ -37,6 +44,13 @@ class PostBase(ABC):
 
 class YOLOPostBase(PostBase):
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """
+        Initialize the YOLOPostBase class.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__()
         img_size = pre_cfg.get("YoloPre")["img_size"]
 
@@ -58,8 +72,22 @@ class YOLOPostBase(PostBase):
 
         self.n_extra = post_cfg.get("n_extra", 0)
         self.task = post_cfg.get("task")
+        self.conf_thres = 0.25
+        self.inv_conf_thres = 1 / self.conf_thres
+        self.iou_thres = 0.45
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """
+        Run the full YOLO post-processing pipeline.
+
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Raw model output.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): NMS IoU threshold.
+
+        Returns:
+            list: List of detections for each image in the batch.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x = self.rearrange(x)
@@ -68,6 +96,16 @@ class YOLOPostBase(PostBase):
         return x
 
     def set_threshold(self, conf_thres: float = None, iou_thres: float = None):
+        """
+        Set confidence and IoU thresholds.
+
+        Args:
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold for NMS.
+
+        Raises:
+            AssertionError: If thresholds are invalid or missing.
+        """
         assert (
             conf_thres is not None and iou_thres is not None
         ), "conf_thres and iou_thres should be provided in yolo_postprocess "
@@ -78,6 +116,15 @@ class YOLOPostBase(PostBase):
         self.iou_thres = iou_thres
 
     def check_input(self, x: Union[TensorLike, ListTensorLike]):
+        """
+        Validate and prepare the input for post-processing.
+
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Raw model output.
+
+        Returns:
+            list: List of torch.Tensors on the correct device.
+        """
         if isinstance(x, np.ndarray):
             x = [torch.from_numpy(x)]
         elif isinstance(x, torch.Tensor):
@@ -94,17 +141,45 @@ class YOLOPostBase(PostBase):
 
     @abstractmethod
     def rearrange(self, x):
+        """
+        Rearrange the input tensors for decoding.
+
+        Args:
+            x (ListTensorLike): Model output tensors.
+        """
         pass
 
     @abstractmethod
     def decode(self, x):
+        """
+        Decode the model outputs into boxes and scores.
+
+        Args:
+            x (ListTensorLike): Rearranged output tensors.
+        """
         pass
 
     @abstractmethod
     def nms(self, x):
+        """
+        Apply Non-Maximum Suppression (NMS) to the decoded detections.
+
+        Args:
+            x: Decoded detections.
+        """
         pass
 
     def masking(self, x, proto_outs):
+        """
+        Generate and apply masks for instance segmentation.
+
+        Args:
+            x: Post-processed detections.
+            proto_outs: Prototype outputs from the model.
+
+        Returns:
+            list: List of [detections, masks] for each image.
+        """
         masks = []
         for pred, proto in zip(x, proto_outs):
             if len(pred) == 0:

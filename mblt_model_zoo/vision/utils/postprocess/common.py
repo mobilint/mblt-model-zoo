@@ -7,7 +7,16 @@ import torch.nn.functional as F
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
-    # Convert bounding box coordinates from (cx, cy, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
+    """
+    Convert bounding box coordinates from (cx, cy, width, height) format to (x1, y1, x2, y2) format.
+    (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
+
+    Args:
+        x (Union[np.ndarray, torch.Tensor]): Bounding boxes in xywh format.
+
+    Returns:
+        Union[np.ndarray, torch.Tensor]: Bounding boxes in xyxy format.
+    """
     if isinstance(x, np.ndarray):
         y = np.copy(x)
     elif isinstance(x, torch.Tensor):
@@ -24,7 +33,16 @@ def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
 
 
 def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
-    # Convert bounding box coordinates from (x1, y1, x2, y2) format to (cx, cy, width, height) format where (cx, cy) is the center of the bounding box and width and height are the dimensions of the bounding box.
+    """
+    Convert bounding box coordinates from (x1, y1, x2, y2) format to (cx, cy, width, height) format.
+    (cx, cy) is the center of the bounding box and width and height are the dimensions.
+
+    Args:
+        x (Union[np.ndarray, torch.Tensor]): Bounding boxes in xyxy format.
+
+    Returns:
+        Union[np.ndarray, torch.Tensor]: Bounding boxes in xywh format.
+    """
     if isinstance(x, np.ndarray):
         y = np.copy(x)
     elif isinstance(x, torch.Tensor):
@@ -67,6 +85,16 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
 
 
 def clip_boxes(boxes, shape):
+    """
+    Clip bounding boxes to image shape.
+
+    Args:
+        boxes (torch.Tensor): Bounding boxes in xyxy format.
+        shape (tuple): Image shape (height, width).
+
+    Returns:
+        torch.Tensor: Clipped bounding boxes.
+    """
     boxes[..., 0] = boxes[..., 0].clamp(0, shape[1])
     boxes[..., 1] = boxes[..., 1].clamp(0, shape[0])
     boxes[..., 2] = boxes[..., 2].clamp(0, shape[1])
@@ -75,7 +103,16 @@ def clip_boxes(boxes, shape):
 
 
 def clip_coords(coords, shape):
-    """Clip coordinates to image shape."""
+    """
+    Clip coordinates to image shape.
+
+    Args:
+        coords (torch.Tensor): Coordinates in (x, y) format.
+        shape (tuple): Image shape (height, width).
+
+    Returns:
+        torch.Tensor: Clipped coordinates.
+    """
     coords[..., 0] = coords[..., 0].clamp(0, shape[1])
     coords[..., 1] = coords[..., 1].clamp(0, shape[0])
     return coords

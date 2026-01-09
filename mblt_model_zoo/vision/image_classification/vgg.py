@@ -3,6 +3,8 @@ from ..wrapper import MBLT_Engine
 
 
 class VGG11_Set(ModelInfoSet):
+    """VGG11 model for image classification."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -286,7 +288,18 @@ def VGG11(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG11 model for image classification."""
+    """
+    Load the VGG11 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG11_Set,
         local_path=local_path,
@@ -302,7 +315,18 @@ def VGG11_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG11_BN model for image classification."""
+    """
+    Load the VGG11_BN model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG11_BN_Set,
         local_path=local_path,
@@ -318,7 +342,18 @@ def VGG13(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG13 model for image classification."""
+    """
+    Load the VGG13 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG13_Set,
         local_path=local_path,
@@ -334,7 +369,18 @@ def VGG13_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG13_BN model for image classification."""
+    """
+    Load the VGG13_BN model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG13_BN_Set,
         local_path=local_path,
@@ -350,7 +396,18 @@ def VGG16(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG16 model for image classification."""
+    """
+    Load the VGG16 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG16_Set,
         local_path=local_path,
@@ -366,7 +423,18 @@ def VGG16_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG16_BN model for image classification."""
+    """
+    Load the VGG16_BN model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG16_BN_Set,
         local_path=local_path,
@@ -382,7 +450,18 @@ def VGG19(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG19 model for image classification."""
+    """
+    Load the VGG19 model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG19_Set,
         local_path=local_path,
@@ -398,7 +477,18 @@ def VGG19_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """Load the VGG19_BN model for image classification."""
+    """
+    Load the VGG19_BN model for the specified product and inference mode.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Generic model type (e.g., "DEFAULT", "IMAGENET1K_V1"). Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode ('single', 'multi', 'global', 'global4', 'global8'). Defaults to "global".
+        product (str, optional): Target product ('aries', 'regulus'). Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: An instance of the MBLT Engine configured for the specified model.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG19_BN_Set,
         local_path=local_path,

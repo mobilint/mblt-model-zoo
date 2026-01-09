@@ -32,6 +32,15 @@ class Results:
         output: Union[TensorLike, ListTensorLike],
         **kwargs,
     ):
+        """
+        Initialize the Results object.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+            **kwargs: Additional arguments, such as conf_thres.
+        """
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
@@ -39,6 +48,15 @@ class Results:
         self.conf_thres = kwargs.get("conf_thres", 0.25)
 
     def _read_image(self, source_path: Union[str, cv2.typing.MatLike, Image.Image]):
+        """
+        Read an image from various sources (path, numpy array, or PIL image).
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The image source.
+
+        Returns:
+            np.ndarray: The image in BGR format.
+        """
         source_img = None
 
         if isinstance(source_path, Image.Image):  # PIL image open
@@ -61,6 +79,16 @@ class Results:
         return source_img
 
     def set_output(self, output: Union[TensorLike, ListTensorLike]):
+        """
+        Set and parse the raw output based on the task type.
+
+        Args:
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+
+        Raises:
+            NotImplementedError: If the task is not supported.
+            ValueError: If the output format is unexpected.
+        """
         self.acc = None
         self.box_cls = None
         self.mask = None
@@ -103,6 +131,17 @@ class Results:
         save_path: str = None,
         **kwargs,
     ):
+        """
+        Plot the results on the source image.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The source image.
+            save_path (str, optional): Path to save the plotted image. Defaults to None.
+            **kwargs: Additional arguments for plotting.
+
+        Returns:
+            np.ndarray: The image with plotted results.
+        """
         if save_path is not None:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
@@ -126,6 +165,18 @@ class Results:
         topk=5,
         **kwargs,
     ):
+        """
+        Plot image classification results.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image], optional): The source image.
+            save_path (str, optional): Path to save the result.
+            topk (int, optional): Number of top results to show. Defaults to 5.
+            **kwargs: Additional arguments.
+
+        Returns:
+            np.ndarray: The image with results, if source_path is provided.
+        """
         assert self.acc is not None, "No accuracy output found."
         if isinstance(self.acc, np.ndarray):
             self.acc = torch.tensor(self.acc)
@@ -180,6 +231,17 @@ class Results:
         save_path: str = None,
         **kwargs,
     ):
+        """
+        Plot object detection results.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The source image.
+            save_path (str, optional): Path to save the result.
+            **kwargs: Additional arguments.
+
+        Returns:
+            np.ndarray: The image with results.
+        """
         assert self.box_cls.shape[1] == 6 + self.post_cfg.get(
             "n_extra", 0
         ), f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
@@ -238,6 +300,17 @@ class Results:
         save_path=None,
         **kwargs,
     ):
+        """
+        Plot instance segmentation results.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The source image.
+            save_path (str, optional): Path to save the result.
+            **kwargs: Additional arguments.
+
+        Returns:
+            np.ndarray: The image with results.
+        """
         img = self._plot_object_detection(source_path, None, **kwargs)
         masks = scale_image(self.mask.permute(1, 2, 0), img.shape[:2])
         overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
@@ -264,6 +337,17 @@ class Results:
         save_path=None,
         **kwargs,
     ):
+        """
+        Plot pose estimation results.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The source image.
+            save_path (str, optional): Path to save the result.
+            **kwargs: Additional arguments.
+
+        Returns:
+            np.ndarray: The image with results.
+        """
         img = self._plot_object_detection(source_path, None, **kwargs)
         self.kpts = scale_coords(
             self.pre_cfg["YoloPre"]["img_size"],
