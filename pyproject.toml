@@ -16,7 +16,7 @@ license = {text = "BSD-3-Clause"}
 requires-python = ">=3.9,<3.13"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
-    "maccel>=0.29.0, <=0.30.1",
+    "maccel",
     "numpy>=1.26.0",
     "torch>=2.4.1",
     "opencv-python>=4.11.0.86",
