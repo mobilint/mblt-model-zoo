@@ -42,3 +42,11 @@ Many tests are parameterized over multiple `mobilint/*` model IDs. Use `-k` to r
 ```bash
 pytest tests/transformers/AutoModelForCausalLM/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
 ```
+
+## Change mxq file
+
+You can change only mxq file with `--mxq-path` params. Only absolute path will work currently.
+
+```bash
+pytest tests/transformers/AutoModelForCausalLM/test_llama.py -s -k "Llama-3.2-1B-Instruct" --mxq-path "/home/mobilint/mblt-model-zoo/Llama-3.2-1B-Instruct.mxq"
+```
