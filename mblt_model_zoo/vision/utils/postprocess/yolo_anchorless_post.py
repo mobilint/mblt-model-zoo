@@ -1,3 +1,5 @@
+"""YOLO anchorless post-processing."""
+
 import torch
 import torch.nn.functional as F
 
@@ -6,6 +8,8 @@ from .common import dist2bbox, non_max_suppression
 
 
 class YOLOAnchorlessPost(YOLOPostBase):
+    """YOLO anchorless post-processing class."""
+
     def __init__(self, pre_cfg: dict, post_cfg: dict):
         """
         Initialize the YOLOAnchorlessPost class.
@@ -36,9 +40,11 @@ class YOLOAnchorlessPost(YOLOPostBase):
         b, _, a = x.shape
         return F.conv2d(
             x.view(b, 4, self.reg_max, a).transpose(2, 1).softmax(1), self.dfl_weight
-        ).view(b, 4, a)
+        ).view(
+            b, 4, a
+        )  # pylint: disable=not-callable
 
-    def process_extra(self, x, ic):
+    def process_extra(self, x, _):
         """
         Process extra outputs (e.g., masks, keypoints).
 
@@ -211,18 +217,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
 
 class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        """
-        Initialize the YOLOAnchorlessSegPost class.
-
-        Args:
-            pre_cfg (dict): Preprocessing configuration.
-            post_cfg (dict): Postprocessing configuration.
-        """
-        super().__init__(
-            pre_cfg,
-            post_cfg,
-        )
+    """YOLO anchorless segmentation post-processing."""
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
         """
@@ -289,19 +284,7 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
 
 
 class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
-    def __init__(
-        self,
-        pre_cfg: dict,
-        post_cfg: dict,
-    ):
-        """
-        Initialize the YOLOAnchorlessPosePost class.
-
-        Args:
-            pre_cfg (dict): Preprocessing configuration.
-            post_cfg (dict): Postprocessing configuration.
-        """
-        super().__init__(pre_cfg, post_cfg)
+    """YOLO anchorless pose estimation post-processing."""
 
     def rearrange(self, x):
         y_det = []
@@ -349,18 +332,18 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
 
         return y
 
-    def process_extra(self, kpt, ic):
+    def process_extra(self, x, ic):
         """
         Process keypoints for pose estimation.
 
         Args:
-            kpt: Raw keypoint data.
+            x: Raw keypoint data.
             ic: Candidate indices.
 
         Returns:
             torch.Tensor: Processed keypoints.
         """
-        kpt = kpt.squeeze(0)
+        kpt = x.squeeze(0)
         assert kpt.shape[0] == self.n_extra, "keypoint shape mismatch"
 
         kpt = kpt.reshape(17, 3, -1)

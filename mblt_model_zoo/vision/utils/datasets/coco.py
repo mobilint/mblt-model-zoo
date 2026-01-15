@@ -292,11 +292,11 @@ POSE_SKELETON = [
     [5, 7],
 ]
 
-LIMB_PALLETE = [
+LIMB_PALETTE = [
     POSE_PALETTE[i]
     for i in [9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]
 ]
-KEYPOINT_PALLETE = [
+KEYPOINT_PALETTE = [
     POSE_PALETTE[i] for i in [16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]
 ]
 
@@ -378,7 +378,7 @@ def get_coco_limb_palette(idx: int) -> list:
     Returns:
         list: The COCO limb palette.
     """
-    return LIMB_PALLETE[idx]
+    return LIMB_PALETTE[idx]
 
 
 def get_coco_keypoint_palette(idx: int) -> list:
@@ -390,4 +390,4 @@ def get_coco_keypoint_palette(idx: int) -> list:
     Returns:
         list: The COCO keypoint palette.
     """
-    return KEYPOINT_PALLETE[idx]
+    return KEYPOINT_PALETTE[idx]

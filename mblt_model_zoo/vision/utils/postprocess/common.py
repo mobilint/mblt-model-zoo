@@ -1,3 +1,5 @@
+"""Common postprocessing utilities."""
+
 from typing import Union
 
 import cv2
@@ -80,8 +82,7 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     x2y2 = anchor_points + rb
     if xywh:
         return torch.cat(((x1y1 + x2y2) / 2, x2y2 - x1y1), dim)  # xywh bbox
-    else:
-        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
 
 def clip_boxes(boxes, shape):
@@ -120,18 +121,22 @@ def clip_coords(coords, shape):
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True):
     """
-    Original Source: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L92
-    Rescales bounding boxes (in the format of xyxy) from the shape of the image they were originally specified in
-    (img1_shape) to the shape of a different image (img0_shape).
+    Original Source:
+    https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L92
+    Rescales bounding boxes (in the format of xyxy) from the shape of the image they were
+    originally specified in (img1_shape) to the shape of a different image (img0_shape).
 
     Args:
-        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
-        boxes (np.ndarray): the bounding boxes of the objects in the image, in the format of (x1, y1, x2, y2)
+        img1_shape (tuple): The shape of the image that the bounding boxes are for,
+            in the format of (height, width).
+        boxes (np.ndarray): the bounding boxes of the objects in the image,
+            in the format of (x1, y1, x2, y2)
         img0_shape (tuple): the shape of the target image, in the format of (height, width).
-        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
-            calculated based on the size difference between the two images.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
+        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided,
+            the ratio and pad will be calculated based on the size difference between
+            the two images.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style.
+            If False then do regular rescaling.
 
     Returns:
         boxes (np.ndarray): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
@@ -151,13 +156,15 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, padding=True):
     https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L756
 
     Args:
-        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
+        img1_shape (tuple): The shape of the image that the bounding boxes are for,
+            in the format of (height, width).
         coords (tuple): The coordinates of the objects in the image, in the format of (x, y).
         img0_shape (tuple): The shape of the target image, in the format of (height, width).
-        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
-            calculated based on the size difference between the two images.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
+        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided,
+            the ratio and pad will be calculated based on the size difference between
+            the two images.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style.
+            If False then do regular rescaling.
 
     Returns:
         coords (tuple): The scaled coordinates, in the format of (x, y)
@@ -215,8 +222,8 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
 
 def process_mask_upsample(protos, masks_in, bboxes, shape):
     """
-    Takes the output of the mask head, and applies the mask to the bounding boxes. This produces masks of higher quality
-    but is slower.
+    Takes the output of the mask head, and applies the mask to the bounding boxes.
+    This produces masks of higher quality but is slower.
 
     https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L713
     Args:
@@ -265,8 +272,8 @@ def scale_masks(masks, shape, padding=True):
     Args:
         masks (torch.Tensor): (N, C, H, W).
         shape (tuple): Height and width.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
+        padding (bool): If True, assuming the boxes is based on image augmented by yolo style.
+            If False then do regular rescaling.
 
     Returns:
         (torch.Tensor): Rescaled masks.
@@ -326,7 +333,7 @@ def scale_image(masks, im0_shape, ratio_pad=None):
             f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}'
         )
     masks = masks[top:bottom, left:right]
-    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]))
+    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]))  # pylint: disable=no-member
     if len(masks.shape) == 2:
         masks = masks[:, :, None]
 
@@ -339,7 +346,8 @@ def non_max_suppression(boxes, scores, iou_threshold, max_output):
 
     Args:
         boxes (torch.Tensor): Bounding boxes in (x1, y1, x2, y2) format.
-        scores (torch.Tensor): Confidence scores for each box (assumed to be sorted in descending order).
+        scores (torch.Tensor): Confidence scores for each box (assumed to be sorted
+            in descending order).
         iou_threshold (float): IoU threshold for suppression.
         max_output (int): Maximum number of boxes to keep.
 

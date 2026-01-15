@@ -1,3 +1,5 @@
+"""Classification post-processing."""
+
 from typing import Union
 
 import numpy as np
@@ -8,6 +10,8 @@ from .base import PostBase
 
 
 class ClsPost(PostBase):
+    """Classification post-processing class."""
+
     def __init__(self, _pre_cfg: dict, _post_cfg: dict):
         """
         Initialize the ClsPost class.

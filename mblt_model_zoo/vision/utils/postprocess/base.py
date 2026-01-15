@@ -1,3 +1,5 @@
+"""Base postprocessing classes."""
+
 from abc import ABC, abstractmethod
 from typing import Union
 
@@ -9,6 +11,8 @@ from .common import process_mask_upsample
 
 
 class PostBase(ABC):
+    """Abstract base class for post-processing operations."""
+
     def __init__(self):
         """Initialize the PostBase class."""
         super().__init__()
@@ -22,7 +26,6 @@ class PostBase(ABC):
         Args:
             x: Raw model output.
         """
-        pass
 
     def to(self, device: Union[str, torch.device]):
         """Move the operations to the specified device.
@@ -43,6 +46,8 @@ class PostBase(ABC):
 
 
 class YOLOPostBase(PostBase):
+    """YOLO post-processing base class."""
+
     def __init__(self, pre_cfg: dict, post_cfg: dict):
         """
         Initialize the YOLOPostBase class.
@@ -147,7 +152,6 @@ class YOLOPostBase(PostBase):
         Args:
             x (ListTensorLike): Model output tensors.
         """
-        pass
 
     @abstractmethod
     def decode(self, x):
@@ -157,7 +161,6 @@ class YOLOPostBase(PostBase):
         Args:
             x (ListTensorLike): Rearranged output tensors.
         """
-        pass
 
     @abstractmethod
     def nms(self, x):
@@ -167,7 +170,6 @@ class YOLOPostBase(PostBase):
         Args:
             x: Decoded detections.
         """
-        pass
 
     def masking(self, x, proto_outs):
         """
