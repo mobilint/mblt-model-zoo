@@ -79,7 +79,7 @@ def get_coco_loader(dataset, batch_size, preprocess_fn: Callable):
         )
 
     return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=loader
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
     )
 
 
@@ -178,7 +178,7 @@ def get_imagenet_loader(dataset, batch_size, preprocess_fn: Callable):
         )  # BHWC, labels
 
     return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=loader
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
     )
 
 
@@ -289,5 +289,5 @@ def get_widerface_loader(dataset, batch_size, preprocess_fn: Callable):
         )
 
     return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=loader
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
     )
