@@ -1,5 +1,10 @@
 # Convert Japanese text to phonemes which is
 # compatible with Julius https://github.com/julius-speech/segmentation-kit
+
+# Suppress warnings about regex deprecation
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import re
 
 from anyascii import anyascii
@@ -9,7 +14,6 @@ from jamo import hangul_to_jamo
 from ....utils.auto import AutoTokenizer
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
-
 
 def normalize(text):
     text = text.strip()
