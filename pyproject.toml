@@ -36,7 +36,6 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -79,11 +78,15 @@ version = { attr = "mblt_model_zoo.__version__" }
     "transformers/text_to_speech/MeloTTS/text/cmudict_cache.pickle"
 ]
 
+[tool.uv.sources]
+maccel = { path = "maccel-0.0.0+be851bfd-cp39-cp39-manylinux_2_31_x86_64.whl" }
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-timeout>=2.4.0",
     "datasets>=3.2.0, <=3.6.0",
-    "librosa",
+    "librosa>=0.11.0, <=0.11.0",
+    "numba>=0.60.0, <=0.60.0",
 ]
