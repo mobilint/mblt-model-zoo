@@ -16,6 +16,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         
         if TYPE_CHECKING:
             self.config = config
+        
+        self.launch()
     
     def launch(self):
         self.config.npu_backend.launch()

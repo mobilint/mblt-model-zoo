@@ -16,11 +16,12 @@ logger = logging.get_logger(__name__)
 
 class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
     config: MobilintLlamaConfig
+    base_model_prefix = "model"
 
     def __init__(self, config: MobilintLlamaConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.padding_idx)
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
 
     def forward(
         self,
