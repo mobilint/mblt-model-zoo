@@ -17,7 +17,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     # args contain only model_kwargs in transformers>=4.56.0
     def _get_cache(
         self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
-    ) -> Cache:
+    ) -> MobilintCache:
         if not hasattr(self, "_cache"):
             self._cache = MobilintCache(self.get_cache_mxq_model())
         else:
