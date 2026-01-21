@@ -11,15 +11,17 @@ from transformers import (
     AutoModel,
     AutoModelForCausalLM,
     AutoTokenizer,
-    CohereTokenizerFast,
+    Exaone4Config,
+    Exaone4PreTrainedModel,
+    GPT2TokenizerFast,
 )
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.models.cohere2 import Cohere2PreTrainedModel
-from transformers.models.cohere2.configuration_cohere2 import Cohere2Config
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, logging
 
-from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+    MobilintGenerationMixin,
+)
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache
@@ -27,8 +29,8 @@ from ..utils.cache_utils import MobilintCache
 logger = logging.get_logger(__name__)
 
 
-class MobilintCohere2Config(Cohere2Config):
-    model_type = "mobilint-cohere2"
+class MobilintExaone4Config(Exaone4Config):
+    model_type = "mobilint-exaone4"
 
     def __init__(
         self,
@@ -38,28 +40,26 @@ class MobilintCohere2Config(Cohere2Config):
     ):
         self.mxq_path = mxq_path
         self.dev_no = dev_no
+
         super().__init__(**kwargs)
 
         self.tie_word_embeddings = False
-    
-    @property
-    def sliding_window_pattern(self):
-        # Suppress warning only in transformers==4.54.1
-        return self._sliding_window_pattern
 
 
-class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin):
-    config: MobilintCohere2Config
+class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, MobilintGenerationMixin):
     supports_gradient_checkpointing = False
-    _supports_flash_attn = False
+    _no_split_modules = []
+    _skip_keys_device_placement = []
+    _supports_flash_attn_2 = False
     _supports_sdpa = False
     _supports_flex_attn = False
-
+    
     _can_compile_fullgraph = False
     _supports_attention_backend = False
     _can_record_outputs = {}
+    config_class = MobilintExaone4Config
 
-    def __init__(self, config: MobilintCohere2Config, *inputs, **kwargs):
+    def __init__(self, config: MobilintExaone4Config, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -67,6 +67,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.embed_tokens = nn.Embedding(
             config.vocab_size, config.hidden_size, self.padding_idx
         )
+
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
@@ -77,8 +78,6 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.mxq_model = maccel.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
-        self.logit_scale = config.logit_scale
-        self.tie_word_embeddings = config.tie_word_embeddings
     
     def get_cache_mxq_model(self):
         return self.mxq_model
@@ -102,34 +101,15 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         chunk_size: int = 0,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
-        output_attentions = (
-            output_attentions
-            if output_attentions is not None
-            else self.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-
-        if output_attentions:
-            logger.warning_once("output_attentions is not supported.")
-
-        if output_hidden_states:
-            logger.warning_once("output_hidden_states is not supported.")
-
         if logits_to_keep > 1:
             logger.warning(
-                "logits_to_keep larger than 1 is not supported: %d" % logits_to_keep
+                "logits_to_keep larger than 1 is not supported: %d"
+                % logits_to_keep
             )
 
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -150,9 +130,13 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
             cache_position = torch.arange(
                 past_seen_tokens,
                 past_seen_tokens + inputs_embeds.shape[1],
+                dtype=torch.long,
                 device=inputs_embeds.device,
             )
-
+            
+        if position_ids is None:
+            position_ids = cache_position.unsqueeze(0)
+            
         inputs_embeds = inputs_embeds.type(torch.float32).cpu().numpy()
 
         if inputs_embeds.ndim == 3:
@@ -160,7 +144,7 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
                 inputs_embeds, 1
             )  # (batch, 1, seqlen, hidden_size)
 
-        # max width should be appropriate number for chunking (ex. 192 for Llama 3.2 3B)
+        # max width should be appropriate number for chunking (ex. 192 for Exaone4 3.2 3B)
         # it should be searched experimentally
         if chunk_size == 0:
             chunk_size = self.mxq_model.get_input_buffer_info()[0].max_width
@@ -189,7 +173,6 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
                 )
 
         logits = torch.tensor(logits, dtype=torch.float32, device=self.device).squeeze(0)
-        logits = logits * self.logit_scale  # main diff from Llama
 
         loss = None
         if labels is not None:
@@ -215,24 +198,26 @@ class MobilintCohere2ForCausalLM(Cohere2PreTrainedModel, MobilintGenerationMixin
         self.mxq_model.dispose()
 
 
-AutoConfig.register("mobilint-cohere2", MobilintCohere2Config)
-AutoModel.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
-AutoTokenizer.register(MobilintCohere2Config, fast_tokenizer_class=CohereTokenizerFast)
-AutoModelForCausalLM.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
+AutoConfig.register("mobilint-exaone4", MobilintExaone4Config)
+AutoModel.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)
+AutoTokenizer.register(MobilintExaone4Config, fast_tokenizer_class=GPT2TokenizerFast)
+AutoModelForCausalLM.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)
 
 from ..utils.types import TransformersModelInfo
 
-c4ai_command_r7b_12_2024 = TransformersModelInfo(
-    original_model_id="CohereLabs/c4ai-command-r7b-12-2024",
-    model_id="mobilint/c4ai-command-r7b-12-2024",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/c4ai-command-r7b-12-2024/",
+EXAONE_40_12B = TransformersModelInfo(
+    original_model_id="LGAI-EXAONE/EXAONE-4.0-1.2B",
+    model_id="mobilint/EXAONE-4.0-1.2B",
+    download_url_base="https://dl.mobilint.com/model/transformers/llm/EXAONE-4.0-1.2B/",
     file_list=[
-        "c4ai-command-r7b-12-2024.mxq",
+        "chat_template.jinja",
         "config.json",
+        "EXAONE-4.0-1.2B.mxq",
         "generation_config.json",
         "model.safetensors",
         "special_tokens_map.json",
         "tokenizer.json",
         "tokenizer_config.json",
+        "vocab.json",
     ],
 )

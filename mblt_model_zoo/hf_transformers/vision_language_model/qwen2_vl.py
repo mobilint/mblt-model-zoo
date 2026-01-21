@@ -34,7 +34,9 @@ from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.utils import logging
 from transformers.video_utils import VideoInput
 
-from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+    MobilintGenerationMixin,
+)
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache

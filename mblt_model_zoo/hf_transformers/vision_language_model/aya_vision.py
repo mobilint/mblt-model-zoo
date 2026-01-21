@@ -23,7 +23,9 @@ from transformers.models.aya_vision.modeling_aya_vision import (
 )
 from transformers.utils import is_torchdynamo_compiling
 
-from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+    MobilintGenerationMixin,
+)
 from mblt_model_zoo.utils.logging import log_model_details
 
 from ..utils.cache_utils import MobilintCache

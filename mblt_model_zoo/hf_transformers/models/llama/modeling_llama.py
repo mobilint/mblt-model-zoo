@@ -6,63 +6,29 @@ import maccel
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers import (
-    AutoConfig,
-    AutoModel,
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    LlamaConfig,
-    LlamaPreTrainedModel,
-    LlamaTokenizerFast,
-)
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.modeling_utils import PreTrainedModel
+from transformers.models.auto.modeling_auto import AutoModel, AutoModelForCausalLM
 from transformers.processing_utils import Unpack
-from transformers.utils import TransformersKwargs, logging
+from transformers.utils.generic import TransformersKwargs, logging
 
-from mblt_model_zoo.transformers.utils.generation_utils import MobilintGenerationMixin
-from mblt_model_zoo.utils.logging import log_model_details
-
-from ..utils.cache_utils import MobilintCache
+from ....utils.logging import log_model_details
+from ...utils.cache_utils import MobilintCache
+from ...utils.generation_utils import MobilintGenerationMixin
+from .configuration_llama import MobilintLlamaConfig
 
 logger = logging.get_logger(__name__)
 
 
-class MobilintLlamaConfig(LlamaConfig):
-    model_type = "mobilint-llama"
-
-    def __init__(
-        self,
-        mxq_path: str = "",
-        dev_no: int = 0,
-        **kwargs,
-    ):
-        self.mxq_path = mxq_path
-        self.dev_no = dev_no
-
-        super().__init__(**kwargs)
-
-        self.tie_word_embeddings = False
-
-
-class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
+class MobilintLlamaForCausalLM(PreTrainedModel, MobilintGenerationMixin):
     config: MobilintLlamaConfig
-    supports_gradient_checkpointing = False
-    _supports_flash_attn = False
-    _supports_sdpa = False
-    _supports_flex_attn = False
 
-    _can_compile_fullgraph = False
-    _supports_attention_backend = False
-    _can_record_outputs = {}
-
-    def __init__(self, config: MobilintLlamaConfig, *inputs, **kwargs):
-        super().__init__(config, *inputs, **kwargs)
+    def __init__(self, config: MobilintLlamaConfig, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(
-            config.vocab_size, config.hidden_size, self.padding_idx
-        )
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
@@ -187,84 +153,6 @@ class MobilintLlamaForCausalLM(LlamaPreTrainedModel, MobilintGenerationMixin):
 
     def dispose(self):
         self.mxq_model.dispose()
-
-
-AutoConfig.register("mobilint-llama", MobilintLlamaConfig)
+        
 AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
-AutoTokenizer.register(MobilintLlamaConfig, fast_tokenizer_class=LlamaTokenizerFast)
 AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
-
-from ..utils.types import TransformersModelInfo
-
-Llama_32_1B_Instruct = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-1B-Instruct",
-    model_id="mobilint/Llama-3.2-1B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-1B-Instruct/",
-    file_list=[
-        "config.json",
-        "generation_config.json",
-        "Llama-3.2-1B-Instruct.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)
-
-Llama_32_3B_Instruct = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.2-3B-Instruct",
-    model_id="mobilint/Llama-3.2-3B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.2-3B-Instruct/",
-    file_list=[
-        "config.json",
-        "generation_config.json",
-        "Llama-3.2-3B-Instruct.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)
-
-Llama_31_8B_Instruct = TransformersModelInfo(
-    original_model_id="meta-llama/Llama-3.1-8B-Instruct",
-    model_id="mobilint/Llama-3.1-8B-Instruct",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/Llama-3.1-8B-Instruct/",
-    file_list=[
-        "config.json",
-        "generation_config.json",
-        "Llama-3.1-8B-Instruct.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)
-
-HyperCLOVAX_SEED_Text_Instruct_05B = TransformersModelInfo(
-    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B",
-    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-0.5B/",
-    file_list=[
-        "config.json",
-        "HyperCLOVAX-SEED-Text-Instruct-0.5B.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)
-
-HyperCLOVAX_SEED_Text_Instruct_15B = TransformersModelInfo(
-    original_model_id="naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
-    model_id="mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
-    download_url_base="https://dl.mobilint.com/model/transformers/llm/HyperCLOVAX-SEED-Text-Instruct-1.5B/",
-    file_list=[
-        "config.json",
-        "HyperCLOVAX-SEED-Text-Instruct-1.5B.mxq",
-        "model.safetensors",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-)

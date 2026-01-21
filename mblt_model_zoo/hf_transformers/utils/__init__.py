@@ -13,4 +13,5 @@ from .auto import (
     pipeline,
 )
 from .cache_utils import MobilintCache
+from .configuration_utils import *
 from .types import TransformersModelInfo

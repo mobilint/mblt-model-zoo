@@ -3,6 +3,7 @@
 
 # Suppress warnings about regex deprecation
 import warnings
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
@@ -15,6 +16,7 @@ from jamo import hangul_to_jamo
 from ....utils.auto import AutoTokenizer
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
+
 
 def normalize(text):
     text = text.strip()

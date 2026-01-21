@@ -2,7 +2,7 @@ import sys
 
 import torch
 
-from mblt_model_zoo.transformers.large_language_model.bert import (
+from mblt_model_zoo.hf_transformers.large_language_model.bert import (
     MobilintBertForMaskedLM,
 )
 
@@ -30,7 +30,7 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
 models = {}
 tokenizers = {}
 def get_bert_feature(text, word2ph, device=None, model_id='', dispose_after_use=False):
-    from mblt_model_zoo.transformers import AutoModelForMaskedLM, AutoTokenizer
+    from mblt_model_zoo.hf_transformers import AutoModelForMaskedLM, AutoTokenizer
     global model
     global tokenizer
     

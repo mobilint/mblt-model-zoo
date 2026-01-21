@@ -74,12 +74,12 @@ version = { attr = "mblt_model_zoo.__version__" }
 
 [tool.setuptools.package-data]
 "mblt_model_zoo" = [
-    "transformers/text_to_speech/MeloTTS/text/cmudict.rep",
-    "transformers/text_to_speech/MeloTTS/text/cmudict_cache.pickle"
+    "hf_transformers/text_to_speech/MeloTTS/text/cmudict.rep",
+    "hf_transformers/text_to_speech/MeloTTS/text/cmudict_cache.pickle"
 ]
 
 [tool.uv.sources]
-maccel = { path = "maccel-0.0.0+be851bfd-cp39-cp39-manylinux_2_31_x86_64.whl" }
+maccel = { path = "maccel-0.0.0+5550771a-cp310-cp310-manylinux_2_31_x86_64.whl" }
 
 [dependency-groups]
 dev = [

@@ -2,7 +2,7 @@ from pprint import pprint
 
 import pytest
 
-from mblt_model_zoo.transformers import pipeline
+from mblt_model_zoo.hf_transformers import pipeline
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 import pytest
 
-from mblt_model_zoo.transformers.text_to_speech.MeloTTS import TTS
+from mblt_model_zoo.hf_transformers.text_to_speech.MeloTTS import TTS
 
 LANGUAGES = (
     "EN_NEWEST",

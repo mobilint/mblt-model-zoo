@@ -1,7 +1,7 @@
 import pytest
 from transformers import TextStreamer
 
-from mblt_model_zoo.transformers import AutoTokenizer, pipeline
+from mblt_model_zoo.hf_transformers import AutoTokenizer, pipeline
 
 MODEL_PATHS = (
     "mobilint/EXAONE-3.5-2.4B-Instruct",

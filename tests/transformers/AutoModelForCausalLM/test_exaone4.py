@@ -3,7 +3,7 @@ import random
 import pytest
 from transformers import TextStreamer
 
-from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
+from mblt_model_zoo.hf_transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 

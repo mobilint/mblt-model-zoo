@@ -31,7 +31,7 @@ pip install -e .[transformers]
 
 ```python
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoTokenizer
+from mblt_model_zoo.hf_transformers import pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -63,7 +63,7 @@ You can also use `AutoModel` or `AutoModelForCausalLM` for initializing models.
 
 ```python
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import AutoModelForCausalLM, AutoTokenizer
+from mblt_model_zoo.hf_transformers import AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
@@ -95,7 +95,7 @@ We also support the vision-language models associated with `AutoProcessor` and i
 
 ```python
 from transformers import TextStreamer
-from mblt_model_zoo.transformers import pipeline, AutoProcessor
+from mblt_model_zoo.hf_transformers import pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
@@ -138,7 +138,7 @@ Further usage examples can be found in the [tests](../../tests/transformers) dir
 
 ```python
 from pprint import pprint
-from mblt_model_zoo.transformers import list_models
+from mblt_model_zoo.hf_transformers import list_models
 
 available_models = list_models()
 pprint(available_models)

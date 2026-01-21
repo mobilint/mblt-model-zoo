@@ -115,7 +115,7 @@ Currently, these optional functions are only available on environment equipped w
 
 |Name|Use|Details|
 |-------|------|------|
-|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/transformers/README.md) |
+|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
 
 ## Verbose Option
 
