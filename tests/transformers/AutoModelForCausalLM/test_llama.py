@@ -1,7 +1,7 @@
 import pytest
-from transformers import TextStreamer
+from transformers import AutoTokenizer, TextStreamer, pipeline
 
-from mblt_model_zoo.hf_transformers import AutoTokenizer, pipeline
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 MODEL_PATHS = (
     "mobilint/Llama-3.2-1B-Instruct",
@@ -29,7 +29,8 @@ def pipe(request, mxq_path):
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
         )
     yield pipe
-    pipe.model.dispose()
+    if isinstance(pipe.model, MobilintModelMixin):
+        pipe.model.dispose()
 
 
 def test_llama(pipe):
