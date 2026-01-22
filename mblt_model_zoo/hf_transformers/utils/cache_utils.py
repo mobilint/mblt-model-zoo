@@ -1,4 +1,6 @@
-from typing import Any, Optional
+import copy
+from pathlib import Path
+from typing import Any, List, Optional
 
 import qbruntime
 import torch
@@ -54,6 +56,43 @@ class MobilintCache(Cache):
         self.num_hidden_layers = 1
         
         self.cache_processor = None
+
+        self.buffer: List[bytes] = []
+    
+    def reset(self):
+        super().reset()
+        
+        self.buffer = []
     
     def update_cache_position(self, cache_position: torch.Tensor):
         self.layers[0].update_cache_position(cache_position)
+    
+    def dump_cache_memory(self):
+        self.buffer = self.mxq_model.dump_cache_memory()
+    
+    def load_cache_memory(self):
+        if self.get_seq_length() > 0:
+            self.mxq_model.reset_cache_memory()
+            self.mxq_model.load_cache_memory(self.buffer)
+    
+    def dump_cache_memory_to(self, cache_dir: str):
+        self.mxq_model.dump_cache_memory_to(cache_dir)
+        seq_path = Path(cache_dir) / "seq_length.txt"
+        seq_path.write_text(f"{self.get_seq_length()}\n", encoding="utf-8")
+    
+    def load_cache_memory_from(self, cache_dir: str):
+        self.reset()
+        seq_path = Path(cache_dir) / "seq_length.txt"
+        if seq_path.exists():
+            seq_length = int(seq_path.read_text(encoding="utf-8").strip())
+        else:
+            seq_length = 0
+        self.layers[0]._seen_tokens = seq_length
+        self.mxq_model.load_cache_memory_from(cache_dir)
+
+    def copy(self):
+        copied = MobilintCache(self.mxq_model)
+        copied.layers[0]._seen_tokens = self.layers[0]._seen_tokens
+        copied.buffer = copy.deepcopy(self.buffer)
+        
+        return copied
