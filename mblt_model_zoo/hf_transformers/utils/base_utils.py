@@ -1,6 +1,7 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
+from huggingface_hub import hf_hub_download
 from maccel import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
 from transformers.utils.generic import logging
 
@@ -49,6 +50,26 @@ class MobilintNPUBackend:
         
         self._target_cores_serialized: List[str] = []
         self.target_cores = target_cores if target_cores is not None else []
+        
+    def check_model_path(self, mxq_path: str) -> str:
+        # 1. current relative/absolute path
+        if os.path.exists(mxq_path):
+            return mxq_path
+        
+        # 2. inside the local path
+        if os.path.isdir(self.name_or_path):
+            local_path = os.path.join(self.name_or_path, mxq_path)
+            if os.path.exists(local_path):
+                return local_path
+        
+        # 3. If none of above, download mxq file from hub
+        else:
+            self.mxq_path = hf_hub_download(
+                repo_id=self.name_or_path,
+                filename=mxq_path,
+            )
+            
+        raise Exception(f"[Mobilint] Error: Could not locate {mxq_path}.")
     
     def launch(self):
         self.acc = Accelerator(self.dev_no)
