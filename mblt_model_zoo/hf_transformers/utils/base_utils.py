@@ -2,7 +2,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from huggingface_hub import hf_hub_download
-from maccel import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
+from qbruntime import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
 from transformers.utils.generic import logging
 
 from ...utils.logging import log_model_details

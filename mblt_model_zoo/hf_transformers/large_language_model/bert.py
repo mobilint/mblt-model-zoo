@@ -1,7 +1,7 @@
 import os
 from typing import Optional, Union
 
-import maccel
+import qbruntime
 import torch
 import torchvision
 from transformers import (
@@ -65,11 +65,11 @@ class MobilintBertModel(MobilintBertPreTrainedModel):
         self.position_embedding_type = config.position_embedding_type
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
         model_path = os.path.join(config.name_or_path, config.mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         self.mxq_model.launch(self.acc)
         log_model_details(model_path)
         self.mxq_model.reset_cache_memory()

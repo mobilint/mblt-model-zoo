@@ -2,7 +2,7 @@ import math
 import os
 from typing import Optional, Tuple, TypeVar, Union
 
-import maccel
+import qbruntime
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -97,11 +97,11 @@ class MobilintWhisperEncoder(MobilintWhisperPreTrainedModel):
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
-        mc.set_global4_core_mode([maccel.Cluster.Cluster1])
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
+        mc.set_global4_core_mode([qbruntime.Cluster.Cluster1])
         model_path = os.path.join(config.name_or_path, config.encoder_mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
@@ -200,11 +200,11 @@ class MobilintWhisperDecoder(MobilintWhisperPreTrainedModel):
         self.post_init()
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
         model_path = os.path.join(config.name_or_path, config.decoder_mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 

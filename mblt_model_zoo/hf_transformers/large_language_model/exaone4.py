@@ -2,7 +2,7 @@ import math
 import os
 from typing import Optional, Union
 
-import maccel
+import qbruntime
 import numpy as np
 import torch
 import torch.nn as nn
@@ -71,11 +71,11 @@ class MobilintExaone4ForCausalLM(Exaone4PreTrainedModel, MobilintGenerationMixin
         self.gradient_checkpointing = False
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
         model_path = os.path.join(config.name_or_path, config.mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict
 
-import maccel
+import qbruntime
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
@@ -9,7 +9,7 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
     @abstractmethod
-    def get_cache_mxq_model(self) -> maccel.Model:
+    def get_cache_mxq_model(self) -> qbruntime.Model:
         pass
     
     # Function arguments changed for transformers>=4.56.0

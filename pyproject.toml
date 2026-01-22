@@ -16,7 +16,7 @@ license = {text = "BSD-3-Clause"}
 requires-python = ">=3.9,<3.13"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
 dependencies = [
-    "maccel",
+    "qbruntime",
     "numpy>=1.26.0",
     "torch>=2.4.1",
     "opencv-python>=4.11.0.86",
@@ -80,7 +80,7 @@ version = { attr = "mblt_model_zoo.__version__" }
 ]
 
 [tool.uv.sources]
-maccel = { path = "maccel-0.0.0+be851bfd-cp310-cp310-manylinux_2_31_x86_64.whl" }
+qbruntime = { path = "qbruntime-0.0.0+1311f792-cp310-cp310-manylinux_2_31_x86_64.whl" }
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-import maccel
+import qbruntime
 import torch
 from transformers.cache_utils import Cache, CacheLayerMixin
 
@@ -8,7 +8,7 @@ from transformers.cache_utils import Cache, CacheLayerMixin
 class MobilintLayer(CacheLayerMixin):
     is_sliding = False
     
-    def __init__(self, mxq_model: maccel.Model):
+    def __init__(self, mxq_model: qbruntime.Model):
         self.mxq_model = mxq_model
         self._seen_tokens = 0
         
@@ -44,7 +44,7 @@ class MobilintLayer(CacheLayerMixin):
         self._seen_tokens += cache_position.numel()
     
 class MobilintCache(Cache):
-    def __init__(self, mxq_model: maccel.Model):
+    def __init__(self, mxq_model: qbruntime.Model):
         self.mxq_model = mxq_model
         self.mxq_model.reset_cache_memory()
         

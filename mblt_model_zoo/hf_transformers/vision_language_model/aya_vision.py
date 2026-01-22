@@ -1,11 +1,11 @@
 import os
 from typing import Any, List, Optional, Tuple, TypeVar, Union
 
-import maccel
+import qbruntime
 import numpy as np
 import torch
 import torch.nn as nn
-from maccel import Cluster, Core, CoreId
+from qbruntime import Cluster, Core, CoreId
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -100,11 +100,11 @@ class MobilintAyaVisionForConditionalGeneration(
         self.post_init()
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
         model_path = os.path.join(config.name_or_path, config.mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
     

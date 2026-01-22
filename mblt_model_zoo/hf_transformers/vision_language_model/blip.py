@@ -1,7 +1,7 @@
 import os
 from typing import Any, List, Optional, Tuple, TypeVar, Union
 
-import maccel
+import qbruntime
 import numpy as np
 import torch
 from transformers import (
@@ -174,11 +174,11 @@ class MobilintBlipTextModel(MobilintBlipTextPreTrainedModel):
         self.embeddings = BlipTextEmbeddings(config)
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()        
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()        
         mc.set_single_core_mode(1)
         model_path = os.path.join(config.name_or_path, config.mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 
@@ -427,11 +427,11 @@ class MobilintBlipVisionModel(MobilintBlipPreTrainedModel):
         self.config = config
 
         self.dev_no = config.dev_no
-        self.acc = maccel.Accelerator(self.dev_no)
-        mc = maccel.ModelConfig()
-        mc.set_global_core_mode([maccel.Cluster.Cluster0])
+        self.acc = qbruntime.Accelerator(self.dev_no)
+        mc = qbruntime.ModelConfig()
+        mc.set_global_core_mode([qbruntime.Cluster.Cluster0])
         model_path = os.path.join(config.name_or_path, config.mxq_path)
-        self.mxq_model = maccel.Model(model_path, mc)
+        self.mxq_model = qbruntime.Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
 

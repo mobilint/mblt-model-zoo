@@ -1,6 +1,6 @@
 import math
 
-import maccel
+import qbruntime
 import numpy as np
 import torch
 from torch import nn
@@ -37,10 +37,10 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         self.language_emb = nn.Embedding(num_languages, hidden_channels)
         nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
         
-        self.acc = maccel.Accelerator()
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator()
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(mxq_path, mc)
+        self.mxq_model = qbruntime.Model(mxq_path, mc)
         num_model_variants = self.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
             self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
@@ -147,10 +147,10 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         self.half_channels = channels // 2
         self.upsample_initial_channel = upsample_initial_channel
         
-        self.acc = maccel.Accelerator()
-        mc = maccel.ModelConfig()
+        self.acc = qbruntime.Accelerator()
+        mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
-        self.mxq_model = maccel.Model(mxq_path, mc)
+        self.mxq_model = qbruntime.Model(mxq_path, mc)
         num_model_variants = self.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
             self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
