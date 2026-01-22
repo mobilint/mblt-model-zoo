@@ -57,9 +57,6 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             )
 
-        if position_ids is None:
-            position_ids = cache_position.unsqueeze(0)
-
         logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
 
         loss = None
