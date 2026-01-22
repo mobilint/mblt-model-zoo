@@ -22,6 +22,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         super().__init__(config, *args, **kwargs)
         
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        self.logit_scale = config.logit_scale
 
     def forward(
         self,
@@ -71,6 +72,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             logger.warning("output_hidden_states is not supported.")
 
         logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
+        logits = logits * self.logit_scale  # main diff from Llama
 
         loss = None
         if labels is not None:
