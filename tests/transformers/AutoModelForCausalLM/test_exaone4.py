@@ -14,10 +14,14 @@ def model(request, mxq_path):
     if mxq_path:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
+            trust_remote_code=True,
             mxq_path=mxq_path,
         )
     else:
-        model = AutoModelForCausalLM.from_pretrained(model_path)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+        )
     yield model
     if isinstance(model, MobilintModelMixin):
         model.dispose()
