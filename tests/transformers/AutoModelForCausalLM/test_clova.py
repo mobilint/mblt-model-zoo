@@ -1,7 +1,7 @@
 import pytest
-from transformers import TextStreamer
+from transformers import AutoTokenizer, TextStreamer, pipeline
 
-from mblt_model_zoo.hf_transformers import AutoTokenizer, pipeline
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 MODEL_PATHS = (
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
@@ -19,6 +19,7 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -26,9 +27,11 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
         )
     yield pipe
-    pipe.model.dispose()
+    if isinstance(pipe.model, MobilintModelMixin):
+        pipe.model.dispose()
 
 
 def test_clova(pipe):
