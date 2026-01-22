@@ -1,5 +1,7 @@
 import pytest
-from transformers import TextStreamer, AutoTokenizer, pipeline
+from transformers import AutoTokenizer, TextStreamer, pipeline
+
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 MODEL_PATHS = (
     "mobilint/EXAONE-3.5-2.4B-Instruct",
@@ -28,7 +30,8 @@ def pipe(request, mxq_path):
             trust_remote_code=True,
         )
     yield pipe
-    pipe.model.dispose()
+    if isinstance(pipe.model, MobilintModelMixin):
+        pipe.model.dispose()
 
 
 def test_exaone(pipe):

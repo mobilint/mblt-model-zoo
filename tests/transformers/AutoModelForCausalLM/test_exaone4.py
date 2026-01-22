@@ -1,9 +1,9 @@
 import random
 
 import pytest
-from transformers import TextStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
-from mblt_model_zoo.hf_transformers import AutoModelForCausalLM, AutoTokenizer
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
@@ -19,7 +19,8 @@ def model(request, mxq_path):
     else:
         model = AutoModelForCausalLM.from_pretrained(model_path)
     yield model
-    model.dispose()
+    if isinstance(model, MobilintModelMixin):
+        model.dispose()
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")

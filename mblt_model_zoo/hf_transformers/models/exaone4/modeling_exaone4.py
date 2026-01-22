@@ -10,30 +10,30 @@ from transformers.utils.generic import TransformersKwargs, logging
 from ...utils.cache_utils import MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
-from .configuration_llama import MobilintLlamaConfig
+from .configuration_exaone4 import MobilintExaone4Config
 
 logger = logging.get_logger(__name__)
 
-class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
-    config: MobilintLlamaConfig
+class MobilintExaone4ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
+    config: MobilintExaone4Config
     base_model_prefix = "model"
 
-    def __init__(self, config: MobilintLlamaConfig, *args, **kwargs):
+    def __init__(self, config: MobilintExaone4Config, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[MobilintCache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        logits_to_keep: Union[int, torch.Tensor] = 0,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: MobilintCache | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
         chunk_size: int = 128,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
@@ -71,5 +71,5 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             attentions=None,
         )
         
-AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
-AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
+AutoModel.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)
+AutoModelForCausalLM.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)

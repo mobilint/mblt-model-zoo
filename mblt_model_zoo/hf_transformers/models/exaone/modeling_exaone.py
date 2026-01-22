@@ -37,7 +37,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        cache_position: Optional[torch.Tensor] = None,
+        cache_position: Optional[torch.LongTensor] = None,
         chunk_size: int = 128,
     ) -> Union[Tuple[torch.Tensor | MobilintCache, ...], CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -60,9 +60,9 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = torch.arange(
+            cache_position = cast(torch.LongTensor, torch.arange(
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            )
+            ))
         
         if output_attentions:
             logger.warning("output_attentions is not supported.")
