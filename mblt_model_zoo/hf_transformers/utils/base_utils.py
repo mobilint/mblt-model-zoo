@@ -13,7 +13,19 @@ if TYPE_CHECKING:
     MixinBase = Any
 else:
     MixinBase = object
-    
+
+cluster_map = {
+    0: Cluster.Cluster0,
+    1: Cluster.Cluster1,
+}
+
+core_map = {
+    0: Core.Core0,
+    1: Core.Core1,
+    2: Core.Core2,
+    3: Core.Core3,
+}
+
 class PretrainedOnlyMixin(MixinBase):
     def __init__(self, *args, **kwargs):
         _internal_call = kwargs.pop("_internal_call", False)
@@ -102,16 +114,6 @@ class MobilintNPUBackend:
         for s in self._target_cores_serialized:
             try:
                 c_val, r_val = map(int, s.split(':'))
-                cluster_map = {
-                    0: Cluster.Cluster0,
-                    1: Cluster.Cluster1,
-                }
-                core_map = {
-                    0: Core.Core0,
-                    1: Core.Core1,
-                    2: Core.Core2,
-                    3: Core.Core3,
-                }
                 result.append(CoreId(cluster_map[c_val], core_map[r_val]))
             except Exception as e:
                 logger.warning("Target cores not serialized: %s" % s)
@@ -140,8 +142,8 @@ class MobilintNPUBackend:
         num_of_clusters = 2
         num_of_cores_in_cluster = 4
         
-        core_id_lists = [[core_id for core_id in self.target_cores if core_id.cluster.value == i] for i in range(num_of_clusters)]
-        
+        core_id_lists = [[core_id for core_id in self.target_cores if core_id.cluster == cluster_map[i]] for i in range(num_of_clusters)]
+                
         for core_ids in core_id_lists:
             if len(core_ids) != num_of_cores_in_cluster and len(core_ids) != 0:
                 raise ValueError(f"Target cores must include every cores in a cluster! core_ids: {self._target_cores_serialized}")
