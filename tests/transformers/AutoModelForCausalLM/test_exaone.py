@@ -1,7 +1,5 @@
 import pytest
-from transformers import TextStreamer
-
-from mblt_model_zoo.hf_transformers import AutoTokenizer, pipeline
+from transformers import TextStreamer, AutoTokenizer, pipeline
 
 MODEL_PATHS = (
     "mobilint/EXAONE-3.5-2.4B-Instruct",
@@ -19,6 +17,7 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -26,6 +25,7 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
         )
     yield pipe
     pipe.model.dispose()
