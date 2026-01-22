@@ -36,14 +36,12 @@ class PretrainedOnlyMixin(MixinBase):
 class MobilintNPUBackend:
     def __init__(
         self,
-        name_or_path: str = "",
         mxq_path: str = "",
         dev_no: int = 0,
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, 'CoreId']]] = None,
         **kwargs
     ):
-        self.name_or_path = name_or_path
         self.mxq_path = mxq_path
         self.dev_no = dev_no
         self.core_mode = core_mode
@@ -64,7 +62,7 @@ class MobilintNPUBackend:
         
         # 3. If none of above, download mxq file from hub
         else:
-            self.mxq_path = hf_hub_download(
+            return hf_hub_download(
                 repo_id=self.name_or_path,
                 filename=mxq_path,
             )
@@ -87,7 +85,7 @@ class MobilintNPUBackend:
         else:
             raise ValueError("core_mode must be single, multi, global4 or global8! value: " + self.core_mode)
         
-        model_path = os.path.join(self.name_or_path, self.mxq_path)
+        model_path = self.check_model_path(self.mxq_path)
         self.mxq_model = Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
