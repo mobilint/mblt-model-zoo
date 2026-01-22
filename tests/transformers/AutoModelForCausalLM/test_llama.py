@@ -20,6 +20,7 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -27,6 +28,7 @@ def pipe(request, mxq_path):
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
         )
     yield pipe
     if isinstance(pipe.model, MobilintModelMixin):

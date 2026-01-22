@@ -1,6 +1,6 @@
 from typing import Any
 
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PretrainedConfig, SpecificPretrainedConfigType
 
 from .base_utils import MobilintNPUBackend
 
@@ -12,11 +12,6 @@ class MobilintConfigMixin(PretrainedConfig):
     ):
         self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
         super().__init__(**kwargs)
-
-    @property
-    def target_cores(self): return self.npu_backend.target_cores
-    @target_cores.setter
-    def target_cores(self, v): self.npu_backend.target_cores = v
     
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):

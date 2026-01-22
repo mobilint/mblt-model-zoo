@@ -2,8 +2,11 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from maccel import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
+from transformers.utils.generic import logging
 
 from ...utils.logging import log_model_details
+
+logger = logging.get_logger(__name__)
 
 if TYPE_CHECKING:
     MixinBase = Any
@@ -52,7 +55,7 @@ class MobilintNPUBackend:
         mc = ModelConfig()
         
         if self.core_mode == "single":
-            mc.set_single_core_mode(0, self.target_cores)
+            mc.set_single_core_mode(None, self.target_cores)
         elif self.core_mode == "multi":
             mc.set_multi_core_mode(self.target_clusters)
         elif self.core_mode == "global4":
@@ -80,8 +83,20 @@ class MobilintNPUBackend:
         for s in self._target_cores_serialized:
             try:
                 c_val, r_val = map(int, s.split(':'))
-                result.append(CoreId(Cluster(c_val), Core(r_val)))
+                cluster_map = {
+                    0: Cluster.Cluster0,
+                    1: Cluster.Cluster1,
+                }
+                core_map = {
+                    0: Core.Core0,
+                    1: Core.Core1,
+                    2: Core.Core2,
+                    3: Core.Core3,
+                }
+                result.append(CoreId(cluster_map[c_val], core_map[r_val]))
             except Exception as e:
+                logger.warning("Target cores not serialized: %s" % s)
+                logger.warning("Error: %s" % e)
                 pass
         return result
 
@@ -127,9 +142,9 @@ class MobilintNPUBackend:
     def from_dict(cls, data: Dict[str, Any], prefix: str = "") -> 'MobilintNPUBackend':
         p = prefix
         return cls(
-            name_or_path=data.get("name_or_path", ""),
-            mxq_path=data.get(f"{p}mxq_path", ""),
-            dev_no=data.get(f"{p}dev_no", 0),
-            core_mode=data.get(f"{p}core_mode", "single"),
-            target_cores=data.get(f"{p}target_cores", None)
+            name_or_path=data.pop("name_or_path", ""),
+            mxq_path=data.pop(f"{p}mxq_path", ""),
+            dev_no=data.pop(f"{p}dev_no", 0),
+            core_mode=data.pop(f"{p}core_mode", "single"),
+            target_cores=data.pop(f"{p}target_cores", None)
         )
