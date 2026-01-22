@@ -40,7 +40,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         result = self.config.npu_backend.mxq_model.infer([embedding_output_numpy])
         assert result is not None, "mxq infer result is None!"
 
-        sequence_output = torch.tensor(result[0], dtype=torch.float32, device=self.device).squeeze(0)
+        sequence_output = torch.tensor(result[0], dtype=torch.float32, device=self.device)
         
         return sequence_output
 

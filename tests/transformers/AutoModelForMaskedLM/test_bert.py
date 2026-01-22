@@ -29,8 +29,8 @@ def pipe_and_prompt(request, mxq_path):
             trust_remote_code=True,
         )
     yield pipe, prompt
-    if isinstance(pipe.model, MobilintModelMixin):
-        pipe.model.dispose()
+    if isinstance(pipe.model.bert, MobilintModelMixin):
+        pipe.model.bert.dispose()
 
 
 def test_bert(pipe_and_prompt):

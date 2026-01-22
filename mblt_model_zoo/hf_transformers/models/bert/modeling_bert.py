@@ -1,6 +1,7 @@
 from typing import cast
 
 import torch
+import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
@@ -12,9 +13,13 @@ from transformers.models.bert.modeling_bert import (
     BertEmbeddings,
     BertOnlyMLMHead,
     BertPooler,
+    BertLMPredictionHead,
+    load_tf_weights_in_bert,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
+
+from ...utils.base_utils import PretrainedOnlyMixin
 
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_bert import MobilintBertConfig
@@ -22,18 +27,40 @@ from .configuration_bert import MobilintBertConfig
 logger = logging.get_logger(__name__)
 
 class MobilintBertPreTrainedModel(PreTrainedModel):
-    config_class = MobilintBertConfig
+    config: MobilintBertConfig
+    load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
+
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, nn.Linear):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        elif isinstance(module, BertLMPredictionHead):
+            module.bias.data.zero_()
 
 class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
     _no_split_modules = ["BertEmbeddings", "BertLayer"]
     
-    def __init__(self, config: MobilintBertConfig, add_pooling_layer=True):
-        super().__init__(config)
+    def __init__(self, config: MobilintBertConfig, add_pooling_layer=True, **kwargs):
+        super().__init__(config, **kwargs)
         self.config = config
 
         self.embeddings = BertEmbeddings(config)
         self.pooler = BertPooler(config) if add_pooling_layer else None
+
+        # Initialize weights and apply final processing
+        self.post_init()
     
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -90,7 +117,7 @@ class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
         )
     
 
-class MobilintBertForMaskedLM(MobilintBertPreTrainedModel):
+class MobilintBertForMaskedLM(PretrainedOnlyMixin, MobilintBertPreTrainedModel):
     _tied_weights_keys = {
         "cls.predictions.decoder.weight": "bert.embeddings.word_embeddings.weight",
         "cls.predictions.decoder.bias": "cls.predictions.bias",
@@ -105,8 +132,11 @@ class MobilintBertForMaskedLM(MobilintBertPreTrainedModel):
                 "bi-directional self-attention."
             )
 
-        self.bert = MobilintBertModel(config, add_pooling_layer=False)
+        self.bert = MobilintBertModel(config, add_pooling_layer=False, _internal_call=True)
         self.cls = BertOnlyMLMHead(config)
+
+        # Initialize weights and apply final processing
+        self.post_init()
         
     def get_output_embeddings(self):
         return self.cls.predictions.decoder
