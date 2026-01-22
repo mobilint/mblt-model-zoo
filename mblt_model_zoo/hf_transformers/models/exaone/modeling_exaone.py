@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import (
-    BaseModelOutputWithPast,
     CausalLMOutputWithPast,
 )
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForCausalLM
