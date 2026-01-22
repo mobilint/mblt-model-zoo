@@ -31,6 +31,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     def get_cache_mxq_model(self):
         return self.config.npu_backend.mxq_model
 
+    def bert_forward(
+        self,
+        embedding_output: torch.Tensor,
+    ):
+        embedding_output_numpy = embedding_output.type(torch.float32).cpu().numpy()
+        
+        result = self.config.npu_backend.mxq_model.infer([embedding_output_numpy])
+        assert result is not None, "mxq infer result is None!"
+
+        sequence_output = torch.tensor(result[0], dtype=torch.float32, device=self.device).squeeze(0)
+        
+        return sequence_output
+
     def llm_forward(
         self,
         inputs_embeds: torch.Tensor,
