@@ -54,6 +54,7 @@ class MobilintNPUBackend:
         target_cores: Optional[List[Union[str, 'CoreId']]] = None,
         **kwargs
     ):
+        self.name_or_path: str = "" # will be populated in MobilintModelMixin
         self.mxq_path = mxq_path
         self.dev_no = dev_no
         self.core_mode = core_mode

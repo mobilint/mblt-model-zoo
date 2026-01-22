@@ -17,7 +17,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if TYPE_CHECKING:
             self.config = config
         
-        self.config.npu_backend.name_or_path = self.config.name_or_path        
+        assert self.config.name_or_path is not None, "config.name_or_path is None!"
+        
+        self.config.npu_backend.name_or_path = self.config.name_or_path
         self.launch()
     
     def launch(self):

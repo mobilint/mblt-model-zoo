@@ -40,7 +40,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         super()._prepare_cache_for_generation(
             generation_config,
             model_kwargs,
-            assistant_model,
+            assistant_model, # type: ignore
             batch_size,
             max_cache_length,
             *args,
