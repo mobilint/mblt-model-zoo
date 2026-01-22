@@ -10,8 +10,28 @@ class MobilintConfigMixin(PretrainedConfig):
         self,
         **kwargs
     ):
-        super().__init__(**kwargs)
         self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
+        super().__init__(**kwargs)
+    
+    @property
+    def mxq_path(self): return self.npu_backend.mxq_path
+    @mxq_path.setter
+    def mxq_path(self, v): self.npu_backend.mxq_path = v
+
+    @property
+    def dev_no(self): return self.npu_backend.dev_no
+    @dev_no.setter
+    def dev_no(self, v): self.npu_backend.dev_no = v
+
+    @property
+    def core_mode(self): return self.npu_backend.core_mode
+    @core_mode.setter
+    def core_mode(self, v): self.npu_backend.core_mode = v
+    
+    @property
+    def target_cores(self): return self.npu_backend.target_cores
+    @target_cores.setter
+    def target_cores(self, v): self.npu_backend.target_cores = v
     
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
