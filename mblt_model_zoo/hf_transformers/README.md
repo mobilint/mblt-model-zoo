@@ -4,11 +4,10 @@
 Currently, these models are only available on Mobilint's [ARIES](https://www.mobilint.com/aries).
 Support for [REGULUS](https://www.mobilint.com/regulus) is planned and currently under development
 
-Mobilint's Model Zoo provides a seamless experience for using Transformers' models with the same class/function interfaces. All of the necessary auto classes in Transformers are overridden with our own, which automatically detect our models' identifiers (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from our model server. It also supports a locally downloaded model directory, just like the original Transformers.
+Mobilint's Model Zoo provides a seamless experience for using `transformers` models with the same class/function interfaces. All of the auto classes in `transformers` can import our pre-quantized models (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from Huggingface hub. It also supports a locally downloaded model directory, just like the original `transformers`.
 
 ## Installation
 
-- Install Mobilint ACCELerator(MACCEL) on your environment. In case you are not Mobilint customer, please contact [us](mailto:tech-support@mobilint.com).
 - Install **mblt-model-zoo** with extra dependency using pip:
 
 ```bash
@@ -27,11 +26,10 @@ pip install -e .[transformers]
 
 ### Working with Quantized Model
 
-**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. You can use our overrided auto classes such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`.
+**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
 
 ```python
-from transformers import TextStreamer
-from mblt_model_zoo.hf_transformers import pipeline, AutoTokenizer
+from transformers import TextStreamer, pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -40,6 +38,7 @@ pipe = pipeline(
     "text-generation",
     model=model_path,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+    trust_remote_code=True,
     device="cpu",
 )
 
@@ -62,13 +61,12 @@ outputs = pipe(
 You can also use `AutoModel` or `AutoModelForCausalLM` for initializing models.
 
 ```python
-from transformers import TextStreamer
-from mblt_model_zoo.hf_transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import TextStreamer, AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path).to("cpu")
+model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True).to("cpu")
 
 messages = [
     {
@@ -94,12 +92,11 @@ outputs = model.generate(
 We also support the vision-language models associated with `AutoProcessor` and image format inputs.
 
 ```python
-from transformers import TextStreamer
-from mblt_model_zoo.hf_transformers import pipeline, AutoProcessor
+from transformers import TextStreamer, pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
-processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
+processor = AutoProcessor.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
@@ -134,15 +131,17 @@ Further usage examples can be found in the [tests](../../tests/transformers) dir
 
 ### Listing Available Models
 
-**mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `large_language_model`, `speech_to_text`, etc.):
+**mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
 
 ```python
 from pprint import pprint
-from mblt_model_zoo.hf_transformers import list_models
+from mblt_model_zoo.hf_transformers.utils import list_models
 
 available_models = list_models()
 pprint(available_models)
 ```
+
+It will search online to look up available models. When offline, it will list cached models in the current environment.
 
 ## Model List
 
@@ -186,7 +185,7 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
 
-Additionally, the license for each model provided in this package follows the terms specified in the source link provided with it.
+Additionally, the license for each model provided on the Huggingface hub follows the terms specified in each repository.
 
 ## Support & Issues
 
