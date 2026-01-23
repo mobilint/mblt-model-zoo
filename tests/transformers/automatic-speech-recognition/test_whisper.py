@@ -34,9 +34,9 @@ def test_whisper(pipe):
             batch_size=8,
             return_timestamps=True,
             generate_kwargs={
-                "max_length": 512,
                 "num_beams": 1,  # Supports for beam search with reorder_cache is not implemented yet
             },
         )
 
-        print(output)
+        print("Result: %s" % output['text'])
+        print("Answer: %s" % ds[i]['text'])
