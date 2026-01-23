@@ -43,7 +43,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         result = self.npu_backend.mxq_model.infer([input_numpy])
         assert result is not None, "mxq infer result is None!"
 
-        output = torch.tensor(result[0], dtype=input.dtype, device=self.device)
+        output = torch.tensor(result[0], dtype=input.dtype, device=input.device)
         
         return output
 
@@ -76,7 +76,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
 
-        logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=self.device).squeeze(0)
+        logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
         
         return logits
 
@@ -101,6 +101,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if past_key_values is not None:
             past_key_values.update_cache_position(cache_position)
 
-        hidden_states = torch.tensor(hidden_states_ndarray, dtype=hidden_states.dtype, device=self.device).squeeze(0)
+        hidden_states = torch.tensor(hidden_states_ndarray, dtype=hidden_states.dtype, device=hidden_states.device).squeeze(0)
         
         return hidden_states
