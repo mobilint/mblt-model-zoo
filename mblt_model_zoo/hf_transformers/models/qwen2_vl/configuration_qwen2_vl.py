@@ -25,6 +25,7 @@ class MobilintQwen2VLConfig(Qwen2VLConfig):
         super().__init__(**kwargs)
         
         self.tie_word_embeddings = False
+        self._attn_implementation = "eager"
 
     @classmethod
     def from_dict(
