@@ -1,6 +1,5 @@
-from typing import Any, Tuple
+from typing import Any, Union
 
-from transformers import Union
 from transformers.configuration_utils import SpecificPretrainedConfigType
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.qwen2_vl.configuration_qwen2_vl import (

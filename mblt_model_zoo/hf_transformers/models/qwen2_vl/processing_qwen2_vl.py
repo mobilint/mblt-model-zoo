@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from cv2 import INTER_CUBIC
 from cv2 import resize as cv2_resize
 from PIL import Image
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import ImageInput, load_image
 from transformers.models.qwen2_vl.processing_qwen2_vl import (
@@ -15,6 +16,8 @@ from transformers.models.qwen2_vl.processing_qwen2_vl import (
 from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.video_utils import VideoInput
+
+from .configuration_qwen2_vl import MobilintQwen2VLConfig
 
 
 class MobilintQwen2VLProcessor(Qwen2VLProcessor):
@@ -64,3 +67,5 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
             raise NotImplementedError("Video inputs are not supported")
                     
         return super().__call__(images, text, videos, **kwargs)
+
+AutoProcessor.register(MobilintQwen2VLConfig, MobilintQwen2VLProcessor)
