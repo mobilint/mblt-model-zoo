@@ -10,7 +10,7 @@ authors = [
     {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
 ]
 dynamic = ["version"]
-description = "A collection of pre-quantized AI models for Mobilint NPUs."
+description = "A codebase for pre-quantized AI models for Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.9,<3.13"
@@ -26,7 +26,7 @@ dependencies = [
     "wheel",
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
@@ -56,6 +56,8 @@ transformers = [
     "transformers>=4.54.0, <=4.57.1",
     "sentencepiece",
     "torchvision",
+]
+MeloTTS = [
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",
@@ -75,8 +77,8 @@ version = { attr = "mblt_model_zoo.__version__" }
 
 [tool.setuptools.package-data]
 "mblt_model_zoo" = [
-    "hf_transformers/text_to_speech/MeloTTS/text/cmudict.rep",
-    "hf_transformers/text_to_speech/MeloTTS/text/cmudict_cache.pickle"
+    "MeloTTS/text/cmudict.rep",
+    "MeloTTS/text/cmudict_cache.pickle"
 ]
 
 [tool.uv.sources]
