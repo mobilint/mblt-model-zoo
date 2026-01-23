@@ -17,7 +17,7 @@ def pipe():
         processor=processor,
     )
     yield pipe
-    pipe.model.dispose()
+    del pipe
 
 
 def test_blip(pipe):

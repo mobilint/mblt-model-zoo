@@ -27,8 +27,7 @@ def pipe(request, mxq_path):
             trust_remote_code=True,
         )
     yield pipe
-    if isinstance(pipe.model, MobilintModelMixin):
-        pipe.model.dispose()
+    del pipe
 
 
 @pytest.mark.timeout(300)

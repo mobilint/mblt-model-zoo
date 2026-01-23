@@ -23,8 +23,7 @@ def model(request, mxq_path):
             trust_remote_code=True,
         )
     yield model
-    if isinstance(model, MobilintModelMixin):
-        model.dispose()
+    del model
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
