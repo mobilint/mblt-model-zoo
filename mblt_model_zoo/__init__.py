@@ -5,3 +5,10 @@ try:  # optional
     from . import hf_transformers
 except Exception as e:
     pass
+
+try:  # optional
+    from . import MeloTTS
+except Exception as e:
+    pass
+
+__all__ = ["utils", "vision"]
