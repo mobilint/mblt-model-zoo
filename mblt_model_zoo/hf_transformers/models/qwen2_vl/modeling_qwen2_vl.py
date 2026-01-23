@@ -149,6 +149,7 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
         self.rope_deltas = None  # cache rope_deltas here
     
     def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None):
+        assert image_grid_thw is not None, "image_grid_thw is None!"
         image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
         split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)

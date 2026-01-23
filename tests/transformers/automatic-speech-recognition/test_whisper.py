@@ -37,4 +37,4 @@ def test_whisper(pipe):
         )
 
         print("Result: %s" % output["text"])
-        print("Answer: %s" % ds[i]["text"])
+        print("Answer: %s" % ds[i]["text"])  # type: ignore
