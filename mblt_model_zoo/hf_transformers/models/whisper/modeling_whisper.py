@@ -314,6 +314,9 @@ class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGe
         self.model = MobilintWhisperModel(config, _internal_call=True)
         self.max_target_positions = config.max_target_positions
 
+        # for pipeline type checking
+        self.config.model_type = "whisper"
+
     def forward(
         self,
         input_features: torch.FloatTensor | None = None,
