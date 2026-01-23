@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Optional, cast
 
 import torch
 import torch.nn as nn
@@ -72,7 +72,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
                 
         merged_hidden_states = self.mxq_forward(hidden_states)
 
-        return merged_hidden_states
+        return merged_hidden_states.squeeze(0)
 
 class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen2VLPreTrainedModel):
     config: MobilintQwen2VLTextConfig
@@ -95,7 +95,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         output_hidden_states: bool | None = None,
         return_dict: bool | None = None,
         cache_position: torch.LongTensor | None = None,
-        chunk_size: int = 0,
+        chunk_size: int = 128,
     ) -> tuple | BaseModelOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -147,6 +147,12 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
         self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config, _internal_call=True)
         self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config, _internal_call=True)
         self.rope_deltas = None  # cache rope_deltas here
+    
+    def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None):
+        image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
+        image_embeds = torch.split(image_embeds, split_sizes)
+        return image_embeds
 
 class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
     def __init__(self, config: MobilintQwen2VLConfig, *args, **kwargs):

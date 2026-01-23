@@ -1,5 +1,5 @@
 import pytest
-from transformers import TextStreamer, AutoProcessor, pipeline
+from transformers import TextStreamer, AutoProcessor, pipeline, AutoTokenizer
 
 
 MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
@@ -8,7 +8,7 @@ MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 @pytest.fixture(params=MODEL_PATHS, scope="module")
 def pipe(request, mxq_path):
     model_path = request.param
-    processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+    processor = AutoProcessor.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
     
     if mxq_path:
         pipe = pipeline(
