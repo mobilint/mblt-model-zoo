@@ -102,7 +102,7 @@ class MobilintNPUBackend:
         self.mxq_model = Model(model_path, mc)
         log_model_details(model_path)
         self.mxq_model.launch(self.acc)
-    
+
     def dispose(self):
         self.mxq_model.dispose()
 

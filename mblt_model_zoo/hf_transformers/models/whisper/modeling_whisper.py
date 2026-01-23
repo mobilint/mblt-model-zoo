@@ -164,8 +164,8 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             logger.warning("output_hidden_states is not supported.")
 
         lm_logits = self.decoder_forward(
-            cast(torch.Tensor, encoder_hidden_states),
             hidden_states.unsqueeze(1),
+            cast(torch.Tensor, encoder_hidden_states),
             past_key_values,
             cache_position
         )

@@ -82,19 +82,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
     def decoder_forward(
         self,
-        encoder_hidden_states: torch.Tensor,
         hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
     ):
-        encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
         hidden_states_numpy = hidden_states.type(torch.float32).cpu().numpy()
+        encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
 
         mxq_model = self.npu_backend.mxq_model
         
         cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
 
-        result = mxq_model.infer([encoder_hidden_states_numpy, hidden_states_numpy], None, cache_size)
+        result = mxq_model.infer([hidden_states_numpy, encoder_hidden_states_numpy], None, cache_size)
         assert result is not None, "mxq infer result is None!"
         logits_ndarray = result[0]
 
