@@ -57,10 +57,10 @@ resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
 
 # Set inference mode for better performance
-# Aries supports "single", "multi", "global", "global4", and "global8" inference mode. Default is "global"
+# ARIES supports "single", "multi", "global", "global4", and "global8" inference mode. Default is "global"
 resnet50 = ResNet50(infer_mode = "global")
 
-# (Beta) If you are holding a model compiled for Regulus, enable inference on the Regulus device.
+# (Beta) If you are holding a model compiled for REGULUS, enable inference on the REGULUS device.
 resnet50 = ResNet50(product = "regulus")
 
 # In summary, the model can be loaded with the following arguments. 
@@ -111,11 +111,12 @@ We provide the models that are quantized with our advanced quantization techniqu
 
 When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.
 
-Currently, these optional functions are only available on environment equipped with Mobilint's [Aries](https://www.mobilint.com/aries).
+Currently, these optional functions are only available on environment equipped with Mobilint's [ARIES](https://www.mobilint.com/aries).
 
 |Name|Use|Details|
 |-------|------|------|
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
+|transformers|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
 
 ## Verbose Option
 

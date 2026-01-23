@@ -141,7 +141,7 @@ class MXQ_Model:
         elif self.product == "regulus":
             assert (
                 self.infer_mode == "single"
-            ), "Only single core mode is available on Regulus"
+            ), "Only single core mode is available on REGULUS"
         else:
             raise ValueError("Inappropriate product")
 
