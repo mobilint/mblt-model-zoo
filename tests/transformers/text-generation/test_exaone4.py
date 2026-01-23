@@ -3,8 +3,6 @@ import random
 import pytest
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 

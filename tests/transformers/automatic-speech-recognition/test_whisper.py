@@ -2,8 +2,6 @@ import pytest
 from datasets import load_dataset
 from transformers import pipeline
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 
 @pytest.fixture
 def pipe():
@@ -38,5 +36,5 @@ def test_whisper(pipe):
             },
         )
 
-        print("Result: %s" % output['text'])
-        print("Answer: %s" % ds[i]['text'])
+        print("Result: %s" % output["text"])
+        print("Answer: %s" % ds[i]["text"])

@@ -1,8 +1,6 @@
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 MODEL_PATHS = ("mobilint/c4ai-command-r7b-12-2024",)
 
 

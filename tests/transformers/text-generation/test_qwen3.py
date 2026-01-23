@@ -1,8 +1,6 @@
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 MODEL_PATHS = (
     "mobilint/Qwen3-0.6B",
     "mobilint/Qwen3-1.7B",

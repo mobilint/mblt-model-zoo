@@ -1,8 +1,6 @@
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 MODEL_PATHS = (
     "mobilint/Llama-3.2-1B-Instruct",
     "mobilint/Llama-3.2-3B-Instruct",

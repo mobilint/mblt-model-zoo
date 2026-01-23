@@ -3,8 +3,6 @@ from pprint import pprint
 import pytest
 from transformers import pipeline
 
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
 MODEL_PATHS_AND_PROMPTS = (
     ("mobilint/bert-base-uncased", "Hello I'm a [MASK] model."),
     ("mobilint/bert-kor-base", "안녕하세요 저는 [MASK] 모델입니다."),
