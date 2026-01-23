@@ -163,9 +163,9 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
 
-        hidden_states = self.decoder_forward(
+        lm_logits = self.decoder_forward(
             cast(torch.Tensor, encoder_hidden_states),
-            hidden_states,
+            hidden_states.unsqueeze(1),
             past_key_values,
             cache_position
         )
@@ -174,11 +174,11 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if not return_dict:
             return tuple(
                 v
-                for v in [hidden_states, next_cache, None, None, None]
+                for v in [lm_logits, next_cache, None, None, None]
                 if v is not None
             )
         return BaseModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=cast(torch.FloatTensor, hidden_states),
+            last_hidden_state=cast(torch.FloatTensor, lm_logits),
             past_key_values=next_cache,
             hidden_states=None,
             attentions=None,
@@ -191,6 +191,12 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
 
         self.encoder = MobilintWhisperEncoder(config, _internal_call=True)
         self.decoder = MobilintWhisperDecoder(config, _internal_call=True)
+    
+    def get_encoder(self):
+        return self.encoder
+
+    def get_decoder(self):
+        return self.decoder
 
     def _mask_input_features(
         self,
@@ -317,6 +323,15 @@ class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGe
         # for pipeline type checking
         self.config.model_type = "whisper"
 
+    def get_encoder(self):
+        return self.model.get_encoder()
+
+    def get_decoder(self):
+        return self.model.get_decoder()
+
+    def get_cache_mxq_model(self):
+        return self.get_decoder().get_mxq_model()
+    
     def forward(
         self,
         input_features: torch.FloatTensor | None = None,

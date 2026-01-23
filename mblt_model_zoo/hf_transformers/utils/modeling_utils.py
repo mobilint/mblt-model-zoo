@@ -88,7 +88,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         cache_position: torch.Tensor,
     ):
         encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
-        hidden_states_numpy = hidden_states.unsqueeze(1).type(torch.float32).cpu().numpy()
+        hidden_states_numpy = hidden_states.type(torch.float32).cpu().numpy()
 
         mxq_model = self.npu_backend.mxq_model
         
@@ -101,6 +101,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if past_key_values is not None:
             past_key_values.update_cache_position(cache_position)
 
-        logits = torch.tensor(logits_ndarray, dtype=hidden_states.dtype, device=hidden_states.device).squeeze(1)
+        logits = torch.tensor(logits_ndarray, dtype=hidden_states.dtype, device=hidden_states.device)
         
         return logits
