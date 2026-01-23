@@ -4,13 +4,16 @@ from typing import Dict
 import qbruntime
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 
-from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
+from ..utils.cache_utils import MobilintCache
+from ..utils.modeling_utils import MobilintModelMixin
 
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
-    @abstractmethod
     def get_cache_mxq_model(self) -> qbruntime.Model:
-        pass
+        if isinstance(self, MobilintModelMixin):
+            return self.get_mxq_model()
+        else:
+            raise TypeError("mxq_model for cache not found! Class: %s" % self.__class__.__name__)
     
     # Function arguments changed for transformers>=4.56.0
     # args contain device and model_kwargs in transformers<4.56.0

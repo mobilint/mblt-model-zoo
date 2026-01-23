@@ -1,17 +1,19 @@
 import math
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 import torch
 from transformers.modeling_utils import PreTrainedModel
 
 from ..utils.cache_utils import MobilintCache
-from .base_utils import PretrainedOnlyMixin
-from .configuration_utils import MobilintConfigMixin
+from .base_utils import MobilintNPUBackend, PretrainedOnlyMixin
+from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConfigMixin
 
 
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
-    def __init__(self, config: MobilintConfigMixin, *args, **kwargs):
+    npu_backend_prefix: Literal["", "encoder_", "decoder_"] = ""
+    
+    def __init__(self, config: MobilintConfigMixin | MobilintEncoderDecoderConfigMixin, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         
         if TYPE_CHECKING:
@@ -19,30 +21,31 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         
         assert self.config.name_or_path is not None, "config.name_or_path is None!"
         
-        self.config.npu_backend.name_or_path = self.config.name_or_path
+        self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
+        self.npu_backend.name_or_path = self.config.name_or_path
         self.launch()
     
     def launch(self):
-        self.config.npu_backend.launch()
+        self.npu_backend.launch()
     
     def dispose(self):
-        self.config.npu_backend.dispose()
+        self.npu_backend.dispose()
     
-    def get_cache_mxq_model(self):
-        return self.config.npu_backend.mxq_model
+    def get_mxq_model(self):
+        return self.npu_backend.mxq_model
 
-    def bert_forward(
+    def mxq_forward(
         self,
-        embedding_output: torch.Tensor,
+        input: torch.Tensor,
     ):
-        embedding_output_numpy = embedding_output.type(torch.float32).cpu().numpy()
+        input_numpy = input.type(torch.float32).cpu().numpy()
         
-        result = self.config.npu_backend.mxq_model.infer([embedding_output_numpy])
+        result = self.npu_backend.mxq_model.infer([input_numpy])
         assert result is not None, "mxq infer result is None!"
 
-        sequence_output = torch.tensor(result[0], dtype=embedding_output.dtype, device=self.device)
+        output = torch.tensor(result[0], dtype=input.dtype, device=self.device)
         
-        return sequence_output
+        return output
 
     def llm_forward(
         self,
@@ -59,7 +62,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         assert chunk_size > 0, "chunk_size should be a positive number! chunk_size: %d" % chunk_size
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / chunk_size)
 
-        mxq_model = self.config.npu_backend.mxq_model
+        mxq_model = self.npu_backend.mxq_model
         
         for i in range(num_of_chunks):
             start_index = i * chunk_size
@@ -73,6 +76,31 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
 
-        logits = torch.tensor(logits_ndarray, dtype=torch.float32, device=self.device).squeeze(0)
+        logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=self.device).squeeze(0)
         
         return logits
+
+    def decoder_forward(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        hidden_states: torch.Tensor,
+        past_key_values: Optional[MobilintCache],
+        cache_position: torch.Tensor,
+    ):
+        encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
+        hidden_states_numpy = hidden_states.unsqueeze(1).type(torch.float32).cpu().numpy()
+
+        mxq_model = self.npu_backend.mxq_model
+        
+        cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
+
+        result = mxq_model.infer([encoder_hidden_states_numpy, hidden_states_numpy], None, cache_size)
+        assert result is not None, "mxq infer result is None!"
+        hidden_states_ndarray = result[0]
+
+        if past_key_values is not None:
+            past_key_values.update_cache_position(cache_position)
+
+        hidden_states = torch.tensor(hidden_states_ndarray, dtype=hidden_states.dtype, device=self.device).squeeze(0)
+        
+        return hidden_states

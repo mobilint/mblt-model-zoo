@@ -11,16 +11,15 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForMaskedLM
 from transformers.models.bert.modeling_bert import (
     BertEmbeddings,
+    BertLMPredictionHead,
     BertOnlyMLMHead,
     BertPooler,
-    BertLMPredictionHead,
     load_tf_weights_in_bert,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_bert import MobilintBertConfig
 
@@ -30,24 +29,6 @@ class MobilintBertPreTrainedModel(PreTrainedModel):
     config: MobilintBertConfig
     load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
-
-    def _init_weights(self, module):
-        """Initialize the weights"""
-        if isinstance(module, nn.Linear):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        elif isinstance(module, BertLMPredictionHead):
-            module.bias.data.zero_()
 
 class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
     _no_split_modules = ["BertEmbeddings", "BertLayer"]
@@ -107,7 +88,7 @@ class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
             past_key_values_length=0,
         )
         
-        sequence_output = self.bert_forward(embedding_output)
+        sequence_output = self.mxq_forward(embedding_output)
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         return BaseModelOutputWithPoolingAndCrossAttentions(
