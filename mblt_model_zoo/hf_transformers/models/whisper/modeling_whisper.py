@@ -74,7 +74,7 @@ class MobilintWhisperEncoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
         
-        hidden_states = self.mxq_forward(input_features.permute(0, 2, 1))
+        hidden_states = self.mxq_forward(input_features.permute(0, 2, 1)).unsqueeze(0)
         
         if not return_dict:
             return tuple(v for v in [hidden_states,] if v is not None)

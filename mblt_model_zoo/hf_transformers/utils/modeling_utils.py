@@ -96,11 +96,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         result = mxq_model.infer([encoder_hidden_states_numpy, hidden_states_numpy], None, cache_size)
         assert result is not None, "mxq infer result is None!"
-        hidden_states_ndarray = result[0]
+        logits_ndarray = result[0]
 
         if past_key_values is not None:
             past_key_values.update_cache_position(cache_position)
 
-        hidden_states = torch.tensor(hidden_states_ndarray, dtype=hidden_states.dtype, device=hidden_states.device).squeeze(0)
+        logits = torch.tensor(logits_ndarray, dtype=hidden_states.dtype, device=hidden_states.device).squeeze(1)
         
-        return hidden_states
+        return logits
