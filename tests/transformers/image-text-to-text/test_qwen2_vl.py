@@ -3,19 +3,31 @@ from transformers import TextStreamer
 
 from mblt_model_zoo.hf_transformers import AutoProcessor, pipeline
 
+MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 
-@pytest.fixture
-def pipe():
-    model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
-    processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
-    pipe = pipeline(
-        "image-text-to-text",
-        model=model_name,
-        processor=processor,
-    )
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request, mxq_path):
+    model_path = request.param
+    processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+    
+    if mxq_path:
+        pipe = pipeline(
+            "image-text-to-text",
+            model=model_path,
+            processor=processor,
+            trust_remote_code=True,
+            model_kwargs={"mxq_path": mxq_path},
+        )
+    else:
+        pipe = pipeline(
+            "image-text-to-text",
+            model=model_path,
+            processor=processor,
+            trust_remote_code=True,
+        )
     yield pipe
-    pipe.model.dispose()
+    del pipe
 
 
 def test_qwen2_vl(pipe):
