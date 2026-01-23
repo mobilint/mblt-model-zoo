@@ -1,7 +1,6 @@
 import pytest
-from transformers import TextStreamer
+from transformers import TextStreamer, AutoProcessor, pipeline
 
-from mblt_model_zoo.hf_transformers import AutoProcessor, pipeline
 
 MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 
