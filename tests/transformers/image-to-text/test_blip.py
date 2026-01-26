@@ -1,20 +1,22 @@
 import pytest
 import requests
 from PIL import Image
-from transformers import TextStreamer
-
-from mblt_model_zoo.hf_transformers import AutoProcessor, pipeline
+from transformers import TextStreamer, AutoProcessor, pipeline
 
 
-@pytest.fixture
-def pipe():
-    model_name = "mobilint/blip-image-captioning-large"
+MODEL_PATHS = ("mobilint/blip-image-captioning-large",)
 
-    processor = AutoProcessor.from_pretrained(model_name, use_fast=True)
+
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request, mxq_path):
+    model_path = request.param
+
+    processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
     pipe = pipeline(
         "image-text-to-text",
-        model=model_name,
+        model=model_path,
         processor=processor,
+        trust_remote_code=True,
     )
     yield pipe
     del pipe
