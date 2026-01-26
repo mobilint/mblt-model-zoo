@@ -147,7 +147,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
         if use_cache and past_key_values is None:
             past_key_values = self._get_cache("", 0, 0)
         
-        logits = self.bert(
+        outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -162,6 +162,8 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
             is_decoder=is_decoder,
             cache_position=cache_position,
         )
+        
+        logits = outputs[0]
         
         if return_logits:
             return logits
