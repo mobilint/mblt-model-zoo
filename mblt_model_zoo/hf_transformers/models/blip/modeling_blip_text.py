@@ -88,7 +88,7 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
             embedding_output.unsqueeze(1),
             past_key_values,
             cache_position,
-        )
+        ).squeeze(0)
 
         if not return_dict:
             return (logits, None, past_key_values)
