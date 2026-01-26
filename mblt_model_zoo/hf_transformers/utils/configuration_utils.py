@@ -1,5 +1,5 @@
-from typing import Any
 import copy
+from typing import Any
 
 from transformers.configuration_utils import (
     PretrainedConfig,
@@ -12,10 +12,11 @@ from .base_utils import MobilintNPUBackend
 class MobilintConfigMixin(PretrainedConfig):
     def __init__(
         self,
+        *args,
         **kwargs
     ):
         self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def mxq_path(self) -> str:
