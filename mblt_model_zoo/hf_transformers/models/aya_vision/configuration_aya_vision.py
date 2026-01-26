@@ -5,11 +5,14 @@ from transformers.configuration_utils import SpecificPretrainedConfigType
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.aya_vision.configuration_aya_vision import AyaVisionConfig
 
+from ...models.cohere2.configuration_cohere2 import MobilintCohere2Config
+
 from ...utils.configuration_utils import MobilintConfigMixin
 
 
 class MobilintAyaVisionConfig(MobilintConfigMixin, AyaVisionConfig):
     model_type = "mobilint-aya_vision"
+    sub_configs = {"text_config": MobilintCohere2Config, "vision_config": AutoConfig}
 
     def __init__(self, vision_config = None, text_config = None, **kwargs):        
         if text_config is None:
