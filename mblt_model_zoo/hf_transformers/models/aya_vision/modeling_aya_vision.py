@@ -139,7 +139,7 @@ class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         inputs_embeds=None,
         pixel_values=None,
         attention_mask=None,
-        cache_position=None,
+        cache_position: torch.LongTensor | None = None,
         logits_to_keep=None,
         is_first_iteration=False,
         **kwargs,
@@ -156,7 +156,8 @@ class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             **kwargs,
         )
 
-        if is_first_iteration or cache_position[0] == 0 or not kwargs.get("use_cache", True):
+        if (cache_position is not None and cache_position[0] == 0 or
+            is_first_iteration or not kwargs.get("use_cache", True)):
             model_inputs["pixel_values"] = pixel_values
 
         return model_inputs
