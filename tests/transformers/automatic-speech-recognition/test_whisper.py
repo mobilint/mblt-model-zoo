@@ -3,9 +3,12 @@ from datasets import load_dataset
 from transformers import pipeline
 
 
-@pytest.fixture
-def pipe():
-    model_path = "mobilint/whisper-small"
+MODEL_PATHS = ("mobilint/whisper-small",)
+
+
+@pytest.fixture(params=MODEL_PATHS, scope="module")
+def pipe(request, mxq_path):
+    model_path = request.param
 
     pipe = pipeline(
         "automatic-speech-recognition",
