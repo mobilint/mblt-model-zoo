@@ -40,14 +40,6 @@ class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         vision_feature_select_strategy: Optional[str] = None,
         **kwargs,
     ):
-        if vision_feature_select_strategy != "full":
-            raise ValueError(
-                f"Unexpected vision_feature_select_strategy: {vision_feature_select_strategy}"
-            )
-
-        if vision_feature_layer != -1:
-            raise ValueError(f"Unexpected vision_feature_layer: {vision_feature_layer}")
-
         image_features = self.mxq_forward(pixel_values).permute(0, 2, 3, 1).contiguous()
         return image_features
 
@@ -164,7 +156,7 @@ class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             **kwargs,
         )
 
-        if is_first_iteration or not kwargs.get("use_cache", True):
+        if is_first_iteration or cache_position[0] == 0 or not kwargs.get("use_cache", True):
             model_inputs["pixel_values"] = pixel_values
 
         return model_inputs
