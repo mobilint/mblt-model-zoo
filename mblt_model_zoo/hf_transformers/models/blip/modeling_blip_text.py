@@ -2,7 +2,10 @@ from typing import cast
 
 import torch
 from torch.nn import CrossEntropyLoss
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPoolingAndCrossAttentions,
+    CausalLMOutputWithCrossAttentions,
+)
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.blip.modeling_blip_text import BlipTextEmbeddings
 from transformers.utils.generic import logging
@@ -18,54 +21,31 @@ class MobilintBlipTextPreTrainedModel(PreTrainedModel):
     config: MobilintBlipTextConfig
     base_model_prefix = "bert"
 
-class MobilintBlipTextLMHeadModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel, MobilintGenerationMixin):
+class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel):
     def __init__(self, config: MobilintBlipTextConfig, **kwargs):
         super().__init__(config, **kwargs)
         self.config = config
 
         self.embeddings = BlipTextEmbeddings(config)
-        self.label_smoothing = config.label_smoothing
-
+    
     def forward(
         self,
         input_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
         inputs_embeds: torch.Tensor | None = None,
+        encoder_embeds: torch.Tensor | None = None,
         encoder_hidden_states: torch.Tensor | None = None,
         encoder_attention_mask: torch.Tensor | None = None,
-        labels: torch.Tensor | None = None,
         past_key_values: MobilintCache | None = None,
         use_cache: bool | None = None,
         output_attentions: bool | None = None,
         output_hidden_states: bool | None = None,
         return_dict: bool | None = None,
-        return_logits: bool | None = False,
-        is_decoder: bool | None = True,
-        reduction: str | None = "mean",
+        is_decoder: bool | None = False,
         cache_position: torch.Tensor | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
         **kwargs,
-    ) -> torch.Tensor | tuple[torch.Tensor | MobilintCache, ...] | CausalLMOutputWithCrossAttentions:
-        assert encoder_hidden_states is not None, "encoder_hidden_states is None!"
-        
-        if logits_to_keep > 1:
-            logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
-        
-        if output_attentions:
-            logger.warning("output_attentions is not supported.")
-
-        if output_hidden_states:
-            logger.warning("output_hidden_states is not supported.")
-        
-        if reduction != "mean":
-            logger.warning("reduction except 'mean' is not supported: %s" % reduction)
-            reduction = "mean"
-            
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        if labels is not None:
-            use_cache = False
-        
+    ) -> tuple[torch.Tensor | None | MobilintCache, ...] | BaseModelOutputWithPoolingAndCrossAttentions:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -80,8 +60,13 @@ class MobilintBlipTextLMHeadModel(MobilintModelMixin, MobilintBlipTextPreTrained
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
-        if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+        if output_attentions:
+            logger.warning("output_attentions is not supported.")
+
+        if output_hidden_states:
+            logger.warning("output_hidden_states is not supported.")
+        
+        assert encoder_hidden_states is not None, "encoder_hidden_states is None!"
         
         past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
 
@@ -105,6 +90,79 @@ class MobilintBlipTextLMHeadModel(MobilintModelMixin, MobilintBlipTextPreTrained
             cache_position,
         )
 
+        if not return_dict:
+            return (logits, None, past_key_values)
+
+        return BaseModelOutputWithPoolingAndCrossAttentions(
+            last_hidden_state=cast(torch.FloatTensor, logits),
+            pooler_output=None,
+            past_key_values=past_key_values,
+            hidden_states=None,
+            attentions=None,
+            cross_attentions=None,
+        )
+
+class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGenerationMixin):
+    def __init__(self, config: MobilintBlipTextConfig, **kwargs):
+        super().__init__(config, **kwargs)
+        
+        self.bert = MobilintBlipTextModel(config, add_pooling_layer=False, _internal_call=True)
+        self.label_smoothing = config.label_smoothing
+    
+    def get_cache_mxq_model(self):
+        return self.bert.get_mxq_model()
+
+    def forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        encoder_hidden_states: torch.Tensor | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        past_key_values: MobilintCache | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        return_logits: bool | None = False,
+        is_decoder: bool | None = True,
+        reduction: str | None = "mean",
+        cache_position: torch.Tensor | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
+        **kwargs,
+    ) -> torch.Tensor | tuple[torch.Tensor | MobilintCache, ...] | CausalLMOutputWithCrossAttentions:            
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        if labels is not None:
+            use_cache = False
+            
+        if logits_to_keep > 1:
+            logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
+        
+        if reduction != "mean":
+            logger.warning("reduction except 'mean' is not supported: %s" % reduction)
+            reduction = "mean"
+        
+        if use_cache and past_key_values is None:
+            past_key_values = self._get_cache("", 0, 0)
+        
+        logits = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            is_decoder=is_decoder,
+            cache_position=cache_position,
+        )
+        
         if return_logits:
             return logits
 
