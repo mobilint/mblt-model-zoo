@@ -45,7 +45,7 @@ class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
         if interpolate_pos_encoding is True:
             logger.warning("interpolate_pos_encoding is not supported.")
         
-        last_hidden_state = self.mxq_forward(pixel_values).permute((0, 2, 1))
+        last_hidden_state = self.mxq_forward(pixel_values).squeeze(2).permute((0, 2, 1))
 
         return BaseModelOutputWithPooling(
             last_hidden_state=cast(torch.FloatTensor, last_hidden_state),
