@@ -22,6 +22,9 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         super().__init__(config, *args, **kwargs)
         
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+    
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embed_tokens
 
     def forward(
         self,

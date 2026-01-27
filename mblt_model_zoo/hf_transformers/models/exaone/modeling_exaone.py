@@ -24,6 +24,9 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         super().__init__(config, *args, **kwargs)
         
         self.wte = nn.Embedding(config.vocab_size, config.hidden_size, self.config.pad_token_id)
+    
+    def get_input_embeddings(self) -> nn.Module:
+        return self.wte
 
     def forward(
         self,

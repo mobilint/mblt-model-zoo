@@ -32,6 +32,9 @@ class MobilintBertPreTrainedModel(PreTrainedModel):
 
 class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
     _no_split_modules = ["BertEmbeddings", "BertLayer"]
+
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embeddings
     
     def __init__(self, config: MobilintBertConfig, add_pooling_layer=True, **kwargs):
         super().__init__(config, **kwargs)

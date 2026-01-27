@@ -1,6 +1,7 @@
 from typing import Optional, Union, cast
 
 import torch
+import torch.nn as nn
 from transformers.models.auto.modeling_auto import (
     AutoModel,
     AutoModelForCausalLM,
@@ -30,7 +31,7 @@ class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
         self.language_model: MobilintCohere2ForCausalLM = AutoModelForCausalLM.from_config(config.text_config, _internal_call=True)
     
-    def get_input_embeddings(self):
+    def get_input_embeddings(self) -> nn.Module:
         return self.language_model.get_input_embeddings()
     
     def get_image_features(

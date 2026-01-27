@@ -1,6 +1,7 @@
 from typing import cast
 
 import torch
+import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
@@ -27,6 +28,9 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
         self.config = config
 
         self.embeddings = BlipTextEmbeddings(config)
+    
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embeddings
     
     def forward(
         self,

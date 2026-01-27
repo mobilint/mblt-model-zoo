@@ -23,6 +23,9 @@ class MobilintQwen3ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
 
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embed_tokens
+    
     def forward(
         self,
         input_ids: torch.LongTensor | None = None,

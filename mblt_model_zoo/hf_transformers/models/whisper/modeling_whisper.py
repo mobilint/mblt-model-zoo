@@ -92,6 +92,9 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         self.embed_tokens = nn.Embedding(config.vocab_size, config.d_model, config.pad_token_id)
         self.embed_positions = WhisperPositionalEmbedding(config.max_target_positions, config.d_model)
     
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embed_tokens
+    
     def forward(
         self,
         input_ids=None,
@@ -191,6 +194,9 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
 
         self.encoder = MobilintWhisperEncoder(config, _internal_call=True)
         self.decoder = MobilintWhisperDecoder(config, _internal_call=True)
+    
+    def get_input_embeddings(self) -> nn.Module:
+        return self.decoder.get_input_embeddings()
     
     def get_encoder(self):
         return self.encoder
@@ -322,6 +328,9 @@ class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGe
 
         # for pipeline type checking
         self.config.model_type = "whisper"
+    
+    def get_input_embeddings(self) -> nn.Module:
+        return self.model.get_input_embeddings()
 
     def get_encoder(self):
         return self.model.get_encoder()
