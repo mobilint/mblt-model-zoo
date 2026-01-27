@@ -27,3 +27,4 @@ tmp/
 uv.lock
 *.wav
 benchmark/results/
+*.json
