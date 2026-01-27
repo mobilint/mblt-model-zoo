@@ -174,21 +174,6 @@ Common environment variables:
 - `MBLT_FIXED_PREFILL` (default: `128`)
 - `MBLT_SKIP_EXISTING` (`true` to skip models with existing outputs)
 
-### Compare selected models
-
-`benchmark/benchmark_text_generation_lanner_compare.py` benchmarks a fixed list of Mobilint LLMs and prints a CSV-like row per model.
-
-```bash
-python benchmark/benchmark_text_generation_lanner_compare.py
-```
-
-Common environment variables:
-- `MBLT_DEVICE` (default: `cpu`)
-- `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
-- `MBLT_REVISION` (default: `W8`)
-- `MBLT_PREFILL` (default: `240`)
-- `MBLT_DECODE` (default: `10`)
-
 ## Verbose Option
 
 By default, model initialization stays quiet. To print the model file size and MD5 hash whenever an MXQ model loads, set the environment variable `MBLT_MODEL_ZOO_VERBOSE` to a truthy value before running your script:
