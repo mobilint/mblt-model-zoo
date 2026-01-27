@@ -119,15 +119,46 @@ class TPSMeasurer:
         # 2. Decode Sweep
         d_start, d_end, d_step = decode_range
         print(f"--- [2/2] Decode Sweep ({d_start} ~ {d_end}) ---")
-        
-        for d_len in range(d_start, d_end + 1, d_step):
-            res = self.measure(num_prefill=fixed_prefill_len, num_decode=d_len)
-            
-            full_result.decode_sweep.x_values.append(d_len)
-            full_result.decode_sweep.tps_values.append(res.decode_tps)
-            full_result.decode_sweep.time_values.append(res.decode_duration)
-            
-            print(f"Out: {d_len} | TPS: {res.decode_tps:.1f} | Time: {res.decode_duration:.4f}s")
+        input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
+        input_ids = input_ids.to(self.device)
+
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        gen_kwargs = dict(
+            input_ids=input_ids,
+            streamer=streamer,
+            min_new_tokens=d_end,
+            max_new_tokens=d_end,
+            do_sample=False,
+            eos_token_id=None,
+            pad_token_id=self.tokenizer.eos_token_id
+        )
+
+        targets = set(range(d_start, d_end + 1, d_step))
+
+        thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+        thread.start()
+
+        first_token_time = None
+        decoded_tokens = 0
+        for _ in streamer:
+            if first_token_time is None:
+                first_token_time = time.perf_counter()
+            decoded_tokens += 1
+            if decoded_tokens in targets:
+                t_hit = time.perf_counter()
+                decode_duration = t_hit - first_token_time
+                decode_count = decoded_tokens - 1
+                decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+
+                full_result.decode_sweep.x_values.append(decoded_tokens)
+                full_result.decode_sweep.tps_values.append(decode_tps)
+                full_result.decode_sweep.time_values.append(decode_duration)
+
+                print(f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | Time: {decode_duration:.4f}s")
+
+        thread.join()
+
+        assert first_token_time is not None
 
         return full_result
 
