@@ -171,129 +171,160 @@ class TPSMeasurer:
         
         plt.switch_backend('Agg') 
 
-    def measure(self, num_prefill=512, num_decode=128) -> SingleMeasurement:
-        # 1. Synthetic Input
-        input_ids = torch.randint(100, self.model.config.vocab_size, (1, num_prefill))
-        input_ids = input_ids.to(self.device)
+    @staticmethod
+    def _start_trace(trace_path: str | None):
+        if not trace_path:
+            return None
+        try:
+            import qbruntime  # type: ignore
+        except Exception as e:
+            raise RuntimeError("Tracing requires qbruntime to be available.") from e
+        qbruntime.start_tracing_event(trace_path)
+        return qbruntime
 
-        # 2. Setup
-        streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        gen_kwargs = dict(
-            input_ids=input_ids,
-            streamer=streamer,
-            min_new_tokens=num_decode,
-            max_new_tokens=num_decode,
-            do_sample=False,
-            eos_token_id=None,
-            pad_token_id=self.tokenizer.eos_token_id
-        )
+    @staticmethod
+    def _stop_trace(handle):
+        if handle is None:
+            return
+        handle.stop_tracing_event()
 
-        # 3. Execution
-        thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
-        
-        t_start = time.perf_counter()
-        thread.start()
-        
-        first_token_time = None
-        decoded_tokens = 0
-        
-        for _ in streamer:
-            if first_token_time is None:
-                first_token_time = time.perf_counter()
-            decoded_tokens += 1
+    def measure(
+        self,
+        num_prefill=512,
+        num_decode=128,
+        trace_path: str | None = None,
+    ) -> SingleMeasurement:
+        trace_handle = self._start_trace(trace_path)
+        try:
+            # 1. Synthetic Input
+            input_ids = torch.randint(100, self.model.config.vocab_size, (1, num_prefill))
+            input_ids = input_ids.to(self.device)
+
+            # 2. Setup
+            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            gen_kwargs = dict(
+                input_ids=input_ids,
+                streamer=streamer,
+                min_new_tokens=num_decode,
+                max_new_tokens=num_decode,
+                do_sample=False,
+                eos_token_id=None,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+
+            # 3. Execution
+            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
             
-        t_end = time.perf_counter()
-        thread.join()
-        
-        assert first_token_time is not None
+            t_start = time.perf_counter()
+            thread.start()
+            
+            first_token_time = None
+            decoded_tokens = 0
+            
+            for _ in streamer:
+                if first_token_time is None:
+                    first_token_time = time.perf_counter()
+                decoded_tokens += 1
+                
+            t_end = time.perf_counter()
+            thread.join()
+            
+            assert first_token_time is not None
 
-        # 4. Calculation
-        prefill_latency = first_token_time - t_start
-        prefill_tps = num_prefill / prefill_latency if prefill_latency > 0 else 0
-        
-        decode_duration = t_end - first_token_time
-        decode_count = decoded_tokens - 1
-        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
-        
-        total_time = t_end - t_start
+            # 4. Calculation
+            prefill_latency = first_token_time - t_start
+            prefill_tps = num_prefill / prefill_latency if prefill_latency > 0 else 0
+            
+            decode_duration = t_end - first_token_time
+            decode_count = decoded_tokens - 1
+            decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+            
+            total_time = t_end - t_start
 
-        return SingleMeasurement(
-            num_prefill=num_prefill,
-            num_decode=num_decode,
-            prefill_latency=prefill_latency,
-            prefill_tps=prefill_tps,
-            decode_duration=decode_duration,
-            decode_tps=decode_tps,
-            total_time=total_time
-        )
+            return SingleMeasurement(
+                num_prefill=num_prefill,
+                num_decode=num_decode,
+                prefill_latency=prefill_latency,
+                prefill_tps=prefill_tps,
+                decode_duration=decode_duration,
+                decode_tps=decode_tps,
+                total_time=total_time
+            )
+        finally:
+            self._stop_trace(trace_handle)
 
     def measure_full(self, 
                      prefill_range: Tuple[int, int, int] = (128, 2048, 128), 
                      decode_range: Tuple[int, int, int] = (128, 1024, 128),
                      fixed_decode_len=10, 
-                     fixed_prefill_len=128) -> BenchmarkResult:
-        full_result = BenchmarkResult()
+                     fixed_prefill_len=128,
+                     trace_path: str | None = None) -> BenchmarkResult:
+        trace_handle = self._start_trace(trace_path)
+        try:
+            full_result = BenchmarkResult()
 
-        print(f"🚀 Starting Full Measurement...")
+            print(f"🚀 Starting Full Measurement...")
 
-        # 1. Prefill Sweep
-        p_start, p_end, p_step = prefill_range
-        print(f"--- [1/2] Prefill Sweep ({p_start} ~ {p_end}) ---")
-        
-        for p_len in range(p_start, p_end + 1, p_step):
-            res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
+            # 1. Prefill Sweep
+            p_start, p_end, p_step = prefill_range
+            print(f"--- [1/2] Prefill Sweep ({p_start} ~ {p_end}) ---")
             
-            full_result.prefill_sweep.x_values.append(p_len)
-            full_result.prefill_sweep.tps_values.append(res.prefill_tps)
-            full_result.prefill_sweep.time_values.append(res.prefill_latency)
-            
-            print(f"In: {p_len} | TPS: {res.prefill_tps:.1f} | Latency: {res.prefill_latency:.4f}s")
+            for p_len in range(p_start, p_end + 1, p_step):
+                res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
+                
+                full_result.prefill_sweep.x_values.append(p_len)
+                full_result.prefill_sweep.tps_values.append(res.prefill_tps)
+                full_result.prefill_sweep.time_values.append(res.prefill_latency)
+                
+                print(f"In: {p_len} | TPS: {res.prefill_tps:.1f} | Latency: {res.prefill_latency:.4f}s")
 
-        # 2. Decode Sweep
-        d_start, d_end, d_step = decode_range
-        print(f"--- [2/2] Decode Sweep ({d_start} ~ {d_end}) ---")
-        input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
-        input_ids = input_ids.to(self.device)
+            # 2. Decode Sweep
+            d_start, d_end, d_step = decode_range
+            print(f"--- [2/2] Decode Sweep ({d_start} ~ {d_end}) ---")
+            input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
+            input_ids = input_ids.to(self.device)
 
-        streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        gen_kwargs = dict(
-            input_ids=input_ids,
-            streamer=streamer,
-            min_new_tokens=d_end,
-            max_new_tokens=d_end,
-            do_sample=False,
-            eos_token_id=None,
-            pad_token_id=self.tokenizer.eos_token_id
-        )
+            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            gen_kwargs = dict(
+                input_ids=input_ids,
+                streamer=streamer,
+                min_new_tokens=d_end,
+                max_new_tokens=d_end,
+                do_sample=False,
+                eos_token_id=None,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
 
-        targets = set(range(d_start, d_end + 1, d_step))
+            targets = set(range(d_start, d_end + 1, d_step))
 
-        thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
-        thread.start()
+            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+            thread.start()
 
-        first_token_time = None
-        decoded_tokens = 0
-        for _ in streamer:
-            if first_token_time is None:
-                first_token_time = time.perf_counter()
-            decoded_tokens += 1
-            if decoded_tokens in targets:
-                t_hit = time.perf_counter()
-                decode_duration = t_hit - first_token_time
-                decode_count = decoded_tokens - 1
-                decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+            first_token_time = None
+            decoded_tokens = 0
+            for _ in streamer:
+                if first_token_time is None:
+                    first_token_time = time.perf_counter()
+                decoded_tokens += 1
+                if decoded_tokens in targets:
+                    t_hit = time.perf_counter()
+                    decode_duration = t_hit - first_token_time
+                    decode_count = decoded_tokens - 1
+                    decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
 
-                full_result.decode_sweep.x_values.append(decoded_tokens)
-                full_result.decode_sweep.tps_values.append(decode_tps)
-                full_result.decode_sweep.time_values.append(decode_duration)
+                    full_result.decode_sweep.x_values.append(decoded_tokens)
+                    full_result.decode_sweep.tps_values.append(decode_tps)
+                    full_result.decode_sweep.time_values.append(decode_duration)
 
-                print(f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | Time: {decode_duration:.4f}s")
+                    print(f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | Time: {decode_duration:.4f}s")
 
-        thread.join()
+            thread.join()
 
-        assert first_token_time is not None
+            assert first_token_time is not None
 
-        return full_result
+            return full_result
+        finally:
+            self._stop_trace(trace_handle)
 
     def plot_and_save(self, result: BenchmarkResult, save_path: str = "tps_benchmark.png"):
         fig, axs = plt.subplots(2, 2, figsize=(16, 10))

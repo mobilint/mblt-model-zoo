@@ -149,7 +149,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     for _ in range(args.warmup):
         measurer.measure(num_prefill=args.prefill, num_decode=args.decode)
 
-    res = measurer.measure(num_prefill=args.prefill, num_decode=args.decode)
+    res = measurer.measure(
+        num_prefill=args.prefill,
+        num_decode=args.decode,
+        trace_path=args.trace,
+    )
 
     print(
         f"prefill: {res.num_prefill} tokens | {res.prefill_tps:.2f} tok/s | TTFT {res.prefill_latency:.4f}s"
@@ -190,6 +194,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         decode_range=args.decode_range,
         fixed_decode_len=args.fixed_decode,
         fixed_prefill_len=args.fixed_prefill,
+        trace_path=args.trace,
     )
 
     if args.json:
@@ -249,6 +254,11 @@ def add_tps_parser(
         )
         p.add_argument(
             "--warmup", type=int, default=1, help="warmup runs before measuring"
+        )
+        p.add_argument(
+            "--trace",
+            default=None,
+            help="write qbruntime trace to the given JSON path",
         )
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
