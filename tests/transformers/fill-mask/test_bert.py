@@ -10,13 +10,10 @@ MODEL_PATHS_AND_PROMPTS = (
 
 
 @pytest.fixture(params=MODEL_PATHS_AND_PROMPTS, scope="module")
-def pipe_and_prompt(request, mxq_path, revision, embedding_weight):
+def pipe_and_prompt(request, revision, npu_params):
     model_path, prompt = request.param
-    model_kwargs = {}
-    if mxq_path:
-        model_kwargs["mxq_path"] = mxq_path
-    if embedding_weight:
-        model_kwargs["embedding_weight"] = embedding_weight
+    npu_params.warn_unused({"base"})
+    model_kwargs = npu_params.base
 
     if model_kwargs:
         pipe = pipeline(

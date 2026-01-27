@@ -6,13 +6,10 @@ MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path, revision, embedding_weight):
+def pipe(request, revision, npu_params):
     model_path = request.param
-    model_kwargs = {}
-    if mxq_path:
-        model_kwargs["mxq_path"] = mxq_path
-    if embedding_weight:
-        model_kwargs["embedding_weight"] = embedding_weight
+    npu_params.warn_unused({"vision", "text"})
+    model_kwargs = {**npu_params.vision, **npu_params.text}
     processor = AutoProcessor.from_pretrained(
         model_path,
         use_fast=True,
