@@ -118,6 +118,68 @@ Currently, these optional functions are only available on environment equipped w
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
 |transformers|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
 
+## CLI (TPS Benchmark)
+
+The package installs a `mblt-model-zoo` command with a `tps` subcommand for measuring text-generation throughput. This CLI requires the transformers extra.
+
+```bash
+# install extras
+pip install mblt-model-zoo[transformers]
+
+# single measurement
+mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --device cpu --prefill 512 --decode 128
+
+# sweep (writes JSON/CSV and a PNG plot by default)
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu \
+  --prefill-range 128:2048:128 --decode-range 128:1024:128 \
+  --json tps.json --csv tps.csv --plot tps.png
+```
+
+Notes:
+- Range syntax supports `start:end:step` or `start,end,step`.
+- Use `--no-plot` to skip the PNG output.
+- You can pass `--dtype`, `--device-map`, `--tokenizer`, or `--no-trust-remote-code` as needed.
+
+## Benchmark Scripts (Text Generation)
+
+The `benchmark/` folder contains runnable scripts for text-generation benchmarking.
+
+### Benchmark all available models
+
+`benchmark/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
+
+```bash
+python benchmark/benchmark_text_generation_models.py
+```
+
+Outputs (created under `benchmark/results/text_generation/`):
+- `{model}.json` and `{model}.png` for each model
+- `combined.png`, `combined.csv`, and `combined.md`
+
+Common environment variables:
+- `MBLT_DEVICE` (default: `cpu`)
+- `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
+- `MBLT_PREFILL_RANGE` (e.g., `128:512:128`)
+- `MBLT_DECODE_RANGE` (e.g., `128:512:128`)
+- `MBLT_FIXED_DECODE` (default: `10`)
+- `MBLT_FIXED_PREFILL` (default: `128`)
+- `MBLT_SKIP_EXISTING` (`true` to skip models with existing outputs)
+
+### Compare selected models
+
+`benchmark/benchmark_text_generation_lanner_compare.py` benchmarks a fixed list of Mobilint LLMs and prints a CSV-like row per model.
+
+```bash
+python benchmark/benchmark_text_generation_lanner_compare.py
+```
+
+Common environment variables:
+- `MBLT_DEVICE` (default: `cpu`)
+- `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
+- `MBLT_REVISION` (default: `W8`)
+- `MBLT_PREFILL` (default: `240`)
+- `MBLT_DECODE` (default: `10`)
+
 ## Verbose Option
 
 By default, model initialization stays quiet. To print the model file size and MD5 hash whenever an MXQ model loads, set the environment variable `MBLT_MODEL_ZOO_VERBOSE` to a truthy value before running your script:
