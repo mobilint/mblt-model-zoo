@@ -118,6 +118,13 @@ Currently, these optional functions are only available on environment equipped w
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
 |transformers|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
 
+## Quantization Revision Terms
+
+We use the following revision labels for quantized variants of `transformers` models:
+- `W8`: all weights are quantized to INT8.
+- `W4`: all weights are quantized to INT4.
+- `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
+
 ## CLI (TPS Benchmark)
 
 The package installs a `mblt-model-zoo` command with a `tps` subcommand for measuring text-generation throughput. This CLI requires the transformers extra.
@@ -138,7 +145,7 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu \
 Notes:
 - Range syntax supports `start:end:step` or `start,end,step`.
 - Use `--no-plot` to skip the PNG output.
-- You can pass `--dtype`, `--device-map`, `--tokenizer`, or `--no-trust-remote-code` as needed.
+- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, or `--no-trust-remote-code` as needed.
 
 ## Benchmark Scripts (Text Generation)
 
@@ -159,6 +166,7 @@ Outputs (created under `benchmark/results/text_generation/`):
 Common environment variables:
 - `MBLT_DEVICE` (default: `cpu`)
 - `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
+- `MBLT_REVISION` (e.g., `W8`)
 - `MBLT_PREFILL_RANGE` (e.g., `128:512:128`)
 - `MBLT_DECODE_RANGE` (e.g., `128:512:128`)
 - `MBLT_FIXED_DECODE` (default: `10`)

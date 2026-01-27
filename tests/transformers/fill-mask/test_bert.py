@@ -10,7 +10,7 @@ MODEL_PATHS_AND_PROMPTS = (
 
 
 @pytest.fixture(params=MODEL_PATHS_AND_PROMPTS, scope="module")
-def pipe_and_prompt(request, mxq_path):
+def pipe_and_prompt(request, mxq_path, revision):
     model_path, prompt = request.param
 
     if mxq_path:
@@ -18,6 +18,7 @@ def pipe_and_prompt(request, mxq_path):
             "fill-mask",
             model=model_path,
             trust_remote_code=True,
+            revision=revision,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -25,6 +26,7 @@ def pipe_and_prompt(request, mxq_path):
             "fill-mask",
             model=model_path,
             trust_remote_code=True,
+            revision=revision,
         )
     yield pipe, prompt
     del pipe

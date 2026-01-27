@@ -7,13 +7,14 @@ MODEL_PATHS = ("mobilint/whisper-small",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path):
+def pipe(request, mxq_path, revision):
     model_path = request.param
 
     pipe = pipeline(
         "automatic-speech-recognition",
         model=model_path,
         trust_remote_code=True,
+        revision=revision,
     )
     yield pipe
 

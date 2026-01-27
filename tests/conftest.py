@@ -8,8 +8,19 @@ def pytest_addoption(parser):
         default=None,
         help="Override default mxq_path for pipeline loading.",
     )
+    parser.addoption(
+        "--revision",
+        action="store",
+        default=None,
+        help="Override model revision (e.g., W8).",
+    )
 
 
 @pytest.fixture(scope="module")
 def mxq_path(request):
     return request.config.getoption("--mxq-path")
+
+
+@pytest.fixture(scope="module")
+def revision(request):
+    return request.config.getoption("--revision")

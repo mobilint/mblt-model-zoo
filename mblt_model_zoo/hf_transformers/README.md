@@ -28,17 +28,27 @@ pip install -e .[transformers]
 
 **mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
 
+Some models require a specific model revision (e.g., `W8`). Pass `revision="W8"` to `from_pretrained`/`pipeline` to select the desired quantized variant.
+
+### Quantization Revision Terms
+
+We use the following revision labels for quantized variants:
+- `W8`: all weights are quantized to INT8.
+- `W4`: all weights are quantized to INT4.
+- `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
+
 ```python
 from transformers import TextStreamer, pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
 
 pipe = pipeline(
     "text-generation",
     model=model_path,
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     trust_remote_code=True,
+    revision="W8",
     device="cpu",
 )
 
@@ -65,8 +75,12 @@ from transformers import TextStreamer, AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True).to("cpu")
+tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
+model = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    trust_remote_code=True,
+    revision="W8",
+).to("cpu")
 
 messages = [
     {
@@ -97,10 +111,17 @@ from transformers import TextStreamer, pipeline, AutoProcessor
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
 processor = AutoProcessor.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(
+    model_name,
+    use_fast=True,
+    trust_remote_code=True,
+    revision="W8",
+)
 pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    revision="W8",
     device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
@@ -134,8 +155,10 @@ Further usage examples can be found in the [tests](../../tests/transformers) dir
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS sweep from the command line:
 
 ```bash
-mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --json tps.json --plot tps.png
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --revision W8 --json tps.json --plot tps.png
 ```
+
+Use `--revision` to select a specific quantized revision (e.g., `W8`).
 
 ### Listing Available Models
 

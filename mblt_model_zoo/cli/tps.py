@@ -69,6 +69,7 @@ def _build_pipeline(
     trust_remote_code: bool,
     dtype: str | None,
     device_map: str | None,
+    revision: str | None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -79,6 +80,8 @@ def _build_pipeline(
         "trust_remote_code": trust_remote_code,
         "device": device,
     }
+    if revision:
+        pipeline_kwargs["revision"] = revision
     if tokenizer:
         pipeline_kwargs["tokenizer"] = tokenizer
     if device_map:
@@ -137,6 +140,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         trust_remote_code=args.trust_remote_code,
         dtype=args.dtype,
         device_map=args.device_map,
+        revision=args.revision,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -172,6 +176,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         trust_remote_code=args.trust_remote_code,
         dtype=args.dtype,
         device_map=args.device_map,
+        revision=args.revision,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -224,6 +229,11 @@ def add_tps_parser(
         )
         p.add_argument(
             "--device", default="cpu", help="device for pipeline (e.g., cpu, cuda:0)"
+        )
+        p.add_argument(
+            "--revision",
+            default=None,
+            help="model revision (e.g., W8)",
         )
         p.add_argument(
             "--device-map", default=None, help="transformers device_map (optional)"

@@ -6,9 +6,14 @@ MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path):
+def pipe(request, mxq_path, revision):
     model_path = request.param
-    processor = AutoProcessor.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        model_path,
+        use_fast=True,
+        trust_remote_code=True,
+        revision=revision,
+    )
     
     if mxq_path:
         pipe = pipeline(
@@ -16,6 +21,7 @@ def pipe(request, mxq_path):
             model=model_path,
             processor=processor,
             trust_remote_code=True,
+            revision=revision,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -24,6 +30,7 @@ def pipe(request, mxq_path):
             model=model_path,
             processor=processor,
             trust_remote_code=True,
+            revision=revision,
         )
     yield pipe
     del pipe

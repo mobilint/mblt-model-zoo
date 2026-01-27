@@ -8,15 +8,20 @@ MODEL_PATHS = ("mobilint/blip-image-captioning-large",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path):
+def pipe(request, mxq_path, revision):
     model_path = request.param
 
-    processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+    processor = AutoProcessor.from_pretrained(
+        model_path,
+        use_fast=True,
+        revision=revision,
+    )
     pipe = pipeline(
         "image-text-to-text",
         model=model_path,
         processor=processor,
         trust_remote_code=True,
+        revision=revision,
     )
     yield pipe
     del pipe

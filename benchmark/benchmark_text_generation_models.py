@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 from dataclasses import asdict
@@ -36,7 +37,7 @@ def _parse_range_env(name: str, default: Tuple[int, int, int]) -> Tuple[int, int
     return start, end, step
 
 
-def _build_pipeline(model_id: str):
+def _build_pipeline(model_id: str, revision: str | None = None):
     device = os.getenv("MBLT_DEVICE", "cpu")
     device_map = os.getenv("MBLT_DEVICE_MAP")
     dtype = os.getenv("MBLT_DTYPE")
@@ -48,6 +49,8 @@ def _build_pipeline(model_id: str):
         "trust_remote_code": trust_remote_code,
         "device": device,
     }
+    if revision:
+        kwargs["revision"] = revision
     if device_map:
         kwargs["device_map"] = device_map
     if dtype:
@@ -79,7 +82,15 @@ def _load_result(path: str) -> BenchmarkResult:
         ),
     )
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
+    parser.add_argument(
+        "--revision",
+        default=os.getenv("MBLT_REVISION"),
+        help="model revision (e.g., W8)",
+    )
+    args = parser.parse_args(argv)
+
     os.environ.setdefault("MPLBACKEND", "Agg")
 
     available = list_models(tasks="text-generation")
@@ -109,7 +120,7 @@ def main() -> int:
         if skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
-        pipeline = _build_pipeline(model_id)
+        pipeline = _build_pipeline(model_id, revision=args.revision)
         measurer = TPSMeasurer(pipeline)
         result = measurer.measure_full(
             prefill_range=prefill_range,

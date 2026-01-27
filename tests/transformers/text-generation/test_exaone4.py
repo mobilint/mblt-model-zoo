@@ -7,27 +7,29 @@ MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def model(request, mxq_path):
+def model(request, mxq_path, revision):
     model_path = request.param
     if mxq_path:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=True,
+            revision=revision,
             mxq_path=mxq_path,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=True,
+            revision=revision,
         )
     yield model
     del model
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def tokenizer(request):
+def tokenizer(request, revision):
     model_path = request.param
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
     yield tokenizer
 
 

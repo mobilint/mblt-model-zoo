@@ -7,16 +7,17 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path):
+def pipe(request, mxq_path, revision):
     model_path = request.param
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
     if mxq_path:
         pipe = pipeline(
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
             trust_remote_code=True,
+            revision=revision,
             model_kwargs={"mxq_path": mxq_path},
         )
     else:
@@ -25,6 +26,7 @@ def pipe(request, mxq_path):
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
             trust_remote_code=True,
+            revision=revision,
         )
     yield pipe
     del pipe
