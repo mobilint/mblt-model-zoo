@@ -1,5 +1,6 @@
 import math
-from typing import TYPE_CHECKING, Literal, Optional
+import os
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -104,3 +105,55 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         logits = torch.tensor(logits_ndarray, dtype=hidden_states.dtype, device=hidden_states.device)
         
         return logits
+    
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
+        model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+
+        embedding_weight_path = kwargs.pop("embedding_weight", None)
+        if embedding_weight_path:
+            cls._inject_custom_embeddings(model, embedding_weight_path)
+
+        return model
+
+    @staticmethod
+    def _inject_custom_embeddings(model: PreTrainedModel, path: str):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Custom embedding path not found: {path}")
+
+        print(f"[Mobilint] Loading custom embeddings from: {path}")
+        
+        custom_data = torch.load(path, map_location="cpu")
+        
+        # Handle dict (state_dict) vs Tensor
+        if isinstance(custom_data, dict):
+            # Try to find common keys for weights
+            if "weight" in custom_data:
+                new_weight = custom_data["weight"]
+            else:
+                # If ambiguous, take the first value
+                new_weight = next(iter(custom_data.values()))
+        elif isinstance(custom_data, torch.Tensor):
+            new_weight = custom_data
+        else:
+            raise ValueError(f"Unsupported data format in {path}. Expected dict or Tensor.")
+
+        input_embeddings = model.get_input_embeddings()
+        
+        original_vocab_size = input_embeddings.weight.shape[0]
+        new_vocab_size = new_weight.shape[0]
+        embed_dim = input_embeddings.weight.shape[1]
+
+        if new_weight.shape[1] != embed_dim:
+            raise ValueError(f"Embedding dimension mismatch! Model expects {embed_dim}, but file has {new_weight.shape[1]}")
+
+        if original_vocab_size != new_vocab_size:
+            raise ValueError(f"Vocab size mismatch! Model expects {original_vocab_size}, but file has {new_vocab_size}")
+
+        with torch.no_grad():
+            input_embeddings.weight.data = new_weight.to(
+                device=input_embeddings.weight.device,
+                dtype=input_embeddings.weight.dtype
+            )
+        
+        print("[Mobilint] Custom embeddings successfully injected.")
