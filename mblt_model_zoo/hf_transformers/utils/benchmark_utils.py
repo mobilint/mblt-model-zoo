@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -47,6 +47,120 @@ class SweepData:
 class BenchmarkResult:
     prefill_sweep: SweepData = field(default_factory=SweepData)
     decode_sweep: SweepData = field(default_factory=SweepData)
+
+    @staticmethod
+    def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, float | int | str]]:
+        for x, tps, t in zip(
+            result.prefill_sweep.x_values,
+            result.prefill_sweep.tps_values,
+            result.prefill_sweep.time_values,
+        ):
+            yield {
+                "model": model_id,
+                "phase": "prefill",
+                "tokens": x,
+                "tps": tps,
+                "time_s": t,
+            }
+        for x, tps, t in zip(
+            result.decode_sweep.x_values,
+            result.decode_sweep.tps_values,
+            result.decode_sweep.time_values,
+        ):
+            yield {
+                "model": model_id,
+                "phase": "decode",
+                "tokens": x,
+                "tps": tps,
+                "time_s": t,
+            }
+
+    @staticmethod
+    def write_combined_csv(
+        path: str, rows: Iterable[dict[str, float | int | str]]
+    ) -> None:
+        import csv
+
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["model", "phase", "tokens", "tps", "time_s"]
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+
+    @staticmethod
+    def write_combined_markdown(
+        path: str, rows: Iterable[dict[str, float | int | str]]
+    ) -> None:
+        row_list = list(rows)
+        model_ids = sorted({str(row["model"]) for row in row_list})
+        prefill_tokens = sorted(
+            {
+                int(row["tokens"])
+                for row in row_list
+                if str(row["phase"]) == "prefill"
+            }
+        )
+        decode_tokens = sorted(
+            {
+                int(row["tokens"])
+                for row in row_list
+                if str(row["phase"]) == "decode"
+            }
+        )
+
+        tps_map: dict[tuple[str, str, int], float] = {}
+        for row in row_list:
+            key = (str(row["model"]), str(row["phase"]), int(row["tokens"]))
+            tps_map[key] = float(row["tps"])
+
+        lines = [
+            "<table>\n",
+            "  <thead>\n",
+            "    <tr>\n",
+            '      <th rowspan="2">model</th>\n',
+            f'      <th colspan="{len(prefill_tokens)}">prefill TPS</th>\n',
+            f'      <th colspan="{len(decode_tokens)}">decode TPS</th>\n',
+            "    </tr>\n",
+            "    <tr>\n",
+        ]
+        for token in prefill_tokens:
+            lines.append(f"      <th>{token}</th>\n")
+        for token in decode_tokens:
+            lines.append(f"      <th>{token}</th>\n")
+        lines.extend(
+            [
+                "    </tr>\n",
+                "  </thead>\n",
+                "  <tbody>\n",
+            ]
+        )
+
+        sort_token = decode_tokens[-1] if decode_tokens else None
+        if sort_token is not None:
+            model_ids = sorted(
+                model_ids,
+                key=lambda m: tps_map.get((m, "decode", sort_token), float("-inf")),
+                reverse=True,
+            )
+
+        for model_id in model_ids:
+            lines.append("    <tr>\n")
+            lines.append(f"      <td>{model_id}</td>\n")
+            for token in prefill_tokens:
+                tps = tps_map.get((model_id, "prefill", token))
+                cell = f"{tps:.4f}" if tps is not None else ""
+                lines.append(f"      <td>{cell}</td>\n")
+            for token in decode_tokens:
+                tps = tps_map.get((model_id, "decode", token))
+                cell = f"{tps:.4f}" if tps is not None else ""
+                lines.append(f"      <td>{cell}</td>\n")
+            lines.append("    </tr>\n")
+
+        lines.extend(["  </tbody>\n", "</table>\n"])
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
 
 class TPSMeasurer:
     def __init__(self, pipeline):
@@ -220,9 +334,9 @@ class TPSMeasurer:
         
         plt.close(fig)
 
+    @staticmethod
     def plot_and_save_results(
-        self,
-        results: List[BenchmarkResult],
+        results: List["BenchmarkResult"],
         labels: List[str],
         save_path: str = "tps_benchmark_all.png",
     ):

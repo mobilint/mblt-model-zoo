@@ -79,7 +79,6 @@ def _load_result(path: str) -> BenchmarkResult:
         ),
     )
 
-
 def main() -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -102,7 +101,6 @@ def main() -> int:
     fixed_prefill = int(os.getenv("MBLT_FIXED_PREFILL", "128"))
     skip_existing = os.getenv("MBLT_SKIP_EXISTING", "false").lower() == "true"
 
-    last_measurer = None
     for model_id in model_ids:
         print(f"=== {model_id} ===")
         base = _safe_filename(model_id)
@@ -124,26 +122,32 @@ def main() -> int:
             json.dump(asdict(result), f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
-        last_measurer = measurer
         del pipeline
 
-    if last_measurer is not None:
-        combined_results = []
-        combined_labels = []
-        for model_id in model_ids:
-            base = _safe_filename(model_id)
-            json_path = os.path.join(results_dir, f"{base}.json")
-            if not os.path.isfile(json_path):
-                continue
-            combined_results.append(_load_result(json_path))
-            combined_labels.append(model_id)
-        if combined_results:
-            combined_path = os.path.join(results_dir, "combined.png")
-            last_measurer.plot_and_save_results(
-                combined_results,
-                combined_labels,
-                save_path=combined_path,
-            )
+    combined_results = []
+    combined_labels = []
+    combined_rows = []
+    for model_id in model_ids:
+        base = _safe_filename(model_id)
+        json_path = os.path.join(results_dir, f"{base}.json")
+        if not os.path.isfile(json_path):
+            continue
+        result = _load_result(json_path)
+        combined_results.append(result)
+        combined_labels.append(model_id)
+        combined_rows.extend(list(BenchmarkResult.iter_rows(model_id, result)))
+        
+    if combined_results:
+        combined_path = os.path.join(results_dir, "combined.png")
+        TPSMeasurer.plot_and_save_results(
+            combined_results,
+            combined_labels,
+            save_path=combined_path,
+        )
+        combined_csv = os.path.join(results_dir, "combined.csv")
+        combined_md = os.path.join(results_dir, "combined.md")
+        BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
+        BenchmarkResult.write_combined_markdown(combined_md, combined_rows)
 
     return 0
 
