@@ -18,7 +18,7 @@ def _parse_target_cores(value: str | None) -> list[str] | None:
 
 
 def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, Any], bool]:
-    opt_prefix = f"{prefix}-" if prefix else ""
+    opt_prefix = f"--{prefix}-" if prefix else "--"
     mxq_path = config.getoption(f"{opt_prefix}mxq-path")
     dev_no = config.getoption(f"{opt_prefix}dev-no")
     core_mode = config.getoption(f"{opt_prefix}core-mode")
