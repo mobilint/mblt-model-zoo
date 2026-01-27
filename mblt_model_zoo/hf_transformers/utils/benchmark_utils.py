@@ -179,14 +179,14 @@ class TPSMeasurer:
             import qbruntime  # type: ignore
         except Exception as e:
             raise RuntimeError("Tracing requires qbruntime to be available.") from e
-        qbruntime.start_tracing_event(trace_path)
+        qbruntime.start_tracing_events(trace_path)
         return qbruntime
 
     @staticmethod
     def _stop_trace(handle):
         if handle is None:
             return
-        handle.stop_tracing_event()
+        handle.stop_tracing_events()
 
     def measure(
         self,
