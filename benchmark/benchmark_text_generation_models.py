@@ -96,6 +96,8 @@ def main() -> int:
             json.dump(asdict(result), f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
+        del pipeline
+
     return 0
 
 

@@ -8,6 +8,25 @@ import torch
 from transformers import TextIteratorStreamer
 
 
+class TokenIteratorStreamer(TextIteratorStreamer):
+    def put(self, value):
+        if len(value.shape) > 1 and value.shape[0] > 1:
+            raise ValueError("TokenIteratorStreamer only supports batch size 1")
+        elif len(value.shape) > 1:
+            value = value[0]
+
+        if self.skip_prompt and self.next_tokens_are_prompt:
+            self.next_tokens_are_prompt = False
+            return
+
+        for _ in value.tolist():
+            self.text_queue.put("", timeout=self.timeout)
+
+    def end(self):
+        self.next_tokens_are_prompt = True
+        self.text_queue.put(self.stop_signal, timeout=self.timeout)
+
+
 @dataclass
 class SingleMeasurement:
     num_prefill: int
@@ -44,7 +63,7 @@ class TPSMeasurer:
         input_ids = input_ids.to(self.device)
 
         # 2. Setup
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         gen_kwargs = dict(
             input_ids=input_ids,
             streamer=streamer,
@@ -122,7 +141,7 @@ class TPSMeasurer:
         input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
         input_ids = input_ids.to(self.device)
 
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         gen_kwargs = dict(
             input_ids=input_ids,
             streamer=streamer,
