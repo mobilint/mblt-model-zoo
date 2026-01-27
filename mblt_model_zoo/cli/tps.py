@@ -47,6 +47,15 @@ def _parse_range(spec: str) -> Tuple[int, int, int]:
     return start, end, step
 
 
+def _parse_target_cores(spec: str | None) -> list[str] | None:
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    return [item.strip() for item in text.split(";") if item.strip()]
+
+
 def _require_transformers_deps() -> None:
     try:
         import transformers  # noqa: F401
@@ -71,6 +80,9 @@ def _build_pipeline(
     device_map: str | None,
     revision: str | None,
     embedding_weight: str | None,
+    mxq_path: str | None,
+    core_mode: str | None,
+    target_cores: list[str] | None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -90,6 +102,12 @@ def _build_pipeline(
     model_kwargs: dict[str, Any] = {}
     if embedding_weight:
         model_kwargs["embedding_weight"] = embedding_weight
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if core_mode:
+        model_kwargs["core_mode"] = core_mode
+    if target_cores:
+        model_kwargs["target_cores"] = target_cores
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -148,6 +166,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        mxq_path=args.mxq_path,
+        core_mode=args.core_mode,
+        target_cores=args.target_cores,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -189,6 +210,9 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        mxq_path=args.mxq_path,
+        core_mode=args.core_mode,
+        target_cores=args.target_cores,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -252,6 +276,22 @@ def add_tps_parser(
             "--embedding-weight",
             default=None,
             help="path to custom embedding weights",
+        )
+        p.add_argument(
+            "--mxq-path",
+            default=None,
+            help="override mxq_path for pipeline loading",
+        )
+        p.add_argument(
+            "--core-mode",
+            default=None,
+            help="NPU core mode (single, multi, global4, global8)",
+        )
+        p.add_argument(
+            "--target-cores",
+            type=_parse_target_cores,
+            default=None,
+            help='Target cores (e.g., "0:0;0:1;0:2;0:3")',
         )
         p.add_argument(
             "--device-map", default=None, help="transformers device_map (optional)"
