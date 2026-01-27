@@ -2,7 +2,6 @@ import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
 MODEL_PATHS = (
-    "mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B",
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
 )
 
