@@ -6,7 +6,11 @@ from typing import Tuple
 from transformers import pipeline as hf_pipeline
 
 from mblt_model_zoo.hf_transformers.utils import list_models
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    BenchmarkResult,
+    SweepData,
+    TPSMeasurer,
+)
 
 
 def _safe_filename(model_id: str) -> str:
@@ -57,6 +61,25 @@ def _build_pipeline(model_id: str):
     return hf_pipeline(**kwargs)
 
 
+def _load_result(path: str) -> BenchmarkResult:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    prefill = payload.get("prefill_sweep", {})
+    decode = payload.get("decode_sweep", {})
+    return BenchmarkResult(
+        prefill_sweep=SweepData(
+            x_values=prefill.get("x_values", []),
+            tps_values=prefill.get("tps_values", []),
+            time_values=prefill.get("time_values", []),
+        ),
+        decode_sweep=SweepData(
+            x_values=decode.get("x_values", []),
+            tps_values=decode.get("tps_values", []),
+            time_values=decode.get("time_values", []),
+        ),
+    )
+
+
 def main() -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -77,9 +100,17 @@ def main() -> int:
     decode_range = _parse_range_env("MBLT_DECODE_RANGE", (128, 512, 128))
     fixed_decode = int(os.getenv("MBLT_FIXED_DECODE", "10"))
     fixed_prefill = int(os.getenv("MBLT_FIXED_PREFILL", "128"))
+    skip_existing = os.getenv("MBLT_SKIP_EXISTING", "false").lower() == "true"
 
+    last_measurer = None
     for model_id in model_ids:
         print(f"=== {model_id} ===")
+        base = _safe_filename(model_id)
+        json_path = os.path.join(results_dir, f"{base}.json")
+        png_path = os.path.join(results_dir, f"{base}.png")
+        if skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
+            print("Skipping (results exist).")
+            continue
         pipeline = _build_pipeline(model_id)
         measurer = TPSMeasurer(pipeline)
         result = measurer.measure_full(
@@ -89,14 +120,30 @@ def main() -> int:
             fixed_prefill_len=fixed_prefill,
         )
 
-        base = _safe_filename(model_id)
-        json_path = os.path.join(results_dir, f"{base}.json")
-        png_path = os.path.join(results_dir, f"{base}.png")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(asdict(result), f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
+        last_measurer = measurer
         del pipeline
+
+    if last_measurer is not None:
+        combined_results = []
+        combined_labels = []
+        for model_id in model_ids:
+            base = _safe_filename(model_id)
+            json_path = os.path.join(results_dir, f"{base}.json")
+            if not os.path.isfile(json_path):
+                continue
+            combined_results.append(_load_result(json_path))
+            combined_labels.append(model_id)
+        if combined_results:
+            combined_path = os.path.join(results_dir, "combined.png")
+            last_measurer.plot_and_save_results(
+                combined_results,
+                combined_labels,
+                save_path=combined_path,
+            )
 
     return 0
 

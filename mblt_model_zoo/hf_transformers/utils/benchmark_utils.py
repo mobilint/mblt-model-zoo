@@ -219,3 +219,46 @@ class TPSMeasurer:
         print(f"\n✅ Graph saved to: {save_path}")
         
         plt.close(fig)
+
+    def plot_and_save_results(
+        self,
+        results: List[BenchmarkResult],
+        labels: List[str],
+        save_path: str = "tps_benchmark_all.png",
+    ):
+        fig, axs = plt.subplots(2, 2, figsize=(18, 12))
+        fig.suptitle('LLM Performance Benchmark (NPU)', fontsize=16)
+
+        for result, label in zip(results, labels):
+            axs[0, 0].plot(result.prefill_sweep.x_values, result.prefill_sweep.tps_values, '-o', label=label)
+            axs[0, 1].plot(result.prefill_sweep.x_values, result.prefill_sweep.time_values, '-o', label=label)
+            axs[1, 0].plot(result.decode_sweep.x_values, result.decode_sweep.tps_values, '-o', label=label)
+            axs[1, 1].plot(result.decode_sweep.x_values, result.decode_sweep.time_values, '-o', label=label)
+
+        axs[0, 0].set_title('Prefill: Tokens vs TPS (Higher is Better)')
+        axs[0, 0].set_xlabel('Input Tokens')
+        axs[0, 0].set_ylabel('TPS (tokens/sec)')
+        axs[0, 0].grid(True)
+
+        axs[0, 1].set_title('Prefill: Tokens vs Latency (TTFT)')
+        axs[0, 1].set_xlabel('Input Tokens')
+        axs[0, 1].set_ylabel('Latency (seconds)')
+        axs[0, 1].grid(True)
+
+        axs[1, 0].set_title('Decode: Tokens vs TPS')
+        axs[1, 0].set_xlabel('Output Tokens')
+        axs[1, 0].set_ylabel('TPS (tokens/sec)')
+        axs[1, 0].grid(True)
+
+        axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
+        axs[1, 1].set_xlabel('Output Tokens')
+        axs[1, 1].set_ylabel('Total Generation Time (seconds)')
+        axs[1, 1].grid(True)
+
+        for ax in axs.flat:
+            ax.legend()
+
+        plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
+        plt.savefig(save_path, dpi=300)
+        print(f"\n✅ Graph saved to: {save_path}")
+        plt.close(fig)
