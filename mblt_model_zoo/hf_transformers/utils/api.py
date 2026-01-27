@@ -1,8 +1,6 @@
 import os
 from typing import Dict, List, Optional, Union
 
-from huggingface_hub import HfApi
-
 TASKS = [
     "text-generation",
     "image-text-to-text",
@@ -18,13 +16,14 @@ def list_tasks():
 
 def list_models(
     tasks: Union[str, List[str]] = TASKS,
+    include_private: bool = False,
 ) -> Dict[str, List[str]]:
     if isinstance(tasks, str):
         tasks = [tasks]
     assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"
 
     try:
-        return _list_models_from_hub(tasks)
+        return _list_models_from_hub(tasks, include_private=include_private)
     except Exception as e:
         print(
             "Failed to list models from Hugging Face Hub. "
@@ -33,13 +32,21 @@ def list_models(
         return _list_models_from_cache(tasks)
 
 
-def _list_models_from_hub(tasks: List[str]) -> Dict[str, List[str]]:
+def _list_models_from_hub(
+    tasks: List[str],
+    *,
+    include_private: bool,
+) -> Dict[str, List[str]]:
+    from huggingface_hub import HfApi
+
     api = HfApi()
     available_models: Dict[str, List[str]] = {task: [] for task in tasks}
     for task in tasks:
         models = api.list_models(author="mobilint", pipeline_tag=task)
         ids: List[str] = []
         for model in models:
+            if not include_private and bool(getattr(model, "private", False)):
+                continue
             model_id = (
                 getattr(model, "modelId", None)
                 or getattr(model, "model_id", None)
