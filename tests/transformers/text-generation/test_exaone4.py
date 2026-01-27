@@ -7,7 +7,7 @@ MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def model(request, mxq_path, revision):
+def model(request, mxq_path, revision, embedding_weight):
     model_path = request.param
     if mxq_path:
         model = AutoModelForCausalLM.from_pretrained(
@@ -15,12 +15,14 @@ def model(request, mxq_path, revision):
             trust_remote_code=True,
             revision=revision,
             mxq_path=mxq_path,
+            embedding_weight=embedding_weight,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=True,
             revision=revision,
+            embedding_weight=embedding_weight,
         )
     yield model
     del model

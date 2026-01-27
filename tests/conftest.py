@@ -14,6 +14,12 @@ def pytest_addoption(parser):
         default=None,
         help="Override model revision (e.g., W8).",
     )
+    parser.addoption(
+        "--embedding-weight",
+        action="store",
+        default=None,
+        help="Path to custom embedding weights.",
+    )
 
 
 @pytest.fixture(scope="module")
@@ -24,3 +30,8 @@ def mxq_path(request):
 @pytest.fixture(scope="module")
 def revision(request):
     return request.config.getoption("--revision")
+
+
+@pytest.fixture(scope="module")
+def embedding_weight(request):
+    return request.config.getoption("--embedding-weight")

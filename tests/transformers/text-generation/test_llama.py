@@ -9,18 +9,23 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path, revision):
+def pipe(request, mxq_path, revision, embedding_weight):
     model_path = request.param
+    model_kwargs = {}
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
-    if mxq_path:
+    if model_kwargs:
         pipe = pipeline(
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
             trust_remote_code=True,
             revision=revision,
-            model_kwargs={"mxq_path": mxq_path},
+            model_kwargs=model_kwargs,
         )
     else:
         pipe = pipeline(

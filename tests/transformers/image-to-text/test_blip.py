@@ -8,8 +8,13 @@ MODEL_PATHS = ("mobilint/blip-image-captioning-large",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path, revision):
+def pipe(request, mxq_path, revision, embedding_weight):
     model_path = request.param
+    model_kwargs = {}
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
 
     processor = AutoProcessor.from_pretrained(
         model_path,
@@ -22,6 +27,7 @@ def pipe(request, mxq_path, revision):
         processor=processor,
         trust_remote_code=True,
         revision=revision,
+        model_kwargs=model_kwargs or None,
     )
     yield pipe
     del pipe

@@ -37,7 +37,11 @@ def _parse_range_env(name: str, default: Tuple[int, int, int]) -> Tuple[int, int
     return start, end, step
 
 
-def _build_pipeline(model_id: str, revision: str | None = None):
+def _build_pipeline(
+    model_id: str,
+    revision: str | None = None,
+    embedding_weight: str | None = None,
+):
     device = os.getenv("MBLT_DEVICE", "cpu")
     device_map = os.getenv("MBLT_DEVICE_MAP")
     dtype = os.getenv("MBLT_DTYPE")
@@ -51,6 +55,8 @@ def _build_pipeline(model_id: str, revision: str | None = None):
     }
     if revision:
         kwargs["revision"] = revision
+    if embedding_weight:
+        kwargs["model_kwargs"] = {"embedding_weight": embedding_weight}
     if device_map:
         kwargs["device_map"] = device_map
     if dtype:
@@ -89,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("MBLT_REVISION"),
         help="model revision (e.g., W8)",
     )
+    parser.add_argument(
+        "--embedding-weight",
+        default=os.getenv("MBLT_EMBEDDING_WEIGHT"),
+        help="path to custom embedding weights",
+    )
     args = parser.parse_args(argv)
 
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -120,7 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         if skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
-        pipeline = _build_pipeline(model_id, revision=args.revision)
+        pipeline = _build_pipeline(
+            model_id,
+            revision=args.revision,
+            embedding_weight=args.embedding_weight,
+        )
         measurer = TPSMeasurer(pipeline)
         result = measurer.measure_full(
             prefill_range=prefill_range,

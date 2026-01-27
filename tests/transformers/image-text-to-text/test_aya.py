@@ -6,8 +6,13 @@ MODEL_PATHS = ("mobilint/aya-vision-8b",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path, revision):
+def pipe(request, mxq_path, revision, embedding_weight):
     model_path = request.param
+    model_kwargs = {}
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
     processor = AutoProcessor.from_pretrained(
         model_path,
         use_fast=True,
@@ -15,14 +20,14 @@ def pipe(request, mxq_path, revision):
         revision=revision,
     )
     
-    if mxq_path:
+    if model_kwargs:
         pipe = pipeline(
             "image-text-to-text",
             model=model_path,
             processor=processor,
             trust_remote_code=True,
             revision=revision,
-            model_kwargs={"mxq_path": mxq_path},
+            model_kwargs=model_kwargs,
         )
     else:
         pipe = pipeline(

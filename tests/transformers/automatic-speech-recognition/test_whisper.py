@@ -7,14 +7,20 @@ MODEL_PATHS = ("mobilint/whisper-small",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, mxq_path, revision):
+def pipe(request, mxq_path, revision, embedding_weight):
     model_path = request.param
+    model_kwargs = {}
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
 
     pipe = pipeline(
         "automatic-speech-recognition",
         model=model_path,
         trust_remote_code=True,
         revision=revision,
+        model_kwargs=model_kwargs or None,
     )
     yield pipe
 

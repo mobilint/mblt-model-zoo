@@ -145,7 +145,7 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu \
 Notes:
 - Range syntax supports `start:end:step` or `start,end,step`.
 - Use `--no-plot` to skip the PNG output.
-- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, or `--no-trust-remote-code` as needed.
+- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, `--embedding-weight`, or `--no-trust-remote-code` as needed.
 
 ## Benchmark Scripts (Text Generation)
 
@@ -167,6 +167,7 @@ Common environment variables:
 - `MBLT_DEVICE` (default: `cpu`)
 - `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
 - `MBLT_REVISION` (e.g., `W8`)
+- `MBLT_EMBEDDING_WEIGHT` (path to custom embedding weights)
 - `MBLT_PREFILL_RANGE` (e.g., `128:512:128`)
 - `MBLT_DECODE_RANGE` (e.g., `128:512:128`)
 - `MBLT_FIXED_DECODE` (default: `10`)

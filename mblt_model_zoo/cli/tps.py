@@ -70,6 +70,7 @@ def _build_pipeline(
     dtype: str | None,
     device_map: str | None,
     revision: str | None,
+    embedding_weight: str | None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -86,6 +87,11 @@ def _build_pipeline(
         pipeline_kwargs["tokenizer"] = tokenizer
     if device_map:
         pipeline_kwargs["device_map"] = device_map
+    model_kwargs: dict[str, Any] = {}
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
+    if model_kwargs:
+        pipeline_kwargs["model_kwargs"] = model_kwargs
 
     if dtype:
         try:
@@ -141,6 +147,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         dtype=args.dtype,
         device_map=args.device_map,
         revision=args.revision,
+        embedding_weight=args.embedding_weight,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -181,6 +188,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         dtype=args.dtype,
         device_map=args.device_map,
         revision=args.revision,
+        embedding_weight=args.embedding_weight,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -239,6 +247,11 @@ def add_tps_parser(
             "--revision",
             default=None,
             help="model revision (e.g., W8)",
+        )
+        p.add_argument(
+            "--embedding-weight",
+            default=None,
+            help="path to custom embedding weights",
         )
         p.add_argument(
             "--device-map", default=None, help="transformers device_map (optional)"

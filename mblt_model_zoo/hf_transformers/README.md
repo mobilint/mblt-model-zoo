@@ -49,6 +49,7 @@ pipe = pipeline(
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
     trust_remote_code=True,
     revision="W8",
+    model_kwargs={"embedding_weight": "/path/to/embedding.pt"},
     device="cpu",
 )
 
@@ -80,6 +81,7 @@ model = AutoModelForCausalLM.from_pretrained(
     model_path,
     trust_remote_code=True,
     revision="W8",
+    embedding_weight="/path/to/embedding.pt",
 ).to("cpu")
 
 messages = [
@@ -122,6 +124,7 @@ pipe = pipeline(
     model=model_name,
     processor=processor,
     revision="W8",
+    model_kwargs={"embedding_weight": "/path/to/embedding.pt"},
     device="cpu",
 )
 pipe.generation_config.max_new_tokens = None
@@ -159,6 +162,7 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --r
 ```
 
 Use `--revision` to select a specific quantized revision (e.g., `W8`).
+Use `--embedding-weight` to inject custom embedding weights.
 
 ### Listing Available Models
 
