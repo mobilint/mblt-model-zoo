@@ -129,6 +129,14 @@ pipe(
 
 Further usage examples can be found in the [tests](../../tests/transformers) directory.
 
+## TPS Benchmark CLI (Sweep)
+
+If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS sweep from the command line:
+
+```bash
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --json tps.json --plot tps.png
+```
+
 ### Listing Available Models
 
 **mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
