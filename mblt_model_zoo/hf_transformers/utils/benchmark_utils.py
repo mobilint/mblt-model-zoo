@@ -1,0 +1,171 @@
+import time
+from dataclasses import dataclass, field
+from threading import Thread
+from typing import List, Tuple
+
+import matplotlib.pyplot as plt
+import torch
+from transformers import TextIteratorStreamer
+
+
+@dataclass
+class SingleMeasurement:
+    num_prefill: int
+    num_decode: int
+    prefill_latency: float  # seconds
+    prefill_tps: float      # tokens/sec
+    decode_duration: float  # seconds
+    decode_tps: float       # tokens/sec
+    total_time: float       # seconds
+
+@dataclass
+class SweepData:
+    x_values: List[int] = field(default_factory=list)      # Token Counts
+    tps_values: List[float] = field(default_factory=list)  # TPS
+    time_values: List[float] = field(default_factory=list) # Latency/Duration
+
+@dataclass
+class BenchmarkResult:
+    prefill_sweep: SweepData = field(default_factory=SweepData)
+    decode_sweep: SweepData = field(default_factory=SweepData)
+
+class TPSMeasurer:
+    def __init__(self, pipeline):
+        self.model = pipeline.model
+        self.tokenizer = pipeline.tokenizer
+        self.device = self.model.device
+        self.model.eval()
+        
+        plt.switch_backend('Agg') 
+
+    def measure(self, num_prefill=512, num_decode=128) -> SingleMeasurement:
+        # 1. Synthetic Input
+        input_ids = torch.randint(100, self.model.config.vocab_size, (1, num_prefill))
+        input_ids = input_ids.to(self.device)
+
+        # 2. Setup
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        gen_kwargs = dict(
+            input_ids=input_ids,
+            streamer=streamer,
+            min_new_tokens=num_decode,
+            max_new_tokens=num_decode,
+            do_sample=False,
+            eos_token_id=None,
+            pad_token_id=self.tokenizer.eos_token_id
+        )
+
+        # 3. Execution
+        thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+        
+        t_start = time.perf_counter()
+        thread.start()
+        
+        first_token_time = None
+        decoded_tokens = 0
+        
+        for _ in streamer:
+            if first_token_time is None:
+                first_token_time = time.perf_counter()
+            decoded_tokens += 1
+            
+        t_end = time.perf_counter()
+        thread.join()
+        
+        assert first_token_time is not None
+
+        # 4. Calculation
+        prefill_latency = first_token_time - t_start
+        prefill_tps = num_prefill / prefill_latency if prefill_latency > 0 else 0
+        
+        decode_duration = t_end - first_token_time
+        decode_count = decoded_tokens - 1
+        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+        
+        total_time = t_end - t_start
+
+        return SingleMeasurement(
+            num_prefill=num_prefill,
+            num_decode=num_decode,
+            prefill_latency=prefill_latency,
+            prefill_tps=prefill_tps,
+            decode_duration=decode_duration,
+            decode_tps=decode_tps,
+            total_time=total_time
+        )
+
+    def measure_full(self, 
+                     prefill_range: Tuple[int, int, int] = (128, 2048, 128), 
+                     decode_range: Tuple[int, int, int] = (128, 1024, 128),
+                     fixed_decode_len=10, 
+                     fixed_prefill_len=128) -> BenchmarkResult:
+        full_result = BenchmarkResult()
+
+        print(f"🚀 Starting Full Measurement...")
+
+        # 1. Prefill Sweep
+        p_start, p_end, p_step = prefill_range
+        print(f"--- [1/2] Prefill Sweep ({p_start} ~ {p_end}) ---")
+        
+        for p_len in range(p_start, p_end + 1, p_step):
+            res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
+            
+            full_result.prefill_sweep.x_values.append(p_len)
+            full_result.prefill_sweep.tps_values.append(res.prefill_tps)
+            full_result.prefill_sweep.time_values.append(res.prefill_latency)
+            
+            print(f"In: {p_len} | TPS: {res.prefill_tps:.1f} | Latency: {res.prefill_latency:.4f}s")
+
+        # 2. Decode Sweep
+        d_start, d_end, d_step = decode_range
+        print(f"--- [2/2] Decode Sweep ({d_start} ~ {d_end}) ---")
+        
+        for d_len in range(d_start, d_end + 1, d_step):
+            res = self.measure(num_prefill=fixed_prefill_len, num_decode=d_len)
+            
+            full_result.decode_sweep.x_values.append(d_len)
+            full_result.decode_sweep.tps_values.append(res.decode_tps)
+            full_result.decode_sweep.time_values.append(res.decode_duration)
+            
+            print(f"Out: {d_len} | TPS: {res.decode_tps:.1f} | Time: {res.decode_duration:.4f}s")
+
+        return full_result
+
+    def plot_and_save(self, result: BenchmarkResult, save_path: str = "tps_benchmark.png"):
+        fig, axs = plt.subplots(2, 2, figsize=(16, 10))
+        fig.suptitle('LLM Performance Benchmark (NPU)', fontsize=16)
+
+        # 1. Prefill: Token vs TPS
+        axs[0, 0].plot(result.prefill_sweep.x_values, result.prefill_sweep.tps_values, 'b-o')
+        axs[0, 0].set_title('Prefill: Tokens vs TPS (Higher is Better)')
+        axs[0, 0].set_xlabel('Input Tokens')
+        axs[0, 0].set_ylabel('TPS (tokens/sec)')
+        axs[0, 0].grid(True)
+
+        # 2. Prefill: Token vs Latency
+        axs[0, 1].plot(result.prefill_sweep.x_values, result.prefill_sweep.time_values, 'r-o')
+        axs[0, 1].set_title('Prefill: Tokens vs Latency (TTFT)')
+        axs[0, 1].set_xlabel('Input Tokens')
+        axs[0, 1].set_ylabel('Latency (seconds)')
+        axs[0, 1].grid(True)
+
+        # 3. Decode: Token vs TPS
+        axs[1, 0].plot(result.decode_sweep.x_values, result.decode_sweep.tps_values, 'g-o')
+        axs[1, 0].set_title('Decode: Tokens vs TPS')
+        axs[1, 0].set_xlabel('Output Tokens')
+        axs[1, 0].set_ylabel('TPS (tokens/sec)')
+        axs[1, 0].grid(True)
+
+        # 4. Decode: Token vs Time
+        axs[1, 1].plot(result.decode_sweep.x_values, result.decode_sweep.time_values, 'm-o')
+        axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
+        axs[1, 1].set_xlabel('Output Tokens')
+        axs[1, 1].set_ylabel('Total Generation Time (seconds)')
+        axs[1, 1].grid(True)
+
+        plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
+        
+        plt.savefig(save_path, dpi=300)
+        print(f"\n✅ Graph saved to: {save_path}")
+        
+        plt.close(fig)
