@@ -1,7 +1,8 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
-from huggingface_hub import hf_hub_download
+from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
 from transformers.utils.generic import logging
 
@@ -75,12 +76,154 @@ class MobilintNPUBackend:
         
         # 3. If none of above, download mxq file from hub
         else:
-            return hf_hub_download(
-                repo_id=self.name_or_path,
-                filename=mxq_path,
+            revision = (
+                getattr(self, "revision", None)
+                or getattr(self, "_commit_hash", None)
+                or self._infer_hf_revision_from_cache(self.name_or_path)
             )
+            try:
+                return hf_hub_download(
+                    repo_id=self.name_or_path,
+                    filename=mxq_path,
+                    revision=revision,
+                )
+            except EntryNotFoundError:
+                try:
+                    return hf_hub_download(
+                        repo_id=self.name_or_path,
+                        filename=mxq_path,
+                    )
+                except EntryNotFoundError:
+                    cached = self._find_cached_mxq(self.name_or_path, mxq_path)
+                    if cached is not None:
+                        return cached
+                    mxq_candidate = self._find_mxq_from_hub(self.name_or_path, mxq_path)
+                    if mxq_candidate is None:
+                        raise
+                    return hf_hub_download(
+                        repo_id=self.name_or_path,
+                        filename=mxq_candidate,
+                        revision=revision,
+                    )
             
         raise Exception(f"[Mobilint] Error: Could not locate {mxq_path}.")
+
+    @staticmethod
+    def _infer_hf_revision_from_cache(repo_id: str) -> Optional[str]:
+        if not repo_id or "/" not in repo_id:
+            return None
+
+        cache_root = os.getenv("HUGGINGFACE_HUB_CACHE") or os.getenv("HF_HUB_CACHE")
+        if not cache_root:
+            hf_home = os.getenv("HF_HOME") or os.path.join(
+                os.path.expanduser("~"),
+                ".cache",
+                "huggingface",
+            )
+            cache_root = os.path.join(hf_home, "hub")
+
+        repo_dir = os.path.join(cache_root, f"models--{repo_id.replace('/', '--')}")
+        refs_dir = os.path.join(repo_dir, "refs")
+        if os.path.isdir(refs_dir):
+            for ref_name in ("main", "master"):
+                ref_path = os.path.join(refs_dir, ref_name)
+                if os.path.isfile(ref_path):
+                    try:
+                        with open(ref_path, "r", encoding="utf-8") as f:
+                            ref = f.read().strip()
+                        if ref:
+                            return ref
+                    except OSError:
+                        pass
+            try:
+                for entry in os.listdir(refs_dir):
+                    ref_path = os.path.join(refs_dir, entry)
+                    if os.path.isfile(ref_path):
+                        with open(ref_path, "r", encoding="utf-8") as f:
+                            ref = f.read().strip()
+                        if ref:
+                            return ref
+            except OSError:
+                pass
+
+        snapshots_dir = os.path.join(repo_dir, "snapshots")
+        if os.path.isdir(snapshots_dir):
+            try:
+                for entry in os.listdir(snapshots_dir):
+                    if os.path.isdir(os.path.join(snapshots_dir, entry)):
+                        return entry
+            except OSError:
+                pass
+
+        return None
+
+    @staticmethod
+    def _find_cached_mxq(repo_id: str, mxq_path: str) -> Optional[str]:
+        if not repo_id or "/" not in repo_id:
+            return None
+
+        cache_root = os.getenv("HUGGINGFACE_HUB_CACHE") or os.getenv("HF_HUB_CACHE")
+        if not cache_root:
+            hf_home = os.getenv("HF_HOME") or os.path.join(
+                os.path.expanduser("~"),
+                ".cache",
+                "huggingface",
+            )
+            cache_root = os.path.join(hf_home, "hub")
+
+        repo_dir = os.path.join(cache_root, f"models--{repo_id.replace('/', '--')}")
+        snapshots_dir = os.path.join(repo_dir, "snapshots")
+        if not os.path.isdir(snapshots_dir):
+            return None
+
+        rel_candidates = [mxq_path, os.path.basename(mxq_path)]
+        try:
+            for snapshot in os.listdir(snapshots_dir):
+                snapshot_dir = os.path.join(snapshots_dir, snapshot)
+                if not os.path.isdir(snapshot_dir):
+                    continue
+                for rel in rel_candidates:
+                    candidate = os.path.join(snapshot_dir, rel)
+                    if os.path.isfile(candidate):
+                        return candidate
+        except OSError:
+            return None
+
+        # Last resort: find any mxq in snapshots
+        for root, _, files in os.walk(snapshots_dir):
+            for name in files:
+                if name.endswith(".mxq"):
+                    return os.path.join(root, name)
+
+        return None
+
+    @staticmethod
+    def _find_mxq_from_hub(repo_id: str, mxq_path: str) -> Optional[str]:
+        try:
+            files = HfApi().list_repo_files(repo_id=repo_id)
+        except Exception:
+            return None
+
+        basename = os.path.basename(mxq_path)
+        if basename in files:
+            return basename
+        if mxq_path in files:
+            return mxq_path
+
+        mxq_files = [f for f in files if f.endswith(".mxq")]
+        if not mxq_files:
+            return None
+
+        for f in mxq_files:
+            if os.path.basename(f) == basename:
+                return f
+
+        base_stem = os.path.splitext(basename)[0]
+        for f in mxq_files:
+            if base_stem and base_stem in os.path.basename(f):
+                return f
+
+        return mxq_files[0]
     
     def launch(self):
         self.acc = Accelerator(self.dev_no)
