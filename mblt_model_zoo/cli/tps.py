@@ -56,6 +56,21 @@ def _parse_target_cores(spec: str | None) -> list[str] | None:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
+def _parse_target_clusters(spec: str | None) -> list[int] | None:
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    clusters: list[int] = []
+    for item in text.split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        clusters.append(int(item))
+    return clusters
+
+
 def _require_transformers_deps() -> None:
     try:
         import transformers  # noqa: F401
@@ -83,6 +98,7 @@ def _build_pipeline(
     mxq_path: str | None,
     core_mode: str | None,
     target_cores: list[str] | None,
+    target_clusters: list[int] | None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -108,6 +124,8 @@ def _build_pipeline(
         model_kwargs["core_mode"] = core_mode
     if target_cores:
         model_kwargs["target_cores"] = target_cores
+    if target_clusters:
+        model_kwargs["target_clusters"] = target_clusters
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -169,6 +187,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
         target_cores=args.target_cores,
+        target_clusters=args.target_clusters,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -213,6 +232,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
         target_cores=args.target_cores,
+        target_clusters=args.target_clusters,
     )
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -292,6 +312,12 @@ def add_tps_parser(
             type=_parse_target_cores,
             default=None,
             help='Target cores (e.g., "0:0;0:1;0:2;0:3")',
+        )
+        p.add_argument(
+            "--target-clusters",
+            type=_parse_target_clusters,
+            default=None,
+            help='Target clusters (e.g., "0;1")',
         )
         p.add_argument(
             "--device-map", default=None, help="transformers device_map (optional)"

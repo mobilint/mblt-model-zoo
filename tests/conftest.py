@@ -16,6 +16,20 @@ def _parse_target_cores(value: str | None) -> list[str] | None:
         return None
     return [item.strip() for item in text.split(";") if item.strip()]
 
+def _parse_target_clusters(value: str | None) -> list[int] | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    clusters: list[int] = []
+    for item in text.split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        clusters.append(int(item))
+    return clusters
+
 
 def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, Any], bool]:
     opt_prefix = f"--{prefix}-" if prefix else "--"
@@ -24,6 +38,8 @@ def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, A
     core_mode = config.getoption(f"{opt_prefix}core-mode")
     target_cores_raw = config.getoption(f"{opt_prefix}target-cores")
     target_cores = _parse_target_cores(target_cores_raw)
+    target_clusters_raw = config.getoption(f"{opt_prefix}target-clusters")
+    target_clusters = _parse_target_clusters(target_clusters_raw)
 
     kwargs: dict[str, Any] = {}
     provided = False
@@ -39,6 +55,9 @@ def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, A
         provided = True
     if target_cores is not None:
         kwargs[f"{prefix + '_' if prefix else ''}target_cores"] = target_cores
+        provided = True
+    if target_clusters is not None:
+        kwargs[f"{prefix + '_' if prefix else ''}target_clusters"] = target_clusters
         provided = True
 
     return kwargs, provided
@@ -89,6 +108,12 @@ def pytest_addoption(parser):
         default=None,
         help='Target cores (e.g., "0:0;0:1;0:2;0:3").',
     )
+    parser.addoption(
+        "--target-clusters",
+        action="store",
+        default=None,
+        help='Target clusters (e.g., "0;1").',
+    )
     for prefix in ("encoder", "decoder", "vision", "text"):
         parser.addoption(
             f"--{prefix}-mxq-path",
@@ -114,6 +139,12 @@ def pytest_addoption(parser):
             action="store",
             default=None,
             help=f'{prefix} target cores (e.g., "0:0;0:1;0:2;0:3").',
+        )
+        parser.addoption(
+            f"--{prefix}-target-clusters",
+            action="store",
+            default=None,
+            help=f'{prefix} target clusters (e.g., "0;1").',
         )
     parser.addoption(
         "--revision",

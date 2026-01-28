@@ -145,7 +145,7 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu \
 Notes:
 - Range syntax supports `start:end:step` or `start,end,step`.
 - Use `--no-plot` to skip the PNG output.
-- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, `--embedding-weight`, `--mxq-path`, `--core-mode`, `--target-cores`, or `--no-trust-remote-code` as needed.
+- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, `--embedding-weight`, `--mxq-path`, `--core-mode`, `--target-cores`, `--target-clusters`, or `--no-trust-remote-code` as needed.
 
 ## Benchmark Scripts (Text Generation)
 

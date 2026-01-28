@@ -102,6 +102,7 @@ class MobilintNPUBackend:
         dev_no: int = 0,
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, 'CoreId']]] = None,
+        target_clusters: Optional[List[Union[int, 'Cluster']]] = None,
         **kwargs
     ):
         self.name_or_path: str = "" # will be populated in MobilintModelMixin
@@ -111,6 +112,9 @@ class MobilintNPUBackend:
         
         self._target_cores_serialized: List[str] = []
         self.target_cores = target_cores if target_cores is not None else []
+
+        self._target_clusters_serialized: List[str] = []
+        self.target_clusters = target_clusters if target_clusters is not None else []
         
     def check_model_path(self, mxq_path: str) -> str:
         # 1. current relative/absolute path
@@ -332,45 +336,55 @@ class MobilintNPUBackend:
     
     @property
     def target_clusters(self) -> List['Cluster']:        
-        core_id_lists = [[core_id for core_id in self.target_cores if core_id.cluster == cluster_map[i]] for i in range(self.num_of_clusters)]
-                
-        for core_ids in core_id_lists:
-            if len(core_ids) != self.num_of_cores_in_cluster and len(core_ids) != 0:
-                raise ValueError(f"Target cores must include every cores in a cluster! core_ids: {self._target_cores_serialized}")
-        
-        return [core_ids[0].cluster for core_ids in core_id_lists if len(core_ids) == self.num_of_cores_in_cluster]
+        result = []
+        if not hasattr(self, "_target_clusters_serialized"):
+            return []
 
-    @target_cores.setter
+        for s in self._target_clusters_serialized:
+            try:
+                c_val = int(s)
+                result.append(cluster_map[c_val])
+            except Exception as e:
+                logger.warning("Target clusters not serialized: %s" % s)
+                logger.warning("Error: %s" % e)
+                pass
+        return result
+
+    @target_clusters.setter
     def target_clusters(self, values: List[Union[int, 'Cluster']]):
-        clusters = []
+        serialized = []
         for v in values:
             if isinstance(v, Cluster):
-                clusters.append(v)
+                serialized.append(v.value)
             elif isinstance(v, int):
-                clusters.append(cluster_map[v])
+                serialized.append(v)
             else:
                 raise TypeError(f"Unsupported type: {type(v)}")
-        
-        core_ids = []
-        for cluster in clusters:
-            core_ids = [CoreId(cluster, core) for core in core_map.values()]
 
-        self.target_cores = core_ids
+        self._target_clusters_serialized = serialized
 
     def to_dict(self, prefix="") -> Dict[str, Any]:
         p = prefix
-        return {
+        result =  {
             f"{p}mxq_path": self.mxq_path,
             f"{p}dev_no": self.dev_no,
             f"{p}core_mode": self.core_mode,
-            f"{p}target_cores": self._target_cores_serialized
         }
+
+        if self.core_mode == "single":
+            result[f"{p}target_cores"] = self._target_cores_serialized
+        else:
+            result[f"{p}target_clusters"] = self._target_clusters_serialized
+        
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any], prefix: str = "") -> 'MobilintNPUBackend':
         p = prefix
         if f"{p}target_cores" in data.keys() and f"{p}target_clusters" in data.keys():
-            logger.warning(f"{p}target_cores and {p}target_clusters are both set! {p}target_clusters will take priority")
+            logger.warning(f"{p}target_cores and {p}target_clusters are both set!")
+            logger.warning(f"If {p}core_mode is `single`, only {p}target_cores will be used.")
+            logger.warning(f"If {p}core_mode is `multi`, `global4`, or `global8`, only {p}target_clusters will be used.")
 
         return cls(
             name_or_path=data.pop("name_or_path", ""),
