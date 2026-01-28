@@ -1,0 +1,60 @@
+from abc import ABC, abstractmethod
+from typing import Dict
+
+import qbruntime
+from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
+
+from ..utils.cache_utils import MobilintCache
+from ..utils.modeling_utils import MobilintModelMixin
+
+
+class MobilintGenerationMixin(ABC, GenerationMixin):
+    def get_cache_mxq_model(self) -> qbruntime.Model:
+        if isinstance(self, MobilintModelMixin):
+            return self.get_mxq_model()
+        else:
+            raise TypeError("mxq_model for cache not found! Class: %s" % self.__class__.__name__)
+    
+    # Function arguments changed for transformers>=4.56.0
+    # args contain device and model_kwargs in transformers<4.56.0
+    # args contain only model_kwargs in transformers>=4.56.0
+    def _get_cache(
+        self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
+    ) -> MobilintCache:
+        if not hasattr(self, "_cache"):
+            self._cache = MobilintCache(self.get_cache_mxq_model())
+        else:
+            self._cache.reset()
+            
+        return self._cache
+
+    # Function arguments changed for transformers>=4.56.0
+    # args contain device in transformers<4.56.0
+    # args empty in transformers>=4.56.0
+    def _prepare_cache_for_generation(
+        self,
+        generation_config: GenerationConfig,
+        model_kwargs: Dict,
+        assistant_model: "PreTrainedModel",
+        batch_size: int,
+        max_cache_length: int,
+        *args,
+    ) -> bool:
+        super()._prepare_cache_for_generation(
+            generation_config,
+            model_kwargs,
+            assistant_model, # type: ignore
+            batch_size,
+            max_cache_length,
+            *args,
+        )
+
+        cache_name = "past_key_values"
+
+        if model_kwargs.get(cache_name, None) is None:
+            return False
+        elif isinstance(model_kwargs[cache_name], MobilintCache):
+            return True
+        else:
+            model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)
+            return True

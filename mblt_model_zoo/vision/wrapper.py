@@ -3,7 +3,7 @@ import sys
 from typing import Union
 from urllib.parse import urlparse
 
-import maccel
+import qbruntime
 import numpy as np
 import torch
 
@@ -99,6 +99,9 @@ class MBLT_Engine:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. Please check your environment.")
         self.to(device=device)
+    
+    def launch(self):
+        self.model.launch()
 
     def dispose(self):
         self.model.dispose()
@@ -117,19 +120,19 @@ class MXQ_Model:
         if self.product not in url_dict.keys():  # execption handling
             url_dict[self.product] = {self.infer_mode: None}
 
-        self.acc = maccel.Accelerator()
+        self.acc = qbruntime.Accelerator()
         # ----------------Core Allocation-------------------------
-        mc = maccel.ModelConfig()
+        mc = qbruntime.ModelConfig()
         if self.product == "aries":
             if self.infer_mode == "single":
                 pass  # default is single with all cores
             elif self.infer_mode == "multi":
                 mc.set_multi_core_mode(
-                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
                 )
             elif self.infer_mode == "global4":
                 mc.set_global4_core_mode(
-                    [maccel.Cluster.Cluster0, maccel.Cluster.Cluster1]
+                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
                 )
             elif self.infer_mode == "global" or self.infer_mode == "global8":
                 mc.set_global8_core_mode()
@@ -138,7 +141,7 @@ class MXQ_Model:
         elif self.product == "regulus":
             assert (
                 self.infer_mode == "single"
-            ), "Only single core mode is available on Regulus"
+            ), "Only single core mode is available on REGULUS"
         else:
             raise ValueError("Inappropriate product")
 
@@ -178,7 +181,7 @@ class MXQ_Model:
                 raise ValueError("The model should be prepared on server or local path")
 
         # ----------------Initialize Model----------------------
-        self.model = maccel.Model(cached_file, mc)
+        self.model = qbruntime.Model(cached_file, mc)
         log_model_details(cached_file)
         self.model.launch(self.acc)
 
@@ -189,6 +192,10 @@ class MXQ_Model:
 
         npu_outs = self.model.infer(x)
         return npu_outs
+    
+    def launch(self):
+        """Launch the model."""
+        self.model.launch(self.acc)
 
     def dispose(self):
         """Dispose the model."""

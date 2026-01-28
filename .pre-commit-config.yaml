@@ -10,4 +10,4 @@ repos:
     rev: 25.9.0
     hooks:
       - id: black
-        exclude: ^mblt_model_zoo/transformers/
+        exclude: ^mblt_model_zoo/hf_transformers/

@@ -1,7 +1,14 @@
-__version__ = "0.4.4"
+__version__ = "1.0.0"
 from . import utils, vision
 
 try:  # optional
-    from . import transformers
+    from . import hf_transformers
 except Exception as e:
     pass
+
+try:  # optional
+    from . import MeloTTS
+except Exception as e:
+    pass
+
+__all__ = ["utils", "vision"]
