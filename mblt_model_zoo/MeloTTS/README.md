@@ -69,7 +69,7 @@ melo --help
 #### English
 
 ```python
-from melo.api import TTS
+from mblt_model_zoo.MeloTTS.api import TTS
 
 # Speed is adjustable
 speed = 1.0
@@ -86,7 +86,7 @@ model.tts_to_file(text, speaker_ids['EN-Newest'], output_path, speed=speed)
 #### Korean
 
 ```python
-from melo.api import TTS
+from mblt_model_zoo.MeloTTS.api import TTS
 
 # Speed is adjustable
 speed = 1.0
