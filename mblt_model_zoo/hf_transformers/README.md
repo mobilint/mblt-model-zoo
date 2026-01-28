@@ -142,6 +142,20 @@ pipe(
 
 Further usage examples can be found in the [tests](../../tests/transformers) directory.
 
+## Listing Available Models
+
+**mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
+
+```python
+from pprint import pprint
+from mblt_model_zoo.hf_transformers.utils import list_models
+
+available_models = list_models()
+pprint(available_models)
+```
+
+It will search online to look up available models. When offline, it will list cached models in the current environment.
+
 ## Keyword Parameters
 
 When loading models with `from_pretrained`, you can pass extra keyword parameters to customize runtime behavior.
@@ -264,7 +278,7 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
     Sets the dtype (e.g. `float32`, `bfloat16`) for CPU-side layers.
     It does not affect `*.mxq` execution. We recommend leaving it as the default (inherited from the original model's `config.json`).
 
-### TPS Benchmark CLI (Sweep)
+## TPS Benchmark CLI (Sweep)
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS sweep from the command line:
 
@@ -272,22 +286,7 @@ If you installed the optional extra (`pip install mblt-model-zoo[transformers]`)
 mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --revision W8 --json tps.json --plot tps.png
 ```
 
-Use `--revision` to select a specific quantized revision (e.g., `W8`).
-Use `--embedding-weight` to inject custom embedding weights.
-
-### Listing Available Models
-
-**mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
-
-```python
-from pprint import pprint
-from mblt_model_zoo.hf_transformers.utils import list_models
-
-available_models = list_models()
-pprint(available_models)
-```
-
-It will search online to look up available models. When offline, it will list cached models in the current environment.
+For TPS Benchmark, you can use any keyword parameters explained in [Keyword Parameters](#keyword-parameters) section.
 
 ## Model List
 
