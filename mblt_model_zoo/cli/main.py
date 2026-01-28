@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
+
 import transformers
-
 from transformers import HfArgumentParser
-
-from .tps import add_tps_parser
 from transformers.commands.chat import ChatCommand
 
+from .tps import add_tps_parser
+from .chat import register_mobilint_models
 
 def build_parser() -> argparse.ArgumentParser:
     parser = HfArgumentParser(prog="mblt-model-zoo")
@@ -23,41 +23,17 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    config = transformers.AutoConfig.from_pretrained(
-        args.model_name_or_path_or_address,
-        trust_remote_code=True,
-    )
+    if hasattr(args, "func"):
+        register_mobilint_models(args, transformers)
+        service = args.func(args)
+        service.run()
+        exit(0)
+    
+    if hasattr(args, "_handler"):
+        exit(args._handler(args))
 
-    model_type = getattr(config, "model_type", "")
-    arch_name = config.architectures[0] if getattr(config, "architectures", None) else ""
-
-    if model_type.startswith("mobilint-") or arch_name.startswith("Mobilint"):
-        original_model_type = model_type[len("mobilint-"):] if model_type.startswith("mobilint-") else model_type
-
-        import importlib
-        module = importlib.import_module(
-            f"mblt_model_zoo.hf_transformers.models.{original_model_type}.modeling_{original_model_type}"
-        )
-        setattr(transformers, config.architectures[0], module.__dict__[config.architectures[0]])
-        
-        from transformers.models.auto.modeling_auto import (
-            MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
-            MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES
-        )
-
-        if arch_name.endswith("CausalLM"):
-            MODEL_FOR_CAUSAL_LM_MAPPING_NAMES[model_type] = arch_name
-        elif arch_name.endswith("ConditionalGeneration"):
-            MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES[model_type] = arch_name
-
-    if not hasattr(args, "func"):
-        parser.print_help()
-        exit(1)
-
-    # Run
-    service = args.func(args)
-    service.run()
-
+    parser.print_help()
+    exit(1)
 
 if __name__ == "__main__":
     main()
