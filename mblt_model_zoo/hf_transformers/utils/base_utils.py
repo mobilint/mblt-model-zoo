@@ -129,32 +129,33 @@ class MobilintNPUBackend:
         
         # 3. If none of above, download mxq file from hub
         else:
+            name_or_path = self.name_or_path if self.name_or_path.startswith("mobilint/") else "mobilint/" + self.name_or_path
             revision = (
                 getattr(self, "revision", None)
                 or getattr(self, "_commit_hash", None)
-                or self._infer_hf_revision_from_cache(self.name_or_path)
+                or self._infer_hf_revision_from_cache(name_or_path)
             )
             try:
                 return hf_hub_download(
-                    repo_id=self.name_or_path,
+                    repo_id=name_or_path,
                     filename=mxq_path,
                     revision=revision,
                 )
             except EntryNotFoundError:
                 try:
                     return hf_hub_download(
-                        repo_id=self.name_or_path,
+                        repo_id=name_or_path,
                         filename=mxq_path,
                     )
                 except EntryNotFoundError:
-                    cached = self._find_cached_mxq(self.name_or_path, mxq_path)
+                    cached = self._find_cached_mxq(name_or_path, mxq_path)
                     if cached is not None:
                         return cached
-                    mxq_candidate = self._find_mxq_from_hub(self.name_or_path, mxq_path)
+                    mxq_candidate = self._find_mxq_from_hub(name_or_path, mxq_path)
                     if mxq_candidate is None:
                         raise
                     return hf_hub_download(
-                        repo_id=self.name_or_path,
+                        repo_id=name_or_path,
                         filename=mxq_candidate,
                         revision=revision,
                     )
