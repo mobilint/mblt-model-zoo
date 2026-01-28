@@ -18,35 +18,36 @@ def _safe_filename(model_id: str) -> str:
     return model_id.replace("/", "__")
 
 
-def _parse_range_env(name: str, default: Tuple[int, int, int]) -> Tuple[int, int, int]:
-    raw = os.getenv(name)
-    if not raw:
-        return default
+def _parse_range_arg(raw: str) -> Tuple[int, int, int]:
     sep = ":" if ":" in raw else ("," if "," in raw else None)
     if sep is None:
-        return default
+        raise argparse.ArgumentTypeError(
+            "expected format 'start:end:step' or 'start,end,step'"
+        )
     parts = [p.strip() for p in raw.split(sep)]
     if len(parts) != 3:
-        return default
+        raise argparse.ArgumentTypeError(
+            "expected exactly 3 integers: 'start:end:step' or 'start,end,step'"
+        )
     try:
         start, end, step = (int(p) for p in parts)
-    except ValueError:
-        return default
-    if start <= 0 or end <= 0 or step <= 0 or start > end:
-        return default
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("range values must be integers") from e
+    if start <= 0 or end <= 0 or step <= 0:
+        raise argparse.ArgumentTypeError("range values must be positive integers")
+    if start > end:
+        raise argparse.ArgumentTypeError("range start must be <= end")
     return start, end, step
 
 
 def _build_pipeline(
     model_id: str,
     revision: str | None = None,
-    embedding_weight: str | None = None,
+    device: str = "cpu",
+    device_map: str | None = None,
+    dtype: str | None = None,
+    trust_remote_code: bool = True,
 ):
-    device = os.getenv("MBLT_DEVICE", "cpu")
-    device_map = os.getenv("MBLT_DEVICE_MAP")
-    dtype = os.getenv("MBLT_DTYPE")
-    trust_remote_code = os.getenv("MBLT_TRUST_REMOTE_CODE", "true").lower() != "false"
-
     kwargs = {
         "task": "text-generation",
         "model": model_id,
@@ -55,8 +56,6 @@ def _build_pipeline(
     }
     if revision:
         kwargs["revision"] = revision
-    if embedding_weight:
-        kwargs["model_kwargs"] = {"embedding_weight": embedding_weight}
     if device_map:
         kwargs["device_map"] = device_map
     if dtype:
@@ -88,17 +87,63 @@ def _load_result(path: str) -> BenchmarkResult:
         ),
     )
 
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     parser.add_argument(
+        "--device",
+        default="cpu",
+        help='pipeline device (e.g., "cpu", "cuda:0")',
+    )
+    parser.add_argument(
+        "--device-map",
+        default=None,
+        help='pipeline device_map (e.g., "auto")',
+    )
+    parser.add_argument(
+        "--dtype",
+        default=None,
+        help='dtype for pipeline (e.g., "float16", "bfloat16")',
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="whether to trust remote code when loading from HF",
+    )
+    parser.add_argument(
         "--revision",
-        default=os.getenv("MBLT_REVISION"),
+        default=None,
         help="model revision (e.g., W8)",
     )
     parser.add_argument(
-        "--embedding-weight",
-        default=os.getenv("MBLT_EMBEDDING_WEIGHT"),
-        help="path to custom embedding weights",
+        "--prefill-range",
+        type=_parse_range_arg,
+        default=(128, 512, 128),
+        help="prefill sweep range as 'start:end:step' (default: 128:512:128)",
+    )
+    parser.add_argument(
+        "--decode-range",
+        type=_parse_range_arg,
+        default=(128, 512, 128),
+        help="decode sweep range as 'start:end:step' (default: 128:512:128)",
+    )
+    parser.add_argument(
+        "--fixed-decode",
+        type=int,
+        default=10,
+        help="fixed decode length used during prefill sweep",
+    )
+    parser.add_argument(
+        "--fixed-prefill",
+        type=int,
+        default=128,
+        help="fixed prefill length used during decode sweep",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="skip models with existing JSON+PNG outputs",
     )
     args = parser.parse_args(argv)
 
@@ -117,31 +162,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     os.makedirs(results_dir, exist_ok=True)
 
-    prefill_range = _parse_range_env("MBLT_PREFILL_RANGE", (128, 512, 128))
-    decode_range = _parse_range_env("MBLT_DECODE_RANGE", (128, 512, 128))
-    fixed_decode = int(os.getenv("MBLT_FIXED_DECODE", "10"))
-    fixed_prefill = int(os.getenv("MBLT_FIXED_PREFILL", "128"))
-    skip_existing = os.getenv("MBLT_SKIP_EXISTING", "false").lower() == "true"
-
     for model_id in model_ids:
         print(f"=== {model_id} ===")
         base = _safe_filename(model_id)
         json_path = os.path.join(results_dir, f"{base}.json")
         png_path = os.path.join(results_dir, f"{base}.png")
-        if skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
+        if (
+            args.skip_existing
+            and os.path.isfile(json_path)
+            and os.path.isfile(png_path)
+        ):
             print("Skipping (results exist).")
             continue
         pipeline = _build_pipeline(
             model_id,
             revision=args.revision,
-            embedding_weight=args.embedding_weight,
+            device=args.device,
+            device_map=args.device_map,
+            dtype=args.dtype,
+            trust_remote_code=args.trust_remote_code,
         )
         measurer = TPSMeasurer(pipeline)
         result = measurer.measure_full(
-            prefill_range=prefill_range,
-            decode_range=decode_range,
-            fixed_decode_len=fixed_decode,
-            fixed_prefill_len=fixed_prefill,
+            prefill_range=args.prefill_range,
+            decode_range=args.decode_range,
+            fixed_decode_len=args.fixed_decode,
+            fixed_prefill_len=args.fixed_prefill,
         )
 
         with open(json_path, "w", encoding="utf-8") as f:
@@ -162,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         combined_results.append(result)
         combined_labels.append(model_id)
         combined_rows.extend(list(BenchmarkResult.iter_rows(model_id, result)))
-        
+
     if combined_results:
         combined_path = os.path.join(results_dir, "combined.png")
         TPSMeasurer.plot_and_save_results(

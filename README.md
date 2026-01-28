@@ -116,63 +116,7 @@ Currently, these optional functions are only available on environment equipped w
 |Name|Use|Details|
 |-------|------|------|
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
-|transformers|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
-
-## Quantization Revision Terms
-
-We use the following revision labels for quantized variants of `transformers` models:
-- `W8`: all weights are quantized to INT8.
-- `W4`: all weights are quantized to INT4.
-- `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
-
-## CLI (TPS Benchmark)
-
-The package installs a `mblt-model-zoo` command with a `tps` subcommand for measuring text-generation throughput. This CLI requires the transformers extra.
-
-```bash
-# install extras
-pip install mblt-model-zoo[transformers]
-
-# single measurement
-mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --device cpu --prefill 512 --decode 128
-
-# sweep (writes JSON/CSV and a PNG plot by default)
-mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu \
-  --prefill-range 128:2048:128 --decode-range 128:1024:128 \
-  --json tps.json --csv tps.csv --plot tps.png
-```
-
-Notes:
-- Range syntax supports `start:end:step` or `start,end,step`.
-- Use `--no-plot` to skip the PNG output.
-- You can pass `--dtype`, `--device-map`, `--tokenizer`, `--revision`, `--embedding-weight`, `--mxq-path`, `--core-mode`, `--target-cores`, `--target-clusters`, or `--no-trust-remote-code` as needed.
-
-## Benchmark Scripts (Text Generation)
-
-The `benchmark/` folder contains runnable scripts for text-generation benchmarking.
-
-### Benchmark all available models
-
-`benchmark/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
-
-```bash
-python benchmark/benchmark_text_generation_models.py
-```
-
-Outputs (created under `benchmark/results/text_generation/`):
-- `{model}.json` and `{model}.png` for each model
-- `combined.png`, `combined.csv`, and `combined.md`
-
-Common environment variables:
-- `MBLT_DEVICE` (default: `cpu`)
-- `MBLT_DEVICE_MAP`, `MBLT_DTYPE`, `MBLT_TRUST_REMOTE_CODE`
-- `MBLT_REVISION` (e.g., `W8`)
-- `MBLT_EMBEDDING_WEIGHT` (path to custom embedding weights)
-- `MBLT_PREFILL_RANGE` (e.g., `128:512:128`)
-- `MBLT_DECODE_RANGE` (e.g., `128:512:128`)
-- `MBLT_FIXED_DECODE` (default: `10`)
-- `MBLT_FIXED_PREFILL` (default: `128`)
-- `MBLT_SKIP_EXISTING` (`true` to skip models with existing outputs)
+|MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
 
 ## Verbose Option
 
