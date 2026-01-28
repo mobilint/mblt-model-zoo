@@ -5,8 +5,9 @@ import numpy as np
 import torch
 from transformers.modeling_utils import PreTrainedModel
 
+from ...utils.npu_backend import MobilintNPUBackend
 from ..utils.cache_utils import MobilintCache
-from .base_utils import MobilintNPUBackend, PretrainedOnlyMixin
+from .base_utils import PretrainedOnlyMixin
 from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConfigMixin
 
 

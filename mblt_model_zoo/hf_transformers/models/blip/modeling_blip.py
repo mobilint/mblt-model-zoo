@@ -52,9 +52,6 @@ class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
             pooler_output=None,
         )
 
-    def get_input_embeddings(self):
-        return self.embeddings
-
 class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerationMixin, MobilintBlipPreTrainedModel):
     base_model_prefix = "model"
     

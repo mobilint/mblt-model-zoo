@@ -5,7 +5,7 @@ from transformers.configuration_utils import (
     SpecificPretrainedConfigType,
 )
 
-from .base_utils import MobilintNPUBackend
+from ...utils.npu_backend import MobilintNPUBackend
 
 
 class MobilintConfigMixin(PretrainedConfig):
