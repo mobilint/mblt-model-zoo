@@ -154,9 +154,9 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     def decoder_target_clusters(self) -> list:
         return self.decoder_npu_backend.target_clusters
 
-    @decoder_target_cores.setter
-    def decoder_target_cores(self, values: list) -> None:
-        self.decoder_npu_backend.target_cores = values
+    @decoder_target_clusters.setter
+    def decoder_target_clusters(self, values: list) -> None:
+        self.decoder_npu_backend.target_clusters = values
         
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "encoder_npu_backend"):
@@ -258,9 +258,9 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     def text_target_clusters(self) -> list:
         return self.text_config.target_clusters
 
-    @text_target_cores.setter
-    def text_target_cores(self, values: list) -> None:
-        self.text_config.target_cores = values
+    @text_target_clusters.setter
+    def text_target_clusters(self, values: list) -> None:
+        self.text_config.target_clusters = values
 
     @classmethod
     def from_dict(

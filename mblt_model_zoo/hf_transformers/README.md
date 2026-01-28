@@ -205,10 +205,13 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
 
 #### Prefixes for multi-backend models
 
-Some architectures have multiple `mxq` files (e.g. encoder-decoder models). In that case, you can target a specific sub-module by prefixing the parameter name:
+Some architectures have multiple `mxq` files (e.g. encoder-decoder models, or vision-language models with separate text/vision backends). In that case, you can target a specific sub-module by prefixing the parameter name:
 
-- Encoder/decoder prefixes (supported today):
+- Encoder/decoder prefixes:
   - `encoder_...` and `decoder_...` variants of the NPU settings above, e.g. `encoder_mxq_path`, `decoder_core_mode`, `encoder_target_cores`, `decoder_target_clusters`, etc.
+
+- Text/vision prefixes:
+  - `text_...` and `vision_...` variants of the NPU settings above, e.g. `text_mxq_path`, `vision_core_mode`, `text_target_cores`, `vision_target_clusters`, etc.
 
 For example, you can override only the encoder `mxq` file:
 
@@ -222,7 +225,17 @@ model = AutoModel.from_pretrained(
 )
 ```
 
-Other prefixes such as `text_...` / `vision_...` are not currently implemented in this repository.
+For vision-language models, you can override only the vision `mxq` file:
+
+```python
+from transformers import AutoModel
+
+model = AutoModel.from_pretrained(
+    model_id,
+    trust_remote_code=True,
+    vision_mxq_path="/path/to/vision.mxq",
+)
+```
 
 #### revision
 
@@ -280,10 +293,16 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
 
 ## TPS Benchmark CLI (Sweep)
 
-If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS sweep from the command line:
+If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS measure/sweep from the command line:
 
 ```bash
-mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct --device cpu --revision W8 --json tps.json --plot tps.png
+# single measurement
+mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 512 --decode 128
+
+# sweep (writes JSON/CSV and a PNG plot by default)
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct \
+  --prefill-range 128:2048:128 --decode-range 128:1024:128 \
+  --json tps.json --csv tps.csv --plot tps.png```
 ```
 
 For TPS Benchmark, you can use any keyword parameters explained in [Keyword Parameters](#keyword-parameters) section.
