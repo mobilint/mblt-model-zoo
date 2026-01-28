@@ -14,6 +14,21 @@ Currently supported languages include:
 
 ## Usage
 
+### Installation notes
+
+`mblt-model-zoo` exposes MeloTTS as an optional extra:
+
+```bash
+pip install "mblt-model-zoo[MeloTTS]"
+```
+
+The `MeloTTS` extra installs `unidic`. `unidic` requires downloading its dictionary once:
+
+```bash
+mblt-unidic-download
+# Or: python -m unidic download
+```
+
 ### WebUI
 
 The WebUI supports muliple languages and voices. First, follow the installation steps. Then, simply run:

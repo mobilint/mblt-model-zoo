@@ -53,6 +53,7 @@ Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
 [project.scripts]
 mblt-model-zoo = "mblt_model_zoo.cli:main"
+mblt-unidic-download = "mblt_model_zoo.utils.unidic_download:main"
 
 [project.optional-dependencies]
 transformers = [
