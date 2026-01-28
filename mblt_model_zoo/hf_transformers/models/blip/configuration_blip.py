@@ -12,7 +12,7 @@ from transformers.models.blip.configuration_blip import (
 )
 from transformers.utils import logging
 
-from ...utils.configuration_utils import MobilintConfigMixin
+from ...utils.configuration_utils import MobilintConfigMixin, MobilintVisionTextConfigMixin
 
 logger = logging.get_logger(__name__)
 
@@ -27,7 +27,7 @@ class MobilintBlipTextConfig(MobilintConfigMixin, BlipTextConfig):
         
         self.tie_word_embeddings = False
 
-class MobilintBlipConfig(BlipConfig):
+class MobilintBlipConfig(MobilintVisionTextConfigMixin, BlipConfig):
     model_type = "mobilint-blip"
     sub_configs = {"vision_config": MobilintBlipVisionConfig, "text_config": MobilintBlipTextConfig}
 
@@ -62,36 +62,5 @@ class MobilintBlipConfig(BlipConfig):
         self.initializer_range = 0.02
         self.image_text_hidden_size = image_text_hidden_size
         self.label_smoothing = label_smoothing
-
-    @classmethod
-    def from_text_vision_configs(
-        cls,
-        text_config: MobilintBlipTextConfig,
-        vision_config: MobilintBlipVisionConfig,
-        **kwargs,
-    ):
-        return cls(
-            text_config=text_config.to_dict(),
-            vision_config=vision_config.to_dict(),
-            **kwargs,
-        )
-
-    @classmethod
-    def from_dict(
-        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
-    ) -> Union["MobilintBlipConfig", tuple["MobilintBlipConfig", dict[str, Any]]]:
-        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
-        
-        config: MobilintBlipConfig
-        unused_kwargs: dict[str, Any]
-        config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs) # type: ignore
-        
-        config.text_config.name_or_path = config.name_or_path
-        config.vision_config.name_or_path = config.name_or_path
-        
-        if return_unused_kwargs:
-            return config, unused_kwargs
-        else:
-            return config
 
 AutoConfig.register("mobilint-blip", MobilintBlipConfig)

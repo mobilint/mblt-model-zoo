@@ -1,5 +1,4 @@
-import copy
-from typing import Any
+from typing import Any, Union
 
 from transformers.configuration_utils import (
     PretrainedConfig,
@@ -178,3 +177,118 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
     def get_text_config(self, decoder=None, encoder=None) -> "PretrainedConfig":
         return self
+
+
+class MobilintVisionTextConfigMixin(PretrainedConfig):
+    sub_configs = {"vision_config": MobilintConfigMixin, "text_config": MobilintConfigMixin}
+
+    @property
+    def vision_mxq_path(self) -> str:
+        return self.vision_config.mxq_path
+
+    @vision_mxq_path.setter
+    def vision_mxq_path(self, value: str) -> None:
+        self.vision_config.mxq_path = value
+
+    @property
+    def vision_dev_no(self) -> int:
+        return self.vision_config.dev_no
+
+    @vision_dev_no.setter
+    def vision_dev_no(self, value: int) -> None:
+        self.vision_config.dev_no = value
+
+    @property
+    def vision_core_mode(self) -> str:
+        return self.vision_config.core_mode
+
+    @vision_core_mode.setter
+    def vision_core_mode(self, value: str) -> None:
+        self.vision_config.core_mode = value
+
+    @property
+    def vision_target_cores(self) -> list:
+        return self.vision_config.target_cores
+
+    @vision_target_cores.setter
+    def vision_target_cores(self, values: list) -> None:
+        self.vision_config.target_cores = values
+
+    @property
+    def vision_target_clusters(self) -> list:
+        return self.vision_config.target_clusters
+
+    @vision_target_clusters.setter
+    def vision_target_clusters(self, values: list) -> None:
+        self.vision_config.target_clusters = values
+
+    @property
+    def text_mxq_path(self) -> str:
+        return self.text_config.mxq_path
+
+    @text_mxq_path.setter
+    def text_mxq_path(self, value: str) -> None:
+        self.text_config.mxq_path = value
+
+    @property
+    def text_dev_no(self) -> int:
+        return self.text_config.dev_no
+
+    @text_dev_no.setter
+    def text_dev_no(self, value: int) -> None:
+        self.text_config.dev_no = value
+
+    @property
+    def text_core_mode(self) -> str:
+        return self.text_config.core_mode
+
+    @text_core_mode.setter
+    def text_core_mode(self, value: str) -> None:
+        self.text_config.core_mode = value
+
+    @property
+    def text_target_cores(self) -> list:
+        return self.text_config.target_cores
+
+    @text_target_cores.setter
+    def text_target_cores(self, values: list) -> None:
+        self.text_config.target_cores = values
+
+    @property
+    def text_target_clusters(self) -> list:
+        return self.text_config.target_clusters
+
+    @text_target_cores.setter
+    def text_target_cores(self, values: list) -> None:
+        self.text_config.target_cores = values
+
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union["MobilintVisionTextConfigMixin", tuple["MobilintVisionTextConfigMixin", dict[str, Any]]]:
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        
+        config: MobilintVisionTextConfigMixin
+        unused_kwargs: dict[str, Any]
+        config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs) # type: ignore
+        
+        config.text_config.name_or_path = config.name_or_path
+        config.vision_config.name_or_path = config.name_or_path
+        
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        else:
+            return config
+    
+    @classmethod
+    def from_text_vision_configs(
+        cls,
+        text_config: MobilintConfigMixin,
+        vision_config: MobilintConfigMixin,
+        **kwargs,
+    ):
+        return cls(
+            text_config=text_config.to_dict(),
+            vision_config=vision_config.to_dict(),
+            **kwargs,
+        )

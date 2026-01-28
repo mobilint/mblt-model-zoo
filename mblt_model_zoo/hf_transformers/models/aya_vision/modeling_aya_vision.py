@@ -16,12 +16,12 @@ from transformers.utils.generic import TransformersKwargs, logging
 from ...models.cohere2.modeling_cohere2 import MobilintCohere2ForCausalLM
 from ...utils.cache_utils import MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
-from ...utils.modeling_utils import MobilintModelMixin
+from ...utils.base_utils import PretrainedOnlyMixin
 from .configuration_aya_vision import MobilintAyaVisionConfig
 
 logger = logging.get_logger(__name__)
 
-class MobilintAyaVisionForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
+class MobilintAyaVisionForCausalLM(PretrainedOnlyMixin, MobilintGenerationMixin):
     config: MobilintAyaVisionConfig
     base_model_prefix = "model"
     input_modalities = ("image", "text")
