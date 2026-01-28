@@ -4,13 +4,13 @@ The `benchmark/` folder contains runnable scripts for text-generation benchmarki
 
 ## Benchmark all available models
 
-`benchmark/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
+`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
 
 ```bash
-python benchmark/benchmark_text_generation_models.py
+python benchmark/transformers/benchmark_text_generation_models.py
 ```
 
-Outputs (created under `benchmark/results/text_generation/`):
+Outputs (created under `benchmark/transformers/results/text_generation/`):
 - `{model}.json` and `{model}.png` for each model
 - `combined.png`, `combined.csv`, and `combined.md`
 
@@ -27,7 +27,7 @@ Common CLI options:
 Example:
 
 ```bash
-python benchmark/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py \
   --revision W8 \
   --prefill-range 128:512:128 \
   --decode-range 128:512:128 \
