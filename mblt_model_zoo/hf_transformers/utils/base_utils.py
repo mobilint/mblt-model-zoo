@@ -93,6 +93,9 @@ class PretrainedOnlyMixin(PreTrainedModel):
 
 
 class MobilintNPUBackend:
+    num_of_clusters = 2
+    num_of_cores_in_cluster = 4
+
     def __init__(
         self,
         mxq_path: str = "",
@@ -328,17 +331,31 @@ class MobilintNPUBackend:
         self._target_cores_serialized = serialized
     
     @property
-    def target_clusters(self) -> List['Cluster']:
-        num_of_clusters = 2
-        num_of_cores_in_cluster = 4
-        
-        core_id_lists = [[core_id for core_id in self.target_cores if core_id.cluster == cluster_map[i]] for i in range(num_of_clusters)]
+    def target_clusters(self) -> List['Cluster']:        
+        core_id_lists = [[core_id for core_id in self.target_cores if core_id.cluster == cluster_map[i]] for i in range(self.num_of_clusters)]
                 
         for core_ids in core_id_lists:
-            if len(core_ids) != num_of_cores_in_cluster and len(core_ids) != 0:
+            if len(core_ids) != self.num_of_cores_in_cluster and len(core_ids) != 0:
                 raise ValueError(f"Target cores must include every cores in a cluster! core_ids: {self._target_cores_serialized}")
         
-        return [core_ids[0].cluster for core_ids in core_id_lists if len(core_ids) == num_of_cores_in_cluster]
+        return [core_ids[0].cluster for core_ids in core_id_lists if len(core_ids) == self.num_of_cores_in_cluster]
+
+    @target_cores.setter
+    def target_clusters(self, values: List[Union[int, 'Cluster']]):
+        clusters = []
+        for v in values:
+            if isinstance(v, Cluster):
+                clusters.append(v)
+            elif isinstance(v, int):
+                clusters.append(cluster_map[v])
+            else:
+                raise TypeError(f"Unsupported type: {type(v)}")
+        
+        core_ids = []
+        for cluster in clusters:
+            core_ids = [CoreId(cluster, core) for core in core_map.values()]
+
+        self.target_cores = core_ids
 
     def to_dict(self, prefix="") -> Dict[str, Any]:
         p = prefix
@@ -352,10 +369,14 @@ class MobilintNPUBackend:
     @classmethod
     def from_dict(cls, data: Dict[str, Any], prefix: str = "") -> 'MobilintNPUBackend':
         p = prefix
+        if f"{p}target_cores" in data.keys() and f"{p}target_clusters" in data.keys():
+            logger.warning(f"{p}target_cores and {p}target_clusters are both set! {p}target_clusters will take priority")
+
         return cls(
             name_or_path=data.pop("name_or_path", ""),
             mxq_path=data.pop(f"{p}mxq_path", ""),
             dev_no=data.pop(f"{p}dev_no", 0),
             core_mode=data.pop(f"{p}core_mode", "single"),
-            target_cores=data.pop(f"{p}target_cores", None)
+            target_cores=data.pop(f"{p}target_cores", None),
+            target_clusters=data.pop(f"{p}target_clusters", None)
         )

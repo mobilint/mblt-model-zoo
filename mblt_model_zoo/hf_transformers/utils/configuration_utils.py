@@ -53,6 +53,10 @@ class MobilintConfigMixin(PretrainedConfig):
     @property
     def target_clusters(self) -> list:
         return self.npu_backend.target_clusters
+
+    @target_clusters.setter
+    def target_clusters(self, values: list) -> None:
+        self.npu_backend.target_clusters = values
     
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
@@ -111,6 +115,10 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     def encoder_target_clusters(self) -> list:
         return self.encoder_npu_backend.target_clusters
 
+    @encoder_target_clusters.setter
+    def encoder_target_clusters(self, values: list) -> None:
+        self.encoder_npu_backend.target_clusters = values
+
     @property
     def decoder_mxq_path(self) -> str:
         return self.decoder_npu_backend.mxq_path
@@ -146,6 +154,10 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @property
     def decoder_target_clusters(self) -> list:
         return self.decoder_npu_backend.target_clusters
+
+    @decoder_target_cores.setter
+    def decoder_target_cores(self, values: list) -> None:
+        self.decoder_npu_backend.target_cores = values
         
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "encoder_npu_backend"):
