@@ -28,15 +28,6 @@ pip install -e .[transformers]
 
 **mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
 
-Some models require a specific model revision (e.g., `W8`). Pass `revision="W8"` to `from_pretrained`/`pipeline` to select the desired quantized variant.
-
-### Quantization Revision Terms
-
-We use the following revision labels for quantized variants:
-- `W8`: all weights are quantized to INT8.
-- `W4`: all weights are quantized to INT4.
-- `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
-
 ```python
 from transformers import TextStreamer, pipeline, AutoTokenizer
 
@@ -152,6 +143,126 @@ pipe(
 ```
 
 Further usage examples can be found in the [tests](../../tests/transformers) directory.
+
+
+### Keyword Parameters
+
+When loading models with `from_pretrained`, you can pass extra keyword parameters to customize runtime behavior.
+For `pipeline(...)`, pass them via `model_kwargs={...}`.
+
+#### NPU settings
+
+These are custom keyword parameters for Mobilint NPU execution (the compiled model is stored in an `*.mxq` file).
+
+- `mxq_path` (`str`)
+    Overrides which `*.mxq` file to load.
+    You can pass either a local path or a path within the Hugging Face repository.
+    Resolution order is:
+    1) If `mxq_path` exists on disk (relative or absolute), it is used as-is.
+    2) If `name_or_path` is a local directory, `os.path.join(name_or_path, mxq_path)` is tried.
+    3) Otherwise, the loader tries to download `mxq_path` from the Hugging Face Hub (preferring the current `revision`), with fallbacks:
+       - retry without `revision`
+       - try to reuse a cached `*.mxq` from the local HF cache
+       - finally, pick a best-effort `*.mxq` candidate from the repo if the exact path is not found
+
+- `core_mode` (`str`)
+    Selects how the NPU runtime schedules work across cores/clusters.
+    Supported values:
+    - `single`: run on specific cores (use `target_cores`)
+    - `multi`: run on one or more clusters (use `target_clusters`)
+    - `global4`: global scheduling across 4 cores (use `target_clusters`)
+    - `global8`: global scheduling across all cores (requires all clusters)
+
+    Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
+
+- `target_cores` (`list[str]`)
+    Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"`.
+    - `cluster`: `0` or `1`
+    - `core`: `0`, `1`, `2`, or `3`
+
+    Example: `target_cores=["0:0", "0:1"]`
+
+- `target_clusters` (`list[int]`)
+    Used when `core_mode` is `multi`, `global4`, or `global8`. Each entry is a cluster index (`0` or `1`).
+    - For `global8`, all clusters must be included (e.g. `target_clusters=[0, 1]`).
+
+    Example: `target_clusters=[0]`
+
+##### Prefixes for multi-backend models
+
+Some architectures have multiple `mxq` files (e.g. encoder-decoder models). In that case, you can target a specific sub-module by prefixing the parameter name:
+
+- Encoder/decoder prefixes (supported today):
+  - `encoder_...` and `decoder_...` variants of the NPU settings above, e.g. `encoder_mxq_path`, `decoder_core_mode`, `encoder_target_cores`, `decoder_target_clusters`, etc.
+
+For example, you can override only the encoder `mxq` file:
+
+```python
+from transformers import AutoModel
+
+model = AutoModel.from_pretrained(
+    model_id,
+    trust_remote_code=True,
+    encoder_mxq_path="/path/to/encoder.mxq",
+)
+```
+
+Other prefixes such as `text_...` / `vision_...` are not currently implemented in this repository.
+
+#### revision
+
+Our quantized models are uploaded on Huggingface Hub.
+The repositories on Huggingface Hub work like a git repository, so they can have multiple branches.
+We provide multiple quantized variants of a single original model via these branches (revisions).
+
+We use the following revision labels for quantized variants:
+- `W8`: all weights are quantized to INT8.
+- `W4`: all weights are quantized to INT4.
+- `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
+
+Currently, we only upload `W8` and `W4V8` variants.
+The default `main` branch may differ by model (some models are fine with `W4V8`, others are not).
+If you prefer inference speed over quality, use `W4V8`. If you need higher accuracy, use `W8`.
+
+#### embedding_weight
+
+If you have your own quantized model from our `qbcompiler`, you may have used rotated embedding options.
+To make it easier to test custom compiled models, we support overriding the input embedding weights.
+
+- `embedding_weight` (`str`)
+    Path to a PyTorch checkpoint file loadable via `torch.load` (commonly `*.pt` or `*.pth`).
+    The file can contain:
+    - a `torch.Tensor` with shape `[vocab_size, hidden_size]`, or
+    - a `dict` (e.g. `state_dict`) containing a `"weight"` entry, or (as a fallback) any single tensor value.
+
+    The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
+    The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
+
+#### device
+
+Even though most of the weights are in `mxq` file, some of the layers are not suited for NPU.
+For example, embedding layers for LLM models are not computed on NPU, but on CPU.
+If you want to change the device for these kinds of CPU layers, you can use `device` parameter.
+But, we recommend to use the default value `cpu`, since our `qbruntime` accept inputs from host memory, not from GPU memory.
+You should trade off the computation efficiency and memory copy inefficiency.
+
+#### device_map
+
+Same with the `device` parameter, `device_map` sets devices for `cpu` layers.
+It doesn't affect our quantized `mxq` models, which can only run on our NPUs.
+We recommend not using it.
+
+#### trust_remote_code
+
+For all `transformers` model in our model zoo, you should set `trust_remote_code` to `True` since our auto_map proxy codes are remote code.
+With this structure, you can just import `transformers` only, and use auto classes to load our quantized models.
+For the sake of performance, our proxy code will only import necessary classes of configs and models.
+
+#### dtype
+
+Same with the `device` parameter, `dtype` sets datatype(eg. `float32`, `bfloat16`) for `cpu` layers.
+It doesn't affect our quantized `mxq` models.
+We recommend leaving it as the default, since this value is inherited from the original model's `config.json`.
 
 ## TPS Benchmark CLI (Sweep)
 
