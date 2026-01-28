@@ -24,8 +24,6 @@ pip install -e .[transformers]
 
 ## Quick Start Guide
 
-### Working with Quantized Model
-
 **mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
 
 ```python
@@ -144,17 +142,17 @@ pipe(
 
 Further usage examples can be found in the [tests](../../tests/transformers) directory.
 
-
-### Keyword Parameters
+## Keyword Parameters
 
 When loading models with `from_pretrained`, you can pass extra keyword parameters to customize runtime behavior.
 For `pipeline(...)`, pass them via `model_kwargs={...}`.
 
-#### NPU settings
+### NPU settings
 
 These are custom keyword parameters for Mobilint NPU execution (the compiled model is stored in an `*.mxq` file).
 
 - `mxq_path` (`str`)
+
     Overrides which `*.mxq` file to load.
     You can pass either a local path or a path within the Hugging Face repository.
     Resolution order is:
@@ -166,6 +164,7 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
        - finally, pick a best-effort `*.mxq` candidate from the repo if the exact path is not found
 
 - `core_mode` (`str`)
+
     Selects how the NPU runtime schedules work across cores/clusters.
     Supported values:
     - `single`: run on specific cores (use `target_cores`)
@@ -176,6 +175,7 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
     Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
 
 - `target_cores` (`list[str]`)
+
     Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"`.
     - `cluster`: `0` or `1`
     - `core`: `0`, `1`, `2`, or `3`
@@ -183,12 +183,13 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
     Example: `target_cores=["0:0", "0:1"]`
 
 - `target_clusters` (`list[int]`)
+
     Used when `core_mode` is `multi`, `global4`, or `global8`. Each entry is a cluster index (`0` or `1`).
     - For `global8`, all clusters must be included (e.g. `target_clusters=[0, 1]`).
 
     Example: `target_clusters=[0]`
 
-##### Prefixes for multi-backend models
+#### Prefixes for multi-backend models
 
 Some architectures have multiple `mxq` files (e.g. encoder-decoder models). In that case, you can target a specific sub-module by prefixing the parameter name:
 
@@ -230,6 +231,7 @@ If you have your own quantized model from our `qbcompiler`, you may have used ro
 To make it easier to test custom compiled models, we support overriding the input embedding weights.
 
 - `embedding_weight` (`str`)
+
     Path to a PyTorch checkpoint file loadable via `torch.load` (commonly `*.pt` or `*.pth`).
     The file can contain:
     - a `torch.Tensor` with shape `[vocab_size, hidden_size]`, or
@@ -238,33 +240,31 @@ To make it easier to test custom compiled models, we support overriding the inpu
     The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
     The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
 
-#### device
+### Original Keyword Parameters from `transformers`
 
-Even though most of the weights are in `mxq` file, some of the layers are not suited for NPU.
-For example, embedding layers for LLM models are not computed on NPU, but on CPU.
-If you want to change the device for these kinds of CPU layers, you can use `device` parameter.
-But, we recommend to use the default value `cpu`, since our `qbruntime` accept inputs from host memory, not from GPU memory.
-You should trade off the computation efficiency and memory copy inefficiency.
+The parameters below follow the standard `transformers` semantics. For Mobilint quantized `*.mxq` models, they only affect the non-NPU parts of the model (typically CPU-side layers such as embeddings). NPU execution always runs on Mobilint NPUs.
 
-#### device_map
+- `device`
 
-Same with the `device` parameter, `device_map` sets devices for `cpu` layers.
-It doesn't affect our quantized `mxq` models, which can only run on our NPUs.
-We recommend not using it.
+    Sets the device for CPU-side layers.
+    We recommend the default `cpu`, because `qbruntime` expects inputs from host memory. Moving CPU-side layers to GPU can introduce extra host↔device copies, so you should trade off compute speed vs. data transfer overhead.
 
-#### trust_remote_code
+- `device_map`
 
-For all `transformers` model in our model zoo, you should set `trust_remote_code` to `True` since our auto_map proxy codes are remote code.
-With this structure, you can just import `transformers` only, and use auto classes to load our quantized models.
-For the sake of performance, our proxy code will only import necessary classes of configs and models.
+    Like `device`, but more granular: it assigns devices per submodule for CPU-side layers.
+    It does not affect `*.mxq` execution, and we generally recommend not using it unless you have a specific reason.
 
-#### dtype
+- `trust_remote_code`
 
-Same with the `device` parameter, `dtype` sets datatype(eg. `float32`, `bfloat16`) for `cpu` layers.
-It doesn't affect our quantized `mxq` models.
-We recommend leaving it as the default, since this value is inherited from the original model's `config.json`.
+    Must be set to `True` for our model zoo models, because our `auto_map` proxy code is loaded as remote code from the Hugging Face Hub.
+    This lets you use the standard `transformers` auto classes (`AutoModel`, `AutoConfig`, `pipeline`, etc.) while loading Mobilint-specific implementations.
 
-## TPS Benchmark CLI (Sweep)
+- `dtype`
+
+    Sets the dtype (e.g. `float32`, `bfloat16`) for CPU-side layers.
+    It does not affect `*.mxq` execution. We recommend leaving it as the default (inherited from the original model's `config.json`).
+
+### TPS Benchmark CLI (Sweep)
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS sweep from the command line:
 
@@ -330,8 +330,6 @@ The following tables summarize Transformers' models available in **mblt-model-zo
 ## License
 
 The Mobilint Model Zoo is released under BSD 3-Clause License. Please see the [LICENSE](https://github.com/mobilint/mblt-model-zoo/blob/master/LICENSE) file for more details.
-
-Additionally, the license for each model provided on the Huggingface hub follows the terms specified in each repository.
 
 ## Support & Issues
 
