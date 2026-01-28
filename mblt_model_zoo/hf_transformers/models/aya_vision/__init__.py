@@ -11,10 +11,10 @@ def __getattr__(name: str):
         module = importlib.import_module(".configuration_aya_vision", __package__)
         return module.MobilintAyaVisionConfig
     
-    if name == "MobilintAyaVisionForCausalLM":
+    if name == "MobilintAyaVisionForConditionalGeneration":
         module = importlib.import_module(".modeling_aya_vision", __package__)
-        return module.MobilintAyaVisionForCausalLM
+        return module.MobilintAyaVisionForConditionalGeneration
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["MobilintAyaVisionConfig", "MobilintAyaVisionForCausalLM"]
+__all__ = ["MobilintAyaVisionConfig", "MobilintAyaVisionForConditionalGeneration"]

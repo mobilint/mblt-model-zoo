@@ -22,7 +22,7 @@ from .configuration_aya_vision import MobilintAyaVisionConfig
 
 logger = logging.get_logger(__name__)
 
-class MobilintAyaVisionForCausalLM(PretrainedOnlyMixin, MobilintGenerationMixin):
+class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerationMixin):
     config: MobilintAyaVisionConfig
     base_model_prefix = "model"
     input_modalities = ("image", "text")
@@ -169,5 +169,5 @@ class MobilintAyaVisionForCausalLM(PretrainedOnlyMixin, MobilintGenerationMixin)
         return model_inputs
 
         
-AutoModel.register(MobilintAyaVisionConfig, MobilintAyaVisionForCausalLM)
-AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionForCausalLM)
+AutoModel.register(MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration)
+AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration)

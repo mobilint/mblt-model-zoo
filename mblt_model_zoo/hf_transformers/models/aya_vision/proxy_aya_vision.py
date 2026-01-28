@@ -3,7 +3,7 @@ try:
         MobilintAyaVisionConfig,
     )
     from mblt_model_zoo.hf_transformers.models.aya_vision.modeling_aya_vision import (
-        MobilintAyaVisionForCausalLM,
+        MobilintAyaVisionForConditionalGeneration,
     )
 except ImportError:
     raise ImportError(
@@ -11,4 +11,4 @@ except ImportError:
         "Please run: pip install mblt_model_zoo[transformers]"
     )
 
-__all__ = ["MobilintAyaVisionConfig", "MobilintAyaVisionForCausalLM"]
+__all__ = ["MobilintAyaVisionConfig", "MobilintAyaVisionForConditionalGeneration"]
