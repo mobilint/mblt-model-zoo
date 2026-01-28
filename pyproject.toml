@@ -62,6 +62,7 @@ transformers = [
     "matplotlib",
 ]
 MeloTTS = [
+    "transformers>=4.54.0, <=4.57.1",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",

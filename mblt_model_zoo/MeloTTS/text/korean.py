@@ -12,8 +12,8 @@ import re
 from anyascii import anyascii
 from g2pkk import G2p
 from jamo import hangul_to_jamo
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
-from ....utils.auto import AutoTokenizer
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
 

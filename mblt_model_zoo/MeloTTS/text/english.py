@@ -3,8 +3,8 @@ import pickle
 import re
 
 from g2p_en import G2p
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
-from ....utils.auto import AutoTokenizer
 from . import symbols
 from .english_utils.abbreviations import expand_abbreviations
 from .english_utils.number_norm import normalize_numbers
