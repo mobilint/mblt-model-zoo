@@ -29,10 +29,10 @@ def main():
     )
 
     model_type = getattr(config, "model_type", "")
+    arch_name = config.architectures[0] if getattr(config, "architectures", None) else ""
 
-    if model_type.startswith("mobilint-"):
-        original_model_type = model_type[len("mobilint-"):]
-        arch_name = config.architectures[0] if getattr(config, "architectures", None) else ""
+    if model_type.startswith("mobilint-") or arch_name.startswith("Mobilint"):
+        original_model_type = model_type[len("mobilint-"):] if model_type.startswith("mobilint-") else model_type
 
         import importlib
         module = importlib.import_module(
