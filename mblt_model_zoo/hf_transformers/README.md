@@ -291,6 +291,16 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
     Sets the dtype (e.g. `float32`, `bfloat16`) for CPU-side layers.
     It does not affect `*.mxq` execution. We recommend leaving it as the default (inherited from the original model's `config.json`).
 
+## Chat CLI
+
+You can test out our models with CLI chat command like below.
+
+```bash
+mblt-model-zoo chat mobilint/Llama-3.2-1B-Instruct --trust-remote-code
+```
+
+Supporting [Keyword Parameters](#keyword-parameters) is still in development.
+
 ## TPS Benchmark CLI (Sweep)
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS measure/sweep from the command line:
