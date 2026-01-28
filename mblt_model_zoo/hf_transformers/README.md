@@ -1,10 +1,10 @@
-# Pretrained Models with Huggingface's Transformers
+# Pretrained Models with HuggingFace's Transformers
 
-**mblt-model-zoo** also provides generative AI models from Huggingface's [Transformers](https://github.com/huggingface/transformers).
+**mblt-model-zoo** also provides generative AI models from HuggingFace's [Transformers](https://github.com/huggingface/transformers).
 Currently, these models are only available on Mobilint's [ARIES](https://www.mobilint.com/aries).
 Support for [REGULUS](https://www.mobilint.com/regulus) is planned and currently under development
 
-Mobilint's Model Zoo provides a seamless experience for using `transformers` models with the same class/function interfaces. All of the auto classes in `transformers` can import our pre-quantized models (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from Huggingface hub. It also supports a locally downloaded model directory, just like the original `transformers`.
+Mobilint's Model Zoo provides a seamless experience for using `transformers` models with the same class/function interfaces. All of the auto classes in `transformers` can import our pre-quantized models (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from HuggingFace hub. It also supports a locally downloaded model directory, just like the original `transformers`.
 
 ## Installation
 
@@ -212,8 +212,8 @@ Other prefixes such as `text_...` / `vision_...` are not currently implemented i
 
 #### revision
 
-Our quantized models are uploaded on Huggingface Hub.
-The repositories on Huggingface Hub work like a git repository, so they can have multiple branches.
+Our quantized models are uploaded on HuggingFace Hub.
+The repositories on HuggingFace Hub work like a git repository, so they can have multiple branches.
 We provide multiple quantized variants of a single original model via these branches (revisions).
 
 We use the following revision labels for quantized variants:
@@ -291,41 +291,7 @@ It will search online to look up available models. When offline, it will list ca
 
 ## Model List
 
-The following tables summarize Transformers' models available in **mblt-model-zoo**. We provide the models that are quantized with our advanced quantization techniques. Performance metrics will be provided in the future.
-
-### Large Language Models
-
-| Model | Model ID | Source | Note |
-| ----- | -------- | ------ | ---- |
-| EXAONE-3.5-2.4B-Instruct | `mobilint/EXAONE-3.5-2.4B-Instruct` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | |
-| EXAONE-3.5-7.8B-Instruct | `mobilint/EXAONE-3.5-7.8B-Instruct` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct) | |
-| EXAONE-4.0-1.2B | `mobilint/EXAONE-4.0-1.2B` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-4.0-1.2B) | |
-| EXAONE-Deep-2.4B | `mobilint/EXAONE-Deep-2.4B` | [Link](https://huggingface.co/LGAI-EXAONE/EXAONE-Deep-2.4B) | |
-| HyperCLOVAX-SEED-Text-Instruct-0.5B | `mobilint/HyperCLOVAX-SEED-Text-Instruct-0.5B` | [Link](https://huggingface.co/naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B) | |
-| HyperCLOVAX-SEED-Text-Instruct-1.5B | `mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B` | [Link](https://huggingface.co/naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B) | |
-| Llama-3.1-8B-Instruct | `mobilint/Llama-3.1-8B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) | |
-| Llama-3.2-1B-Instruct | `mobilint/Llama-3.2-1B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) | |
-| Llama-3.2-3B-Instruct | `mobilint/Llama-3.2-3B-Instruct` | [Link](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | |
-| Qwen2.5-0.5B-Instruct | `mobilint/Qwen2.5-0.5B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) | |
-| Qwen2.5-1.5B-Instruct | `mobilint/Qwen2.5-1.5B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) | |
-| Qwen2.5-3B-Instruct | `mobilint/Qwen2.5-3B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) | |
-| Qwen2.5-7B-Instruct | `mobilint/Qwen2.5-7B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) | |
-| bert-base-uncased | `mobilint/bert-base-uncased` | [Link](https://huggingface.co/google-bert/bert-base-uncased) | |
-| c4ai-command-r7b-12-2024 | `mobilint/c4ai-command-r7b-12-2024` | [Link](https://huggingface.co/CohereLabs/c4ai-command-r7b-12-2024) | |
-
-### Speech-To-Text Models
-
-| Model | Model ID | Source | Note |
-| ----- | -------- | ------ | ---- |
-| whisper-small | `mobilint/whisper-small` | [Link](https://huggingface.co/openai/whisper-small) | |
-
-### Vision Language Models
-
-| Model | Model ID | Source | Note |
-| ----- | -------- | ------ | ---- |
-| aya-vision-8b | `mobilint/aya-vision-8b` | [Link](https://huggingface.co/CohereLabs/aya-vision-8b) | |
-| blip-image-captioning-large | `mobilint/blip-image-captioning-large` | [Link](https://huggingface.co/Salesforce/blip-image-captioning-large) | |
-| Qwen2-VL-2B-Instruct | `mobilint/Qwen2-VL-2B-Instruct` | [Link](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct) | Only supports 1 image input with (224, 224) size. Image input will be resized automatically by our overrided preprocessor. |
+You can find `transformers` models available in **mblt-model-zoo** in our [HuggingFace Group Page](https://huggingface.co/mobilint).
 
 ## License
 
