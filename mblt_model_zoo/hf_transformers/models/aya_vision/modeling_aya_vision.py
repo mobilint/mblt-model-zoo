@@ -14,6 +14,7 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from ...models.cohere2.modeling_cohere2 import MobilintCohere2ForCausalLM
+from ...models.siglip.modeling_siglip import MobilintSiglipVisionModel
 from ...utils.cache_utils import MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.base_utils import PretrainedOnlyMixin
@@ -29,7 +30,11 @@ class MobilintAyaVisionForCausalLM(PretrainedOnlyMixin, MobilintGenerationMixin)
     def __init__(self, config: MobilintAyaVisionConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         
+        self.vision_tower: MobilintSiglipVisionModel = AutoModel.from_config(config.vision_config, _internal_call=True)
         self.language_model: MobilintCohere2ForCausalLM = AutoModelForCausalLM.from_config(config.text_config, _internal_call=True)
+    
+    def get_cache_mxq_model(self):
+        return self.language_model.get_cache_mxq_model()
     
     def get_input_embeddings(self) -> nn.Module:
         return self.language_model.get_input_embeddings()
@@ -41,7 +46,7 @@ class MobilintAyaVisionForCausalLM(PretrainedOnlyMixin, MobilintGenerationMixin)
         vision_feature_select_strategy: Optional[str] = None,
         **kwargs,
     ):
-        image_features = self.mxq_forward(pixel_values).permute(0, 2, 3, 1).contiguous()
+        image_features = self.vision_tower(pixel_values)
         return image_features
 
     def get_placeholder_mask(
