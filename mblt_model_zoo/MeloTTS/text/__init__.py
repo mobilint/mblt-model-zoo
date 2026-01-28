@@ -29,7 +29,7 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
 
 models = {}
 tokenizers = {}
-def get_bert_feature(text, word2ph, device=None, model_id='', dispose_after_use=False):
+def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0", dispose_after_use=False):
     from transformers import AutoModelForMaskedLM, AutoTokenizer
     global model
     global tokenizer
@@ -43,7 +43,11 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dispose_after_use=
     if not device:
         device = "cuda"
     if model_id not in models:
-        model = AutoModelForMaskedLM.from_pretrained(model_id).to(
+        model = AutoModelForMaskedLM.from_pretrained(
+            model_id,
+            dev_no=dev_no,
+            target_cores=[target_core]
+        ).to(
             device
         )
         models[model_id] = model
@@ -77,6 +81,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dispose_after_use=
     return phone_level_feature.T
 
 
-def get_bert(norm_text, word2ph, language, device, model_id, dispose_after_use=False):
-    bert = get_bert_feature(norm_text, word2ph, device, model_id, dispose_after_use=dispose_after_use)
+def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0", dispose_after_use=False):
+    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core, dispose_after_use=dispose_after_use)
     return bert

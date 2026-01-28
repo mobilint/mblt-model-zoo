@@ -8,45 +8,6 @@ from .text import cleaned_text_to_sequence, get_bert
 from .text.cleaner import clean_text
 
 
-def get_text_for_tts_infer(text, language_str, hps, device, symbol_to_id=None, dispose_bert_after_use=False):
-    norm_text, phone, tone, word2ph = clean_text(text, language_str)
-    phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
-
-    if hps.data.add_blank:
-        phone = commons.intersperse(phone, 0)
-        tone = commons.intersperse(tone, 0)
-        language = commons.intersperse(language, 0)
-        for i in range(len(word2ph)):
-            word2ph[i] = word2ph[i] * 2
-        word2ph[0] += 1
-
-    if getattr(hps.data, "disable_bert", False):
-        bert = torch.zeros(1024, len(phone))
-        ja_bert = torch.zeros(768, len(phone))
-    else:
-        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id, dispose_after_use=dispose_bert_after_use)
-        del word2ph
-        assert bert.shape[-1] == len(phone), phone
-
-        if language_str == "ZH":
-            bert = bert
-            ja_bert = torch.zeros(768, len(phone))
-        elif language_str in ["JP", "EN", "ZH_MIX_EN", 'KR', 'SP', 'ES', 'FR', 'DE', 'RU']:
-            ja_bert = bert
-            bert = torch.zeros(1024, len(phone))
-        else:
-            raise NotImplementedError()
-
-    assert bert.shape[-1] == len(
-        phone
-    ), f"Bert seq len {bert.shape[-1]} != {len(phone)}"
-
-    phone = torch.LongTensor(phone)
-    tone = torch.LongTensor(tone)
-    language = torch.LongTensor(language)
-    return bert, ja_bert, phone, tone, language
-
-
 def get_hparams_from_file(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         data = f.read()
@@ -104,8 +65,10 @@ class DataHParams(HParamsBase):
 class ModelHParams(HParamsBase):
     def __init__(self, **kwargs):
         self.bert_model_id: str = kwargs['bert_model_id'] # type: ignore
-        self.mxq_path_enc_p_sdp_dp: str = kwargs['mxq_path_enc_p_sdp_dp'] # type: ignore
-        self.mxq_path_dec_flow: str = kwargs['mxq_path_dec_flow'] # type: ignore
+        self.dev_no: int = kwargs.get('dev_no', 0)
+        self.target_core: str = kwargs['target_core']
+        self.encoder_mxq_path: str = kwargs['encoder_mxq_path'] # type: ignore
+        self.decoder_mxq_path: str = kwargs['decoder_mxq_path'] # type: ignore
         self.use_spk_conditioned_encoder: bool = kwargs.get('use_spk_conditioned_encoder', True) # type: ignore
         self.use_noise_scaled_mask: bool = kwargs.get('use_noise_scaled_mask', True) # type: ignore
         self.use_mel_posterior_encoder: bool = kwargs.get('use_mel_posterior_encoder', False) # type: ignore
@@ -138,3 +101,42 @@ class HParams(HParamsBase):
         self.num_languages: int = kwargs.get('num_languages') # type: ignore
         self.num_tones: int = kwargs.get('num_tones') # type: ignore
         self.symbols: list[str] = kwargs.get('symbols') # type: ignore
+
+
+def get_text_for_tts_infer(text, language_str, hps: HParams, device, symbol_to_id=None, dev_no=0, target_core="0:0", dispose_bert_after_use=False):
+    norm_text, phone, tone, word2ph = clean_text(text, language_str)
+    phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
+
+    if hps.data.add_blank:
+        phone = commons.intersperse(phone, 0)
+        tone = commons.intersperse(tone, 0)
+        language = commons.intersperse(language, 0)
+        for i in range(len(word2ph)):
+            word2ph[i] = word2ph[i] * 2
+        word2ph[0] += 1
+
+    if getattr(hps.data, "disable_bert", False):
+        bert = torch.zeros(1024, len(phone))
+        ja_bert = torch.zeros(768, len(phone))
+    else:
+        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id, dev_no=hps.model.dev_no, target_core=hps.model.target_core, dispose_after_use=dispose_bert_after_use)
+        del word2ph
+        assert bert.shape[-1] == len(phone), phone
+
+        if language_str == "ZH":
+            bert = bert
+            ja_bert = torch.zeros(768, len(phone))
+        elif language_str in ["JP", "EN", "ZH_MIX_EN", 'KR', 'SP', 'ES', 'FR', 'DE', 'RU']:
+            ja_bert = bert
+            bert = torch.zeros(1024, len(phone))
+        else:
+            raise NotImplementedError()
+
+    assert bert.shape[-1] == len(
+        phone
+    ), f"Bert seq len {bert.shape[-1]} != {len(phone)}"
+
+    phone = torch.LongTensor(phone)
+    tone = torch.LongTensor(tone)
+    language = torch.LongTensor(language)
+    return bert, ja_bert, phone, tone, language

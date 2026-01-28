@@ -1,7 +1,7 @@
 import torch
 from huggingface_hub import hf_hub_download
 
-from . import utils
+from .utils import get_hparams_from_file
 
 LANG_TO_HF_REPO_ID = {
     'EN_NEWEST': 'mobilint/MeloTTS-English-v3',
@@ -13,7 +13,7 @@ def load_or_download_config(locale, config_path=None):
         language = locale.split('-')[0].upper()
         assert language in LANG_TO_HF_REPO_ID
         config_path = hf_hub_download(repo_id=LANG_TO_HF_REPO_ID[language], filename="config.json")
-    return utils.get_hparams_from_file(config_path)
+    return get_hparams_from_file(config_path)
 
 def load_or_download_model(locale, device, ckpt_path=None):
     if ckpt_path is None:

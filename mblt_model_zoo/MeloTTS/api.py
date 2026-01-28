@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 
 import noisereduce as nr
 import numpy as np
@@ -8,7 +9,11 @@ from torch import nn
 from tqdm import tqdm
 
 from . import utils
-from .download_utils import load_or_download_config, load_or_download_model
+from .download_utils import (
+    LANG_TO_HF_REPO_ID,
+    load_or_download_config,
+    load_or_download_model,
+)
 from .models import MobilintSynthesizerTrn
 from .split_utils import split_sentence
 
@@ -18,7 +23,13 @@ class TTS(nn.Module):
                 language,
                 device='auto',
                 config_path=None,
-                ckpt_path=None):
+                ckpt_path=None,
+                
+                dev_no: Optional[int] = None,
+                target_core: Optional[str] = None,
+                encoder_mxq_path: Optional[str] = None,
+                decoder_mxq_path: Optional[str] = None,
+        ):
         nn.Module.__init__(self)
         if device == 'auto':
             device = 'cpu'
@@ -29,6 +40,18 @@ class TTS(nn.Module):
 
         # config_path = 
         hps = load_or_download_config(language, config_path=config_path)
+        
+        if dev_no is not None:
+            hps.model.dev_no = dev_no
+        
+        if target_core is not None:
+            hps.model.target_core = target_core
+        
+        if encoder_mxq_path is not None:
+            hps.model.encoder_mxq_path = encoder_mxq_path
+        
+        if decoder_mxq_path is not None:
+            hps.model.decoder_mxq_path = decoder_mxq_path
 
         num_languages = hps.num_languages
         num_tones = hps.num_tones
@@ -41,6 +64,7 @@ class TTS(nn.Module):
             n_speakers=hps.data.n_speakers,
             num_tones=num_tones,
             num_languages=num_languages,
+            name_or_path=LANG_TO_HF_REPO_ID[language],
             **hps.model,
         ).to(device)
 
