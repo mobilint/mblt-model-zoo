@@ -302,7 +302,7 @@ mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 512 
 # sweep (writes JSON/CSV and a PNG plot by default)
 mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct \
   --prefill-range 128:2048:128 --decode-range 128:1024:128 \
-  --json tps.json --csv tps.csv --plot tps.png```
+  --json tps.json --csv tps.csv --plot tps.png
 ```
 
 For TPS Benchmark, you can use any keyword parameters explained in [Keyword Parameters](#keyword-parameters) section.
