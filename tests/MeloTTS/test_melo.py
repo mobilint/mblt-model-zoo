@@ -1,6 +1,6 @@
 import pytest
 
-from mblt_model_zoo.hf_transformers.text_to_speech.MeloTTS import TTS
+from mblt_model_zoo.MeloTTS.api import TTS
 
 LANGUAGES = (
     "EN_NEWEST",
@@ -14,14 +14,13 @@ def pipe(request):
 
     pipe = TTS(language=language, device="auto")
     yield pipe
-    pipe.dispose()
+    del pipe
 
 
-def test_melo(pipe):
+def test_melo(pipe: TTS):
     # Speed is adjustable
     speed = 1.0
 
-    # English
     texts = {
         "EN": "Did you ever hear a folk tale about a giant turtle?",
         "KR": "안녕하세요! 오늘은 날씨가 정말 좋네요.",
