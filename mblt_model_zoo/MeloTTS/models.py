@@ -93,7 +93,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         ja_bert = ja_bert.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, f]
         z0 = z0.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
         z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
-        
+
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[1] / max_chunk)
         
@@ -118,10 +118,13 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 z0_slice = z0[:, start_index:end_index, :]
                 z1_slice = z1[:, start_index:end_index, :]
             
-            outputs = self.npu_backend.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
-            assert outputs is not None, "No output from mxq model inference."
-            m_p_chunk, logs_p_chunk, logw_chunk = outputs
+            input_mask = np.ones(shape=(2, x_slice.shape[1], x_slice.shape[1]), dtype=np.float32)
+            input_mask[:, :, :remaining_length] = 0
             
+            outputs = self.npu_backend.mxq_model.infer([ja_bert_slice, z1_slice, z0_slice, x_slice, input_mask])
+            assert outputs is not None, "No output from mxq model inference."
+            logw_chunk, m_p_chunk, logs_p_chunk = outputs
+
             if end_index > x.shape[1]:
                 m_p_chunk = m_p_chunk[..., :remaining_length, :]
                 logs_p_chunk = logs_p_chunk[..., :remaining_length, :]
@@ -211,8 +214,11 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             x_slice = np.split(x_slice, [self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
+
+            input_mask = np.ones(shape=(2, x0.shape[1], x0.shape[1]), dtype=np.float32)
+            input_mask[:, :, :remaining_length] = 0
             
-            outputs = self.npu_backend.mxq_model.infer([x1, x0]) # [(1, seq_len, 1)]
+            outputs = self.npu_backend.mxq_model.infer([x1, x0, input_mask]) # [(1, seq_len, 1)]
             assert outputs is not None, "No output from mxq model inference."
             output_chunk = outputs[0]
             
