@@ -72,6 +72,7 @@ MeloTTS = [
     "python-mecab-ko>=1.3.7",
     "noisereduce",
     "soundfile",
+    "gradio",
 ]
 
 # Tools setting -----------------------------------------

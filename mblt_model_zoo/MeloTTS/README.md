@@ -34,7 +34,7 @@ mblt-unidic-download
 The WebUI supports muliple languages and voices. First, follow the installation steps. Then, simply run:
 
 ```bash
-melo-ui
+mblt-model-zoo melo-ui
 # Or: python melo/app.py
 ```
 
@@ -45,38 +45,38 @@ You may use the MeloTTS CLI to interact with MeloTTS. The CLI may be invoked usi
 **Read English text:**
 
 ```bash
-melo "Text to read" output.wav
+mblt-model-zoo melo "Text to read" output.wav
 ```
 
 **Specify a language:**
 
 ```bash
-melo "Text to read" output.wav --language EN-Newest
+mblt-model-zoo melo "Text to read" output.wav --language EN-Newest
 ```
 
 **Specify a speed:**
 
 ```bash
-melo "Text to read" output.wav --language EN-Newest --speed 1.5
-melo "Text to read" output.wav --speed 1.5
+mblt-model-zoo melo "Text to read" output.wav --language EN-Newest --speed 1.5
+mblt-model-zoo melo "Text to read" output.wav --speed 1.5
 ```
 
 **Use a different language:**
 
 ```bash
-melo "text-to-speech 안녕하세요" kr.wav -l KR
+mblt-model-zoo melo "text-to-speech 안녕하세요" kr.wav -l KR
 ```
 
 **Load from a file:**
 
 ```bash
-melo file.txt out.wav --file
+mblt-model-zoo melo file.txt out.wav --file
 ```
 
 The full API documentation may be found using:
 
 ```bash
-melo --help
+mblt-model-zoo melo --help
 ```
 
 ### Python API
