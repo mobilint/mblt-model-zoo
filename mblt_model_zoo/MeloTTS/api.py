@@ -6,6 +6,8 @@ import soundfile
 import torch
 from torch import nn
 from tqdm import tqdm
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForMaskedLM
 
 from . import utils
 from .download_utils import (
@@ -24,8 +26,8 @@ class TTS(nn.Module):
                 config_path=None,
                 ckpt_path=None,
 
-                local_files_only: Optional[bool]=None,
                 trust_remote_code: Optional[bool]=None,
+                local_files_only: Optional[bool]=None,
                 
                 dev_no: Optional[int] = None,
                 target_core: Optional[str] = None,
@@ -83,7 +85,20 @@ class TTS(nn.Module):
         language = language.split('_')[0]
         self.language = 'ZH_MIX_EN' if language == 'ZH' else language # we support a ZH_MIX_EN model
 
-        self.trust_remote_code = trust_remote_code
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            hps.model.bert_model_id,
+            trust_remote_code=trust_remote_code,
+            local_files_only=local_files_only,
+        )
+
+        self.bert = AutoModelForMaskedLM.from_pretrained(
+            hps.model.bert_model_id,
+            trust_remote_code=trust_remote_code,
+            local_files_only=local_files_only,
+
+            dev_no=hps.model.dev_no,
+            target_cores=[hps.model.target_core],
+        )
     
     @staticmethod
     def audio_numpy_concat(segment_data_list, sr, speed=1.):
@@ -120,8 +135,7 @@ class TTS(nn.Module):
             if language in ['EN', 'ZH_MIX_EN']:
                 t = re.sub(r'([a-z])([A-Z])', r'\1 \2', t)
             device = self.device
-            print(self.trust_remote_code)
-            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, self.trust_remote_code)
+            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, self.tokenizer, self.bert)
             with torch.no_grad():
                 x_tst = phones.to(device).unsqueeze(0)
                 tones = tones.to(device).unsqueeze(0)

@@ -23,43 +23,13 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
     return phones, tones, lang_ids
 
 
-models = {}
-tokenizers = {}
-def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0", trust_remote_code=None):
-    from transformers import AutoModelForMaskedLM, AutoTokenizer
-    global model
-    global tokenizer
-    
-    if (
-        sys.platform == "darwin"
-        and torch.backends.mps.is_available()
-        and device == "cpu"
-    ):
-        device = "mps"
-    if not device:
-        device = "cuda"
-    if model_id not in models:
-        model = AutoModelForMaskedLM.from_pretrained(
-            model_id,
-            dev_no=dev_no,
-            target_cores=[target_core],
-            trust_remote_code=trust_remote_code,
-        ).to(
-            device
-        )
-        models[model_id] = model
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        tokenizers[model_id] = tokenizer
-    else:
-        model = models[model_id]
-        tokenizer = tokenizers[model_id]
-        
+def get_bert_feature(text, word2ph, device=None, tokenizer=None, bert=None):        
     with torch.no_grad():
         inputs = tokenizer(text, return_tensors="pt")
         for i in inputs:
             inputs[i] = inputs[i].to(device)
         # bert models are compiled to output third-from-last hidden state
-        res = model(**inputs)
+        res = bert(**inputs)
         res = torch.cat(res["hidden_states"][0:1], -1)[0].cpu()
         
     assert inputs["input_ids"].shape[-1] == len(word2ph)
@@ -74,6 +44,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
     return phone_level_feature.T
 
 
-def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0", trust_remote_code=None):
-    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core, trust_remote_code=trust_remote_code)
+def get_bert(norm_text, word2ph, device, tokenizer=None, bert=None):
+    bert = get_bert_feature(norm_text, word2ph, device, tokenizer=tokenizer, bert=bert)
     return bert

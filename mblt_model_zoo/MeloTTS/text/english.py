@@ -184,10 +184,7 @@ def text_normalize(text):
     text = expand_abbreviations(text)
     return text
 
-model_id = 'mobilint/bert-base-uncased'
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-
-def g2p(text, pad_start_end=True, tokenized=None):
+def g2p(text, pad_start_end=True, tokenized=None, tokenizer=None):
     if tokenized is None:
         tokenized = tokenizer.tokenize(text)
     # import pdb; pdb.set_trace()

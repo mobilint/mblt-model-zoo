@@ -90,12 +90,7 @@ def distribute_phone(n_phone, n_word):
     return phones_per_word
 
 
-# tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
-
-model_id = 'mobilint/bert-kor-base'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-def g2p(norm_text):
+def g2p(norm_text, tokenizer=None):
     tokenized = tokenizer.tokenize(norm_text)
     phs = []
     ph_groups = []
