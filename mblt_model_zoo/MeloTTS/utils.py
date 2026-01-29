@@ -103,7 +103,7 @@ class HParams(HParamsBase):
         self.symbols: list[str] = kwargs.get('symbols') # type: ignore
 
 
-def get_text_for_tts_infer(text, language_str, hps: HParams, device, symbol_to_id=None, dev_no=0, target_core="0:0", dispose_bert_after_use=False):
+def get_text_for_tts_infer(text, language_str, hps: HParams, device, symbol_to_id=None):
     norm_text, phone, tone, word2ph = clean_text(text, language_str)
     phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
 
@@ -119,7 +119,7 @@ def get_text_for_tts_infer(text, language_str, hps: HParams, device, symbol_to_i
         bert = torch.zeros(1024, len(phone))
         ja_bert = torch.zeros(768, len(phone))
     else:
-        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id, dev_no=hps.model.dev_no, target_core=hps.model.target_core, dispose_after_use=dispose_bert_after_use)
+        bert = get_bert(norm_text, word2ph, language_str, device, hps.model.bert_model_id, dev_no=hps.model.dev_no, target_core=hps.model.target_core)
         del word2ph
         assert bert.shape[-1] == len(phone), phone
 

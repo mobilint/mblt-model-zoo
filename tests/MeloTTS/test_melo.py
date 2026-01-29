@@ -41,5 +41,4 @@ def test_melo(pipe: TTS):
         speaker_ids[speaker],
         output_path,
         speed=speed,
-        dispose_bert_after_use=True,
     )

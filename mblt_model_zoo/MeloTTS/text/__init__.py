@@ -2,10 +2,6 @@ import sys
 
 import torch
 
-from mblt_model_zoo.hf_transformers.models.bert.modeling_bert import (
-    MobilintBertForMaskedLM,
-)
-
 from .symbols import *
 
 _symbol_to_id = {s: i for i, s in enumerate(symbols)}
@@ -29,7 +25,7 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
 
 models = {}
 tokenizers = {}
-def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0", dispose_after_use=False):
+def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0"):
     from transformers import AutoModelForMaskedLM, AutoTokenizer
     global model
     global tokenizer
@@ -56,8 +52,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
     else:
         model = models[model_id]
         tokenizer = tokenizers[model_id]
-        if isinstance(model, MobilintBertForMaskedLM) and dispose_after_use == True:
-            model.launch()
         
     with torch.no_grad():
         inputs = tokenizer(text, return_tensors="pt")
@@ -66,8 +60,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
         # bert models are compiled to output third-from-last hidden state
         res = model(**inputs)
         res = torch.cat(res["hidden_states"][0:1], -1)[0].cpu()
-        if isinstance(model, MobilintBertForMaskedLM) and dispose_after_use == True:
-            model.dispose()
         
     assert inputs["input_ids"].shape[-1] == len(word2ph)
     word2phone = word2ph
@@ -81,6 +73,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
     return phone_level_feature.T
 
 
-def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0", dispose_after_use=False):
-    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core, dispose_after_use=dispose_after_use)
+def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0"):
+    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core)
     return bert
