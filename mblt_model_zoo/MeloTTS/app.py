@@ -13,14 +13,10 @@ import click
 
 device = 'auto'
 models = {
-    'EN': TTS(language='EN', device=device),
-    'ES': TTS(language='ES', device=device),
-    'FR': TTS(language='FR', device=device),
-    'ZH': TTS(language='ZH', device=device),
-    'JP': TTS(language='JP', device=device),
+    'EN-Newest': TTS(language='EN-Newest', device=device),
     'KR': TTS(language='KR', device=device),
 }
-speaker_ids = models['EN'].hps.data.spk2id
+speaker_ids = models['EN-Newest'].hps.data.spk2id
 
 default_text_dict = {
     'EN-Newest': 'The field of text-to-speech has seen rapid development recently.',
@@ -41,7 +37,7 @@ with gr.Blocks() as demo:
     gr.Markdown('# MeloTTS WebUI\n\nA WebUI for MeloTTS.')
     with gr.Group():
         speaker = gr.Dropdown(speaker_ids.keys(), interactive=True, value='EN-Newest', label='Speaker')
-        language = gr.Radio(['EN-Newest', 'KR'], label='Language', value='EN')
+        language = gr.Radio(['EN-Newest', 'KR'], label='Language', value='EN-Newest')
         speed = gr.Slider(label='Speed', minimum=0.1, maximum=10.0, value=1.0, interactive=True, step=0.1)
         text = gr.Textbox(label="Text to speak", value=default_text_dict['EN-Newest'])
         language.input(load_speakers, inputs=[language, text], outputs=[speaker, text])
