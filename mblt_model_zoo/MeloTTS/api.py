@@ -135,7 +135,7 @@ class TTS(nn.Module):
             if language in ['EN', 'ZH_MIX_EN']:
                 t = re.sub(r'([a-z])([A-Z])', r'\1 \2', t)
             device = self.device
-            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, self.tokenizer, self.bert)
+            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, tokenizer=self.tokenizer, bert=self.bert)
             with torch.no_grad():
                 x_tst = phones.to(device).unsqueeze(0)
                 tones = tones.to(device).unsqueeze(0)
