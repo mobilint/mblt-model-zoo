@@ -26,7 +26,7 @@ def main(text, file, output_path, language, speaker, speed, device, local_files_
     if language == '': language = 'EN_NEWEST'
     if speaker == '': speaker = None
     if (not language == 'EN_NEWEST') and speaker:
-        warnings.warn('You specified a speaker but the language is English.')
+        warnings.warn('You specified a speaker but the language is not English.')
     from mblt_model_zoo.MeloTTS.api import TTS
     model = TTS(language=language, device=device, trust_remote_code=True, local_files_only=local_files_only)
     speaker_ids = model.hps.data.spk2id

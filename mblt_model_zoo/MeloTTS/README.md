@@ -51,13 +51,13 @@ mblt-model-zoo melo "Text to read" output.wav
 **Specify a language:**
 
 ```bash
-mblt-model-zoo melo "Text to read" output.wav --language EN-Newest
+mblt-model-zoo melo "Text to read" output.wav --language EN_NEWEST
 ```
 
 **Specify a speed:**
 
 ```bash
-mblt-model-zoo melo "Text to read" output.wav --language EN-Newest --speed 1.5
+mblt-model-zoo melo "Text to read" output.wav --language EN_NEWEST --speed 1.5
 mblt-model-zoo melo "Text to read" output.wav --speed 1.5
 ```
 
