@@ -36,7 +36,6 @@ class MobilintLayer(CacheLayerMixin):
         return self.mxq_model.get_input_buffer_info()[0].max_cache_size
     
     def reset(self) -> None:
-        self.mxq_model.reset_cache_memory()
         self._seen_tokens: int = 0
 
     def reorder_cache(self, beam_idx: torch.LongTensor):
@@ -48,7 +47,6 @@ class MobilintLayer(CacheLayerMixin):
 class MobilintCache(Cache):
     def __init__(self, mxq_model: qbruntime.Model):
         self.mxq_model = mxq_model
-        self.mxq_model.reset_cache_memory()
         
         self.layers: list[MobilintLayer] = [MobilintLayer(self.mxq_model)]
         self.layer_classes = MobilintLayer
@@ -72,7 +70,6 @@ class MobilintCache(Cache):
     
     def load_cache_memory(self):
         if self.get_seq_length() > 0:
-            self.mxq_model.reset_cache_memory()
             self.mxq_model.load_cache_memory(self.buffer)
     
     def dump_cache_memory_to(self, cache_dir: str):
