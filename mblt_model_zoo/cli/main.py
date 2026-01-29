@@ -8,6 +8,7 @@ from transformers import HfArgumentParser
 from transformers.commands.chat import ChatCommand
 
 from .chat import register_mobilint_models
+from .melo_ui import add_melo_ui_parser
 from .tps import add_tps_parser
 
 
@@ -16,6 +17,7 @@ def build_parser() -> HfArgumentParser:
     commands_parser = parser.add_subparsers(help="mblt-model-zoo command helpers")
 
     add_tps_parser(commands_parser)
+    add_melo_ui_parser(commands_parser)
     ChatCommand.register_subcommand(cast(ArgumentParser, commands_parser))
 
     return parser

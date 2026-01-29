@@ -73,6 +73,7 @@ MeloTTS = [
     "noisereduce",
     "soundfile",
     "gradio",
+    "click",
 ]
 
 # Tools setting -----------------------------------------
