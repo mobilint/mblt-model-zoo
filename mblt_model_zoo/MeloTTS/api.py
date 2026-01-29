@@ -1,7 +1,6 @@
 import re
 from typing import Optional
 
-import noisereduce as nr
 import numpy as np
 import soundfile
 import torch
@@ -144,14 +143,6 @@ class TTS(nn.Module):
             audio_list.append(audio)
         torch.cuda.empty_cache()
         audio = self.audio_numpy_concat(audio_list, sr=self.hps.data.sampling_rate, speed=speed)
-
-        audio = nr.reduce_noise(y=audio, sr=self.hps.data.sampling_rate, stationary=True, padding=0, 
-                                prop_decrease=0.7,         # moderate noise reduction for better volume
-                                freq_mask_smooth_hz=100,   # tight frequency mask for precise processing
-                                time_mask_smooth_ms=150,   # shorter time mask for better volume preservation
-                                n_fft=1024,                # standard FFT resolution for balanced processing
-                                n_std_thresh_stationary=1.5,  # lower threshold for better volume preservation
-                                clip_noise_stationary=True)    # clip noise for cleaner output
         
         if output_path is None:
             return audio
