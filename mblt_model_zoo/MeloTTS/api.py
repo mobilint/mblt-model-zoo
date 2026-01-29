@@ -23,6 +23,9 @@ class TTS(nn.Module):
                 device='auto',
                 config_path=None,
                 ckpt_path=None,
+
+                local_files_only: Optional[bool]=None,
+                trust_remote_code: Optional[bool]=None,
                 
                 dev_no: Optional[int] = None,
                 target_core: Optional[str] = None,
@@ -38,7 +41,7 @@ class TTS(nn.Module):
             assert torch.cuda.is_available()
 
         # config_path = 
-        hps = load_or_download_config(language, config_path=config_path)
+        hps = load_or_download_config(language, config_path=config_path, local_files_only=local_files_only)
         
         if dev_no is not None:
             hps.model.dev_no = dev_no
@@ -74,11 +77,13 @@ class TTS(nn.Module):
         self.device = device
     
         # load state_dict
-        checkpoint_dict = load_or_download_model(language, device, ckpt_path=ckpt_path)
+        checkpoint_dict = load_or_download_model(language, device, ckpt_path=ckpt_path, local_files_only=local_files_only)
         self.model.load_state_dict(checkpoint_dict['model'], strict=True)
         
         language = language.split('_')[0]
         self.language = 'ZH_MIX_EN' if language == 'ZH' else language # we support a ZH_MIX_EN model
+
+        self.trust_remote_code = trust_remote_code
     
     @staticmethod
     def audio_numpy_concat(segment_data_list, sr, speed=1.):
@@ -115,7 +120,8 @@ class TTS(nn.Module):
             if language in ['EN', 'ZH_MIX_EN']:
                 t = re.sub(r'([a-z])([A-Z])', r'\1 \2', t)
             device = self.device
-            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id)
+            print(self.trust_remote_code)
+            bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, self.trust_remote_code)
             with torch.no_grad():
                 x_tst = phones.to(device).unsqueeze(0)
                 tones = tones.to(device).unsqueeze(0)

@@ -12,7 +12,11 @@ LANGUAGES = (
 def pipe(request):
     language = request.param
 
-    pipe = TTS(language=language, device="auto")
+    pipe = TTS(
+        language=language,
+        device="auto",
+        trust_remote_code=True,
+    )
     yield pipe
     del pipe
 

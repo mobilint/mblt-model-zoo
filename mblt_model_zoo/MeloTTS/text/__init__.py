@@ -25,7 +25,7 @@ def cleaned_text_to_sequence(cleaned_text, tones, language, symbol_to_id=None):
 
 models = {}
 tokenizers = {}
-def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0"):
+def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_core="0:0", trust_remote_code=None):
     from transformers import AutoModelForMaskedLM, AutoTokenizer
     global model
     global tokenizer
@@ -42,7 +42,8 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
         model = AutoModelForMaskedLM.from_pretrained(
             model_id,
             dev_no=dev_no,
-            target_cores=[target_core]
+            target_cores=[target_core],
+            trust_remote_code=trust_remote_code,
         ).to(
             device
         )
@@ -73,6 +74,6 @@ def get_bert_feature(text, word2ph, device=None, model_id='', dev_no=0, target_c
     return phone_level_feature.T
 
 
-def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0"):
-    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core)
+def get_bert(norm_text, word2ph, language, device, model_id, dev_no=0, target_core="0:0", trust_remote_code=None):
+    bert = get_bert_feature(norm_text, word2ph, device, model_id, dev_no=dev_no, target_core=target_core, trust_remote_code=trust_remote_code)
     return bert
