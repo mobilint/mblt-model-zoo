@@ -35,5 +35,11 @@ def log_model_details(model_path: str, npu_backend: Optional["MobilintNPUBackend
             print(f"Target Cores: {npu_backend.target_cores}")
         else:
             print(f"Target Clusters: {npu_backend.target_clusters}")
-        print(f"Model Input Shape: {npu_backend.mxq_model.get_model_input_shape()}")
-        print(f"Model Output Shape: {npu_backend.mxq_model.get_model_output_shape()}")
+        if npu_backend.mxq_model.get_num_model_variants() == 1:
+            print(f"Model Input Shape: {npu_backend.mxq_model.get_model_input_shape()}")
+            print(f"Model Output Shape: {npu_backend.mxq_model.get_model_output_shape()}")
+        else:
+            for i in range(npu_backend.mxq_model.get_num_model_variants()):
+                print(f"Model Variant {i}")
+                print(f"\tInput Shape: {npu_backend.mxq_model.get_model_variant_handle(i).get_model_input_shape()}")
+                print(f"\tOutput Shape: {npu_backend.mxq_model.get_model_variant_handle(i).get_model_output_shape()}")
