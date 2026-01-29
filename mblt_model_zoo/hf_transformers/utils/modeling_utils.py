@@ -24,6 +24,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         
         self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
         self.npu_backend.name_or_path = self.config.name_or_path
+        self.npu_backend.create()
         self.launch()
     
     def launch(self):

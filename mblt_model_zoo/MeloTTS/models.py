@@ -55,6 +55,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         )
         
         self.npu_backend.name_or_path = name_or_path
+        self.npu_backend.create()
         self.npu_backend.launch()
         
         num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()
@@ -180,6 +181,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         )
         
         self.npu_backend.name_or_path = name_or_path
+        self.npu_backend.create()
         self.npu_backend.launch()
         
         num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()

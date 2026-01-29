@@ -214,7 +214,7 @@ class MobilintNPUBackend:
 
         return mxq_files[0]
 
-    def launch(self):
+    def create(self):
         self.acc = Accelerator(self.dev_no)
         mc = ModelConfig()
 
@@ -236,6 +236,8 @@ class MobilintNPUBackend:
         model_path = self.check_model_path(self.mxq_path)
         self.mxq_model = Model(model_path, mc)
         log_model_details(model_path, self)
+
+    def launch(self):
         self.mxq_model.launch(self.acc)
 
     def dispose(self):
