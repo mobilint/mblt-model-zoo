@@ -21,8 +21,20 @@ def build_parser() -> HfArgumentParser:
     add_melo_parser(commands_parser)
     add_melo_ui_parser(commands_parser)
     ChatCommand.register_subcommand(cast(ArgumentParser, commands_parser))
+    _set_subparser_help(commands_parser, "chat", "Transformers chat interface")
 
     return parser
+
+
+def _set_subparser_help(subparsers, name: str, help_text: str) -> None:
+    choices_actions = getattr(subparsers, "_choices_actions", [])
+    for action in choices_actions:
+        if getattr(action, "dest", None) == name:
+            action.help = help_text
+            return
+    pseudo_action_cls = getattr(type(subparsers), "_ChoicesPseudoAction", None)
+    if pseudo_action_cls is not None:
+        choices_actions.append(pseudo_action_cls(name, [], help_text))
 
 
 def main():
