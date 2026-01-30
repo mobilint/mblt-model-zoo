@@ -7,9 +7,9 @@ class YOLOv3u_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/single/yolov3u.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/multi/yolov3u.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3u/aries/global/yolov3u.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -23,7 +23,7 @@ class YOLOv3u_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -39,9 +39,9 @@ class YOLOv3_sppu_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/single/yolov3-sppu.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/multi/yolov3-sppu.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-sppu/aries/global/yolov3-sppu.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -55,7 +55,7 @@ class YOLOv3_sppu_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -87,7 +87,7 @@ class YOLOv3_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -107,9 +107,9 @@ class YOLOv3_spp_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/single/yolov3-spp.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/multi/yolov3-spp.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov3-spp/aries/global/yolov3-spp.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -123,7 +123,7 @@ class YOLOv3_spp_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",

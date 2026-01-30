@@ -7,9 +7,9 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_224/aries/single/deit3_small_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_224/aries/multi/deit3_small_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_224/aries/global/deit3_small_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -39,9 +39,9 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_384/aries/single/deit3_small_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_384/aries/multi/deit3_small_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_small_patch16_384/aries/global/deit3_small_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -60,7 +60,7 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -71,9 +71,9 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_medium_patch16_224/aries/single/deit3_medium_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_medium_patch16_224/aries/multi/deit3_medium_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_medium_patch16_224/aries/global/deit3_medium_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -92,7 +92,7 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -103,9 +103,9 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_224/aries/single/deit3_base_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_224/aries/multi/deit3_base_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_224/aries/global/deit3_base_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -124,7 +124,7 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -135,9 +135,9 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_384/aries/single/deit3_base_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_384/aries/multi/deit3_base_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_base_patch16_384/aries/global/deit3_base_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -156,7 +156,7 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -167,9 +167,9 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_224/aries/single/deit3_large_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_224/aries/multi/deit3_large_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_224/aries/global/deit3_large_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -188,7 +188,7 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -199,9 +199,9 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_384/aries/single/deit3_large_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_384/aries/multi/deit3_large_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/deit3_large_patch16_384/aries/global/deit3_large_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -220,7 +220,7 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

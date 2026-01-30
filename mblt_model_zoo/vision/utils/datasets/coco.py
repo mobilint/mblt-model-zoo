@@ -70,6 +70,15 @@ CLASS_INV_MAP = (
     78,
     79,
     80,
+    81,
+    82,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
 )
 
 CLASSES = (
@@ -283,11 +292,11 @@ POSE_SKELETON = [
     [5, 7],
 ]
 
-LIMB_PALLETE = [
+LIMB_PALETTE = [
     POSE_PALETTE[i]
     for i in [9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]
 ]
-KEYPOINT_PALLETE = [
+KEYPOINT_PALETTE = [
     POSE_PALETTE[i] for i in [16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]
 ]
 
@@ -339,13 +348,14 @@ def get_coco_det_palette(idx: int) -> tuple:
     return DET_PALETTE[idx]
 
 
-def get_coco_pose_palette() -> tuple:
-    """Get the COCO pose palette.
-
+def get_coco_pose_palette(idx: int) -> tuple:
+    """Get the COCO pose palette by index.
+    Args:
+        idx (int): The index of the COCO pose palette.
     Returns:
-        tuple: The COCO pose palette.
+        tuple: The COCO pose palette. (R, G, B)
     """
-    return POSE_PALETTE
+    return POSE_PALETTE[idx]
 
 
 def get_coco_pose_skeleton() -> list:
@@ -357,19 +367,21 @@ def get_coco_pose_skeleton() -> list:
     return POSE_SKELETON
 
 
-def get_coco_limb_palette() -> list:
-    """Get the COCO limb palette.
-
+def get_coco_limb_palette(idx: int) -> list:
+    """Get the COCO limb palette by index.
+    Args:
+        idx (int): The index of the COCO limb palette.
     Returns:
         list: The COCO limb palette.
     """
-    return LIMB_PALLETE
+    return LIMB_PALETTE[idx]
 
 
-def get_coco_keypoint_palette() -> list:
+def get_coco_keypoint_palette(idx: int) -> list:
     """Get the COCO keypoint palette.
-
+    Args:
+        idx (int): The index of the COCO keypoint palette.
     Returns:
         list: The COCO keypoint palette.
     """
-    return KEYPOINT_PALLETE
+    return KEYPOINT_PALETTE[idx]

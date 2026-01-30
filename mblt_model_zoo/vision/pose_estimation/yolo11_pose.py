@@ -23,7 +23,7 @@ class YOLO11nPose_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "pose_estimation",
@@ -56,7 +56,7 @@ class YOLO11sPose_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "pose_estimation",
@@ -89,7 +89,7 @@ class YOLO11mPose_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "pose_estimation",
@@ -122,7 +122,7 @@ class YOLO11lPose_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "pose_estimation",
@@ -139,9 +139,9 @@ class YOLO11xPose_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/single/yolo11x-pose.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/multi/yolo11x-pose.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/pose_estimation/yolo11x-pose/aries/global/yolo11x-pose.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -155,7 +155,7 @@ class YOLO11xPose_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "pose_estimation",

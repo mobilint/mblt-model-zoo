@@ -1,6 +1,5 @@
 import pytest
-from transformers import TextStreamer, AutoProcessor, pipeline, AutoTokenizer
-
+from transformers import AutoProcessor, AutoTokenizer, TextStreamer, pipeline
 
 MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 
@@ -16,7 +15,7 @@ def pipe(request, revision, npu_params):
         trust_remote_code=True,
         revision=revision,
     )
-    
+
     if model_kwargs:
         pipe = pipeline(
             "image-text-to-text",

@@ -43,19 +43,19 @@ def test_resnet50(resnet50):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ResNet50 inference")
     parser.add_argument(
-        "--mxq_path",
+        "--mxq-path",
         type=str,
         default=None,
         help="Path to the ResNet50 model file (.mxq)",
     )
     parser.add_argument(
-        "--model_type",
+        "--model-type",
         type=str,
         default="DEFAULT",
         help="Model type",
     )
     parser.add_argument(
-        "--infer_mode",
+        "--infer-mode",
         type=str,
         default="global",
         help="Inference mode",
@@ -67,13 +67,13 @@ if __name__ == "__main__":
         help="Product",
     )
     parser.add_argument(
-        "--input_path",
+        "--input-path",
         type=str,
         default=os.path.join(TEST_DIR, "rc", "volcano.jpg"),
         help="Path to the input image",
     )
     parser.add_argument(
-        "--save_path",
+        "--save-path",
         type=str,
         default=None,
         help="Path to save the output image",

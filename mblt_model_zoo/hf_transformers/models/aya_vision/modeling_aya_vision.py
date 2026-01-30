@@ -15,9 +15,9 @@ from transformers.utils.generic import TransformersKwargs, logging
 
 from ...models.cohere2.modeling_cohere2 import MobilintCohere2ForCausalLM
 from ...models.siglip.modeling_siglip import MobilintSiglipVisionModel
+from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
-from ...utils.base_utils import PretrainedOnlyMixin
 from .configuration_aya_vision import MobilintAyaVisionConfig
 
 logger = logging.get_logger(__name__)

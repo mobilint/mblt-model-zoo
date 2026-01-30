@@ -4,7 +4,7 @@ from . import (
     korean,
 )
 
-language_module_map = {"EN": english, 'KR': korean}
+language_module_map = {"EN": english, "KR": korean}
 
 
 def clean_text(text, language):

@@ -20,7 +20,9 @@ from .ko_dictionary import english_dictionary, etc_dictionary
 
 def normalize(text):
     text = text.strip()
-    text = re.sub("[⺀-⺙⺛-⻳⼀-⿕々〇〡-〩〸-〺〻㐀-䶵一-鿃豈-鶴侮-頻並-龎]", "", text)
+    text = re.sub(
+        "[⺀-⺙⺛-⻳⼀-⿕々〇〡-〩〸-〺〻㐀-䶵一-鿃豈-鶴侮-頻並-龎]", "", text
+    )
     text = normalize_with_dictionary(text, etc_dictionary)
     text = normalize_english(text)
     text = text.lower()
@@ -38,7 +40,7 @@ def normalize_english(text):
     def fn(m: re.Match[str]) -> str:
         word = m.group()
         if word in english_dictionary:
-            return english_dictionary.get(word) # type: ignore
+            return english_dictionary.get(word)  # type: ignore
         return word
 
     text = re.sub("([A-Za-z]+)", fn, text)
@@ -46,6 +48,8 @@ def normalize_english(text):
 
 
 g2p_kr = None
+
+
 def korean_text_to_phonemes(text, character: str = "hangeul") -> str:
     """
 
@@ -72,6 +76,7 @@ def korean_text_to_phonemes(text, character: str = "hangeul") -> str:
     text = list(hangul_to_jamo(text))  # '하늘' --> ['ᄒ', 'ᅡ', 'ᄂ', 'ᅳ', 'ᆯ']
     return "".join(text)
 
+
 def text_normalize(text):
     # res = unicodedata.normalize("NFKC", text)
     # res = japanese_convert_numbers_to_words(res)
@@ -92,8 +97,9 @@ def distribute_phone(n_phone, n_word):
 
 # tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
 
-model_id = 'mobilint/bert-kor-base'
+model_id = "mobilint/bert-kor-base"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
+
 
 def g2p(norm_text):
     tokenized = tokenizer.tokenize(norm_text)
@@ -109,8 +115,8 @@ def g2p(norm_text):
         text = ""
         for ch in group:
             text += ch
-        if text == '[UNK]':
-            phs += ['_']
+        if text == "[UNK]":
+            phs += ["_"]
             word2ph += [1]
             continue
         elif text in punctuation:
@@ -135,6 +141,6 @@ def g2p(norm_text):
         phs += phonemes
     phones = ["_"] + phs + ["_"]
     tones = [0 for i in phones]
-    word2ph =  [1] + word2ph + [1]
+    word2ph = [1] + word2ph + [1]
     assert len(word2ph) == len(tokenized) + 2
     return phones, tones, word2ph

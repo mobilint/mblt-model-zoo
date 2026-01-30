@@ -41,6 +41,5 @@ class YoloPre(PreOps):
         img = cv2.copyMakeBorder(
             img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
         )  # add border
-        img = (img / 255).astype(np.float32)
 
-        return torch.from_numpy(img).to(self.device)
+        return torch.from_numpy(img).to(self.device).byte()

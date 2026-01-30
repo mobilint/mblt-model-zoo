@@ -7,9 +7,9 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/single/convnext_tiny_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/multi/convnext_tiny_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/global/convnext_tiny_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -42,9 +42,9 @@ class ConvNeXt_Small_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/single/convnext_small_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/multi/convnext_small_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/global/convnext_small_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -63,7 +63,7 @@ class ConvNeXt_Small_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -77,9 +77,9 @@ class ConvNeXt_Base_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/single/convnext_base_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/multi/convnext_base_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/global/convnext_base_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -98,7 +98,7 @@ class ConvNeXt_Base_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -112,9 +112,9 @@ class ConvNeXt_Large_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/single/convnext_large_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/multi/convnext_large_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/global/convnext_large_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -133,7 +133,7 @@ class ConvNeXt_Large_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

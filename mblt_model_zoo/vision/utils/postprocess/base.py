@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import List, Union
 
 import numpy as np
 import torch
 
 from ..types import ListTensorLike, TensorLike
-from .common import *
+from .common import process_mask_upsample
 
 
 class PostBase(ABC):
@@ -62,8 +62,8 @@ class YOLOPostBase(PostBase):
     def __call__(self, x, conf_thres=None, iou_thres=None):
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
-        x = self.rearrange(x)
-        x = self.decode(x)
+        x = self.conversion(x)
+        x = self.filter_conversion(x)
         x = self.nms(x)
         return x
 
@@ -74,7 +74,6 @@ class YOLOPostBase(PostBase):
         assert 0 < conf_thres < 1, "conf_thres should be in (0, 1)"
         assert 0 < iou_thres < 1, "iou_thres should be in (0, 1)"
         self.conf_thres = conf_thres
-        self.inv_conf_thres = -np.log(1 / conf_thres - 1)
         self.iou_thres = iou_thres
 
     def check_input(self, x: Union[TensorLike, ListTensorLike]):
@@ -90,14 +89,28 @@ class YOLOPostBase(PostBase):
         elif isinstance(x[0], torch.Tensor):
             x = [xi.to(self.device) for xi in x]
 
-        return x
+        return self.check_dim(x)
+
+    def check_dim(self, x: List[torch.Tensor]):
+        y = []
+        for xi in x:
+            if xi.ndim == 3:
+                xi = xi.unsqueeze(0)
+            elif xi.ndim == 4:
+                pass
+            else:
+                raise ValueError(f"Got unexpected dim for xi={xi.ndim}.")
+            y.append(xi)
+        return y
+
+    def conversion(self, x: List[torch.Tensor]):
+        assert (
+            len(x) == 1
+        ), f"Assume return is a single output, but got {len(x)} outputs"
+        return x[0]
 
     @abstractmethod
-    def rearrange(self, x):
-        pass
-
-    @abstractmethod
-    def decode(self, x):
+    def filter_conversion(self, x):
         pass
 
     @abstractmethod
@@ -107,6 +120,9 @@ class YOLOPostBase(PostBase):
     def masking(self, x, proto_outs):
         masks = []
         for pred, proto in zip(x, proto_outs):
+            proto = proto.permute(
+                2, 0, 1
+            )  # [mask_h, mask_w, mask_dim] -> [mask_dim, mask_h, mask_w]
             if len(pred) == 0:
                 masks.append(
                     torch.zeros(

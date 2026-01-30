@@ -1,7 +1,7 @@
 import math
 
-import qbruntime
 import numpy as np
+import qbruntime
 import torch
 from torch import nn
 from transformers.utils import logging
@@ -14,16 +14,14 @@ logger = logging.get_logger(__name__)
 class MobilintTextEncoderAndDurationPredictor(nn.Module):
     def __init__(
         self,
-        
         n_vocab,
         hidden_channels,
         num_languages=None,
         num_tones=None,
-        
         mxq_path="",
     ):
         super().__init__()
-        
+
         if num_languages is None:
             from .text import num_languages
         if num_tones is None:
@@ -36,7 +34,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         nn.init.normal_(self.tone_emb.weight, 0.0, hidden_channels**-0.5)
         self.language_emb = nn.Embedding(num_languages, hidden_channels)
         nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
-        
+
         self.acc = qbruntime.Accelerator()
         mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
@@ -47,7 +45,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
             for i in range(num_model_variants)
         ]
         self.mxq_model.launch(self.acc)
-    
+
     def __call__(
         self,
         x,
@@ -59,80 +57,110 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
     ):
         # b = batch size, h = hidden_channels, t = time (dynamic dim)
         # ja_bert [1, f, t]
-        x = (
-            self.emb(x)
-            + self.tone_emb(tone)
-            + self.language_emb(language)
-        ) # [b, t, h]
+        x = self.emb(x) + self.tone_emb(tone) + self.language_emb(language)  # [b, t, h]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.shape[1]), 1).to(
             x.dtype
-        ) # [t, 1]
-        
+        )  # [t, 1]
+
         z = (
             torch.randn(x.shape[0], 2, x.shape[1]).to(device=x.device, dtype=x.dtype)
             * noise_scale
-        ) # [b, 2, t]
-        z0, z1 = torch.split(z, [1, 1], 1) # [b, 1, t], [b, 1, t]
-        
-        x = x.type(torch.float32).cpu().numpy() # [b, t, h]
-        ja_bert = ja_bert.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, f]
-        z0 = z0.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
-        z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
-        
+        )  # [b, 2, t]
+        z0, z1 = torch.split(z, [1, 1], 1)  # [b, 1, t], [b, 1, t]
+
+        x = x.type(torch.float32).cpu().numpy()  # [b, t, h]
+        ja_bert = (
+            ja_bert.permute(0, 2, 1).type(torch.float32).cpu().numpy()
+        )  # [b, t, f]
+        z0 = z0.permute(0, 2, 1).type(torch.float32).cpu().numpy()  # [b, t, 1]
+        z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy()  # [b, t, 1]
+
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[1] / max_chunk)
-        
+
         m_p_chunks, logs_p_chunks, logw_chunks = [], [], []
-                
+
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
             remaining_length = x.shape[1] - start_index
-            
+
             if end_index > x.shape[1]:
-                chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
+                chunk_size = min(
+                    [
+                        chunk_size
+                        for chunk_size in self.allowed_chunks
+                        if chunk_size >= remaining_length
+                    ]
+                )
                 pad_width = [(0, 0), (0, chunk_size - remaining_length), (0, 0)]
-                
-                x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
-                ja_bert_slice = np.pad(ja_bert[:, start_index:, :], pad_width, mode="constant", constant_values=0)
-                z0_slice = np.pad(z0[:, start_index:, :], pad_width, mode="constant", constant_values=0)
-                z1_slice = np.pad(z1[:, start_index:, :], pad_width, mode="constant", constant_values=0)
+
+                x_slice = np.pad(
+                    x[:, start_index:, :], pad_width, mode="constant", constant_values=0
+                )
+                ja_bert_slice = np.pad(
+                    ja_bert[:, start_index:, :],
+                    pad_width,
+                    mode="constant",
+                    constant_values=0,
+                )
+                z0_slice = np.pad(
+                    z0[:, start_index:, :],
+                    pad_width,
+                    mode="constant",
+                    constant_values=0,
+                )
+                z1_slice = np.pad(
+                    z1[:, start_index:, :],
+                    pad_width,
+                    mode="constant",
+                    constant_values=0,
+                )
             else:
                 x_slice = x[:, start_index:end_index, :]
                 ja_bert_slice = ja_bert[:, start_index:end_index, :]
                 z0_slice = z0[:, start_index:end_index, :]
                 z1_slice = z1[:, start_index:end_index, :]
-            
+
             outputs = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
             assert outputs is not None, "No output from mxq model inference."
             m_p_chunk, logs_p_chunk, logw_chunk = outputs
-            
+
             if end_index > x.shape[1]:
                 m_p_chunk = m_p_chunk[..., :remaining_length, :]
                 logs_p_chunk = logs_p_chunk[..., :remaining_length, :]
                 logw_chunk = logw_chunk[..., :remaining_length]
-            
+
             m_p_chunks.append(m_p_chunk)
             logs_p_chunks.append(logs_p_chunk)
             logw_chunks.append(logw_chunk)
-        
+
         # Concatenate along sequence axis
         m_p = np.concatenate(m_p_chunks, axis=2)
         logs_p = np.concatenate(logs_p_chunks, axis=2)
         logw = np.concatenate(logw_chunks, axis=2)
-        
+
         # Convert to torch tensors
-        m_p = torch.tensor(m_p, dtype=torch.float32, device=x_lengths.device).squeeze(1).transpose(1, 2)
-        logs_p = torch.tensor(logs_p, dtype=torch.float32, device=x_lengths.device).squeeze(1).transpose(1, 2)
+        m_p = (
+            torch.tensor(m_p, dtype=torch.float32, device=x_lengths.device)
+            .squeeze(1)
+            .transpose(1, 2)
+        )
+        logs_p = (
+            torch.tensor(logs_p, dtype=torch.float32, device=x_lengths.device)
+            .squeeze(1)
+            .transpose(1, 2)
+        )
         logw = torch.tensor(logw, dtype=torch.float32, device=x_lengths.device)
-        
+
         return m_p, logs_p, x_mask, logw
 
     def launch(self):
         self.mxq_model.launch(self.acc)
-    
+
     def dispose(self):
         self.mxq_model.dispose()
+
 
 class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __init__(
@@ -146,7 +174,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         self.channels = channels
         self.half_channels = channels // 2
         self.upsample_initial_channel = upsample_initial_channel
-        
+
         self.acc = qbruntime.Accelerator()
         mc = qbruntime.ModelConfig()
         mc.set_single_core_mode(1)
@@ -157,53 +185,72 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             for i in range(num_model_variants)
         ]
         self.mxq_model.launch(self.acc)
-        
+
     def __call__(self, x):
         device = x.device
-        x = x.permute(0, 2, 1).type(torch.float32).cpu().numpy() # (1, C, W) -> (1, W, C)
+        x = (
+            x.permute(0, 2, 1).type(torch.float32).cpu().numpy()
+        )  # (1, C, W) -> (1, W, C)
         x = np.ascontiguousarray(x)
-        
+
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[1] / max_chunk)
-        
+
         output_chunks = []
-                
+
         for i in range(num_of_chunks):
             start_index = i * max_chunk
             end_index = start_index + max_chunk
             remaining_length = x.shape[1] - start_index
-            
+
             if end_index > x.shape[1]:
-                chunk_size = min([chunk_size for chunk_size in self.allowed_chunks if chunk_size >= remaining_length])
+                chunk_size = min(
+                    [
+                        chunk_size
+                        for chunk_size in self.allowed_chunks
+                        if chunk_size >= remaining_length
+                    ]
+                )
                 pad_width = [(0, 0), (0, chunk_size - remaining_length), (0, 0)]
-                
-                x_slice = np.pad(x[:, start_index:, :], pad_width, mode="constant", constant_values=0)
+
+                x_slice = np.pad(
+                    x[:, start_index:, :], pad_width, mode="constant", constant_values=0
+                )
             else:
                 x_slice = x[:, start_index:end_index, :]
 
-            x_slice = np.split(x_slice, [self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
+            x_slice = np.split(
+                x_slice, [self.half_channels], 2
+            )  # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
-            
-            outputs = self.mxq_model.infer([x1, x0]) # [(1, seq_len, 1)]
+
+            outputs = self.mxq_model.infer([x1, x0])  # [(1, seq_len, 1)]
             assert outputs is not None, "No output from mxq model inference."
             output_chunk = outputs[0]
-            
+
             if end_index > x.shape[1]:
-                output_chunk = output_chunk[:, :(remaining_length * self.upsample_initial_channel), :]
-            
+                output_chunk = output_chunk[
+                    :, : (remaining_length * self.upsample_initial_channel), :
+                ]
+
             output_chunks.append(output_chunk)
 
-        output = np.concatenate(output_chunks, 1) # (1, seq_len, 1)
-        output = torch.tensor(output, dtype=torch.float32, device=device).squeeze(2).unsqueeze(0)  # (1, 1, seq_len)
+        output = np.concatenate(output_chunks, 1)  # (1, seq_len, 1)
+        output = (
+            torch.tensor(output, dtype=torch.float32, device=device)
+            .squeeze(2)
+            .unsqueeze(0)
+        )  # (1, 1, seq_len)
 
         return None, output
 
     def launch(self):
         self.mxq_model.launch(self.acc)
-    
+
     def dispose(self):
         self.mxq_model.dispose()
+
 
 class MobilintSynthesizerTrn(nn.Module):
     def __init__(
@@ -237,10 +284,10 @@ class MobilintSynthesizerTrn(nn.Module):
         norm_refenc=False,
         mxq_path_enc_p_sdp_dp="",
         mxq_path_dec_flow="",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
-        
+
         # self.enc_p, self.dp, self.sdp all in one mxq
         self.enc_p_sdp_dp = MobilintTextEncoderAndDurationPredictor(
             n_vocab,
@@ -249,17 +296,19 @@ class MobilintSynthesizerTrn(nn.Module):
             num_tones=num_tones,
             mxq_path=mxq_path_enc_p_sdp_dp,
         )
-        
+
         # self.dec, self.flow all in one mxq
         self.dec_flow = MobilintTransformerCouplingBlockAndGenerator(
             inter_channels,
             upsample_initial_channel,
             mxq_path=mxq_path_dec_flow,
         )
-        
+
         if n_speakers <= 0:
-            logger.warning("`self.n_speakers` should be positive to use g with self.emb_g.")
-        
+            logger.warning(
+                "`self.n_speakers` should be positive to use g with self.emb_g."
+            )
+
         if use_vc is True:
             logger.warning("`self.use_vc` should be False to use g_p as g.")
 
@@ -281,20 +330,24 @@ class MobilintSynthesizerTrn(nn.Module):
         g=None,
     ):
         if x_lengths.shape != torch.Size([1]) or x_lengths[0] != int(x.shape[1]):
-            logger.warning(f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length={x_lengths}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}")
-            
+            logger.warning(
+                f"Input `x_lengths` is set to `[x.shape[1]]` inside the mxq. x_length={x_lengths}, x_lengths[0]={x_lengths[0]}, x.shape={x.shape}"
+            )
+
         if sid != 0:
             logger.warning("Input `sid` is set to 0 inside the mxq.")
-        
+
         if g is not None:
-            logger.warning('Input `g` is calculated inside the mxq with assuming sid is 0.')
-                
+            logger.warning(
+                "Input `g` is calculated inside the mxq with assuming sid is 0."
+            )
+
         if sdp_ratio != 0.2:
-            logger.warning('Input `sdp_ratio` is set inside the mxq as 0.2.')
-        
+            logger.warning("Input `sdp_ratio` is set inside the mxq as 0.2.")
+
         if max_len is not None:
-            logger.warning('Input `max_len` is not supported.')
-        
+            logger.warning("Input `max_len` is not supported.")
+
         m_p, logs_p, x_mask, logw = self.enc_p_sdp_dp(
             x,
             x_lengths,
@@ -304,7 +357,7 @@ class MobilintSynthesizerTrn(nn.Module):
             noise_scale_w,
         )
         w = torch.exp(logw) * x_mask * length_scale
-        
+
         w_ceil = torch.ceil(w)
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
         y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
@@ -328,7 +381,7 @@ class MobilintSynthesizerTrn(nn.Module):
     def launch(self):
         self.enc_p_sdp_dp.launch()
         self.dec_flow.launch()
-    
+
     def dispose(self):
         self.enc_p_sdp_dp.dispose()
         self.dec_flow.dispose()

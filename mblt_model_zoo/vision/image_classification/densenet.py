@@ -7,9 +7,9 @@ class DenseNet121_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/single/densenet121_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/multi/densenet121_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet121_IMAGENET1K_V1/aries/global/densenet121_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class DenseNet121_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -40,9 +40,9 @@ class DenseNet169_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/single/densenet169_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/multi/densenet169_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet169_IMAGENET1K_V1/aries/global/densenet169_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -61,7 +61,7 @@ class DenseNet169_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -73,9 +73,9 @@ class DenseNet201_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/single/densenet201_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/multi/densenet201_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/densenet201_IMAGENET1K_V1/aries/global/densenet201_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -94,7 +94,7 @@ class DenseNet201_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

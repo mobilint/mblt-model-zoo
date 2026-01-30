@@ -62,8 +62,7 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     x2y2 = anchor_points + rb
     if xywh:
         return torch.cat(((x1y1 + x2y2) / 2, x2y2 - x1y1), dim)  # xywh bbox
-    else:
-        return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
 
 def clip_boxes(boxes, shape):
@@ -193,7 +192,7 @@ def process_mask_upsample(protos, masks_in, bboxes, shape):
     """
     c, mh, mw = protos.shape  # CHW
     masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # n, CHW
-    masks = scale_masks(masks[None], shape)[0]  # CHW
+    masks = scale_masks(masks, shape)  # CHW
     masks = crop_mask(masks, bboxes)  # CHW
     return masks.gt_(0.0)
 
@@ -221,12 +220,17 @@ def crop_mask(masks, boxes):
     return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
 
 
-def scale_masks(masks, shape, padding=True):
+def scale_masks(
+    masks: torch.Tensor,
+    shape: tuple[int, int],
+    ratio_pad: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    padding: bool = True,
+) -> torch.Tensor:
     """
     Rescale segment masks to shape.
 
     Args:
-        masks (torch.Tensor): (N, C, H, W).
+        masks (torch.Tensor): (C, H, W).
         shape (tuple): Height and width.
         padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
             rescaling.
@@ -234,18 +238,33 @@ def scale_masks(masks, shape, padding=True):
     Returns:
         (torch.Tensor): Rescaled masks.
     """
-    mh, mw = masks.shape[2:]
-    gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
-    pad = [mw - shape[1] * gain, mh - shape[0] * gain]  # wh padding
-    if padding:
-        pad[0] /= 2
-        pad[1] /= 2
-    top, left = (int(pad[1]), int(pad[0])) if padding else (0, 0)  # y, x
-    bottom, right = (int(mh - pad[1]), int(mw - pad[0]))
-    masks = masks[..., top:bottom, left:right]
+    im1_h, im1_w = masks.shape[1:]
+    im0_h, im0_w = shape[:2]
 
-    masks = F.interpolate(masks, shape, mode="bilinear", align_corners=False)  # NCHW
-    return masks
+    if masks.numel() == 0:
+        return torch.zeros((0, im0_h, im0_w), dtype=masks.dtype, device=masks.device)
+
+    if im1_h == im0_h and im1_w == im0_w:
+        return masks
+
+    if ratio_pad is None:  # calculate from im0_shape
+        gain = min(im1_h / im0_h, im1_w / im0_w)  # gain  = old / new
+        pad_w, pad_h = (im1_w - im0_w * gain), (im1_h - im0_h * gain)  # wh padding
+        if padding:
+            pad_w /= 2
+            pad_h /= 2
+    else:
+        pad_w, pad_h = ratio_pad[1]
+
+    top, left = (round(pad_h - 0.1), round(pad_w - 0.1)) if padding else (0, 0)
+    bottom, right = im1_h - round(pad_h + 0.1), im1_w - round(pad_w + 0.1)
+    masks = masks[..., top:bottom, left:right]
+    if isinstance(masks, np.ndarray):
+        masks = torch.from_numpy(masks)
+    masks = F.interpolate(
+        masks[None], shape, mode="bilinear", align_corners=False
+    )  # 1NHW
+    return masks[0]
 
 
 def scale_image(masks, im0_shape, ratio_pad=None):

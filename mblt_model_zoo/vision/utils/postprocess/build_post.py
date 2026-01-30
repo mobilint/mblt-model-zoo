@@ -2,7 +2,6 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
-    YOLOAnchorlessPosePost,
     YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
 )
@@ -46,7 +45,7 @@ def build_postprocess(
             )
 
     elif task_lower == "pose_estimation":
-        return YOLOAnchorlessPosePost(  # pose estimation is only available for anchorless model
+        return YOLOAnchorlessPost(
             pre_cfg,
             post_cfg,
         )

@@ -184,8 +184,10 @@ def text_normalize(text):
     text = expand_abbreviations(text)
     return text
 
-model_id = 'mobilint/bert-base-uncased'
+
+model_id = "mobilint/bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
+
 
 def g2p(text, pad_start_end=True, tokenized=None):
     if tokenized is None:
@@ -198,7 +200,7 @@ def g2p(text, pad_start_end=True, tokenized=None):
             ph_groups.append([t])
         else:
             ph_groups[-1].append(t.replace("#", ""))
-    
+
     phones = []
     tones = []
     word2ph = []

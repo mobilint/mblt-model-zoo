@@ -7,9 +7,9 @@ class MNasNet1_0_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_0_IMAGENET1K_V1/aries/single/mnasnet1_0_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_0_IMAGENET1K_V1/aries/multi/mnasnet1_0_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_0_IMAGENET1K_V1/aries/global/mnasnet1_0_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class MNasNet1_0_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -40,9 +40,9 @@ class MNasNet1_3_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_3_IMAGENET1K_V1/aries/single/mnasnet1_3_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_3_IMAGENET1K_V1/aries/multi/mnasnet1_3_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/mnasnet1_3_IMAGENET1K_V1/aries/global/mnasnet1_3_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -61,7 +61,7 @@ class MNasNet1_3_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

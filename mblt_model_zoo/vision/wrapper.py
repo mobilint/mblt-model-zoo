@@ -3,8 +3,8 @@ import sys
 from typing import Union
 from urllib.parse import urlparse
 
-import qbruntime
 import numpy as np
+import qbruntime
 import torch
 
 from ..utils.downloads import download_url_to_file
@@ -99,7 +99,7 @@ class MBLT_Engine:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. Please check your environment.")
         self.to(device=device)
-    
+
     def launch(self):
         self.model.launch()
 
@@ -189,10 +189,9 @@ class MXQ_Model:
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         assert isinstance(x, np.ndarray), "Input should be a numpy array"
-
         npu_outs = self.model.infer(x)
         return npu_outs
-    
+
     def launch(self):
         """Launch the model."""
         self.model.launch(self.acc)

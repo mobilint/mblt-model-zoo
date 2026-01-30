@@ -7,9 +7,9 @@ class ResNext50_32x4d_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V1/aries/single/resnext50_32x4d_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V1/aries/multi/resnext50_32x4d_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V1/aries/global/resnext50_32x4d_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -38,9 +38,9 @@ class ResNext50_32x4d_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V2/aries/single/resnext50_32x4d_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V2/aries/multi/resnext50_32x4d_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnext50_32x4d_IMAGENET1K_V2/aries/global/resnext50_32x4d_IMAGENET1K_V2.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -59,7 +59,7 @@ class ResNext50_32x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -73,9 +73,9 @@ class ResNext101_32x8d_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V1/aries/single/resnext101_32x8d_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V1/aries/multi/resnext101_32x8d_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V1/aries/global/resnext101_32x8d_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -94,7 +94,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -104,9 +104,9 @@ class ResNext101_32x8d_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V2/aries/single/resnext101_32x8d_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V2/aries/multi/resnext101_32x8d_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnext101_32x8d_IMAGENET1K_V2/aries/global/resnext101_32x8d_IMAGENET1K_V2.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -125,7 +125,7 @@ class ResNext101_32x8d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -139,9 +139,9 @@ class ResNext101_64x4d_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnext101_64x4d_IMAGENET1K_V1/aries/single/resnext101_64x4d_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnext101_64x4d_IMAGENET1K_V1/aries/multi/resnext101_64x4d_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnext101_64x4d_IMAGENET1K_V1/aries/global/resnext101_64x4d_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -160,7 +160,7 @@ class ResNext101_64x4d_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

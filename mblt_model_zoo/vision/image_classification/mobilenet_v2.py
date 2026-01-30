@@ -28,7 +28,7 @@ class MobileNet_V2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -36,9 +36,9 @@ class MobileNet_V2_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/single/mobilenet_v2_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/multi/mobilenet_v2_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/mobilenet_v2_IMAGENET1K_V2/aries/global/mobilenet_v2_IMAGENET1K_V2.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -57,7 +57,7 @@ class MobileNet_V2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

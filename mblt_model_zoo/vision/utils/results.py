@@ -6,8 +6,16 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .datasets import *
-from .postprocess.common import *
+from .datasets import (
+    get_coco_class_num,
+    get_coco_det_palette,
+    get_coco_keypoint_palette,
+    get_coco_label,
+    get_coco_limb_palette,
+    get_coco_pose_palette,
+    get_imagenet_label,
+)
+from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks
 from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width
@@ -231,7 +239,14 @@ class Results:
         **kwargs,
     ):
         img = self._plot_object_detection(source_path, None, **kwargs)
-        masks = scale_image(self.mask.permute(1, 2, 0), img.shape[:2])
+        masks = (
+            crop_mask(scale_masks(self.mask, img.shape[:2]), self.boxes)
+            .gt_(0.0)
+            .permute(1, 2, 0)
+            .to(torch.float32)
+            .cpu()
+            .numpy()
+        )
         overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
 
         for i, label in enumerate(self.labels):

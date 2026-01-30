@@ -7,9 +7,9 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/single/wide_resnet50_2_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/multi/wide_resnet50_2_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V1/aries/global/wide_resnet50_2_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -38,9 +38,9 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/single/wide_resnet50_2_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/multi/wide_resnet50_2_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet50_2_IMAGENET1K_V2/aries/global/wide_resnet50_2_IMAGENET1K_V2.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -59,7 +59,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -73,9 +73,9 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/single/wide_resnet101_2_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/multi/wide_resnet101_2_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V1/aries/global/wide_resnet101_2_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -94,7 +94,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -104,9 +104,9 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/single/wide_resnet101_2_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/multi/wide_resnet101_2_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/wide_resnet101_2_IMAGENET1K_V2/aries/global/wide_resnet101_2_IMAGENET1K_V2.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -125,7 +125,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",

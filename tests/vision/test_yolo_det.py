@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLOv9c
+from mblt_model_zoo.vision import YOLO11m
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_det():
-    model = YOLOv9c()
+    model = YOLO11m()
     yield model
     model.dispose()
 
@@ -35,28 +35,28 @@ def test_yolo_det(yolo_det):
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolov9c_{os.path.basename(image_path)}",
+        f"yolo11m_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLOv9c inference")
+    parser = argparse.ArgumentParser(description="Run YOLOv5m inference")
     parser.add_argument(
-        "--mxq_path",
+        "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLOv9c model file (.mxq)",
+        help="Path to the YOLO11m model file (.mxq)",
     )
     parser.add_argument(
-        "--model_type",
+        "--model-type",
         type=str,
         default="DEFAULT",
         help="Model type",
     )
     parser.add_argument(
-        "--infer_mode",
+        "--infer-mode",
         type=str,
         default="global",
         help="Inference mode",
@@ -68,25 +68,25 @@ if __name__ == "__main__":
         help="Product",
     )
     parser.add_argument(
-        "--input_path",
+        "--input-path",
         type=str,
         default=os.path.join(TEST_DIR, "rc", "cr7.jpg"),
         help="Path to the input image",
     )
     parser.add_argument(
-        "--save_path",
+        "--save-path",
         type=str,
         default=None,
         help="Path to save the output image",
     )
     parser.add_argument(
-        "--conf_thres",
+        "--conf-thres",
         type=float,
         default=0.5,
         help="Confidence threshold",
     )
     parser.add_argument(
-        "--iou_thres",
+        "--iou-thres",
         type=float,
         default=0.5,
         help="IoU threshold",
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLOv9c(
+    model = YOLO11m(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolov9c_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}"
         )
 
     try:

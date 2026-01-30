@@ -7,9 +7,9 @@ class YOLOv9cSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/single/yolov9c-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/multi/yolov9c-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov9c-seg/aries/global/yolov9c-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -23,7 +23,7 @@ class YOLOv9cSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -56,7 +56,7 @@ class YOLOv9eSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",

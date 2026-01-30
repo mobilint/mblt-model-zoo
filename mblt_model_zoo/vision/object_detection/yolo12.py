@@ -23,7 +23,7 @@ class YOLO12n_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -39,9 +39,9 @@ class YOLO12s_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo12s/aries/single/yolo12s.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo12s/aries/multi/yolo12s.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo12s/aries/global/yolo12s.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -55,7 +55,7 @@ class YOLO12s_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -71,9 +71,9 @@ class YOLO12m_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo12m/aries/single/yolo12m.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo12m/aries/multi/yolo12m.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo12m/aries/global/yolo12m.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -87,7 +87,7 @@ class YOLO12m_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -119,7 +119,7 @@ class YOLO12l_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -151,7 +151,7 @@ class YOLO12x_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",

@@ -1,6 +1,5 @@
 import pytest
-from transformers import TextStreamer, AutoProcessor, pipeline
-
+from transformers import AutoProcessor, TextStreamer, pipeline
 
 MODEL_PATHS = ("mobilint/aya-vision-8b",)
 
@@ -16,7 +15,7 @@ def pipe(request, revision, npu_params):
         trust_remote_code=True,
         revision=revision,
     )
-    
+
     if model_kwargs:
         pipe = pipeline(
             "image-text-to-text",

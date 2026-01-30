@@ -23,7 +23,7 @@ class YOLOv5nSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -60,7 +60,7 @@ class YOLOv5sSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -97,7 +97,7 @@ class YOLOv5mSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -118,9 +118,9 @@ class YOLOv5lSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5l-seg/aries/single/yolov5l-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5l-seg/aries/multi/yolov5l-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5l-seg/aries/global/yolov5l-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -134,7 +134,7 @@ class YOLOv5lSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -155,9 +155,9 @@ class YOLOv5xSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5x-seg/aries/single/yolov5x-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5x-seg/aries/multi/yolov5x-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov5x-seg/aries/global/yolov5x-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -171,7 +171,7 @@ class YOLOv5xSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",

@@ -7,9 +7,9 @@ class FlexiViT_Small_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/single/flexivit_small.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/multi/flexivit_small.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_small/aries/global/flexivit_small.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class FlexiViT_Small_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -39,9 +39,9 @@ class FlexiViT_Base_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/single/flexivit_base.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/multi/flexivit_base.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_base/aries/global/flexivit_base.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -60,7 +60,7 @@ class FlexiViT_Base_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -71,9 +71,9 @@ class FlexiViT_Large_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/single/flexivit_large.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/multi/flexivit_large.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/flexivit_large/aries/global/flexivit_large.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -92,7 +92,7 @@ class FlexiViT_Large_Set(ModelInfoSet):
                 "size": [240, 240],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

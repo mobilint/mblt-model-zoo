@@ -23,7 +23,7 @@ class YOLOv8n_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -39,9 +39,9 @@ class YOLOv8s_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov8s/aries/single/yolov8s.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov8s/aries/multi/yolov8s.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov8s/aries/global/yolov8s.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -55,7 +55,7 @@ class YOLOv8s_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -71,9 +71,9 @@ class YOLOv8m_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov8m/aries/single/yolov8m.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov8m/aries/multi/yolov8m.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov8m/aries/global/yolov8m.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -87,7 +87,7 @@ class YOLOv8m_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -103,9 +103,9 @@ class YOLOv8l_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov8l/aries/single/yolov8l.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov8l/aries/multi/yolov8l.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov8l/aries/global/yolov8l.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -119,7 +119,7 @@ class YOLOv8l_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -135,9 +135,9 @@ class YOLOv8x_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov8x/aries/single/yolov8x.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov8x/aries/multi/yolov8x.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov8x/aries/global/yolov8x.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -151,7 +151,7 @@ class YOLOv8x_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",

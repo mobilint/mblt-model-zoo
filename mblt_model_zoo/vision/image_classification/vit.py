@@ -7,9 +7,9 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_224/aries/single/vit_tiny_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_224/aries/multi/vit_tiny_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_224/aries/global/vit_tiny_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -39,9 +39,9 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_384/aries/single/vit_tiny_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_384/aries/multi/vit_tiny_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_tiny_patch16_384/aries/global/vit_tiny_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -60,7 +60,7 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -71,9 +71,9 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_224/aries/single/vit_small_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_224/aries/multi/vit_small_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_224/aries/global/vit_small_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -92,7 +92,7 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -103,9 +103,9 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_384/aries/single/vit_small_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_384/aries/multi/vit_small_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch16_384/aries/global/vit_small_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -124,7 +124,7 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -135,9 +135,9 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_224/aries/single/vit_small_patch32_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_224/aries/multi/vit_small_patch32_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_224/aries/global/vit_small_patch32_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -156,7 +156,7 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -167,9 +167,9 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_384/aries/single/vit_small_patch32_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_384/aries/multi/vit_small_patch32_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_small_patch32_384/aries/global/vit_small_patch32_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -188,7 +188,7 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -199,9 +199,9 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch8_224/aries/single/vit_base_patch8_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch8_224/aries/multi/vit_base_patch8_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch8_224/aries/global/vit_base_patch8_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -220,7 +220,7 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -231,9 +231,9 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_224/aries/single/vit_base_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_224/aries/multi/vit_base_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_224/aries/global/vit_base_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -252,7 +252,7 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -263,9 +263,9 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_384/aries/single/vit_base_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_384/aries/multi/vit_base_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch16_384/aries/global/vit_base_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -284,7 +284,7 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -295,9 +295,9 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_224/aries/single/vit_base_patch32_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_224/aries/multi/vit_base_patch32_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_224/aries/global/vit_base_patch32_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -316,7 +316,7 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -327,9 +327,9 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_384/aries/single/vit_base_patch32_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_384/aries/multi/vit_base_patch32_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_base_patch32_384/aries/global/vit_base_patch32_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -348,7 +348,7 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -359,9 +359,9 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_224/aries/single/vit_large_patch16_224.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_224/aries/multi/vit_large_patch16_224.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_224/aries/global/vit_large_patch16_224.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -380,7 +380,7 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -391,9 +391,9 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_384/aries/single/vit_large_patch16_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_384/aries/multi/vit_large_patch16_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch16_384/aries/global/vit_large_patch16_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -412,7 +412,7 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )
@@ -423,9 +423,9 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch32_384/aries/single/vit_large_patch32_384.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch32_384/aries/multi/vit_large_patch32_384.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/vit_large_patch32_384/aries/global/vit_large_patch32_384.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -444,7 +444,7 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
                 "size": [384, 384],
             },
             "Normalize": {"style": "tf"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
     )

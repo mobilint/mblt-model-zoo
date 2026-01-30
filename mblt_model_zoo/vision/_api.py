@@ -17,7 +17,10 @@ def list_tasks():
 
 
 def list_models(tasks: Union[str, List[str]] = TASKS):
-    if isinstance(tasks, str):
+
+    if tasks is None:
+        tasks = TASKS
+    elif isinstance(tasks, str):
         tasks = [tasks]
     assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"
 

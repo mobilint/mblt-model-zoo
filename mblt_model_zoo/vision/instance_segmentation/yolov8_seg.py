@@ -23,7 +23,7 @@ class YOLOv8nSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -40,9 +40,9 @@ class YOLOv8sSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/single/yolov8s-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/multi/yolov8s-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/global/yolov8s-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -56,7 +56,7 @@ class YOLOv8sSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -73,9 +73,9 @@ class YOLOv8mSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/single/yolov8m-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/multi/yolov8m-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/global/yolov8m-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -89,7 +89,7 @@ class YOLOv8mSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -106,9 +106,9 @@ class YOLOv8lSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/single/yolov8l-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/multi/yolov8l-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/global/yolov8l-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -122,7 +122,7 @@ class YOLOv8lSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
@@ -139,9 +139,9 @@ class YOLOv8xSeg_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/single/yolov8x-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/multi/yolov8x-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/global/yolov8x-seg.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -155,7 +155,7 @@ class YOLOv8xSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",

@@ -7,9 +7,9 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_0_IMAGENET1K_V1/aries/single/shufflenet_v2_x1_0_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_0_IMAGENET1K_V1/aries/multi/shufflenet_v2_x1_0_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_0_IMAGENET1K_V1/aries/global/shufflenet_v2_x1_0_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -28,7 +28,7 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -42,9 +42,9 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_5_IMAGENET1K_V1/aries/single/shufflenet_v2_x1_5_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_5_IMAGENET1K_V1/aries/multi/shufflenet_v2_x1_5_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x1_5_IMAGENET1K_V1/aries/global/shufflenet_v2_x1_5_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -63,7 +63,7 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -77,9 +77,9 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
         model_cfg={
             "url_dict": {
                 "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x2_0_IMAGENET1K_V1/aries/single/shufflenet_v2_x2_0_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x2_0_IMAGENET1K_V1/aries/multi/shufflenet_v2_x2_0_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/shufflenet_v2_x2_0_IMAGENET1K_V1/aries/global/shufflenet_v2_x2_0_IMAGENET1K_V1.mxq",
+                    "single": None,
+                    "multi": None,
+                    "global": None,
                     "global4": None,
                     "global8": None,
                 },
@@ -98,7 +98,7 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
                 "size": [224, 224],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
