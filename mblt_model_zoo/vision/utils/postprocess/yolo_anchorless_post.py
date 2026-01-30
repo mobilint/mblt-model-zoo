@@ -1,3 +1,7 @@
+"""
+YOLO anchorless postprocessing.
+"""
+
 from typing import List
 
 import torch
@@ -7,18 +11,17 @@ from .common import non_max_suppression, xywh2xyxy
 
 
 class YOLOAnchorlessPost(YOLOPostBase):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
+    """Postprocessing for YOLO models without anchors."""
 
     def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Convert the output of ONNX model to the input of NMS.
 
         Args:
-            x: NPU outputs
-        Returns:
-            Decoded outputs
-        """
+            x (torch.Tensor): NPU outputs
 
+        Returns:
+            List[torch.Tensor]: Decoded outputs
+        """
         x_list = torch.split(
             x.squeeze(1), 1, dim=0
         )  # [(1, 8400, 84), (1, 8400, 84), ...]
@@ -43,6 +46,17 @@ class YOLOAnchorlessPost(YOLOPostBase):
         return [process_conversion(xi) for xi in x_list]
 
     def nms(self, x, max_det=300, max_nms=30000, max_wh=7680):
+        """Execute Non-Maximum Suppression.
+
+        Args:
+            x (List[torch.Tensor]): Input tensors.
+            max_det (int, optional): Maximum number of detections. Defaults to 300.
+            max_nms (int, optional): Maximum number of boxes for NMS. Defaults to 30000.
+            max_wh (int, optional): Maximum width/height for NMS. Defaults to 7680.
+
+        Returns:
+            List[torch.Tensor]: NMS results.
+        """
         output = []
 
         for xi in x:
@@ -81,13 +95,19 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
 
 class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(
-            pre_cfg,
-            post_cfg,
-        )
+    """Postprocessing for YOLO segmentation models without anchors."""
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """Execute YOLO segmentation postprocessing.
+
+        Args:
+            x: Input tensor or list of tensors.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold.
+
+        Returns:
+            list: Postprocessed results with masks.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x, proto_outs = self.conversion(x)
@@ -98,10 +118,14 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
     def conversion(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
         """
         Convert the output of ONNX model to the input of NMS.
+
         Args:
-            npu_outputs: list of np arrays, NPU outputs
+            x (List[torch.Tensor]): list of np arrays, NPU outputs
+
         Returns:
-            outputs decoded outputs(boxes, conf, scores, keypts/lmarks/masks)
+            tuple:
+                 - x (torch.Tensor): decoded outputs(boxes, conf, scores, keypts/lmarks/masks)
+                 - proto_out (torch.Tensor): proto output
         """
         if (self.nc + self.n_extra + 4) in x[0].shape[1:] and self.n_extra in x[
             1
@@ -120,3 +144,18 @@ class YOLOAnchorlessSegPost(YOLOAnchorlessPost):
             )
 
         raise ValueError(f"Wrong shape of input: {x[0].shape}, {x[1].shape}")
+
+
+class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
+
+    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
+        """Convert the output of ONNX model to the input of NMS.
+
+        Args:
+            x (torch.Tensor): NPU outputs
+
+        Returns:
+            List[torch.Tensor]: Decoded outputs
+        """
+        x = x.transpose(-1, -2)
+        return super().filter_conversion(x)

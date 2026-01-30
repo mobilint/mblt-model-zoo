@@ -1,3 +1,10 @@
+"""
+Script to organize the ImageNet dataset.
+
+This script takes the raw image tar file and xml tgz file for the ImageNet dataset
+and organizes them into a structure suitable for the model zoo.
+"""
+
 import argparse
 import os
 

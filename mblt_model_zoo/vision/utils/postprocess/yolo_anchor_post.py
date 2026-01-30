@@ -1,3 +1,7 @@
+"""
+YOLO anchor-based postprocessing.
+"""
+
 from typing import List
 
 import torch
@@ -7,7 +11,15 @@ from .common import non_max_suppression, xywh2xyxy
 
 
 class YOLOAnchorPost(YOLOPostBase):
+    """Postprocessing for YOLO models with anchors."""
+
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """Initialize YOLOAnchorPost.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__(pre_cfg, post_cfg)
         self.no = self.nc + 5 + self.n_extra
 
@@ -29,7 +41,7 @@ class YOLOAnchorPost(YOLOPostBase):
             x = x[ic]  # (n, 85)
 
             if len(x) == 0:
-                return torch.zeros((0, 5 + self.nc + self.n_extra), dtype=torch.float32)
+                return torch.zeros((0, self.no), dtype=torch.float32)
 
             return x
 
@@ -72,10 +84,19 @@ class YOLOAnchorPost(YOLOPostBase):
 
 
 class YOLOAnchorSegPost(YOLOAnchorPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
+    """Postprocessing for YOLO segmentation models with anchors."""
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """Execute YOLO segmentation postprocessing.
+
+        Args:
+            x: Input tensor or list of tensors.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold.
+
+        Returns:
+            list: Postprocessed results with masks.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x, proto_outs = self.conversion(x)
@@ -86,11 +107,14 @@ class YOLOAnchorSegPost(YOLOAnchorPost):
     def conversion(self, x: List[torch.Tensor]):
         """
         Convert NPU outputs from ONNX inference to evaluable format.
+
         Args:
-            npu_outs: list of np arrays, NPU(shouldn't contain decode) outputs
+            x (List[torch.Tensor]): list of np arrays, NPU(shouldn't contain decode) outputs
+
         Returns:
-            proto_out: proto output(np.array)
-            npu_outs: npu output(concatenated np.array)
+            tuple:
+                - x (torch.Tensor): npu output(concatenated np.array)
+                - proto_out (torch.Tensor): proto output(np.array)
         """
 
         if self.no in x[0].shape[1:] and self.n_extra in x[1].shape[1:]:

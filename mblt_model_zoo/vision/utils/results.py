@@ -1,3 +1,7 @@
+"""
+Results processing and plotting.
+"""
+
 import os
 from typing import Union
 
@@ -12,7 +16,7 @@ from .datasets import (
     get_coco_keypoint_palette,
     get_coco_label,
     get_coco_limb_palette,
-    get_coco_pose_palette,
+    get_coco_pose_skeleton,
     get_imagenet_label,
 )
 from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks
@@ -25,6 +29,10 @@ ALPHA = 0.3  # alpha for overlay
 
 
 class Results:
+    """
+    Class for handling and plotting model inference results.
+    """
+
     def __init__(
         self,
         pre_cfg: dict,
@@ -32,6 +40,15 @@ class Results:
         output: Union[TensorLike, ListTensorLike],
         **kwargs,
     ):
+        """
+        Initializes the Results object.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+            **kwargs: Additional arguments.
+        """
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
@@ -61,36 +78,29 @@ class Results:
         return source_img
 
     def set_output(self, output: Union[TensorLike, ListTensorLike]):
+        """
+        Sets variables from the raw model output based on the task.
+
+        Args:
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+
+        Raises:
+            NotImplementedError: If the task is not supported.
+        """
         self.acc = None
         self.box_cls = None
         self.mask = None
 
         if self.task.lower() == "image_classification":
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
             self.acc = output
         elif (
             self.task.lower() == "object_detection"
             or self.task.lower() == "pose_estimation"
         ):
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
-            self.box_cls = output
-        elif self.task.lower() == "instance_segmentation":
-            assert isinstance(
-                output, list
-            ), f"Got unexpected output={output}. It should be a list."
-            if len(output) == 2:  # [box_cls, mask]
-                pass
-            elif len(output) == 1:  # [[box_cls, mask]]
-                assert len(output[0]) == 2, f"Got unexpected output={output}."
-                output = output[0]
-            else:
-                raise ValueError(f"Got unexpected output={output}.")
             self.box_cls = output[0]
-            self.mask = output[1]
+        elif self.task.lower() == "instance_segmentation":
+            self.box_cls = output[0][0]
+            self.mask = output[0][1]
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."
@@ -103,6 +113,20 @@ class Results:
         save_path: str = None,
         **kwargs,
     ):
+        """
+        Plots the results on the source image.
+
+        Args:
+            source_path (Union[str, cv2.typing.MatLike, Image.Image]): Path or image object.
+            save_path (str, optional): Path to save the plotted image. Defaults to None.
+            **kwargs: Additional arguments.
+
+        Returns:
+            np.ndarray: The image with plotted results.
+
+        Raises:
+            NotImplementedError: If the task is not supported.
+        """
         if save_path is not None:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
@@ -279,9 +303,9 @@ class Results:
         )
         for kpt in self.kpts:
             for i, (x, y, v) in enumerate(kpt):
-                color_k = KEYPOINT_PALLETE[i]
-                if v < self.conf_thres:
-                    continue
+                color_k = get_coco_keypoint_palette(i)
+                # if v < self.conf_thres:
+                #    continue
                 cv2.circle(
                     img,
                     (int(x), int(y)),
@@ -291,20 +315,20 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
 
-            for j, sk in enumerate(POSE_SKELETON):
+            for j, sk in enumerate(get_coco_pose_skeleton()):
                 pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
                 pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
 
                 conf1 = kpt[sk[0] - 1, 2]
                 conf2 = kpt[sk[1] - 1, 2]
 
-                if conf1 < self.conf_thres or conf2 < self.conf_thres:
-                    continue
+                # if conf1 < self.conf_thres or conf2 < self.conf_thres:
+                #    continue
                 cv2.line(
                     img,
                     pos1,
                     pos2,
-                    LIMB_PALLETE[j],
+                    get_coco_limb_palette(j),
                     thickness=int(np.ceil(LW / 2)),
                     lineType=cv2.LINE_AA,
                 )

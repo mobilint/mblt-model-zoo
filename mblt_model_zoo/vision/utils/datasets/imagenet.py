@@ -1,3 +1,8 @@
+"""
+ImageNet dataset constants and utilities.
+"""
+
+
 def get_imagenet_label(idx: int) -> str:
     """Get the label of the imagenet class index
 

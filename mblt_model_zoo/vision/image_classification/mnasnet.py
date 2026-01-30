@@ -1,8 +1,14 @@
+"""
+MNasNet model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class MNasNet1_0_Set(ModelInfoSet):
+    """Configuration set for MNasNet 1.0 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -35,6 +41,8 @@ class MNasNet1_0_Set(ModelInfoSet):
 
 
 class MNasNet1_3_Set(ModelInfoSet):
+    """Configuration set for MNasNet 1.3 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -72,6 +80,18 @@ def MNasNet1_0(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs an MNasNet1_0 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         MNasNet1_0_Set,
         local_path=local_path,
@@ -87,6 +107,18 @@ def MNasNet1_3(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs an MNasNet1_3 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         MNasNet1_3_Set,
         local_path=local_path,

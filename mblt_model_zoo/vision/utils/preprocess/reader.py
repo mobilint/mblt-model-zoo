@@ -1,3 +1,7 @@
+"""
+Image reader preprocessing.
+"""
+
 from typing import Union
 
 import cv2
@@ -20,6 +24,14 @@ class Reader(PreOps):
         self.style = style.lower()
 
     def __call__(self, x: Union[str, TensorLike, Image.Image]):
+        """Read image and convert to tensor.
+
+        Args:
+            x (Union[str, TensorLike, Image.Image]): Input image path or image object.
+
+        Returns:
+            Union[np.ndarray, Image.Image]: Read image.
+        """
         if self.style == "numpy":
             if isinstance(x, np.ndarray):
                 return x

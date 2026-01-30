@@ -1,3 +1,7 @@
+"""
+API functions for listing tasks and models.
+"""
+
 import importlib
 import inspect
 from typing import List, Union
@@ -13,10 +17,26 @@ TASKS = [
 
 
 def list_tasks():
+    """
+    Lists the available vision tasks.
+
+    Returns:
+        list: A list of task names.
+    """
     return TASKS
 
 
-def list_models(tasks: Union[str, List[str]] = TASKS):
+def list_models(tasks: Union[str, List[str]] = None):
+    """
+    Lists the available models for the specified tasks.
+
+    Args:
+        tasks (Union[str, List[str]], optional): The task(s) to list models for.
+            Defaults to all TASKS.
+
+    Returns:
+        dict: A dictionary where keys are task names and values are lists of model names.
+    """
 
     if tasks is None:
         tasks = TASKS

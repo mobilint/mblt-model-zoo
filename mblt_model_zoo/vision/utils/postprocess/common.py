@@ -1,3 +1,7 @@
+"""
+Common postprocessing utility functions.
+"""
+
 from typing import Union
 
 import cv2
@@ -7,6 +11,15 @@ import torch.nn.functional as F
 
 
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
+    """
+    Convert bounding box coordinates from (cx, cy, width, height) to (x1, y1, x2, y2).
+
+    Args:
+        x (Union[np.ndarray, torch.Tensor]): Input bounding boxes.
+
+    Returns:
+        Union[np.ndarray, torch.Tensor]: Bounding boxes in (x1, y1, x2, y2) format.
+    """
     # Convert bounding box coordinates from (cx, cy, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
     if isinstance(x, np.ndarray):
         y = np.copy(x)
@@ -19,23 +32,6 @@ def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
     y[..., 1] = x[..., 1] - x[..., 3] / 2
     y[..., 2] = x[..., 0] + x[..., 2] / 2
     y[..., 3] = x[..., 1] + x[..., 3] / 2
-
-    return y
-
-
-def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
-    # Convert bounding box coordinates from (x1, y1, x2, y2) format to (cx, cy, width, height) format where (cx, cy) is the center of the bounding box and width and height are the dimensions of the bounding box.
-    if isinstance(x, np.ndarray):
-        y = np.copy(x)
-    elif isinstance(x, torch.Tensor):
-        y = torch.clone(x).to(x)
-    else:
-        raise ValueError("x should be np.ndarray or torch.Tensor")
-
-    y[..., 0] = (x[..., 0] + x[..., 2]) / 2
-    y[..., 1] = (x[..., 1] + x[..., 3]) / 2
-    y[..., 2] = x[..., 2] - x[..., 0]
-    y[..., 3] = x[..., 3] - x[..., 1]
 
     return y
 
@@ -66,6 +62,16 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
 
 
 def clip_boxes(boxes, shape):
+    """
+    Clip bounding boxes to image shape.
+
+    Args:
+        boxes (torch.Tensor): Bounding boxes.
+        shape (tuple): Image shape (height, width).
+
+    Returns:
+        torch.Tensor: Clipped bounding boxes.
+    """
     boxes[..., 0] = boxes[..., 0].clamp(0, shape[1])
     boxes[..., 1] = boxes[..., 1].clamp(0, shape[0])
     boxes[..., 2] = boxes[..., 2].clamp(0, shape[1])
@@ -148,12 +154,16 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     """
     https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L680
     Faster way to process masks.
-    protos: [mask_dim, mask_h, mask_w]
-    masks_in: [n, mask_dim], n is number of masks after nms
-    bboxes: [n, 4], n is number of masks after nms
-    shape: input_image_size, (h, w)
 
-    return: h, w, n
+    Args:
+        protos (torch.Tensor): [mask_dim, mask_h, mask_w]
+        masks_in (torch.Tensor): [n, mask_dim], n is number of masks after nms
+        bboxes (torch.Tensor): [n, 4], n is number of masks after nms
+        shape (tuple): input_image_size, (h, w)
+        upsample (bool): Whether to upsample the masks.
+
+    Returns:
+        torch.Tensor: Processed masks.
     """
 
     c, mh, mw = protos.shape  # CHW
@@ -261,58 +271,11 @@ def scale_masks(
     masks = masks[..., top:bottom, left:right]
     if isinstance(masks, np.ndarray):
         masks = torch.from_numpy(masks)
+
     masks = F.interpolate(
         masks[None], shape, mode="bilinear", align_corners=False
     )  # 1NHW
     return masks[0]
-
-
-def scale_image(masks, im0_shape, ratio_pad=None):
-    """
-    Takes a mask, and resizes it to the original image size.
-    Original Source:
-        https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L377
-    Args:
-        masks (np.ndarray): resized and padded masks/images, [h, w, num]/[h, w, 3].
-        im0_shape (tuple): the original image shape
-        ratio_pad (tuple): the ratio of the padding to the original image.
-
-    Returns:
-        masks (np.ndarray): The masks that are being returned.
-    """
-    # Rescale coordinates (xyxy) from im1_shape to im0_shape
-    if isinstance(masks, torch.Tensor):
-        masks = masks.cpu().numpy()
-
-    im1_shape = masks.shape
-    if im1_shape[:2] == im0_shape[:2]:
-        return masks
-    elif im1_shape[2] == 0:
-        return np.zeros((im0_shape[0], im0_shape[1], 0), dtype=np.float32)
-
-    if ratio_pad is None:  # calculate from im0_shape
-        gain = min(
-            im1_shape[0] / im0_shape[0], im1_shape[1] / im0_shape[1]
-        )  # gain  = old / new
-        pad = (im1_shape[1] - im0_shape[1] * gain) / 2, (
-            im1_shape[0] - im0_shape[0] * gain
-        ) / 2  # wh padding
-    else:
-        gain = ratio_pad[0][0]
-        pad = ratio_pad[1]
-    top, left = int(pad[1]), int(pad[0])  # y, x
-    bottom, right = int(im1_shape[0] - pad[1]), int(im1_shape[1] - pad[0])
-
-    if len(masks.shape) < 2:
-        raise ValueError(
-            f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}'
-        )
-    masks = masks[top:bottom, left:right]
-    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]))
-    if len(masks.shape) == 2:
-        masks = masks[:, :, None]
-
-    return masks
 
 
 def non_max_suppression(boxes, scores, iou_threshold, max_output):

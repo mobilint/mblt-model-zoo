@@ -1,8 +1,14 @@
+"""
+YOLOv9 Segmentation model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv9cSeg_Set(ModelInfoSet):
+    """Configuration set for YOLOv9cSeg models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -36,6 +42,8 @@ class YOLOv9cSeg_Set(ModelInfoSet):
 
 
 class YOLOv9eSeg_Set(ModelInfoSet):
+    """Configuration set for YOLOv9eSeg models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -74,6 +82,18 @@ def YOLOv9cSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv9cSeg model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv9cSeg_Set,
         local_path=local_path,
@@ -89,6 +109,18 @@ def YOLOv9eSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv9eSeg model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv9eSeg_Set,
         local_path=local_path,

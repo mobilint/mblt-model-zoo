@@ -1,3 +1,7 @@
+"""
+COCO dataset constants and utilities.
+"""
+
 CLASS_INV_MAP = (
     1,
     2,

@@ -1,3 +1,10 @@
+"""
+Script to organize the WiderFace dataset.
+
+This script takes the raw image and annotation zip files for the WiderFace dataset
+and organizes them into a structure suitable for the model zoo.
+"""
+
 import argparse
 import os
 

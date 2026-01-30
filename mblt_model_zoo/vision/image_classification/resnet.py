@@ -1,8 +1,14 @@
+"""
+ResNet model definitions (ResNet18, ResNet34, ResNet50, ResNet101, ResNet152).
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class ResNet18_Set(ModelInfoSet):
+    """Configuration set for ResNet18 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -37,6 +43,8 @@ class ResNet18_Set(ModelInfoSet):
 
 
 class ResNet34_Set(ModelInfoSet):
+    """Configuration set for ResNet34 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -71,6 +79,8 @@ class ResNet34_Set(ModelInfoSet):
 
 
 class ResNet50_Set(ModelInfoSet):
+    """Configuration set for ResNet50 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -135,6 +145,8 @@ class ResNet50_Set(ModelInfoSet):
 
 
 class ResNet101_Set(ModelInfoSet):
+    """Configuration set for ResNet101 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -199,6 +211,8 @@ class ResNet101_Set(ModelInfoSet):
 
 
 class ResNet152_Set(ModelInfoSet):
+    """Configuration set for ResNet152 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -268,6 +282,18 @@ def ResNet18(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNet18 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNet18_Set,
         local_path=local_path,
@@ -283,6 +309,18 @@ def ResNet34(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNet34 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNet34_Set,
         local_path=local_path,
@@ -298,6 +336,18 @@ def ResNet50(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNet50 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNet50_Set,
         local_path=local_path,
@@ -313,6 +363,18 @@ def ResNet101(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNet101 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNet101_Set,
         local_path=local_path,
@@ -328,6 +390,18 @@ def ResNet152(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNet152 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNet152_Set,
         local_path=local_path,

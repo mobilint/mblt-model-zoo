@@ -1,8 +1,14 @@
+"""
+VGG model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class VGG11_Set(ModelInfoSet):
+    """Configuration set for VGG11 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -35,6 +41,8 @@ class VGG11_Set(ModelInfoSet):
 
 
 class VGG11_BN_Set(ModelInfoSet):
+    """Configuration set for VGG11_BN models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -67,6 +75,8 @@ class VGG11_BN_Set(ModelInfoSet):
 
 
 class VGG13_Set(ModelInfoSet):
+    """Configuration set for VGG13 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -99,6 +109,8 @@ class VGG13_Set(ModelInfoSet):
 
 
 class VGG13_BN_Set(ModelInfoSet):
+    """Configuration set for VGG13_BN models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -131,6 +143,8 @@ class VGG13_BN_Set(ModelInfoSet):
 
 
 class VGG16_Set(ModelInfoSet):
+    """Configuration set for VGG16 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -163,6 +177,8 @@ class VGG16_Set(ModelInfoSet):
 
 
 class VGG16_BN_Set(ModelInfoSet):
+    """Configuration set for VGG16_BN models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -195,6 +211,8 @@ class VGG16_BN_Set(ModelInfoSet):
 
 
 class VGG19_Set(ModelInfoSet):
+    """Configuration set for VGG19 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -227,6 +245,8 @@ class VGG19_Set(ModelInfoSet):
 
 
 class VGG19_BN_Set(ModelInfoSet):
+    """Configuration set for VGG19_BN models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -264,6 +284,18 @@ def VGG11(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG11 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG11_Set,
         local_path=local_path,
@@ -279,6 +311,18 @@ def VGG11_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG11_BN model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG11_BN_Set,
         local_path=local_path,
@@ -294,6 +338,18 @@ def VGG13(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG13 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG13_Set,
         local_path=local_path,
@@ -309,6 +365,18 @@ def VGG13_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG13_BN model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG13_BN_Set,
         local_path=local_path,
@@ -324,6 +392,18 @@ def VGG16(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG16 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG16_Set,
         local_path=local_path,
@@ -339,6 +419,18 @@ def VGG16_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG16_BN model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG16_BN_Set,
         local_path=local_path,
@@ -354,6 +446,18 @@ def VGG19(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG19 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG19_Set,
         local_path=local_path,
@@ -369,6 +473,18 @@ def VGG19_BN(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a VGG19_BN model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         VGG19_BN_Set,
         local_path=local_path,

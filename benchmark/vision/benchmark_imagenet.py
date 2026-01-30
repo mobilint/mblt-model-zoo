@@ -1,3 +1,10 @@
+"""
+Benchmark script for ResNet50 on ImageNet dataset.
+
+This script runs the benchmark for the ResNet50 model using the ImageNet dataset.
+It initializes the model and evaluates its performance.
+"""
+
 import argparse
 import os
 

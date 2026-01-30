@@ -9,12 +9,20 @@ from .common import process_mask_upsample
 
 
 class PostBase(ABC):
+    """Abstract base class for postprocessing."""
+
     def __init__(self):
+        """Initialize PostBase."""
         super().__init__()
         self.device = torch.device("cpu")
 
     @abstractmethod
     def __call__(self, x):
+        """Execute postprocessing.
+
+        Args:
+            x: Input tensor or list of tensors.
+        """
         pass
 
     def to(self, device: Union[str, torch.device]):
@@ -36,7 +44,15 @@ class PostBase(ABC):
 
 
 class YOLOPostBase(PostBase):
+    """Base class for YOLO postprocessing."""
+
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """Initialize YOLOPostBase.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__()
         img_size = pre_cfg.get("YoloPre")["img_size"]
 
@@ -60,6 +76,16 @@ class YOLOPostBase(PostBase):
         self.task = post_cfg.get("task")
 
     def __call__(self, x, conf_thres=None, iou_thres=None):
+        """Execute YOLO postprocessing.
+
+        Args:
+            x: Input tensor or list of tensors.
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold.
+
+        Returns:
+            list: Postprocessed results.
+        """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
         x = self.conversion(x)
@@ -68,6 +94,12 @@ class YOLOPostBase(PostBase):
         return x
 
     def set_threshold(self, conf_thres: float = None, iou_thres: float = None):
+        """Set confidence and IoU thresholds.
+
+        Args:
+            conf_thres (float, optional): Confidence threshold.
+            iou_thres (float, optional): IoU threshold.
+        """
         assert (
             conf_thres is not None and iou_thres is not None
         ), "conf_thres and iou_thres should be provided in yolo_postprocess "
@@ -77,6 +109,14 @@ class YOLOPostBase(PostBase):
         self.iou_thres = iou_thres
 
     def check_input(self, x: Union[TensorLike, ListTensorLike]):
+        """Check and prepare input tensors.
+
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Input tensor or list of tensors.
+
+        Returns:
+            list[torch.Tensor]: List of tensors on the correct device.
+        """
         if isinstance(x, np.ndarray):
             x = [torch.from_numpy(x)]
         elif isinstance(x, torch.Tensor):
@@ -92,6 +132,14 @@ class YOLOPostBase(PostBase):
         return self.check_dim(x)
 
     def check_dim(self, x: List[torch.Tensor]):
+        """Check tensor dimensions.
+
+        Args:
+            x (List[torch.Tensor]): List of tensors.
+
+        Returns:
+            List[torch.Tensor]: List of tensors with corrected dimensions.
+        """
         y = []
         for xi in x:
             if xi.ndim == 3:
@@ -104,6 +152,14 @@ class YOLOPostBase(PostBase):
         return y
 
     def conversion(self, x: List[torch.Tensor]):
+        """Convert input tensors.
+
+        Args:
+            x (List[torch.Tensor]): Input tensors.
+
+        Returns:
+            torch.Tensor: Converted tensor.
+        """
         assert (
             len(x) == 1
         ), f"Assume return is a single output, but got {len(x)} outputs"
@@ -111,13 +167,32 @@ class YOLOPostBase(PostBase):
 
     @abstractmethod
     def filter_conversion(self, x):
+        """Filter and convert outputs before NMS.
+
+        Args:
+            x: Input tensor.
+        """
         pass
 
     @abstractmethod
     def nms(self, x):
+        """Perform Non-Maximum Suppression.
+
+        Args:
+            x: Input tensor.
+        """
         pass
 
     def masking(self, x, proto_outs):
+        """Apply masking to detection results.
+
+        Args:
+            x: Detection results.
+            proto_outs: Prototype outputs for masks.
+
+        Returns:
+            list: Detection results with masks.
+        """
         masks = []
         for pred, proto in zip(x, proto_outs):
             proto = proto.permute(

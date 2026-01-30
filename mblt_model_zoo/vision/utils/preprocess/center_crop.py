@@ -1,3 +1,7 @@
+"""
+Center crop preprocessing.
+"""
+
 from typing import List, Union
 
 import cv2

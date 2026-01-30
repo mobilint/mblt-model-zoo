@@ -1,3 +1,7 @@
+"""
+Evaluation script for WiderFace dataset.
+"""
+
 import os
 
 import numpy as np

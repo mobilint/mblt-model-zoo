@@ -1,3 +1,10 @@
+"""
+Script to organize the COCO dataset.
+
+This script takes the raw image and annotation zip files for the COCO dataset
+and organizes them into a structure suitable for the model zoo.
+"""
+
 import argparse
 import os
 

@@ -1,3 +1,7 @@
+"""
+Classification postprocessing.
+"""
+
 from typing import Union
 
 import numpy as np
@@ -8,10 +12,26 @@ from .base import PostBase
 
 
 class ClsPost(PostBase):
+    """Classification postprocessing."""
+
     def __init__(self, pre_cfg: dict, post_cfg: dict):
+        """Initialize ClsPost.
+
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+        """
         super().__init__()
 
     def __call__(self, x: Union[TensorLike, ListTensorLike]):
+        """Execute classification postprocessing.
+
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Input tensor or list of tensors.
+
+        Returns:
+            torch.Tensor: Softmax probabilities.
+        """
         if isinstance(x, list):
             assert (
                 len(x) == 1

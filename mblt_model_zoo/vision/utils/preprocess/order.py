@@ -1,3 +1,7 @@
+"""
+Channel order preprocessing.
+"""
+
 import numpy as np
 import torch
 

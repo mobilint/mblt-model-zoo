@@ -1,3 +1,7 @@
+"""
+Evaluation script for ImageNet dataset.
+"""
+
 import math
 from time import time
 

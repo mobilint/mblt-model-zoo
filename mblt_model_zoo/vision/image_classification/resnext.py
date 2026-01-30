@@ -1,8 +1,14 @@
+"""
+ResNeXt model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class ResNext50_32x4d_Set(ModelInfoSet):
+    """Configuration set for ResNeXt50 32x4d models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -67,6 +73,8 @@ class ResNext50_32x4d_Set(ModelInfoSet):
 
 
 class ResNext101_32x8d_Set(ModelInfoSet):
+    """Configuration set for ResNeXt101 32x8d models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -131,6 +139,8 @@ class ResNext101_32x8d_Set(ModelInfoSet):
 
 
 class ResNext101_64x4d_Set(ModelInfoSet):
+    """Configuration set for ResNeXt101 64x4d models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -170,6 +180,18 @@ def ResNext50_32x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNext50_32x4d model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext50_32x4d_Set,
         local_path=local_path,
@@ -185,6 +207,18 @@ def ResNext101_32x8d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNext101_32x8d model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext101_32x8d_Set,
         local_path=local_path,
@@ -200,6 +234,18 @@ def ResNext101_64x4d(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ResNext101_64x4d model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ResNext101_64x4d_Set,
         local_path=local_path,

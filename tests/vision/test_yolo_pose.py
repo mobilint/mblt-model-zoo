@@ -1,17 +1,25 @@
+"""
+Test script for YOLOv8mPose model.
+
+This script tests the YOLOv8mPose model by running inference on a sample image.
+It can be run as a pytest test or as a standalone script.
+"""
+
 import argparse
 import os
 from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLO11xPose
+from mblt_model_zoo.vision import YOLOv8mPose
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_pose():
-    model = YOLO11xPose()
+    """Fixture to initialize and dispose of the YOLOv8mPose model."""
+    model = YOLOv8mPose()
     yield model
     model.dispose()
 
@@ -31,23 +39,24 @@ def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
 
 
 def test_yolo_pose(yolo_pose):
+    """Test YOLOv8mPose inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolov11x_pose_{os.path.basename(image_path)}",
+        f"yolovv8m_pose_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_pose, image_path, save_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO11xPose inference")
+    parser = argparse.ArgumentParser(description="Run YOLOv8mPose inference")
     parser.add_argument(
         "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLO11xPose model file (.mxq)",
+        help="Path to the YOLOv8mPose model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -95,7 +104,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLO11xPose(
+    model = YOLOv8mPose(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -103,7 +112,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolov11x_pose_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolovv8m_pose_{os.path.basename(args.input_path)}"
         )
 
     try:

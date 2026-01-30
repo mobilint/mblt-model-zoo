@@ -5,23 +5,82 @@ import math
 import os
 from time import time
 
-import numpy as np
 import torch
-from faster_coco_eval import COCO, COCOeval_faster, mask
+from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
 from ..datasets import CustomCocodata, get_coco_inv, get_coco_loader
-from ..postprocess.common import scale_boxes, scale_coords, scale_image
+from ..postprocess.common import scale_boxes, scale_coords, scale_masks
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
 
 
-def single_encode(x):
-    """Encode predicted masks as RLE and append results to jdict."""
-    rle = mask.encode(np.asarray(x[:, :, None], order="F", dtype="uint8"))[0]
-    rle["counts"] = rle["counts"].decode("utf-8")
-    return rle
+def to_string(counts: list[int]) -> str:
+    """Converts the RLE object into a compact string representation. Each count is delta-encoded and
+    variable-length encoded as a string.
+
+    Args:
+        counts (list[int]): List of RLE counts.
+    """
+    result = []
+
+    for i in range(len(counts)):
+        x = int(counts[i])
+
+        # Apply delta encoding for all counts after the second entry
+        if i > 2:
+            x -= int(counts[i - 2])
+
+        # Variable-length encode the value
+        while True:
+            c = x & 0x1F  # Take 5 bits
+            x >>= 5
+
+            # If the sign bit (0x10) is set, continue if x != -1;
+            # otherwise, continue if x != 0
+            more = (x != -1) if (c & 0x10) else (x != 0)
+            if more:
+                c |= 0x20  # Set continuation bit
+            c += 48  # Shift to ASCII
+            result.append(chr(c))
+            if not more:
+                break
+
+    return "".join(result)
+
+
+def multi_encode(pixels: torch.Tensor) -> list[int]:
+    """Convert multiple binary masks using Run-Length Encoding (RLE).
+
+    Args:
+        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask with shape [N,
+            H*W].
+
+    Returns:
+        (list[int]): A list of RLE counts for each mask.
+    """
+    transitions = pixels[:, 1:] != pixels[:, :-1]
+    row_idx, col_idx = torch.where(transitions)
+    col_idx = col_idx + 1
+
+    # Compute run lengths
+    counts = []
+    for i in range(pixels.shape[0]):
+        positions = col_idx[row_idx == i]
+        if len(positions):
+            count = torch.diff(positions).tolist()
+            count.insert(0, positions[0].item())
+            count.append(len(pixels[i]) - positions[-1].item())
+        else:
+            count = [len(pixels[i])]
+
+        # Ensure starting with background (0) count
+        if pixels[i][0].item() == 1:
+            count = [0, *count]
+        counts.append(count)
+
+    return counts
 
 
 def nmsout2eval(nms_outs, img1_shape, img0_shapes):
@@ -86,23 +145,32 @@ def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
     seg_results = []
     for nms_out in nms_outs:
         det_results.append(nms_out[0])
-        seg_results.append(nms_out[1].to(torch.uint8).cpu().numpy())
+        seg_results.append(nms_out[1])
 
     labels_list, boxes_list, scores_list = nmsout2eval(
         det_results, img1_shape, img0_shapes
     )
 
-    masks = [
-        scale_image(seg_result.transpose(1, 2, 0), img0_shape)
+    seg_results = [
+        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]))
         for seg_result, img0_shape in zip(seg_results, img0_shapes)
-    ]  # HWC
-    extra_list = [
-        [
-            single_encode(mask_channel)
-            for mask_channel in np.transpose(mask, (2, 0, 1))  # hwc -> chw
-        ]  # RLE encode. mask_channel shape: (h, w)
-        for mask in masks
     ]
+
+    def mask_encode(seg_result):
+        extra = []
+        h, w = seg_result.shape[1:3]
+        seg_result = (
+            seg_result.permute(0, 2, 1)
+            .contiguous()
+            .view(seg_result.shape[0], h * w)
+            .byte()
+        )
+        counts = multi_encode(seg_result)
+        for c in counts:
+            extra.append({"size": [h, w], "counts": to_string(c)})
+        return extra
+
+    extra_list = [mask_encode(seg_result) for seg_result in seg_results]
     return labels_list, boxes_list, scores_list, extra_list
 
 
@@ -217,7 +285,6 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
         data_path (str): Path to the COCO data.
         batch_size (int): Batch size for evaluation.
     """
-
     if model.post_cfg["task"] in ["object_detection", "instance_segmentation"]:
         dataset = CustomCocodata(
             os.path.join(data_path, "val2017"),

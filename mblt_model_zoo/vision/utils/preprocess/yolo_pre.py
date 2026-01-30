@@ -1,7 +1,6 @@
 from typing import List
 
 import cv2
-import numpy as np
 import torch
 
 from ..types import TensorLike
@@ -17,10 +16,23 @@ class YoloPre(PreOps):
     """
 
     def __init__(self, img_size: List[int]):
+        """Initialize YoloPre.
+
+        Args:
+            img_size (List[int]): Target image size [h, w].
+        """
         super().__init__()
         self.img_size = img_size
 
     def __call__(self, x: TensorLike):
+        """Execute YOLO preprocessing.
+
+        Args:
+            x (TensorLike): Input image.
+
+        Returns:
+            torch.Tensor: Preprocessed image.
+        """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         img = x

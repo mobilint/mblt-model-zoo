@@ -1,5 +1,6 @@
 from .yolo11 import YOLO11l, YOLO11m, YOLO11n, YOLO11s, YOLO11x
 from .yolo12 import YOLO12l, YOLO12m, YOLO12n, YOLO12s, YOLO12x
+from .yolo26 import YOLO26l, YOLO26m, YOLO26n, YOLO26s, YOLO26x
 from .yolov3 import YOLOv3_spp, YOLOv3_sppu, YOLOv3u
 from .yolov5 import (
     YOLOv5l,

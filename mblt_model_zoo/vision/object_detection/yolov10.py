@@ -1,8 +1,14 @@
+"""
+YOLOv10 model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv10n_Set(ModelInfoSet):
+    """Configuration set for YOLOv10n models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -36,6 +42,8 @@ class YOLOv10n_Set(ModelInfoSet):
 
 
 class YOLOv10s_Set(ModelInfoSet):
+    """Configuration set for YOLOv10s models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -69,6 +77,8 @@ class YOLOv10s_Set(ModelInfoSet):
 
 
 class YOLOv10m_Set(ModelInfoSet):
+    """Configuration set for YOLOv10m models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -102,6 +112,8 @@ class YOLOv10m_Set(ModelInfoSet):
 
 
 class YOLOv10b_Set(ModelInfoSet):
+    """Configuration set for YOLOv10b models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -135,6 +147,8 @@ class YOLOv10b_Set(ModelInfoSet):
 
 
 class YOLOv10l_Set(ModelInfoSet):
+    """Configuration set for YOLOv10l models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -168,6 +182,8 @@ class YOLOv10l_Set(ModelInfoSet):
 
 
 class YOLOv10x_Set(ModelInfoSet):
+    """Configuration set for YOLOv10x models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -206,6 +222,18 @@ def YOLOv10n(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10n model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10n_Set,
         local_path=local_path,
@@ -221,6 +249,18 @@ def YOLOv10s(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10s model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10s_Set,
         local_path=local_path,
@@ -236,6 +276,18 @@ def YOLOv10m(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10m model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10m_Set,
         local_path=local_path,
@@ -251,6 +303,18 @@ def YOLOv10b(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10b model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10b_Set,
         local_path=local_path,
@@ -266,6 +330,18 @@ def YOLOv10l(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10l model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10l_Set,
         local_path=local_path,
@@ -281,6 +357,18 @@ def YOLOv10x(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv10x model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv10x_Set,
         local_path=local_path,

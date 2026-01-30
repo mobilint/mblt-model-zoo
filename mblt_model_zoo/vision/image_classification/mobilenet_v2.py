@@ -1,8 +1,14 @@
+"""
+MobileNet V2 model definition.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class MobileNet_V2_Set(ModelInfoSet):
+    """Configuration set for MobileNet V2 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -68,6 +74,18 @@ def MobileNet_V2(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a MobileNet_V2 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         MobileNet_V2_Set,
         local_path=local_path,

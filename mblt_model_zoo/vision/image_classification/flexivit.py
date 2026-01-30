@@ -1,8 +1,14 @@
+"""
+FlexiViT model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class FlexiViT_Small_Set(ModelInfoSet):
+    """Configuration set for FlexiViT Small models."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -34,6 +40,8 @@ class FlexiViT_Small_Set(ModelInfoSet):
 
 
 class FlexiViT_Base_Set(ModelInfoSet):
+    """Configuration set for FlexiViT Base models."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -65,6 +73,8 @@ class FlexiViT_Base_Set(ModelInfoSet):
 
 
 class FlexiViT_Large_Set(ModelInfoSet):
+    """Configuration set for FlexiViT Large models."""
+
     DEFAULT = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -101,6 +111,18 @@ def FlexiViT_Small(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a FlexiViT_Small model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         FlexiViT_Small_Set,
         local_path=local_path,
@@ -116,6 +138,18 @@ def FlexiViT_Base(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a FlexiViT_Base model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         FlexiViT_Base_Set,
         local_path=local_path,
@@ -131,6 +165,18 @@ def FlexiViT_Large(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a FlexiViT_Large model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         FlexiViT_Large_Set,
         local_path=local_path,

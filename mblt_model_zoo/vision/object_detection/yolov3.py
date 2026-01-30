@@ -1,8 +1,14 @@
+"""
+YOLOv3 model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv3u_Set(ModelInfoSet):
+    """Configuration set for YOLOv3u models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -35,6 +41,8 @@ class YOLOv3u_Set(ModelInfoSet):
 
 
 class YOLOv3_sppu_Set(ModelInfoSet):
+    """Configuration set for YOLOv3_sppu models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -67,6 +75,8 @@ class YOLOv3_sppu_Set(ModelInfoSet):
 
 
 class YOLOv3_Set(ModelInfoSet):
+    """Configuration set for YOLOv3 models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -103,6 +113,8 @@ class YOLOv3_Set(ModelInfoSet):
 
 
 class YOLOv3_spp_Set(ModelInfoSet):
+    """Configuration set for YOLOv3_spp models."""
+
     COCO_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -144,6 +156,18 @@ def YOLOv3u(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3u model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv3u_Set,
         local_path=local_path,
@@ -159,6 +183,18 @@ def YOLOv3_sppu(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3_sppu model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv3_sppu_Set,
         local_path=local_path,
@@ -174,6 +210,18 @@ def YOLOv3(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv3_Set,
         local_path=local_path,
@@ -189,6 +237,18 @@ def YOLOv3_spp(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3_spp model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         YOLOv3_spp_Set,
         local_path=local_path,

@@ -1,3 +1,7 @@
+"""
+Preprocessing builder.
+"""
+
 from collections import OrderedDict
 
 from .base import PreBase
@@ -9,6 +13,14 @@ from .yolo_pre import YoloPre
 
 
 def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
+    """Build the preprocess object.
+
+    Args:
+        pre_cfg (OrderedDict): Preprocessing configuration.
+
+    Returns:
+        PreBase: The preprocess object.
+    """
     res = []
     for pre_type, pre_attr in pre_cfg.items():
         pre_type_lower = pre_type.lower()

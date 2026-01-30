@@ -1,8 +1,14 @@
+"""
+ShuffleNet V2 model definitions.
+"""
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
+    """Configuration set for ShuffleNet V2 x1.0 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -37,6 +43,8 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
 
 
 class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
+    """Configuration set for ShuffleNet V2 x1.5 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -71,6 +79,8 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
 
 
 class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
+    """Configuration set for ShuffleNet V2 x2.0 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "url_dict": {
@@ -110,6 +120,18 @@ def ShuffleNet_V2_X1_0(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ShuffleNet_V2_X1_0 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X1_0_Set,
         local_path=local_path,
@@ -125,6 +147,18 @@ def ShuffleNet_V2_X1_5(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ShuffleNet_V2_X1_5 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X1_5_Set,
         local_path=local_path,
@@ -140,6 +174,18 @@ def ShuffleNet_V2_X2_0(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
+    """
+    Constructs a ShuffleNet_V2_X2_0 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
     return MBLT_Engine.from_model_info_set(
         ShuffleNet_V2_X2_0_Set,
         local_path=local_path,
