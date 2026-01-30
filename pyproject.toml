@@ -52,6 +52,9 @@ classifiers = [
 Home = "https://www.mobilint.com/"
 Repository  = "https://github.com/mobilint/mblt-model-zoo"
 
+[project.scripts]
+mblt-model-zoo = "mblt_model_zoo.cli:main"
+
 [project.optional-dependencies]
 transformers = [
     "transformers>=4.54.0, <=4.57.1",

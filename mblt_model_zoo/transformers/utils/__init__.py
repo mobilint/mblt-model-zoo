@@ -12,5 +12,6 @@ from .auto import (
     AutoTokenizer,
     pipeline,
 )
+from .benchmark_utils import *
 from .cache_utils import MobilintCache
 from .types import TransformersModelInfo
