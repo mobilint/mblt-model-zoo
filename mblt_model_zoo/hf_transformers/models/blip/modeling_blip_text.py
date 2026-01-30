@@ -88,8 +88,8 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
             ))
         
         logits = self.decoder_forward(
-            encoder_hidden_states.unsqueeze(1),
             embedding_output.unsqueeze(1),
+            encoder_hidden_states.unsqueeze(1),
             past_key_values,
             cache_position,
         ).squeeze(0)
