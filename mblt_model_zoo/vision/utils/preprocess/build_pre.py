@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 from .base import PreBase
 from .center_crop import CenterCrop
+from .normalize import Normalize
 from .order import SetOrder
 from .reader import Reader
 from .resize import Resize
@@ -34,6 +35,8 @@ def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
             res.append(SetOrder(**pre_attr))
         elif pre_type_lower == YoloPre.__name__.lower():
             res.append(YoloPre(**pre_attr))
+        elif pre_type_lower == Normalize.__name__.lower():
+            res.append(Normalize(**pre_attr))
         else:
             raise ValueError(f"Got unsupported pre_type={pre_type}.")
 
