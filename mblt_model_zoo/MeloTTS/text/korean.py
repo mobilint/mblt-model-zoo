@@ -12,8 +12,8 @@ import re
 from anyascii import anyascii
 from g2pkk import G2p
 from jamo import hangul_to_jamo
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
-from ....utils.auto import AutoTokenizer
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
 
@@ -95,13 +95,7 @@ def distribute_phone(n_phone, n_word):
     return phones_per_word
 
 
-# tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
-
-model_id = "mobilint/bert-kor-base"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-
-def g2p(norm_text):
+def g2p(norm_text, tokenizer=None):
     tokenized = tokenizer.tokenize(norm_text)
     phs = []
     ph_groups = []

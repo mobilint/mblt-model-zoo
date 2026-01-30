@@ -1,49 +1,31 @@
-import os
-
 import torch
+from huggingface_hub import hf_hub_download
 
-from ...utils.auto import convert_identifier_to_path
-from . import utils
+from .utils import get_hparams_from_file
 
 LANG_TO_HF_REPO_ID = {
     "EN_NEWEST": "mobilint/MeloTTS-English-v3",
     "KR": "mobilint/MeloTTS-Korean",
 }
 
-
-def load_or_download_config(locale, use_hf=False, config_path=None):
-    assert use_hf is False
-
+def load_or_download_config(locale, config_path=None, local_files_only=False):
     if config_path is None:
         language = locale.split("-")[0].upper()
         assert language in LANG_TO_HF_REPO_ID
-        download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
-        config_path = os.path.join(download_path, "config.json")
+        config_path = hf_hub_download(
+            repo_id=LANG_TO_HF_REPO_ID[language],
+            filename="config.json",
+            local_files_only=local_files_only
+        )
+    return get_hparams_from_file(config_path)
 
-    result = utils.get_hparams_from_file(config_path)
-    result.model.mxq_path_enc_p_sdp_dp = os.path.join(
-        os.path.dirname(config_path), result.model.mxq_path_enc_p_sdp_dp
-    )
-    result.model.mxq_path_dec_flow = os.path.join(
-        os.path.dirname(config_path), result.model.mxq_path_dec_flow
-    )
-
-    # bert_model_id can be either model id such as `mobilint/bert-base-uncased` or path such as `bert-kor-base`
-    bert_model_path = os.path.join(
-        os.path.dirname(config_path), result.model.bert_model_id
-    )
-    if os.path.exists(bert_model_path):
-        result.model.bert_model_id = bert_model_path
-
-    return result
-
-
-def load_or_download_model(locale, device, use_hf=False, ckpt_path=None):
-    assert use_hf is False
-
+def load_or_download_model(locale, device, ckpt_path=None, local_files_only=False):
     if ckpt_path is None:
         language = locale.split("-")[0].upper()
         assert language in LANG_TO_HF_REPO_ID
-        download_path = convert_identifier_to_path(LANG_TO_HF_REPO_ID[language])
-        ckpt_path = os.path.join(download_path, "checkpoint.pth")
+        ckpt_path = hf_hub_download(
+            repo_id=LANG_TO_HF_REPO_ID[language],
+            filename="checkpoint.pth",
+            local_files_only=local_files_only
+        )
     return torch.load(ckpt_path, map_location=device)

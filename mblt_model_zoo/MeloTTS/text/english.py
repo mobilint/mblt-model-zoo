@@ -3,8 +3,8 @@ import pickle
 import re
 
 from g2p_en import G2p
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
-from ....utils.auto import AutoTokenizer
 from . import symbols
 from .english_utils.abbreviations import expand_abbreviations
 from .english_utils.number_norm import normalize_numbers
@@ -184,12 +184,7 @@ def text_normalize(text):
     text = expand_abbreviations(text)
     return text
 
-
-model_id = "mobilint/bert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-
-def g2p(text, pad_start_end=True, tokenized=None):
+def g2p(text, pad_start_end=True, tokenized=None, tokenizer=None):
     if tokenized is None:
         tokenized = tokenizer.tokenize(text)
     # import pdb; pdb.set_trace()
