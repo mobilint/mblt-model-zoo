@@ -144,6 +144,20 @@ available_models = list_models()
 pprint(available_models)
 ```
 
+## TPS Benchmark CLI (Sweep)
+
+If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS measure/sweep from the command line:
+
+```bash
+# single measurement
+mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 512 --decode 128
+
+# sweep (writes JSON/CSV and a PNG plot by default)
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct \
+  --prefill-range 128:2048:128 --decode-range 128:1024:128 \
+  --json tps.json --csv tps.csv --plot tps.png
+```
+
 ## Model List
 
 The following tables summarize Transformers' models available in **mblt-model-zoo**. We provide the models that are quantized with our advanced quantization techniques. Performance metrics will be provided in the future.
