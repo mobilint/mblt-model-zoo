@@ -34,7 +34,6 @@ class YOLO11n_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -68,7 +67,6 @@ class YOLO11s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -102,7 +100,6 @@ class YOLO11m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -136,7 +133,6 @@ class YOLO11l_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -170,7 +166,6 @@ class YOLO11x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1

@@ -34,7 +34,6 @@ class YOLO26nSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
             "nmsfree": True,  # nms free yolo
         },
@@ -70,7 +69,6 @@ class YOLO26sSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
             "nmsfree": True,  # nms free yolo
         },
@@ -106,7 +104,6 @@ class YOLO26mSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
             "nmsfree": True,  # nms free yolo
         },
@@ -142,7 +139,6 @@ class YOLO26lSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
             "nmsfree": True,  # nms free yolo
         },
@@ -178,7 +174,6 @@ class YOLO26xSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
             "nmsfree": True,  # nms free yolo
         },

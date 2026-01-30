@@ -34,7 +34,6 @@ class YOLOv9t_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -68,7 +67,6 @@ class YOLOv9s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -102,7 +100,6 @@ class GELANs_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -136,7 +133,6 @@ class YOLOv9m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -170,7 +166,6 @@ class GELANm_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -204,7 +199,6 @@ class YOLOv9c_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -238,7 +232,6 @@ class GELANc_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -272,7 +265,6 @@ class YOLOv9e_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -306,7 +298,6 @@ class GELANe_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1

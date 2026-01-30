@@ -34,7 +34,6 @@ class YOLO26nPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
             "nmsfree": True,  # nms free yolo
         },
@@ -70,7 +69,6 @@ class YOLO26sPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
             "nmsfree": True,  # nms free yolo
         },
@@ -106,7 +104,6 @@ class YOLO26mPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
             "nmsfree": True,  # nms free yolo
         },
@@ -142,7 +139,6 @@ class YOLO26lPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
             "nmsfree": True,  # nms free yolo
         },
@@ -178,7 +174,6 @@ class YOLO26xPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
             "nmsfree": True,  # nms free yolo
         },

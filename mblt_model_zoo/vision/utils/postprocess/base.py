@@ -62,16 +62,7 @@ class YOLOPostBase(PostBase):
             self.imh, self.imw = img_size
 
         self.nc = post_cfg.get("nc")
-        self.anchors = post_cfg.get("anchors", None)  # anchor coordinates
-        if self.anchors is None:
-            self.anchorless = True
-            self.nl = post_cfg.get("nl")
-            assert self.nl is not None, "nl should be provided for anchorless model"
-        else:
-            self.anchorless = False
-            self.nl = len(self.anchors)
-            self.na = len(self.anchors[0]) // 2
-
+        self.anchors = post_cfg.get("anchors", False)  # anchor coordinates
         self.n_extra = post_cfg.get("n_extra", 0)
         self.task = post_cfg.get("task")
 

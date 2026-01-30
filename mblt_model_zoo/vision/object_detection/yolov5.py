@@ -34,11 +34,7 @@ class YOLOv5n_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -72,7 +68,6 @@ class YOLOv5nu_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -106,12 +101,7 @@ class YOLOv5n6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -145,7 +135,6 @@ class YOLOv5n6u_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -179,11 +168,7 @@ class YOLOv5s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -217,12 +202,7 @@ class YOLOv5s6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -256,7 +236,6 @@ class YOLOv5su_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -290,7 +269,6 @@ class YOLOv5s6u_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -324,11 +302,7 @@ class YOLOv5m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -362,12 +336,7 @@ class YOLOv5m6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -401,7 +370,6 @@ class YOLOv5mu_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -435,7 +403,6 @@ class YOLOv5m6u_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -469,11 +436,7 @@ class YOLOv5l_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -507,7 +470,6 @@ class YOLOv5lu_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -541,12 +503,7 @@ class YOLOv5l6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -580,7 +537,6 @@ class YOLOv5l6u_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -614,11 +570,7 @@ class YOLOv5x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -652,7 +604,6 @@ class YOLOv5xu_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1
@@ -686,12 +637,7 @@ class YOLOv5x6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -725,7 +671,6 @@ class YOLOv5x6u_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 4,  # Number of detection layers
         },
     )
     DEFAULT = COCO_V1

@@ -34,11 +34,7 @@ class YOLOv7_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -72,12 +68,7 @@ class YOLOv7d6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -111,12 +102,7 @@ class YOLOv7e6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -150,12 +136,7 @@ class YOLOv7e6e_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -189,12 +170,7 @@ class YOLOv7w6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1
@@ -228,11 +204,7 @@ class YOLOv7x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
+            "anchors": True,
         },
     )
     DEFAULT = COCO_V1

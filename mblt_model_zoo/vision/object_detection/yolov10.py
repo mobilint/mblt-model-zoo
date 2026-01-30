@@ -34,7 +34,6 @@ class YOLOv10n_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )
@@ -69,7 +68,6 @@ class YOLOv10s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )
@@ -104,7 +102,6 @@ class YOLOv10m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )
@@ -139,7 +136,6 @@ class YOLOv10b_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )
@@ -174,7 +170,6 @@ class YOLOv10l_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )
@@ -209,7 +204,6 @@ class YOLOv10x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "nmsfree": True,  # nms free yolo
         },
     )

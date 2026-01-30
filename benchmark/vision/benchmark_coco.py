@@ -1,24 +1,24 @@
 """
-Benchmark script for YOLO11nPose on COCO dataset.
+Benchmark script for YOLOv8m on COCO dataset.
 
-This script runs the benchmark for the YOLO11nPose model using the COCO dataset.
+This script runs the benchmark for the YOLOv8m model using the COCO dataset.
 It initializes the model and evaluates its performance.
 """
 
 import argparse
 import os
 
-from mblt_model_zoo.vision import YOLO11nPose
+from mblt_model_zoo.vision import YOLOv8m
 from mblt_model_zoo.vision.utils.evaluation import eval_coco
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO11nPose Benchmark")
+    parser = argparse.ArgumentParser(description="Run YOLOv8m Benchmark")
     # --- Model Configuration ---
     parser.add_argument(
         "--local-path",
         type=str,
         default=None,
-        help="Path to the YOLO11nPose model file (.mxq)",
+        help="Path to the YOLOv8m model file (.mxq)",
     )
     parser.add_argument("--model-type", type=str, default="DEFAULT", help="Model type")
     parser.add_argument(
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # --- Model Initialization ---
-    model = YOLO11nPose(args.local_path, args.model_type, args.infer_mode, args.product)
+    model = YOLOv8m(args.local_path, args.model_type, args.infer_mode, args.product)
 
     # --- Benchmark Execution ---
     acc = eval_coco(

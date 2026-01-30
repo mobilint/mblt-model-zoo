@@ -34,7 +34,6 @@ class YOLO11nPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
         },
     )
@@ -69,7 +68,6 @@ class YOLO11sPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
         },
     )
@@ -104,7 +102,6 @@ class YOLO11mPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
         },
     )
@@ -139,7 +136,6 @@ class YOLO11lPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
         },
     )
@@ -174,7 +170,6 @@ class YOLO11xPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 51,
         },
     )

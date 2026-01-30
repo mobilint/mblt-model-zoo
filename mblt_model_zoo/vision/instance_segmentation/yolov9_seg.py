@@ -34,7 +34,6 @@ class YOLOv9cSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
         },
     )
@@ -69,7 +68,6 @@ class YOLOv9eSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
             "n_extra": 32,
         },
     )

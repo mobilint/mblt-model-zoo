@@ -30,7 +30,7 @@ def build_postprocess(
     if task_lower == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
     if task_lower == "object_detection":
-        if post_cfg.get("anchors") is not None:
+        if post_cfg.get("anchors", False):
             return YOLOAnchorPost(
                 pre_cfg,
                 post_cfg,
@@ -46,7 +46,7 @@ def build_postprocess(
         )
 
     if task_lower == "instance_segmentation":
-        if post_cfg.get("anchors") is not None:
+        if post_cfg.get("anchors", False):
             return YOLOAnchorSegPost(
                 pre_cfg,
                 post_cfg,

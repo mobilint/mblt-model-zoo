@@ -34,11 +34,7 @@ class YOLOv5nSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
             "n_extra": 32,
         },
     )
@@ -73,11 +69,7 @@ class YOLOv5sSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
             "n_extra": 32,
         },
     )
@@ -112,11 +104,7 @@ class YOLOv5mSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
             "n_extra": 32,
         },
     )
@@ -151,11 +139,7 @@ class YOLOv5lSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
             "n_extra": 32,
         },
     )
@@ -190,11 +174,7 @@ class YOLOv5xSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
-            "anchors": [
-                [10, 13, 16, 30, 33, 23],  # P3/8
-                [30, 61, 62, 45, 59, 119],  # P4/16
-                [116, 90, 156, 198, 373, 326],  # P5/32
-            ],
+            "anchors": True,
             "n_extra": 32,
         },
     )
