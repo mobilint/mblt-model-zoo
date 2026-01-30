@@ -196,6 +196,9 @@ class TPSMeasurer:
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
+            assert num_prefill > 0, "num_prefill should be positive! num_prefill: %d" % num_prefill
+            assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+
             # 1. Synthetic Input
             input_ids = torch.randint(100, self.model.config.vocab_size, (1, num_prefill))
             input_ids = input_ids.to(self.device)
@@ -205,8 +208,8 @@ class TPSMeasurer:
             gen_kwargs = dict(
                 input_ids=input_ids,
                 streamer=streamer,
-                min_new_tokens=num_decode,
-                max_new_tokens=num_decode,
+                min_new_tokens=num_decode + 1,
+                max_new_tokens=num_decode + 1,
                 do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id
@@ -236,8 +239,7 @@ class TPSMeasurer:
             prefill_tps = num_prefill / prefill_latency if prefill_latency > 0 else 0
             
             decode_duration = t_end - first_token_time
-            decode_count = decoded_tokens - 1
-            decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+            decode_tps = (decoded_tokens - 1) / decode_duration if decode_duration > 0 else 0
             
             total_time = t_end - t_start
 
