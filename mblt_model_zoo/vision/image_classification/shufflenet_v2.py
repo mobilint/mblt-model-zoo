@@ -27,7 +27,6 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -62,7 +61,6 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -97,7 +95,6 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={

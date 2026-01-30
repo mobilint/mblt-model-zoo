@@ -27,7 +27,6 @@ class DenseNet121_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -60,7 +59,6 @@ class DenseNet169_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -93,7 +91,6 @@ class DenseNet201_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

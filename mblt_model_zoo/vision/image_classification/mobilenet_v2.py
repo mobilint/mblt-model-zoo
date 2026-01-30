@@ -27,7 +27,6 @@ class MobileNet_V2_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -56,7 +55,6 @@ class MobileNet_V2_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

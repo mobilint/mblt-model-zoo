@@ -27,7 +27,6 @@ class ResNext50_32x4d_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -58,7 +57,6 @@ class ResNext50_32x4d_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -93,7 +91,6 @@ class ResNext101_32x8d_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -124,7 +121,6 @@ class ResNext101_32x8d_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
@@ -159,7 +155,6 @@ class ResNext101_64x4d_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={

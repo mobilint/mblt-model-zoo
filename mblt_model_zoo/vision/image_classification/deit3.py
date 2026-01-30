@@ -27,7 +27,6 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -59,7 +58,6 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -91,7 +89,6 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -123,7 +120,6 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -155,7 +151,6 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -187,7 +182,6 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -219,7 +213,6 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

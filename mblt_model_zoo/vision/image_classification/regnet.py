@@ -27,7 +27,6 @@ class RegNet_X_400MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -56,7 +55,6 @@ class RegNet_X_400MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -89,7 +87,6 @@ class RegNet_X_800MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -118,7 +115,6 @@ class RegNet_X_800MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -151,7 +147,6 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -180,7 +175,6 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -213,7 +207,6 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -242,7 +235,6 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -275,7 +267,6 @@ class RegNet_X_8GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -304,7 +295,6 @@ class RegNet_X_8GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -337,7 +327,6 @@ class RegNet_X_16GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -366,7 +355,6 @@ class RegNet_X_16GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -399,7 +387,6 @@ class RegNet_X_32GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -428,7 +415,6 @@ class RegNet_X_32GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -461,7 +447,6 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -490,7 +475,6 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -523,7 +507,6 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -552,7 +535,6 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -585,7 +567,6 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -614,7 +595,6 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -647,7 +627,6 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -676,7 +655,6 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -709,7 +687,6 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -738,7 +715,6 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -771,7 +747,6 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -800,7 +775,6 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -833,7 +807,6 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -862,7 +835,6 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

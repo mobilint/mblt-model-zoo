@@ -27,7 +27,6 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -59,7 +58,6 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -91,7 +89,6 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -123,7 +120,6 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -155,7 +151,6 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -187,7 +182,6 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -219,7 +213,6 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -251,7 +244,6 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -283,7 +275,6 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -315,7 +306,6 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -347,7 +337,6 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -379,7 +368,6 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -411,7 +399,6 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},
@@ -443,7 +430,6 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [384, 384],
             },
-            "Normalize": {"style": "tf"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

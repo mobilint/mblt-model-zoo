@@ -53,4 +53,4 @@ class CenterCrop(PreOps):
             :,
         ]
 
-        return x
+        return x.astype(np.uint8)

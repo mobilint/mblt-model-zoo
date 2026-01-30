@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLO11m
+from mblt_model_zoo.vision import YOLOv5m
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_det():
-    model = YOLO11m()
+    model = YOLOv5m()
     yield model
     model.dispose()
 
@@ -35,7 +35,7 @@ def test_yolo_det(yolo_det):
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolo11m_{os.path.basename(image_path)}",
+        f"yolov5m_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
@@ -47,7 +47,7 @@ if __name__ == "__main__":
         "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLO11m model file (.mxq)",
+        help="Path to the YOLOv5m model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLO11m(
+    model = YOLOv5m(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov5m_{os.path.basename(args.input_path)}"
         )
 
     try:
