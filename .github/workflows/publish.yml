@@ -42,7 +42,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
-    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.event.base_ref == 'refs/heads/master'
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && github.event.base_ref == 'refs/heads/beomsu/0.5.0'
     
     steps:
       - name: Download distribution artifacts
