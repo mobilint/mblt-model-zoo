@@ -103,7 +103,7 @@ def _build_pipeline(
     target_clusters: list[int] | None,
 ) -> Any:
     _require_transformers_deps()
-    from transformers import pipeline as hf_pipeline
+    from mblt_model_zoo.transformers.utils.auto import pipeline as hf_pipeline
 
     pipeline_kwargs: dict[str, Any] = {
         "task": task,
