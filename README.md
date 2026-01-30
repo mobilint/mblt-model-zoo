@@ -118,6 +118,8 @@ Currently, these optional functions are only available on environment equipped w
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
 
+> Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
+
 ## Verbose Option
 
 By default, model initialization stays quiet. To print the model file size and MD5 hash whenever an MXQ model loads, set the environment variable `MBLT_MODEL_ZOO_VERBOSE` to a truthy value before running your script:
@@ -125,6 +127,35 @@ By default, model initialization stays quiet. To print the model file size and M
 ```bash
 export MBLT_MODEL_ZOO_VERBOSE=true  # accepted values: true/1/yes/on (case-insensitive)
 python your_script.py
+```
+
+### Example Verbose Output
+
+```bash
+Model Initialized
+Model Size: 216.94 MB
+Model Hash: 23c262c43b4c1c453dd0326e249480a0
+Device Number: 0
+Core Mode: single
+Target Cores: [CoreId(cluster=Cluster.Cluster0, core=Core.Core0)]
+Model Variant 0
+        Input Shape: [(1, 200, 96), (1, 200, 96), (2, 200, 200)]
+        Output Shape: [(1, 102400, 1)]
+Model Variant 1
+        Input Shape: [(1, 300, 96), (1, 300, 96), (2, 300, 300)]
+        Output Shape: [(1, 153600, 1)]
+Model Variant 2
+        Input Shape: [(1, 400, 96), (1, 400, 96), (2, 400, 400)]
+        Output Shape: [(1, 204800, 1)]
+Model Variant 3
+        Input Shape: [(1, 500, 96), (1, 500, 96), (2, 500, 500)]
+        Output Shape: [(1, 256000, 1)]
+Model Variant 4
+        Input Shape: [(1, 600, 96), (1, 600, 96), (2, 600, 600)]
+        Output Shape: [(1, 307200, 1)]
+Model Variant 5
+        Input Shape: [(1, 900, 96), (1, 900, 96), (2, 900, 900)]
+        Output Shape: [(1, 460800, 1)]
 ```
 
 Unset or set the variable to any other value to suppress these messages.

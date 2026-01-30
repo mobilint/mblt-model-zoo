@@ -8,6 +8,8 @@ import sys
 from dataclasses import asdict
 from typing import Any, Iterable, Sequence, Tuple
 
+from transformers import HfArgumentParser
+
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
     """
@@ -265,7 +267,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
 
 
 def add_tps_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: argparse._SubParsersAction[HfArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("tps", help="Measure/sweep tokens-per-second")
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)

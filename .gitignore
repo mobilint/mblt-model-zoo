@@ -26,5 +26,5 @@ dist/
 tmp/
 uv.lock
 *.wav
-benchmark/results/
+benchmark/transformers/results/
 *.json

@@ -1,10 +1,14 @@
 import math
+from typing import List, Literal, Optional, Union
 
-import qbruntime
 import numpy as np
+import qbruntime
 import torch
+from qbruntime import Cluster, CoreId
 from torch import nn
 from transformers.utils import logging
+
+from mblt_model_zoo.utils.npu_backend import MobilintNPUBackend
 
 from . import commons
 
@@ -20,7 +24,12 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         num_languages=None,
         num_tones=None,
         
-        mxq_path="",
+        name_or_path: str = "",
+        mxq_path: str = "",
+        dev_no: int = 0,
+        core_mode: Literal["single", "multi", "global4", "global8"] = "single",
+        target_cores: Optional[List[Union[str, "CoreId"]]] = None,
+        target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
     ):
         super().__init__()
         
@@ -37,16 +46,23 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         self.language_emb = nn.Embedding(num_languages, hidden_channels)
         nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
         
-        self.acc = qbruntime.Accelerator()
-        mc = qbruntime.ModelConfig()
-        mc.set_single_core_mode(1)
-        self.mxq_model = qbruntime.Model(mxq_path, mc)
-        num_model_variants = self.mxq_model.get_num_model_variants()
+        self.npu_backend = MobilintNPUBackend(
+            mxq_path=mxq_path,
+            dev_no=dev_no,
+            core_mode=core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
+        
+        self.npu_backend.name_or_path = name_or_path
+        self.npu_backend.create()
+        self.npu_backend.launch()
+        
+        num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
-            self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
+            self.npu_backend.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
             for i in range(num_model_variants)
         ]
-        self.mxq_model.launch(self.acc)
     
     def __call__(
         self,
@@ -78,7 +94,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         ja_bert = ja_bert.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, f]
         z0 = z0.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
         z1 = z1.permute(0, 2, 1).type(torch.float32).cpu().numpy() # [b, t, 1]
-        
+
         max_chunk = max(self.allowed_chunks)
         num_of_chunks = math.ceil(x.shape[1] / max_chunk)
         
@@ -103,10 +119,13 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
                 z0_slice = z0[:, start_index:end_index, :]
                 z1_slice = z1[:, start_index:end_index, :]
             
-            outputs = self.mxq_model.infer([z1_slice, x_slice, ja_bert_slice, z0_slice])
-            assert outputs is not None, "No output from mxq model inference."
-            m_p_chunk, logs_p_chunk, logw_chunk = outputs
+            input_mask = np.ones(shape=(2, x_slice.shape[1], x_slice.shape[1]), dtype=np.float32)
+            input_mask[:, :, :remaining_length] = 0
             
+            outputs = self.npu_backend.mxq_model.infer([ja_bert_slice, z1_slice, z0_slice, x_slice, input_mask])
+            assert outputs is not None, "No output from mxq model inference."
+            logw_chunk, m_p_chunk, logs_p_chunk = outputs
+
             if end_index > x.shape[1]:
                 m_p_chunk = m_p_chunk[..., :remaining_length, :]
                 logs_p_chunk = logs_p_chunk[..., :remaining_length, :]
@@ -129,17 +148,23 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         return m_p, logs_p, x_mask, logw
 
     def launch(self):
-        self.mxq_model.launch(self.acc)
+        self.npu_backend.launch()
     
     def dispose(self):
-        self.mxq_model.dispose()
+        self.npu_backend.dispose()
 
 class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
     def __init__(
         self,
         channels,
         upsample_initial_channel,
-        mxq_path,
+        
+        name_or_path: str = "",
+        mxq_path: str = "",
+        dev_no: int = 0,
+        core_mode: Literal["single", "multi", "global4", "global8"] = "single",
+        target_cores: Optional[List[Union[str, "CoreId"]]] = None,
+        target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
     ):
         assert channels % 2 == 0, "channels should be divisible by 2"
         super().__init__()
@@ -147,16 +172,23 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         self.half_channels = channels // 2
         self.upsample_initial_channel = upsample_initial_channel
         
-        self.acc = qbruntime.Accelerator()
-        mc = qbruntime.ModelConfig()
-        mc.set_single_core_mode(1)
-        self.mxq_model = qbruntime.Model(mxq_path, mc)
-        num_model_variants = self.mxq_model.get_num_model_variants()
+        self.npu_backend = MobilintNPUBackend(
+            mxq_path=mxq_path,
+            dev_no=dev_no,
+            core_mode=core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
+        
+        self.npu_backend.name_or_path = name_or_path
+        self.npu_backend.create()
+        self.npu_backend.launch()
+        
+        num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
-            self.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
+            self.npu_backend.mxq_model.get_model_variant_handle(i).get_model_input_shape()[0][1]
             for i in range(num_model_variants)
         ]
-        self.mxq_model.launch(self.acc)
         
     def __call__(self, x):
         device = x.device
@@ -184,8 +216,11 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             x_slice = np.split(x_slice, [self.half_channels], 2) # [1, W, C // 2], [1, W, C // 2]
             x0, x1 = x_slice[0], x_slice[1]
             x0 = np.flip(x0, 2)
+
+            input_mask = np.ones(shape=(2, x0.shape[1], x0.shape[1]), dtype=np.float32)
+            input_mask[:, :, :remaining_length] = 0
             
-            outputs = self.mxq_model.infer([x1, x0]) # [(1, seq_len, 1)]
+            outputs = self.npu_backend.mxq_model.infer([x1, x0, input_mask]) # [(1, seq_len, 1)]
             assert outputs is not None, "No output from mxq model inference."
             output_chunk = outputs[0]
             
@@ -200,10 +235,10 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         return None, output
 
     def launch(self):
-        self.mxq_model.launch(self.acc)
+        self.npu_backend.launch()
     
     def dispose(self):
-        self.mxq_model.dispose()
+        self.npu_backend.dispose()
 
 class MobilintSynthesizerTrn(nn.Module):
     def __init__(
@@ -235,8 +270,13 @@ class MobilintSynthesizerTrn(nn.Module):
         num_languages=None,
         num_tones=None,
         norm_refenc=False,
-        mxq_path_enc_p_sdp_dp="",
-        mxq_path_dec_flow="",
+        
+        name_or_path="",
+        dev_no=0,
+        target_core="0:0",
+        encoder_mxq_path="",
+        decoder_mxq_path="",
+        
         **kwargs
     ):
         super().__init__()
@@ -247,14 +287,24 @@ class MobilintSynthesizerTrn(nn.Module):
             hidden_channels,
             num_languages=num_languages,
             num_tones=num_tones,
-            mxq_path=mxq_path_enc_p_sdp_dp,
+            
+            name_or_path=name_or_path,
+            mxq_path=encoder_mxq_path,
+            dev_no=dev_no,
+            core_mode="single",
+            target_cores=[target_core],
         )
         
         # self.dec, self.flow all in one mxq
         self.dec_flow = MobilintTransformerCouplingBlockAndGenerator(
             inter_channels,
             upsample_initial_channel,
-            mxq_path=mxq_path_dec_flow,
+            
+            name_or_path=name_or_path,
+            mxq_path=decoder_mxq_path,
+            dev_no=dev_no,
+            core_mode="single",
+            target_cores=[target_core],
         )
         
         if n_speakers <= 0:
