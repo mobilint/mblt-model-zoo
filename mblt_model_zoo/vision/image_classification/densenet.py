@@ -11,16 +11,34 @@ class DenseNet121_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
+            "repo_id": "mobilint/DenseNet121",
+            "filename": "densenet121.mxq",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
             },
+            "Resize": {
+                "size": 256,
+                "interpolation": "bilinear",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={"task": "image_classification"},
+    )
+    DEFAULT = IMAGENET1K_V1  # Default model
+
+
+class DenseNet161_Set(ModelInfoSet):
+    """Configuration set for DenseNet169 models."""
+
+    IMAGENET1K_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/DenseNet161",
+            "filename": "densenet161.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -45,16 +63,8 @@ class DenseNet169_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DenseNet169",
+            "filename": "densenet169.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -79,16 +89,8 @@ class DenseNet201_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DenseNet201",
+            "filename": "densenet201.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -128,6 +130,33 @@ def DenseNet121(
     """
     return MBLT_Engine.from_model_info_set(
         DenseNet121_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def DenseNet161(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    """
+    Constructs a DenseNet161 model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
+    return MBLT_Engine.from_model_info_set(
+        DenseNet161_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

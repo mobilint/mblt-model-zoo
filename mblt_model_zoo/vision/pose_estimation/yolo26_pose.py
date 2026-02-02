@@ -11,16 +11,8 @@ class YOLO26nPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO26nPose",
+            "filename": "yolo26n-pose.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -46,16 +38,8 @@ class YOLO26sPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO26sPose",
+            "filename": "yolo26s-pose.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -81,16 +65,8 @@ class YOLO26mPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO26mPose",
+            "filename": "yolo26m-pose.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -116,16 +92,8 @@ class YOLO26lPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO26lPose",
+            "filename": "yolo26l-pose.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -151,16 +119,8 @@ class YOLO26xPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO26xPose",
+            "filename": "yolo26x-pose.mxq",
         },
         pre_cfg={
             "Reader": {

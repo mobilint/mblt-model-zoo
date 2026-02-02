@@ -11,16 +11,8 @@ class MobileNet_V2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/mobilenet_v2",
+            "filename": "mobilenet_v2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -39,16 +31,8 @@ class MobileNet_V2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/mobilenet_v2",
+            "filename": "mobilenet_v2.mxq",
         },
         pre_cfg={
             "Reader": {

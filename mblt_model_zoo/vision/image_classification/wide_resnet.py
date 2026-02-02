@@ -11,16 +11,8 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/WideResNet50_2",
+            "filename": "wide_resnet50_2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -41,16 +33,8 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/WideResNet50_2",
+            "filename": "wide_resnet50_2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +61,8 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/WideResNet101_2",
+            "filename": "wide_resnet101_2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -107,16 +83,8 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/WideResNet101_2",
+            "filename": "wide_resnet101_2.mxq",
         },
         pre_cfg={
             "Reader": {

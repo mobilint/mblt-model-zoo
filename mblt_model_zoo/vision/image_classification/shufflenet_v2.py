@@ -6,21 +6,41 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
+class ShuffleNet_V2_X0_5_Set(ModelInfoSet):
+    """Configuration set for ShuffleNet V2 x0.5 models."""
+
+    IMAGENET1K_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/shufflenet_v2_x0_5",
+            "filename": "shufflenet_v2_x0_5.mxq",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 256,
+                "interpolation": "bilinear",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "image_classification",
+        },
+    )
+    DEFAULT = IMAGENET1K_V1  # Default model
+
+
 class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
     """Configuration set for ShuffleNet V2 x1.0 models."""
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/shufflenet_v2_x1_0",
+            "filename": "shufflenet_v2_x1_0.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -47,16 +67,8 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/shufflenet_v2_x1_5",
+            "filename": "shufflenet_v2_x1_5.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -83,16 +95,8 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/shufflenet_v2_x2_0",
+            "filename": "shufflenet_v2_x2_0.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -11,16 +11,8 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Tiny_Patch16_224",
+            "filename": "ViT_Tiny_Patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -44,16 +36,8 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Tiny_Patch16_384",
+            "filename": "ViT_Tiny_Patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +61,8 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Small_Patch16_224",
+            "filename": "ViT_Small_Patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -110,16 +86,8 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Small_Patch16_384",
+            "filename": "ViT_Small_Patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -143,16 +111,8 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Small_Patch32_224",
+            "filename": "ViT_Small_Patch32_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -176,16 +136,8 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Small_Patch32_384",
+            "filename": "ViT_Small_Patch32_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -209,16 +161,8 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Base_Patch8_224",
+            "filename": "ViT_Base_Patch8_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -242,16 +186,8 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Base_Patch16_224",
+            "filename": "ViT_Base_Patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -275,16 +211,8 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Base_Patch16_384",
+            "filename": "ViT_Base_Patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -308,16 +236,8 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Base_Patch32_224",
+            "filename": "ViT_Base_Patch32_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -341,16 +261,8 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Base_Patch32_384",
+            "filename": "ViT_Base_Patch32_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -374,16 +286,8 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Large_Patch16_224",
+            "filename": "ViT_Large_Patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -407,16 +311,8 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Large_Patch16_384",
+            "filename": "ViT_Large_Patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -440,16 +336,8 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ViT_Large_Patch32_384",
+            "filename": "ViT_Large_Patch32_384.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -11,16 +11,8 @@ class YOLO11nSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11n-seg",
+            "filename": "yolo11n-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -45,16 +37,8 @@ class YOLO11sSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11s-seg",
+            "filename": "yolo11s-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -79,16 +63,8 @@ class YOLO11mSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11m-seg",
+            "filename": "yolo11m-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -113,16 +89,8 @@ class YOLO11lSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11l-seg",
+            "filename": "yolo11l-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -147,16 +115,8 @@ class YOLO11xSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11x-seg",
+            "filename": "yolo11x-seg.mxq",
         },
         pre_cfg={
             "Reader": {

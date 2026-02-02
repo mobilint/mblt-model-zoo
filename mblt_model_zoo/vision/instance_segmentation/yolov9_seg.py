@@ -11,16 +11,8 @@ class YOLOv9cSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9c-seg",
+            "filename": "yolov9c-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -45,16 +37,8 @@ class YOLOv9eSeg_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9e-seg",
+            "filename": "yolov9e-seg.mxq",
         },
         pre_cfg={
             "Reader": {

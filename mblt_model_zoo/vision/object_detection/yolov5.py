@@ -11,16 +11,8 @@ class YOLOv5n_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5n",
+            "filename": "yolov5n.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -45,16 +37,8 @@ class YOLOv5nu_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5nu",
+            "filename": "yolov5nu.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -78,16 +62,8 @@ class YOLOv5n6_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5n6",
+            "filename": "yolov5n6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -112,16 +88,8 @@ class YOLOv5n6u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5n6u",
+            "filename": "yolov5n6u.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -145,16 +113,8 @@ class YOLOv5s_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5s",
+            "filename": "yolov5s.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -179,16 +139,8 @@ class YOLOv5s6_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5s6",
+            "filename": "yolov5s6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -213,16 +165,8 @@ class YOLOv5su_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5su",
+            "filename": "yolov5su.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -246,16 +190,8 @@ class YOLOv5s6u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5s6u",
+            "filename": "yolov5s6u.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -279,16 +215,8 @@ class YOLOv5m_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5m",
+            "filename": "yolov5m.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -313,16 +241,8 @@ class YOLOv5m6_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5m6",
+            "filename": "yolov5m6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -347,16 +267,8 @@ class YOLOv5mu_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5mu",
+            "filename": "yolov5mu.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -380,16 +292,8 @@ class YOLOv5m6u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5m6u",
+            "filename": "yolov5m6u.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -413,16 +317,8 @@ class YOLOv5l_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5l",
+            "filename": "yolov5l.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -447,16 +343,8 @@ class YOLOv5lu_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5lu",
+            "filename": "yolov5lu.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -480,16 +368,8 @@ class YOLOv5l6_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5l6",
+            "filename": "yolov5l6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -514,16 +394,8 @@ class YOLOv5l6u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5l6u",
+            "filename": "yolov5l6u.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -547,16 +419,8 @@ class YOLOv5x_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5x",
+            "filename": "yolov5x.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -581,16 +445,8 @@ class YOLOv5xu_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5xu",
+            "filename": "yolov5xu.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -614,16 +470,8 @@ class YOLOv5x6_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5x6",
+            "filename": "yolov5x6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -648,16 +496,8 @@ class YOLOv5x6u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv5x6u",
+            "filename": "yolov5x6u.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -11,16 +11,8 @@ class FlexiViT_Small_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/flexivit-small",
+            "filename": "flexivit-small.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -44,16 +36,8 @@ class FlexiViT_Base_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/flexivit-base",
+            "filename": "flexivit-base.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +61,8 @@ class FlexiViT_Large_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/flexivit-large",
+            "filename": "flexivit-large.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -11,16 +11,8 @@ class VGG11_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG11",
+            "filename": "vgg11.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -45,16 +37,8 @@ class VGG11_BN_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG11_BN",
+            "filename": "vgg11_bn.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -79,16 +63,8 @@ class VGG13_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG13",
+            "filename": "vgg13.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -113,16 +89,8 @@ class VGG13_BN_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG13_BN",
+            "filename": "vgg13_bn.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -147,16 +115,8 @@ class VGG16_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG16",
+            "filename": "vgg16.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -181,16 +141,8 @@ class VGG16_BN_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG16_BN",
+            "filename": "vgg16_bn.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -215,16 +167,8 @@ class VGG19_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG19",
+            "filename": "vgg19.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -249,16 +193,8 @@ class VGG19_BN_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/VGG19_BN",
+            "filename": "vgg19_bn.mxq",
         },
         pre_cfg={
             "Reader": {

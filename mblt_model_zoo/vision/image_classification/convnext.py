@@ -11,16 +11,8 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Tiny",
+            "filename": "convnext_tiny.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -47,16 +39,8 @@ class ConvNeXt_Small_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Small",
+            "filename": "convnext_small.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -83,16 +67,8 @@ class ConvNeXt_Base_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Base",
+            "filename": "convnext_base.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -119,16 +95,8 @@ class ConvNeXt_Large_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Large",
+            "filename": "convnext_large.mxq",
         },
         pre_cfg={
             "Reader": {

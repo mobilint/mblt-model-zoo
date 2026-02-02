@@ -11,16 +11,8 @@ class ResNext50_32x4d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/resnext50_32x4d",
+            "filename": "resnext50_32x4d.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -41,16 +33,8 @@ class ResNext50_32x4d_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/resnext50_32x4d",
+            "filename": "resnext50_32x4d.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +61,8 @@ class ResNext101_32x8d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/resnext101_32x8d",
+            "filename": "resnext101_32x8d.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -107,16 +83,8 @@ class ResNext101_32x8d_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/resnext101_32x8d",
+            "filename": "resnext101_32x8d.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -143,16 +111,8 @@ class ResNext101_64x4d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/resnext101_64x4d",
+            "filename": "resnext101_64x4d.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 import numpy as np
 import qbruntime
 import torch
+from huggingface_hub import hf_hub_download
 
-from ..utils.downloads import download_url_to_file
 from ..utils.logging import log_model_details
 from .utils.postprocess import build_postprocess
 from .utils.preprocess import build_preprocess
@@ -47,7 +47,7 @@ class MBLT_Engine:
         model_info_set: ModelInfoSet,
         local_path: str = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """
@@ -57,16 +57,6 @@ class MBLT_Engine:
         assert (
             model_type in model_info_set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
-        assert (
-            product
-            in model_info_set.__dict__[model_type].value.model_cfg["url_dict"].keys()
-        ), f"product {product} not found in model_type {model_type}. Available products: {model_info_set.__dict__[model_type].value.model_cfg['url_dict'].keys()}"
-        assert (
-            infer_mode
-            in model_info_set.__dict__[model_type]
-            .value.model_cfg["url_dict"][product]
-            .keys()
-        ), f"infer_mode {infer_mode} not found in model_type {model_type} for product {product}. Available infer modes: {model_info_set.__dict__[model_type].value.model_cfg['url_dict'][product].keys()}"
 
         model_cfg = model_info_set.__dict__[model_type].value.model_cfg
         model_cfg["local_path"] = local_path
@@ -182,10 +172,11 @@ class MXQ_Model:
 
     def __init__(
         self,
-        url_dict,
-        local_path: str = None,
-        infer_mode: str = "global",
         product: str = "aries",
+        infer_mode: str = "global",
+        repo_id: str = None,
+        filename: str = None,
+        local_path: str = None,
     ):
         """
         Initializes the MXQ_Model.
@@ -200,9 +191,15 @@ class MXQ_Model:
             ValueError: If inference mode or product is invalid, or model file is missing.
         """
         self.infer_mode = infer_mode
+        assert infer_mode in [
+            "single",
+            "multi",
+            "global4",
+            "global8",
+        ], "Inappropriate inference mode"
+
         self.product = product
-        if self.product not in url_dict.keys():  # execption handling
-            url_dict[self.product] = {self.infer_mode: None}
+        assert product in ["aries", "regulus"], "Inappropriate product"
 
         self.acc = qbruntime.Accelerator()
         # ----------------Core Allocation-------------------------
@@ -218,10 +215,10 @@ class MXQ_Model:
                 mc.set_global4_core_mode(
                     [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
                 )
-            elif self.infer_mode == "global" or self.infer_mode == "global8":
+            elif self.infer_mode == "global8":
                 mc.set_global8_core_mode()
             else:
-                raise ValueError("Inappropriate inferece mode")
+                raise ValueError("Inappropriate inference mode")
         elif self.product == "regulus":
             assert (
                 self.infer_mode == "single"
@@ -230,39 +227,20 @@ class MXQ_Model:
             raise ValueError("Inappropriate product")
 
         # -----------------Model Preparation-----------------------
-        url = url_dict[self.product].get(self.infer_mode)
-        if url is not None:
-            parts = urlparse(url)
-            filename = os.path.basename(parts.path)
-
-            if local_path is None:  # default option
-                model_dir = os.path.expanduser(
-                    f"~/.mblt_model_zoo/vision/{product}/{infer_mode}"
-                )
-                os.makedirs(model_dir, exist_ok=True)
-                cached_file = os.path.join(model_dir, filename)
-
-            else:
-                if local_path.endswith(".mxq"):
-                    cached_file = local_path
-                else:
-                    os.makedirs(local_path, exist_ok=True)
-                    cached_file = os.path.join(local_path, filename)
-
-            if not os.path.exists(cached_file):
-                sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
-                download_url_to_file(url, cached_file, progress=True)
-
+        if local_path is not None:
+            assert os.path.isfile(
+                local_path
+            ), "The model should be prepared on local path"
+            cached_file = local_path
+        elif repo_id is not None and filename is not None:
+            cached_file = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                subfolder=f"{self.product}/{self.infer_mode}",
+                local_dir=os.path.expanduser("~/.mblt_model_zoo/vision"),
+            )
         else:
-            if local_path is not None:
-                if os.path.isfile(local_path):
-                    cached_file = local_path
-                else:
-                    raise ValueError(
-                        "The model should be prepared on server or local path"
-                    )
-            else:
-                raise ValueError("The model should be prepared on server or local path")
+            raise ValueError("The model should be prepared on server or local path")
 
         # ----------------Initialize Model----------------------
         self.model = qbruntime.Model(cached_file, mc)

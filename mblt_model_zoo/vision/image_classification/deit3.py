@@ -11,16 +11,8 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Small_Patch16_224",
+            "filename": "deit3_small_patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -44,16 +36,8 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Small_Patch16_384",
+            "filename": "deit3_small_patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +61,8 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Medium_Patch16_224",
+            "filename": "deit3_medium_patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -110,16 +86,8 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Base_Patch16_224",
+            "filename": "deit3_base_patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -143,16 +111,8 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Base_Patch16_384",
+            "filename": "deit3_base_patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -176,16 +136,8 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Large_Patch16_224",
+            "filename": "deit3_large_patch16_224.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -209,16 +161,8 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/DeiT3_Large_Patch16_384",
+            "filename": "deit3_large_patch16_384.mxq",
         },
         pre_cfg={
             "Reader": {

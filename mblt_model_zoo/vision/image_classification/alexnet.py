@@ -11,16 +11,8 @@ class AlexNet_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/AlexNet",
+            "filename": "alexnet.mxq",
         },
         pre_cfg={
             "Reader": {

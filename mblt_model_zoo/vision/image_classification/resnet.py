@@ -11,16 +11,8 @@ class ResNet18_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet18",
+            "filename": "resnet18-imagenet1k-v1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -47,16 +39,8 @@ class ResNet34_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet34",
+            "filename": "resnet34-imagenet1k-v1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -83,16 +67,8 @@ class ResNet50_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet50",
+            "filename": "resnet50-imagenet1k-v1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -113,16 +89,8 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet50",
+            "filename": "resnet50-imagenet1k-v2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -149,16 +117,8 @@ class ResNet101_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet101",
+            "filename": "resnet101-imagenet1k-v1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -179,16 +139,8 @@ class ResNet101_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet101",
+            "filename": "resnet101-imagenet1k-v2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -215,16 +167,8 @@ class ResNet152_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet152",
+            "filename": "resnet152-imagenet1k-v1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -245,16 +189,8 @@ class ResNet152_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet152",
+            "filename": "resnet152-imagenet1k-v2.mxq",
         },
         pre_cfg={
             "Reader": {

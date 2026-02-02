@@ -11,16 +11,8 @@ class YOLOv3u_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv3u",
+            "filename": "yolov3u.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -44,16 +36,33 @@ class YOLOv3_sppu_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
+            "repo_id": "mobilint/YOLOv3-SPPu",
+            "filename": "yolov3-sppu.mxq",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
             },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+class YOLOv3_tinyu_Set(ModelInfoSet):
+    """Configuration set for YOLOv3_tinyu models."""
+
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv3-Tinyu",
+            "filename": "yolov3-tinyu.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -77,16 +86,8 @@ class YOLOv3_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv3",
+            "filename": "yolov3.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -111,16 +112,34 @@ class YOLOv3_spp_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
+            "repo_id": "mobilint/YOLOv3-SPP",
+            "filename": "yolov3-spp.mxq",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
             },
+            "YoloPre": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "anchors": True,
+        },
+    )
+    DEFAULT = COCO_V1
+
+
+class YOLOv3_tiny_Set(ModelInfoSet):
+    """Configuration set for YOLOv3_tiny models."""
+
+    COCO_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv3-Tiny",
+            "filename": "yolov3-tiny.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -194,6 +213,33 @@ def YOLOv3_sppu(
     )
 
 
+def YOLOv3_tinyu(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3_tinyu model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
+    return MBLT_Engine.from_model_info_set(
+        YOLOv3_tinyu_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
 def YOLOv3(
     local_path: str = None,
     model_type: str = "DEFAULT",
@@ -241,6 +287,33 @@ def YOLOv3_spp(
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv3_spp_Set,
+        local_path=local_path,
+        model_type=model_type,
+        infer_mode=infer_mode,
+        product=product,
+    )
+
+
+def YOLOv3_tiny(
+    local_path: str = None,
+    model_type: str = "DEFAULT",
+    infer_mode: str = "global",
+    product: str = "aries",
+) -> MBLT_Engine:
+    """
+    Constructs a YOLOv3_tiny model engine.
+
+    Args:
+        local_path (str, optional): Path to the local model file. Defaults to None.
+        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference mode. Defaults to "global".
+        product (str, optional): Target product. Defaults to "aries".
+
+    Returns:
+        MBLT_Engine: The constructed model engine.
+    """
+    return MBLT_Engine.from_model_info_set(
+        YOLOv3_tiny_Set,
         local_path=local_path,
         model_type=model_type,
         infer_mode=infer_mode,

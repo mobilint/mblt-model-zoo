@@ -11,16 +11,8 @@ class RegNet_X_400MF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_400mf",
+            "filename": "regnet_x_400mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -39,16 +31,8 @@ class RegNet_X_400MF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_400mf",
+            "filename": "regnet_x_400mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -73,16 +57,8 @@ class RegNet_X_800MF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_800mf",
+            "filename": "regnet_x_800mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -101,16 +77,8 @@ class RegNet_X_800MF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_800mf",
+            "filename": "regnet_x_800mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -135,16 +103,8 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_1_6gf",
+            "filename": "regnet_x_1_6gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -163,16 +123,8 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_1_6gf",
+            "filename": "regnet_x_1_6gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -197,16 +149,8 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_3_2gf",
+            "filename": "regnet_x_3_2gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -225,16 +169,8 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_3_2gf",
+            "filename": "regnet_x_3_2gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -259,16 +195,8 @@ class RegNet_X_8GF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_8gf",
+            "filename": "regnet_x_8gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -287,16 +215,8 @@ class RegNet_X_8GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_8gf",
+            "filename": "regnet_x_8gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -321,16 +241,8 @@ class RegNet_X_16GF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_16gf",
+            "filename": "regnet_x_16gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -349,16 +261,8 @@ class RegNet_X_16GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_16gf",
+            "filename": "regnet_x_16gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -383,16 +287,8 @@ class RegNet_X_32GF_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_x_32gf",
+            "filename": "regnet_x_32gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -443,16 +339,8 @@ class RegNet_X_32GF_Set(ModelInfoSet):
 class RegNet_Y_400MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_400mf",
+            "filename": "regnet_y_400mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -471,16 +359,8 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_400mf",
+            "filename": "regnet_y_400mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -503,16 +383,8 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
 class RegNet_Y_800MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_800mf",
+            "filename": "regnet_y_800mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -531,16 +403,8 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_800mf",
+            "filename": "regnet_y_800mf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -563,16 +427,8 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
 class RegNet_Y_1_6GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_1_6gf",
+            "filename": "regnet_y_1_6gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -591,16 +447,8 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_1_6gf",
+            "filename": "regnet_y_1_6gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -623,16 +471,8 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
 class RegNet_Y_3_2GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_3_2gf",
+            "filename": "regnet_y_3_2gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -651,16 +491,8 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_3_2gf",
+            "filename": "regnet_y_3_2gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -683,16 +515,8 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
 class RegNet_Y_8GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_8gf",
+            "filename": "regnet_y_8gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -711,16 +535,8 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_8gf",
+            "filename": "regnet_y_8gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -743,16 +559,8 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
 class RegNet_Y_16GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_16gf",
+            "filename": "regnet_y_16gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -771,16 +579,8 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_16gf",
+            "filename": "regnet_y_16gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -803,16 +603,8 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
 class RegNet_Y_32GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_32gf",
+            "filename": "regnet_y_32gf.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -831,16 +623,8 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/regnet_y_32gf",
+            "filename": "regnet_y_32gf.mxq",
         },
         pre_cfg={
             "Reader": {
