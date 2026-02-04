@@ -315,49 +315,56 @@ def get_coco_class_num() -> int:
 
 
 def get_coco_label(idx: int) -> str:
-    """Get the COCO label by index.
+    """
+    Get the COCO class label for a given index.
 
     Args:
-        idx (int): The index of the COCO label.
+        idx (int): Zero-based class index.
 
     Returns:
-        str: The COCO label.
+        str: Descriptive label for the class (e.g., "person").
+
+    Raises:
+        AssertionError: If index is out of range.
     """
     assert 0 <= idx < get_coco_class_num(), f"Invalid index: {idx}"
 
     return CLASSES[idx]
 
 
-def get_coco_inv(idx: int) -> str:
-    """Get the COCO label by index.
+def get_coco_inv(idx: int) -> int:
+    """Get the original COCO category ID for a given model output index.
 
     Args:
-        idx (int): The index of the COCO label.
+        idx (int): Model output class index.
 
     Returns:
-        str: The COCO label.
+        int: Original COCO category ID.
     """
     return CLASS_INV_MAP[idx]
 
 
 def get_coco_det_palette(idx: int) -> tuple:
-    """Get the COCO detection palette by index.
+    """
+    Get a distinct color for a COCO detection class.
 
     Args:
-        idx (int): The index of the COCO detection palette.
+        idx (int): Class index.
 
     Returns:
-        tuple: The COCO detection palette. (R, G, B)
+        tuple: (R, G, B) color tuple.
     """
     return DET_PALETTE[idx]
 
 
-def get_coco_pose_palette(idx: int) -> tuple:
+def get_coco_pose_palette(idx: int) -> list:
     """Get the COCO pose palette by index.
+
     Args:
         idx (int): The index of the COCO pose palette.
+
     Returns:
-        tuple: The COCO pose palette. (R, G, B)
+        list: The COCO pose palette as an [R, G, B] list.
     """
     return POSE_PALETTE[idx]
 
@@ -373,19 +380,23 @@ def get_coco_pose_skeleton() -> list:
 
 def get_coco_limb_palette(idx: int) -> list:
     """Get the COCO limb palette by index.
+
     Args:
         idx (int): The index of the COCO limb palette.
+
     Returns:
-        list: The COCO limb palette.
+        list: The COCO limb palette as an [R, G, B] list.
     """
     return LIMB_PALETTE[idx]
 
 
 def get_coco_keypoint_palette(idx: int) -> list:
-    """Get the COCO keypoint palette.
+    """Get the COCO keypoint palette by index.
+
     Args:
         idx (int): The index of the COCO keypoint palette.
+
     Returns:
-        list: The COCO keypoint palette.
+        list: The COCO keypoint palette as an [R, G, B] list.
     """
     return KEYPOINT_PALETTE[idx]

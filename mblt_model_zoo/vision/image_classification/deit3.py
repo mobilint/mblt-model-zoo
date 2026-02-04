@@ -187,17 +187,16 @@ def DeiT3_Small_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Small_Patch16_224 model engine.
+    """Constructs a DeiT3_Small_Patch16_224 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Small_Patch16_224_Set,
@@ -214,17 +213,16 @@ def DeiT3_Small_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Small_Patch16_384 model engine.
+    """Constructs a DeiT3_Small_Patch16_384 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Small_Patch16_384_Set,
@@ -241,17 +239,16 @@ def DeiT3_Medium_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Medium_Patch16_224 model engine.
+    """Constructs a DeiT3_Medium_Patch16_224 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Medium_Patch16_224_Set,
@@ -268,17 +265,16 @@ def DeiT3_Base_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Base_Patch16_224 model engine.
+    """Constructs a DeiT3_Base_Patch16_224 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Base_Patch16_224_Set,
@@ -295,17 +291,16 @@ def DeiT3_Base_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Base_Patch16_384 model engine.
+    """Constructs a DeiT3_Base_Patch16_384 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Base_Patch16_384_Set,
@@ -322,17 +317,16 @@ def DeiT3_Large_Patch16_224(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Large_Patch16_224 model engine.
+    """Constructs a DeiT3_Large_Patch16_224 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Large_Patch16_224_Set,
@@ -349,17 +343,16 @@ def DeiT3_Large_Patch16_384(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a DeiT3_Large_Patch16_384 model engine.
+    """Constructs a DeiT3_Large_Patch16_384 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         DeiT3_Large_Patch16_384_Set,

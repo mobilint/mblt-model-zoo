@@ -10,21 +10,26 @@ from .yolo_anchorless_post import (
     YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
 )
-from .yolo_nmsfree_post import YOLONMSFreePosePost, YOLONMSFreePost, YOLONMSFreeSegPost
+from .yolo_dflfree_post import YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
+from .yolo_nmsfree_post import YOLONMSFreePost
 
 
 def build_postprocess(
     pre_cfg: dict,
     post_cfg: dict,
 ) -> PostBase:
-    """Build the postprocess object.
+    """Builds a postprocessing object based on the model configuration.
 
     Args:
-        pre_cfg (dict): Preprocessing configuration.
-        post_cfg (dict): Postprocessing configuration.
+        pre_cfg (dict): Preprocessing configuration from the model info.
+        post_cfg (dict): Postprocessing configuration from the model info.
+            Must contain "task" and relevant flags for the specific task.
 
     Returns:
-        PostBase: The postprocess object.
+        PostBase: An instance of a postprocessing class tailored for the task.
+
+    Raises:
+        NotImplementedError: If the specified task is not supported.
     """
     task_lower = post_cfg["task"].lower()
     if task_lower == "image_classification":
@@ -35,7 +40,12 @@ def build_postprocess(
                 pre_cfg,
                 post_cfg,
             )
-        if post_cfg.get("nmsfree", False):  # nms free is only available for detection
+        if post_cfg.get("dflfree", False):  # nms free is only available for detection
+            return YOLODFLFreePost(
+                pre_cfg,
+                post_cfg,
+            )
+        if post_cfg.get("nmsfree", False):
             return YOLONMSFreePost(
                 pre_cfg,
                 post_cfg,
@@ -44,15 +54,14 @@ def build_postprocess(
             pre_cfg,
             post_cfg,
         )
-
     if task_lower == "instance_segmentation":
         if post_cfg.get("anchors", False):
             return YOLOAnchorSegPost(
                 pre_cfg,
                 post_cfg,
             )
-        if post_cfg.get("nmsfree", False):
-            return YOLONMSFreeSegPost(
+        if post_cfg.get("dflfree", False):
+            return YOLODFLFreeSegPost(
                 pre_cfg,
                 post_cfg,
             )
@@ -60,10 +69,9 @@ def build_postprocess(
             pre_cfg,
             post_cfg,
         )
-
     if task_lower == "pose_estimation":
-        if post_cfg.get("nmsfree", False):
-            return YOLONMSFreePosePost(
+        if post_cfg.get("dflfree", False):
+            return YOLODFLFreePosePost(
                 pre_cfg,
                 post_cfg,
             )
@@ -71,5 +79,4 @@ def build_postprocess(
             pre_cfg,
             post_cfg,
         )
-
     raise NotImplementedError(f"Task {post_cfg['task']} is not implemented yet")

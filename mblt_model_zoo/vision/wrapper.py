@@ -3,9 +3,7 @@ Wrapper classes for MBLT model execution.
 """
 
 import os
-import sys
 from typing import Union
-from urllib.parse import urlparse
 
 import numpy as np
 import qbruntime
@@ -21,12 +19,12 @@ from .utils.types import ModelInfoSet, TensorLike
 
 class MBLT_Engine:
     """
-    Engine for executing MBLT models with preprocessing and postprocessing.
+    Main engine class for running vision models from the MBLT zoo.
+    Handles the full pipeline: Preprocessing -> Inference -> Postprocessing.
     """
 
     def __init__(self, model_cfg: dict, pre_cfg: dict, post_cfg: dict):
-        """
-        Initializes the MBLT_Engine.
+        """Initializes the MBLT_Engine.
 
         Args:
             model_cfg (dict): Model configuration.
@@ -49,9 +47,18 @@ class MBLT_Engine:
         model_type: str = "DEFAULT",
         infer_mode: str = "global8",
         product: str = "aries",
-    ):
-        """
-        Create an instance of the model from a ModelInfoSet.
+    ) -> "MBLT_Engine":
+        """Creates an instance of the model from a ModelInfoSet.
+
+        Args:
+            model_info_set (ModelInfoSet): Set of model configurations.
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+
+        Returns:
+            MBLT_Engine: A model engine instance.
         """
 
         assert (
@@ -69,37 +76,37 @@ class MBLT_Engine:
         return cls(model_cfg, pre_cfg, post_cfg)
 
     def __call__(self, x: TensorLike):
-        """
-        Runs inference on the input.
+        """Runs raw model inference on the input.
+
+        Note:
+            This does NOT include preprocessing or postprocessing.
 
         Args:
-            x (TensorLike): Input tensor or array.
+            x (TensorLike): Input tensor for the model.
 
         Returns:
-            Any: Inference result.
+            Any: Raw model output.
         """
         return self.model(x)
 
     def preprocess(self, x, **kwargs):
-        """
-        Runs preprocessing on the input.
+        """Runs preprocessing on the input.
 
         Args:
             x: Input data.
-            **kwargs: Additional arguments.
+            **kwargs: Additional arguments for preprocessing.
 
         Returns:
             Any: Preprocessed data.
         """
         return self._preprocess(x, **kwargs)
 
-    def postprocess(self, x, **kwargs):
-        """
-        Runs postprocessing on the input.
+    def postprocess(self, x, **kwargs) -> Results:
+        """Runs postprocessing on the input.
 
         Args:
             x: Input data.
-            **kwargs: Additional arguments.
+            **kwargs: Additional arguments for postprocessing.
 
         Returns:
             Results: Postprocessed results.
@@ -108,8 +115,7 @@ class MBLT_Engine:
         return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
 
     def to(self, device: Union[str, torch.device]):
-        """
-        Moves the engine and its components to the specified device.
+        """Moves the engine and its components to the specified device.
 
         Args:
             device (Union[str, torch.device]): Target device.
@@ -136,8 +142,7 @@ class MBLT_Engine:
         self.to(device="cuda")
 
     def cuda(self, device: Union[str, int] = 0):
-        """
-        Moves the engine to CUDA device.
+        """Moves the engine to CUDA device.
 
         Args:
             device (Union[str, int], optional): CUDA device identifier. Defaults to 0.
@@ -167,7 +172,8 @@ class MBLT_Engine:
 
 class MXQ_Model:
     """
-    MXQ Model wrapper managing model loading and inference on accelerator.
+    Low-level wrapper for managing model execution on the Mobilint MXQ accelerator.
+    Handles communication with the qbruntime and resource management.
     """
 
     def __init__(
@@ -178,14 +184,14 @@ class MXQ_Model:
         filename: str = None,
         local_path: str = None,
     ):
-        """
-        Initializes the MXQ_Model.
+        """Initializes the MXQ_Model.
 
         Args:
-            url_dict (dict): Dictionary of model URLs.
+            repo_id (str, optional): Hugging Face repository ID. Defaults to None.
+            filename (str, optional): Model filename. Defaults to None.
             local_path (str, optional): Path to local model file. Defaults to None.
-            infer_mode (str, optional): Inference mode. Defaults to "global".
-            product (str, optional): Product name. Defaults to "aries".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
 
         Raises:
             ValueError: If inference mode or product is invalid, or model file is missing.
@@ -248,8 +254,7 @@ class MXQ_Model:
         self.model.launch(self.acc)
 
     def __call__(self, x: TensorLike):
-        """
-        Runs inference on the input using the accelerator.
+        """Runs inference on the input using the accelerator.
 
         Args:
             x (TensorLike): Input tensor or array.

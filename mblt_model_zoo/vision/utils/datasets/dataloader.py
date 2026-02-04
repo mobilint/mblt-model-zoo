@@ -13,13 +13,23 @@ from PIL import Image
 
 
 class CustomCocodata:
-    """Custom COCO dataset class (without using torchvision)"""
+    """Custom COCO dataset class for loading images and metadata.
 
-    def __init__(self, root, annFile):
-        """
+    This class provides a simple interface for accessing COCO formatted data
+    without requiring external library dependencies like torchvision.
+
+    Attributes:
+        root (str): Root directory path containing the images.
+        coco (COCO): COCO helper object from faster_coco_eval.
+        ids (list[int]): Sorted list of image IDs in the dataset.
+    """
+
+    def __init__(self, root: str, annFile: str):
+        """Initializes the CustomCocodata instance.
+
         Args:
-            root (str): Image directory path
-            annFile (str): Annotation file path
+            root (str): Path to the directory containing images.
+            annFile (str): Path to the COCO annotation JSON file.
         """
         self.root = root
         self.coco = COCO(annFile)
@@ -50,15 +60,16 @@ class CustomCocodata:
         return len(self.ids)
 
 
-def get_coco_loader(dataset, batch_size, preprocess_fn: Callable):
-    """
-    Create a DataLoader for the COCO dataset.
+def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Callable):
+    """Creates a DataLoader for the COCO dataset.
+
     Args:
-        dataset: The dataset instance (e.g., CustomCocodata).
+        dataset (CustomCocodata): The dataset instance to load from.
         batch_size (int): Number of samples per batch.
-        preprocess_fn (Callable): Function to preprocess images.
+        preprocess_fn (Callable): Function used to preprocess images.
+
     Returns:
-        torch.utils.data.DataLoader: configured DataLoader for COCO.
+        torch.utils.data.DataLoader: A configured DataLoader for the COCO dataset.
     """
 
     def loader(batch):
@@ -86,15 +97,22 @@ def get_coco_loader(dataset, batch_size, preprocess_fn: Callable):
 
 
 class CustomImageFolder:
-    """
-    Custom ImageFolder dataset that loads images from a directory structure.
-    Expects data to be organized as root/class/image.jpg.
+    """Custom ImageFolder dataset for loading images from class-based directory structures.
+
+    Expects data to be organized in the format: root/class_name/image.jpg.
+
+    Attributes:
+        root (str): Root directory path.
+        classes (list[str]): List of class names found in the root directory.
+        class_to_idx (dict): Mapping from class name to class index.
+        samples (list[tuple]): List of (image_path, class_index) tuples.
     """
 
-    def __init__(self, root):
-        """
+    def __init__(self, root: str):
+        """Initializes the CustomImageFolder instance.
+
         Args:
-            root (str): Root directory path.
+            root (str): Path to the root directory.
         """
         self.root = root
         self.classes, self.class_to_idx = self.find_classes(root)
@@ -149,15 +167,18 @@ class CustomImageFolder:
         return len(self.samples)
 
 
-def get_imagenet_loader(dataset, batch_size, preprocess_fn: Callable):
-    """
-    Create a DataLoader for the ImageNet dataset.
+def get_imagenet_loader(
+    dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable
+):
+    """Creates a DataLoader for the ImageNet dataset.
+
     Args:
-        dataset: The dataset instance (e.g., CustomImageFolder).
+        dataset (CustomImageFolder): The dataset instance to load from.
         batch_size (int): Number of samples per batch.
-        preprocess_fn (Callable): Function to preprocess images.
+        preprocess_fn (Callable): Function used to preprocess images.
+
     Returns:
-        torch.utils.data.DataLoader: configured DataLoader for ImageNet.
+        torch.utils.data.DataLoader: A configured DataLoader for the ImageNet dataset.
     """
 
     def loader(batch):
@@ -180,14 +201,19 @@ def get_imagenet_loader(dataset, batch_size, preprocess_fn: Callable):
 
 
 class CustomWiderface:
-    """
-    Custom dataset for WiderFace.
+    """Custom dataset class for the WiderFace dataset.
+
+    Attributes:
+        root (str): Path to the root directory containing WiderFace images.
+        classes (list[str]): List of class/event names found in the root.
+        samples (list[tuple]): List of (image_path, class_name, file_name) tuples.
     """
 
-    def __init__(self, root):
-        """
+    def __init__(self, root: str):
+        """Initializes the CustomWiderface instance.
+
         Args:
-            root (str): Image directory path
+            root (str): Path to the directory containing WiderFace images.
         """
         self.root = root
         self.classes = self.find_classes(root)
@@ -249,15 +275,18 @@ class CustomWiderface:
         return len(self.samples)
 
 
-def get_widerface_loader(dataset, batch_size, preprocess_fn: Callable):
-    """
-    Create a DataLoader for the WiderFace dataset.
+def get_widerface_loader(
+    dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable
+):
+    """Creates a DataLoader for the WiderFace dataset.
+
     Args:
-        dataset: The dataset instance (e.g., CustomWiderface).
+        dataset (CustomWiderface): The dataset instance to load from.
         batch_size (int): Number of samples per batch.
-        preprocess_fn (Callable): Function to preprocess images.
+        preprocess_fn (Callable): Function used to preprocess images.
+
     Returns:
-        torch.utils.data.DataLoader: configured DataLoader for WiderFace.
+        torch.utils.data.DataLoader: A configured DataLoader for the WiderFace dataset.
     """
 
     def loader(batch):

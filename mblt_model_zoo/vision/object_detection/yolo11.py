@@ -26,6 +26,8 @@ class YOLO11n_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -51,6 +53,8 @@ class YOLO11s_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -76,6 +80,8 @@ class YOLO11m_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -101,6 +107,8 @@ class YOLO11l_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -126,6 +134,8 @@ class YOLO11x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -137,17 +147,16 @@ def YOLO11n(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11n model engine.
+    """Constructs a YOLO11n model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11n_Set,
@@ -164,17 +173,16 @@ def YOLO11s(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11s model engine.
+    """Constructs a YOLO11s model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11s_Set,
@@ -191,17 +199,16 @@ def YOLO11m(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11m model engine.
+    """Constructs a YOLO11m model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11m_Set,
@@ -218,17 +225,16 @@ def YOLO11l(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11l model engine.
+    """Constructs a YOLO11l model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11l_Set,
@@ -245,17 +251,16 @@ def YOLO11x(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11x model engine.
+    """Constructs a YOLO11x model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11x_Set,

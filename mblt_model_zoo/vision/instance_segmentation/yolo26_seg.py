@@ -26,8 +26,9 @@ class YOLO26nSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 32,
-            "nmsfree": True,  # nms free yolo
+            "dflfree": True,  # dfl free yolo
         },
     )
     DEFAULT = COCO_V1
@@ -50,8 +51,9 @@ class YOLO26sSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 32,
-            "nmsfree": True,  # nms free yolo
+            "dflfree": True,  # dfl free yolo
         },
     )
     DEFAULT = COCO_V1
@@ -74,8 +76,9 @@ class YOLO26mSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 32,
-            "nmsfree": True,  # nms free yolo
+            "dflfree": True,  # dfl free yolo
         },
     )
     DEFAULT = COCO_V1
@@ -98,8 +101,9 @@ class YOLO26lSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 32,
-            "nmsfree": True,  # nms free yolo
+            "dflfree": True,  # dfl free yolo
         },
     )
     DEFAULT = COCO_V1
@@ -122,8 +126,9 @@ class YOLO26xSeg_Set(ModelInfoSet):
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 32,
-            "nmsfree": True,  # nms free yolo
+            "dflfree": True,  # dfl free yolo
         },
     )
     DEFAULT = COCO_V1
@@ -135,17 +140,16 @@ def YOLO26nSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO26nSeg model engine.
+    """Constructs a YOLO26nSeg model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO26nSeg_Set,
@@ -162,17 +166,16 @@ def YOLO26sSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO26sSeg model engine.
+    """Constructs a YOLO26sSeg model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO26sSeg_Set,
@@ -189,17 +192,16 @@ def YOLO26mSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO26mSeg model engine.
+    """Constructs a YOLO26mSeg model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO26mSeg_Set,
@@ -216,17 +218,16 @@ def YOLO26lSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO26lSeg model engine.
+    """Constructs a YOLO26lSeg model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO26lSeg_Set,
@@ -243,17 +244,16 @@ def YOLO26xSeg(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO26xSeg model engine.
+    """Constructs a YOLO26xSeg model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO26xSeg_Set,

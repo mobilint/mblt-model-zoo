@@ -17,16 +17,20 @@ logger = logging.getLogger()
 
 
 def to_string(counts: list[int]) -> str:
-    """Converts the RLE object into a compact string representation. Each count is delta-encoded and
-    variable-length encoded as a string.
+    """Converts the RLE object into a compact string representation.
+
+    Each count is delta-encoded and variable-length encoded as a string.
 
     Args:
         counts (list[int]): List of RLE counts.
+
+    Returns:
+        str: Compact string representation of the RLE object.
     """
     result = []
 
-    for i in range(len(counts)):
-        x = int(counts[i])
+    for i, x in enumerate(counts):
+        x = int(x)
 
         # Apply delta encoding for all counts after the second entry
         if i > 2:
@@ -54,11 +58,11 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
     """Convert multiple binary masks using Run-Length Encoding (RLE).
 
     Args:
-        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask with shape [N,
-            H*W].
+        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask
+            with shape [N, H*W].
 
     Returns:
-        (list[int]): A list of RLE counts for each mask.
+        list[list[int]]: A list of RLE counts for each mask.
     """
     transitions = pixels[:, 1:] != pixels[:, :-1]
     row_idx, col_idx = torch.where(transitions)
@@ -66,17 +70,17 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
 
     # Compute run lengths
     counts = []
-    for i in range(pixels.shape[0]):
+    for i, pixel_row in enumerate(pixels):
         positions = col_idx[row_idx == i]
         if len(positions):
             count = torch.diff(positions).tolist()
             count.insert(0, positions[0].item())
-            count.append(len(pixels[i]) - positions[-1].item())
+            count.append(len(pixel_row) - positions[-1].item())
         else:
-            count = [len(pixels[i])]
+            count = [len(pixel_row)]
 
         # Ensure starting with background (0) count
-        if pixels[i][0].item() == 1:
+        if pixel_row[0].item() == 1:
             count = [0, *count]
         counts.append(count)
 
@@ -84,17 +88,19 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
 
 
 def nmsout2eval(nms_outs, img1_shape, img0_shapes):
-    """NMS output to evaluation format.
-    Args:
+    """Converts NMS output to COCO evaluation format.
+
     Args:
         nms_outs (List[np.array or torch.Tensor] or torch.Tensor): The output of the NMS
-            operation of shape (n, 6), where n is the number of objects
-        img1_shape (tuple): processed image shape
-        img0_shape (tuple): original image shape
+            operation of shape (n, 6), where n is the number of objects.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
     Returns:
-        labels (list): The labels of the objects
-        boxes (list): The bounding boxes of the objects
-        scores (list): The confidence scores of the objects
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
     """
 
     if not isinstance(nms_outs, list):
@@ -106,7 +112,6 @@ def nmsout2eval(nms_outs, img1_shape, img0_shapes):
         boxes = nms_out[:, :4]
         scores = nms_out[:, 4]
         labels = nms_out[:, 5]
-
         boxes = scale_boxes(
             img1_shape, boxes, img0_shape
         )  # scale boxes to original image size
@@ -125,18 +130,19 @@ def nmsout2eval(nms_outs, img1_shape, img0_shapes):
 
 
 def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
-    """NMS output to evaluation format.
+    """Converts segmentation NMS output to COCO evaluation format.
+
     Args:
-    Args:
-        nms_outs (list): The output of the NMS operation of shape (n, 6), where n
-            is the number of objects
-        img1_shape (tuple): processed image shape
-        img0_shape (tuple): original image shape
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
     Returns:
-        labels (list): The labels of the objects
-        boxes (list): The bounding boxes of the objects
-        scores (list): The confidence scores of the objects
-        extra (list): The segmentation masks of the objects
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - extra (list[list]): The encoded segmentation masks for each image.
     """
     if not isinstance(nms_outs[0], list):
         nms_outs = [nms_outs]
@@ -175,18 +181,19 @@ def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
 
 
 def nmsout2eval_pose(nms_outs, img1_shape, img0_shapes):
-    """NMS output to evaluation format.
+    """Converts pose estimation NMS output to COCO evaluation format.
+
     Args:
-    Args:
-        nms_outs (list): The output of the NMS operation of shape (n, 6+51),
-            where n is the number of objects
-        img1_shape (tuple): processed image shape
-        img0_shape (tuple): original image shape
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
     Returns:
-        labels (list): The labels of the objects
-        boxes (list): The bounding boxes of the objects
-        scores (list): The confidence scores of the objects
-        keypoints (list): The keypoints of the objects
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - keypoints (list[list]): The scaled keypoints for each image.
     """
     if not isinstance(nms_outs, list):
         nms_outs = [nms_outs]
@@ -224,11 +231,11 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
                 [
                     {
                         "image_id": dataset_ids[i],
-                        "category_id": labels[k],
+                        "category_id": label,
                         "bbox": box,
-                        "score": scores[k],
+                        "score": score,
                     }
-                    for k, box in enumerate(boxes)
+                    for box, score, label in zip(boxes, scores, labels)
                 ]
             )
     elif task == "instance_segmentation":
@@ -242,12 +249,12 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
                 [
                     {
                         "image_id": dataset_ids[i],
-                        "category_id": labels[k],
+                        "category_id": label,
                         "bbox": box,
-                        "score": scores[k],
-                        "segmentation": extra[k],
+                        "score": score,
+                        "segmentation": extra,
                     }
-                    for k, box in enumerate(boxes)
+                    for box, score, label, extra in zip(boxes, scores, labels, extra)
                 ]
             )
     elif task == "pose_estimation":
@@ -261,12 +268,12 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
                 [
                     {
                         "image_id": dataset_ids[i],
-                        "category_id": labels[k],
+                        "category_id": label,
                         "bbox": box,
-                        "score": scores[k],
-                        "keypoints": extra[k],
+                        "score": score,
+                        "keypoints": extra,
                     }
-                    for k, box in enumerate(boxes)
+                    for box, score, label, extra in zip(boxes, scores, labels, extra)
                 ]
             )
     else:
@@ -278,12 +285,17 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
 
 
 def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
-    """
-    Evaluate a model on the COCO dataset.
+    """Evaluates a model on the COCO dataset.
+
     Args:
-        model: The model to evaluate.
-        data_path (str): Path to the COCO data.
+        model (MBLT_Engine): The model engine to evaluate.
+        data_path (str): Path to the COCO dataset.
         batch_size (int): Batch size for evaluation.
+        conf_thres (float): Confidence threshold for detection.
+        iou_thres (float): IoU threshold for NMS.
+
+    Returns:
+        float: The mAP score (average precision at IoU=0.50:0.95).
     """
     if model.post_cfg["task"] in ["object_detection", "instance_segmentation"]:
         dataset = CustomCocodata(
@@ -343,13 +355,15 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
 
 
 def evaluate_predictions_on_coco(coco_gt, coco_results: dict, task: str):
-    """Evaluate the predictions on the coco dataset
+    """Evaluates predictions using the COCO API.
+
     Args:
-        coco_gt: Ground truth coco object
-        coco_results: Results to evaluate
-        task (str): Task to evaluate
+        coco_gt (COCO): Ground truth COCO object.
+        coco_results (dict): Predictions in COCO format.
+        task (str): Task type ('object_detection', 'instance_segmentation', or 'pose_estimation').
+
     Returns:
-        COCOeval_faster: The COCO evaluation object.
+        COCOeval_faster: The COCO evaluation object containing results.
     """
     assert task.lower() in [
         "object_detection",

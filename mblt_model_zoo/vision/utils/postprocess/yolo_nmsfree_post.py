@@ -6,42 +6,60 @@ from typing import List
 
 import torch
 
+from .common import dist2bbox, dual_topk
 from .yolo_anchorless_post import YOLOAnchorlessPost
 
 
 class YOLONMSFreePost(YOLOAnchorlessPost):
     """Postprocessing for YOLO NMS-free models."""
 
-    def conversion(self, x: List[torch.Tensor]):
-        """Convert input tensors.
+    def __call__(self, x, conf_thres: float, iou_thres: float) -> List[torch.Tensor]:
+        """Executes YOLO postprocessing for NMS-free models.
 
         Args:
-            x (List[torch.Tensor]): Input tensors.
+            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
+            conf_thres (float): Confidence threshold.
+            iou_thres (float): IoU threshold.
 
+        Returns:
+            List[torch.Tensor]: List of detections per image.
+        """
+        self.set_threshold(conf_thres, iou_thres)
+        x = self.check_input(x)
+        if len(x) == 2:
+            x = self.conversion(x)
+            x = self.filter_conversion(x)
+        else:
+            x = self.rearrange(x)
+            x = self.decode(x)
+        x = self.nms(x)
+        return x
+
+    def conversion(self, x: List[torch.Tensor]):
+        """Convert input tensors.
+        Args:
+            x (List[torch.Tensor]): Input tensors.
         Returns:
             torch.Tensor: Converted tensor.
         """
-        assert (
-            len(x) == 2
-        ), f"Assume return is a list of two outputs, but got {len(x)} outputs"
+        assert len(x) == 2, f"Expected 2 output tensors, but got {len(x)}"
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=False)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
 
     def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
-        """Convert the output of NPU to the input of NMS.
+        """Filters out low-confidence detections from a single output tensor.
 
         Args:
-            x (torch.Tensor): NPU outputs
+            x (torch.Tensor): Model output tensor.
 
         Returns:
-            List[torch.Tensor]: Decoded outputs
+            List[torch.Tensor]: Decoded and filtered outputs for each image.
         """
         x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
         def process_conversion(x):
             x = x.squeeze(0)
-
             if self.n_extra == 0:
                 ic = torch.amax(x[..., -self.nc :], dim=-1) > self.conf_thres
             else:
@@ -50,123 +68,57 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
                     > self.conf_thres
                 )
             pre_topk = x[ic]  # (*, 84)
-            max_det = min(pre_topk.shape[0], 300)
-
-            # first topk
-            box, scores, extra = pre_topk.split([4, self.nc, self.n_extra], dim=-1)
-            max_scores = scores.amax(dim=-1)
-            max_scores, index = torch.topk(
-                max_scores, max_det, dim=-1
-            )  # max deteciton is 300
-            index = index.unsqueeze(-1)
-            box = torch.gather(box, dim=0, index=index.repeat(1, 4))
-            scores = torch.gather(scores, dim=0, index=index.repeat(1, self.nc))
-            extra = torch.gather(extra, dim=0, index=index.repeat(1, self.n_extra))
-
-            # second topk
-            scores, index = torch.topk(scores.flatten(), max_det)
-            index = index.unsqueeze(-1)
-            scores = scores.unsqueeze(-1)
-            labels = index % self.nc
-            index = index // self.nc
-            box = box.gather(dim=0, index=index.repeat(1, 4))
-            extra = extra.gather(dim=0, index=index.repeat(1, self.n_extra))
-
-            box_cls = torch.cat([box, scores, labels, extra], dim=1)  # (300, 6)
-
-            box_cls = box_cls[box_cls[:, 4] > self.conf_thres]  # final filtering
-            if box_cls.numel() == 0:
-                return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32)
-
-            return box_cls
+            return dual_topk(
+                pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres
+            )
 
         return [process_conversion(xi) for xi in x_list]
 
+    def process_box_cls(self, box_cls):
+        """
+        Process detection results for a single image.
+        Args:
+            box_cls (torch.Tensor): Raw detections for one image.
+        Returns:
+            torch.Tensor: Decoded and top-k filtered detections.
+        """
+        ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
+        box_cls = box_cls[:, ic]  # (144, *)
+        if box_cls.numel() == 0:
+            return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
+        box, scores = torch.split(
+            box_cls[None], [self.reg_max * 4, self.nc], dim=1
+        )  # (1, 64, *), (1, 80, *)
+        dbox = (
+            dist2bbox(
+                self.dfl(box),
+                self.anchors[:, ic],
+                xywh=False,
+                dim=1,
+            )
+            * self.stride[:, ic]
+        )
+        pre_topk = (
+            torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)
+        )  # (*, 84)
+        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
+
     def nms(
-        self, x, max_det=300, max_nms=30000, max_wh=7680
-    ):  # Do nothing on NMS Free model
-        """Perform Non-Maximum Suppression (No-op).
+        self,
+        x: List[torch.Tensor],
+        max_det: int = 300,
+        max_nms: int = 30000,
+        max_wh: int = 7680,
+    ) -> List[torch.Tensor]:
+        """Perform Non-Maximum Suppression (no-op for NMS-free models).
 
         Args:
-            x: Input tensor.
-            max_det (int, optional): Maximum number of detections. Defaults to 300.
-            max_nms (int, optional): Maximum number of boxes for NMS. Defaults to 30000.
-            max_wh (int, optional): Maximum width/height for NMS. Defaults to 7680.
+            x (List[torch.Tensor]): Decoded detections.
+            max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
+            max_nms (int, optional): Maximum candidates for NMS. Defaults to 30000.
+            max_wh (int, optional): Maximum box width/height. Defaults to 7680.
 
         Returns:
-            torch.Tensor: Input tensor.
+            List[torch.Tensor]: The input detections unchanged.
         """
         return x
-
-
-class YOLONMSFreeSegPost(YOLONMSFreePost):
-    """Postprocessing for YOLO NMS-free segmentation models."""
-
-    def __call__(self, x, conf_thres=None, iou_thres=None):
-        """Execute YOLO NMS-free segmentation postprocessing.
-
-        Args:
-            x: Input tensor or list of tensors.
-            conf_thres (float, optional): Confidence threshold.
-            iou_thres (float, optional): IoU threshold.
-
-        Returns:
-            list: Postprocessed results with masks.
-        """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
-        x, proto_outs = self.conversion(x)
-        x = self.filter_conversion(x)
-        x = self.nms(x)
-        return self.masking(x, proto_outs)
-
-    def conversion(self, x: List[torch.Tensor]):
-        """Convert input tensors.
-
-        Args:
-            x (List[torch.Tensor]): Input tensors.
-
-        Returns:
-            tuple:
-                - outputs (torch.Tensor): Processed outputs.
-                - proto (torch.Tensor): Prototype masks.
-        """
-        assert (
-            len(x) == 4
-        ), f"Assume return is a list of four outputs, but got {len(x)} outputs"
-        x = sorted(x, key=lambda x: x.size(), reverse=False)
-        outputs = []
-        protos = []
-        for xi in x:
-            if xi.shape[-1] == self.n_extra:
-                protos.append(xi)
-            else:
-                outputs.append(xi)
-
-        proto = protos.pop(-1)
-        outputs = torch.cat(outputs + protos, dim=-1).squeeze(1)
-        return outputs, proto
-
-
-class YOLONMSFreePosePost(YOLONMSFreePost):
-    """Postprocessing for YOLO NMS-free pose estimation models."""
-
-    def conversion(self, x: List[torch.Tensor]):
-        """Convert input tensors.
-
-        Args:
-            x (List[torch.Tensor]): Input tensors.
-
-        Returns:
-            torch.Tensor: Converted tensor.
-        """
-        assert (
-            len(x) == 3
-        ), f"Assume return is a list of three outputs, but got {len(x)} outputs"
-        # sort by element number
-        x = sorted(x, key=lambda x: x.size(), reverse=True)
-        kpt = x.pop(0)
-        kpt = kpt.permute(0, -1, -3, -2).flatten(-2)
-        return torch.cat(
-            [torch.cat(x, dim=-1).squeeze(1), kpt], dim=-1
-        )  # [b, 8400, 56]

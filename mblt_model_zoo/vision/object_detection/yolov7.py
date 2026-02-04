@@ -26,7 +26,11 @@ class YOLOv7_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [12, 16, 19, 36, 40, 28],
+                [36, 75, 76, 55, 72, 146],
+                [142, 110, 192, 243, 459, 401],
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -52,7 +56,12 @@ class YOLOv7d6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [19, 27, 44, 40, 38, 94],  # P3/8
+                [96, 68, 86, 152, 180, 137],  # P4/16
+                [140, 301, 303, 264, 238, 542],  # P5/32
+                [436, 615, 739, 380, 925, 792],  # P6/64
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -78,7 +87,12 @@ class YOLOv7e6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [19, 27, 44, 40, 38, 94],  # P3/8
+                [96, 68, 86, 152, 180, 137],  # P4/16
+                [140, 301, 303, 264, 238, 542],  # P5/32
+                [436, 615, 739, 380, 925, 792],  # P6/64
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -104,7 +118,12 @@ class YOLOv7e6e_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [19, 27, 44, 40, 38, 94],  # P3/8
+                [96, 68, 86, 152, 180, 137],  # P4/16
+                [140, 301, 303, 264, 238, 542],  # P5/32
+                [436, 615, 739, 380, 925, 792],  # P6/64
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -130,7 +149,12 @@ class YOLOv7w6_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [19, 27, 44, 40, 38, 94],  # P3/8
+                [96, 68, 86, 152, 180, 137],  # P4/16
+                [140, 301, 303, 264, 238, 542],  # P5/32
+                [436, 615, 739, 380, 925, 792],  # P6/64
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -156,7 +180,11 @@ class YOLOv7x_Set(ModelInfoSet):
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
-            "anchors": True,
+            "anchors": [
+                [12, 16, 19, 36, 40, 28],
+                [36, 75, 76, 55, 72, 146],
+                [142, 110, 192, 243, 459, 401],
+            ],
         },
     )
     DEFAULT = COCO_V1
@@ -168,17 +196,16 @@ def YOLOv7(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7 model engine.
+    """Constructs a YOLOv7 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7_Set,
@@ -195,17 +222,16 @@ def YOLOv7d6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7d6 model engine.
+    """Constructs a YOLOv7d6 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7d6_Set,
@@ -222,17 +248,16 @@ def YOLOv7e6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7e6 model engine.
+    """Constructs a YOLOv7e6 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7e6_Set,
@@ -249,17 +274,16 @@ def YOLOv7e6e(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7e6e model engine.
+    """Constructs a YOLOv7e6e model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7e6e_Set,
@@ -276,17 +300,16 @@ def YOLOv7w6(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7w6 model engine.
+    """Constructs a YOLOv7w6 model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7w6_Set,
@@ -303,17 +326,16 @@ def YOLOv7x(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLOv7x model engine.
+    """Constructs a YOLOv7x model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLOv7x_Set,

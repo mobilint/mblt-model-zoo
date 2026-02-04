@@ -16,19 +16,17 @@ TASKS = [
 ]
 
 
-def list_tasks():
-    """
-    Lists the available vision tasks.
+def list_tasks() -> List[str]:
+    """Lists the available vision tasks.
 
     Returns:
-        list: A list of task names.
+        List[str]: A list of task names.
     """
     return TASKS
 
 
-def list_models(tasks: Union[str, List[str]] = None):
-    """
-    Lists the available models for the specified tasks.
+def list_models(tasks: Union[str, List[str]] = None) -> dict:
+    """Lists the available models for the specified tasks.
 
     Args:
         tasks (Union[str, List[str]], optional): The task(s) to list models for.

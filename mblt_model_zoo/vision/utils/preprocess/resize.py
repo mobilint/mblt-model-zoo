@@ -23,47 +23,55 @@ PIL_INTERP_CODES = {
 
 
 class Resize(PreOps):
-    """Resize image in Torch backend"""
+    """Resizes the image to a specified size using various interpolation modes.
+
+    Supports both PyTorch tensors (CHW) and PIL images.
+    """
 
     def __init__(
         self,
         size: Union[int, List[int]],
         interpolation: str,
     ):
+        """
+        Initialize the Resize operation.
+        Args:
+            size (Union[int, List[int]]): Target size. If int, the shorter edge is resized to this size
+                maintaining aspect ratio. If [h, w], it is resized to exactly this size.
+            interpolation (str): Interpolation mode (e.g., "bilinear", "bicubic", "nearest").
+        """
         # Note that this behaves different for npy image and PIL image
         super().__init__()
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(self, x: Union[TensorLike, Image.Image]):
-        """Resize image
+    def __call__(
+        self, x: Union[TensorLike, Image.Image]
+    ) -> Union[torch.Tensor, Image.Image]:
+        """Resizes the input image.
 
         Args:
-            x (Union[np.ndarray, Image]): Image to be resized.
-
-        Raises:
-            TypeError: If x is not numpy array or PIL image.
+            x (Union[TensorLike, Image.Image]): Image to be resized.
 
         Returns:
-            x: Resized image.
+            Union[torch.Tensor, Image.Image]: Resized image in the same format as input.
+
+        Raises:
+            TypeError: If input type is not supported.
         """
         # result: np.ndarray (H, W, C)
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).to(self.device)
-
         if isinstance(x, torch.Tensor):
             assert x.ndim() == 3, f"Got unexpected x.shape={x.shape}."
             x = x.to(self.device)
             img_h, img_w = x.shape[:2]
             new_h, new_w = self._compute_resized_output_size(img_h, img_w)
-
             if [img_h, img_w] == [new_h, new_w]:
                 return x
-
             x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(
                 x, [torch.float32, torch.float64]
             )
-
             x = F.interpolate(
                 x[None],
                 size=(new_h, new_w),
@@ -73,9 +81,7 @@ class Resize(PreOps):
                 ),
                 antialias=self.interpolation in ["bilinear", "bicubic"],
             )
-
             x = self._cast_squeeze_out(x, need_cast, need_squeeze, out_dtype)
-
             return x.to(self.device)
         elif isinstance(x, Image.Image):
             img_w, img_h = x.size
@@ -99,7 +105,6 @@ class Resize(PreOps):
             new_h, new_w = self.size
         else:
             raise ValueError(f"Got unexpected size={self.size}.")
-
         return [new_h, new_w]
 
     def _cast_squeeze_in(
@@ -110,7 +115,6 @@ class Resize(PreOps):
         if img.ndim < 4:
             img = img.unsqueeze(dim=0)
             need_squeeze = True
-
         out_dtype = img.dtype
         need_cast = False
         if out_dtype not in req_dtypes:
@@ -128,7 +132,6 @@ class Resize(PreOps):
     ) -> torch.Tensor:
         if need_squeeze:
             img = img.squeeze(dim=0)
-
         if need_cast:
             if out_dtype in (
                 torch.uint8,
@@ -140,5 +143,4 @@ class Resize(PreOps):
                 # it is better to round before cast
                 img = torch.round(img)
             img = img.to(out_dtype)
-
         return img

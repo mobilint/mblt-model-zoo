@@ -26,7 +26,9 @@ class YOLO11nPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 51,
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -52,7 +54,9 @@ class YOLO11sPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 51,
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -78,7 +82,9 @@ class YOLO11mPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 51,
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -104,7 +110,9 @@ class YOLO11lPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 51,
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -130,7 +138,9 @@ class YOLO11xPose_Set(ModelInfoSet):
         post_cfg={
             "task": "pose_estimation",
             "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
             "n_extra": 51,
+            "reg_max": 16,
         },
     )
     DEFAULT = COCO_V1
@@ -142,17 +152,16 @@ def YOLO11nPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11nPose model engine.
+    """Constructs a YOLO11nPose model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11nPose_Set,
@@ -169,17 +178,16 @@ def YOLO11sPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11sPose model engine.
+    """Constructs a YOLO11sPose model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11sPose_Set,
@@ -196,17 +204,16 @@ def YOLO11mPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11mPose model engine.
+    """Constructs a YOLO11mPose model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11mPose_Set,
@@ -223,17 +230,16 @@ def YOLO11lPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11lPose model engine.
+    """Constructs a YOLO11lPose model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11lPose_Set,
@@ -250,17 +256,16 @@ def YOLO11xPose(
     infer_mode: str = "global",
     product: str = "aries",
 ) -> MBLT_Engine:
-    """
-    Constructs a YOLO11xPose model engine.
+    """Constructs a YOLO11xPose model engine.
 
     Args:
-        local_path (str, optional): Path to the local model file. Defaults to None.
-        model_type (str, optional): Type of the model to use. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference mode. Defaults to "global".
-        product (str, optional): Target product. Defaults to "aries".
+        local_path (str, optional): Path to a local model file. Defaults to None.
+        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+        infer_mode (str, optional): Inference execution mode. Defaults to "global".
+        product (str, optional): Target hardware product. Defaults to "aries".
 
     Returns:
-        MBLT_Engine: The constructed model engine.
+        MBLT_Engine: A model engine instance.
     """
     return MBLT_Engine.from_model_info_set(
         YOLO11xPose_Set,

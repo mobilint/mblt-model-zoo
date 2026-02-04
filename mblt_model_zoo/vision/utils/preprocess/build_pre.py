@@ -14,13 +14,13 @@ from .yolo_pre import YoloPre
 
 
 def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
-    """Build the preprocess object.
+    """Builds a preprocessing pipeline based on the configuration.
 
     Args:
-        pre_cfg (OrderedDict): Preprocessing configuration.
+        pre_cfg (OrderedDict): Preprocessing configuration mapping operations to attributes.
 
     Returns:
-        PreBase: The preprocess object.
+        PreBase: An orchestrator for the sequence of preprocessing steps.
     """
     res = []
     for pre_type, pre_attr in pre_cfg.items():

@@ -5,24 +5,26 @@ import torch
 
 
 class PreOps(ABC):
-    """Base class for preprocess operations."""
+    """Abstract base class for individual preprocessing operations."""
 
     def __init__(self):
-        """Initialize the PreOps class."""
+        """Initializes the preprocessing operation."""
         super().__init__()
         self.device = torch.device("cpu")
 
     @abstractmethod
     def __call__(self, x):
-        """Execute the preprocess operation.
+        """Executes the preprocess operation.
 
         Args:
-            x: Input data.
+            x (Any): Input data to be processed.
+
+        Returns:
+            Any: Processed data.
         """
 
     def to(self, device: Union[str, torch.device]):
         """Move the operation to the specified device.
-
         Args:
             device (Union[str, torch.device]): Device to move the operation to.
         """
@@ -32,20 +34,19 @@ class PreOps(ABC):
             self.device = device
         else:
             raise TypeError(f"Got unexpected type for device={type(device)}.")
-
         for name, value in self.__dict__.items():
             if isinstance(value, torch.Tensor):
                 setattr(self, name, value.to(self.device))
 
 
 class PreBase:
-    """Base class for preprocess."""
+    """Base class for orchestrating a series of preprocessing operations."""
 
     def __init__(self, Ops: List[PreOps]):
-        """Initialize the PreBase class.
+        """Initializes the PreBase class with a list of operations.
 
         Args:
-            Ops (list): List of operations to be applied.
+            Ops (List[PreOps]): List of ordered PreOps instances to be applied.
         """
         self.Ops = Ops
         self._check_ops()
@@ -58,13 +59,13 @@ class PreBase:
                 raise TypeError(f"Got unsupported type={type(op)}.")
 
     def __call__(self, x):
-        """Apply the operations to the input.
+        """Applies the sequence of preprocessing operations to the input.
 
         Args:
-            x: Input data.
+            x (Any): Initial input data.
 
         Returns:
-            x: Processed data.
+            Any: Fully processed data.
         """
         for op in self.Ops:
             x = op(x)
@@ -72,7 +73,6 @@ class PreBase:
 
     def to(self, device: Union[str, torch.device]):
         """Move the operations to the specified device.
-
         Args:
             device (Union[str, torch.device]): Device to move the operations to.
         """
@@ -82,10 +82,8 @@ class PreBase:
             self.device = device
         else:
             raise TypeError(f"Got unexpected type for device={type(device)}.")
-
         for name, value in self.__dict__.items():
             if isinstance(value, torch.Tensor):
                 setattr(self, name, value.to(self.device))
-
         for op in self.Ops:
             op.to(self.device)

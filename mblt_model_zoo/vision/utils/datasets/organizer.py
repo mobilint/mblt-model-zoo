@@ -10,15 +10,17 @@ from tempfile import TemporaryDirectory
 from tqdm import tqdm
 
 
-def construct_imagenet(image_dir, xml_dir, output_dir):
-    """
-    Construct the ImageNet dataset by organizing images into category folders.
+def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
+    """Constructs the ImageNet dataset by organizing images into category folders.
+
     Args:
         image_dir (str): Directory containing the ImageNet validation images.
         xml_dir (str): Directory containing the ImageNet bounding box XML files.
         output_dir (str): Directory where the organized dataset will be stored.
+
     Raises:
         ValueError: If an XML file has no objects or contains multiple object names.
+        AssertionError: If the number of XML files and images do not match.
     """
 
     assert len(os.listdir(xml_dir + "/val")) == len(
@@ -80,16 +82,17 @@ def construct_imagenet(image_dir, xml_dir, output_dir):
 
 
 def organize_imagenet(
-    image_dir,
-    xml_dir,
-    output_dir=os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
+    image_dir: str,
+    xml_dir: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
 ):
-    """
-    Organize the ImageNet dataset, unpacking archives if necessary.
+    """Organizes the ImageNet dataset, unpacking archives if necessary.
+
     Args:
-        image_dir (str): Path to the image directory or archive.
-        xml_dir (str): Path to the XML directory or archive.
+        image_dir (str): Path to the image directory or archive (.tar).
+        xml_dir (str): Path to the XML directory or archive (.tgz).
         output_dir (str, optional): Directory to store the organized dataset.
+            Defaults to ~/.mblt_model_zoo/datasets/imagenet.
     """
     if image_dir.endswith(".tar") and xml_dir.endswith(".tgz"):
         with TemporaryDirectory() as temp_dir:
@@ -110,9 +113,9 @@ def organize_imagenet(
         construct_imagenet(image_dir, xml_dir, output_dir)
 
 
-def construct_coco(image_dir, annotation_dir, output_dir):
-    """
-    Construct the COCO dataset by copying images and annotations to a target directory.
+def construct_coco(image_dir: str, annotation_dir: str, output_dir: str):
+    """Constructs the COCO dataset by copying images and annotations to a target directory.
+
     Args:
         image_dir (str): Directory containing COCO images.
         annotation_dir (str): Directory containing COCO annotations.
@@ -136,16 +139,17 @@ def construct_coco(image_dir, annotation_dir, output_dir):
 
 
 def organize_coco(
-    image_dir,
-    annotation_dir,
-    output_dir=os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
+    image_dir: str,
+    annotation_dir: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
 ):
-    """
-    Organize the COCO dataset, unpacking archives if necessary.
+    """Organizes the COCO dataset, unpacking archives if necessary.
+
     Args:
         image_dir (str): Path to the image zip file or directory.
         annotation_dir (str): Path to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
+            Defaults to ~/.mblt_model_zoo/datasets/coco.
     """
     if image_dir.endswith(".zip") and annotation_dir.endswith(".zip"):
         with TemporaryDirectory() as temp_dir:
@@ -165,9 +169,9 @@ def organize_coco(
         construct_coco(image_dir, annotation_dir, output_dir)
 
 
-def construct_widerface(image_dir, annotation_dir, output_dir):
-    """
-    Construct the WiderFace dataset by copying images and annotations to a target directory.
+def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str):
+    """Constructs the WiderFace dataset by copying images and annotations to a target directory.
+
     Args:
         image_dir (str): Directory containing WiderFace images.
         annotation_dir (str): Directory containing WiderFace annotations.
@@ -189,16 +193,17 @@ def construct_widerface(image_dir, annotation_dir, output_dir):
 
 
 def organize_widerface(
-    image_dir,
-    annotation_dir,
-    output_dir=os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
+    image_dir: str,
+    annotation_dir: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
 ):
-    """
-    Organize the WiderFace dataset, unpacking archives if necessary.
+    """Organizes the WiderFace dataset, unpacking archives if necessary.
+
     Args:
         image_dir (str): Path to the image zip file or directory.
         annotation_dir (str): Path to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
+            Defaults to ~/.mblt_model_zoo/datasets/widerface.
     """
     if image_dir.endswith(".zip") and annotation_dir.endswith(".zip"):
         with TemporaryDirectory() as temp_dir:

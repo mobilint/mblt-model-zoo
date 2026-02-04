@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLO26m
+from mblt_model_zoo.vision import YOLO11m
 
 TEST_DIR = Path(__file__).parent
 
@@ -19,7 +19,7 @@ TEST_DIR = Path(__file__).parent
 @pytest.fixture
 def yolo_det():
     """Fixture to initialize and dispose of the YOLO26m model."""
-    model = YOLO26m()
+    model = YOLO11m()
     yield model
     model.dispose()
 
@@ -39,24 +39,24 @@ def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
 
 
 def test_yolo_det(yolo_det):
-    """Test YOLO26m inference on a sample image."""
+    """Test YOLO11m inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolo26m_{os.path.basename(image_path)}",
+        f"yolov11m_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO26m inference")
+    parser = argparse.ArgumentParser(description="Run YOLO11m inference")
     parser.add_argument(
         "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLO26m model file (.mxq)",
+        help="Path to the YOLO11m model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLO26m(
+    model = YOLO11m(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolo26m_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov11m_{os.path.basename(args.input_path)}"
         )
 
     try:
