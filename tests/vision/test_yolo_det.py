@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLO11m
+from mblt_model_zoo.vision import YOLOv7x
 
 TEST_DIR = Path(__file__).parent
 
@@ -19,7 +19,7 @@ TEST_DIR = Path(__file__).parent
 @pytest.fixture
 def yolo_det():
     """Fixture to initialize and dispose of the YOLO26m model."""
-    model = YOLO11m()
+    model = YOLOv7x()
     yield model
     model.dispose()
 
@@ -44,7 +44,7 @@ def test_yolo_det(yolo_det):
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolov11m_{os.path.basename(image_path)}",
+        f"yolov7x_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
@@ -56,7 +56,7 @@ if __name__ == "__main__":
         "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLO11m model file (.mxq)",
+        help="Path to the YOLOv7x model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -68,6 +68,7 @@ if __name__ == "__main__":
         "--infer-mode",
         type=str,
         default="global8",
+        choices=["global", "single", "multi", "global4", "global8"],
         help="Inference mode",
     )
     parser.add_argument(
@@ -104,7 +105,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLO11m(
+    model = YOLOv7x(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -112,7 +113,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolov11m_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov7x_{os.path.basename(args.input_path)}"
         )
 
     try:

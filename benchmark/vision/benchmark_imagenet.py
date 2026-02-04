@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--infer-mode",
         type=str,
-        default="global",
+        default="global8",
         choices=["global", "single", "multi", "global4", "global8"],
         help="Inference mode",
     )
