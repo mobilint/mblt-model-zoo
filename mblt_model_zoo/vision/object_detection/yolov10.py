@@ -183,7 +183,7 @@ class YOLOv10n(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10n engine.
@@ -191,7 +191,7 @@ class YOLOv10n(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -211,7 +211,7 @@ class YOLOv10s(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10s engine.
@@ -219,7 +219,7 @@ class YOLOv10s(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -239,7 +239,7 @@ class YOLOv10m(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10m engine.
@@ -247,7 +247,7 @@ class YOLOv10m(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -267,7 +267,7 @@ class YOLOv10b(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10b engine.
@@ -275,7 +275,7 @@ class YOLOv10b(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -295,7 +295,7 @@ class YOLOv10l(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10l engine.
@@ -303,7 +303,7 @@ class YOLOv10l(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -323,7 +323,7 @@ class YOLOv10x(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv10x engine.
@@ -331,7 +331,7 @@ class YOLOv10x(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

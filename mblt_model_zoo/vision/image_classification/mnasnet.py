@@ -8,12 +8,12 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class MNasNet0_5_Set(ModelInfoSet):
-    """Configuration set for MNasNet 1.0 models."""
+class MNASNet0_5_Set(ModelInfoSet):
+    """Configuration set for MNASNet 1.0 models."""
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNasNet0_5",
+            "repo_id": "mobilint/MNASNet0_5",
             "filename": "mnasnet0_5.mxq",
         },
         pre_cfg={
@@ -34,12 +34,12 @@ class MNasNet0_5_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNasNet0_75_Set(ModelInfoSet):
-    """Configuration set for MNasNet 1.0 models."""
+class MNASNet0_75_Set(ModelInfoSet):
+    """Configuration set for MNASNet 1.0 models."""
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNasNet0_75",
+            "repo_id": "mobilint/MNASNet0_75",
             "filename": "mnasnet0_75.mxq",
         },
         pre_cfg={
@@ -60,12 +60,12 @@ class MNasNet0_75_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNasNet1_0_Set(ModelInfoSet):
-    """Configuration set for MNasNet 1.0 models."""
+class MNASNet1_0_Set(ModelInfoSet):
+    """Configuration set for MNASNet 1.0 models."""
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNasNet1_0",
+            "repo_id": "mobilint/MNASNet1_0",
             "filename": "mnasnet1_0.mxq",
         },
         pre_cfg={
@@ -86,12 +86,12 @@ class MNasNet1_0_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNasNet1_3_Set(ModelInfoSet):
-    """Configuration set for MNasNet 1.3 models."""
+class MNASNet1_3_Set(ModelInfoSet):
+    """Configuration set for MNASNet 1.3 models."""
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNasNet1_3",
+            "repo_id": "mobilint/MNASNet1_3",
             "filename": "mnasnet1_3.mxq",
         },
         pre_cfg={
@@ -112,26 +112,26 @@ class MNasNet1_3_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNasNet0_5(MBLT_Engine):
-    """MNasNet0_5 model engine."""
+class MNASNet0_5(MBLT_Engine):
+    """MNASNet0_5 model engine."""
 
     def __init__(
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNasNet0_5 engine.
+        """Initializes the MNASNet0_5 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNasNet0_5_Set,
+            MNASNet0_5_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -140,26 +140,26 @@ class MNasNet0_5(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNasNet0_75(MBLT_Engine):
-    """MNasNet0_75 model engine."""
+class MNASNet0_75(MBLT_Engine):
+    """MNASNet0_75 model engine."""
 
     def __init__(
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNasNet0_75 engine.
+        """Initializes the MNASNet0_75 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNasNet0_75_Set,
+            MNASNet0_75_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -168,26 +168,26 @@ class MNasNet0_75(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNasNet1_0(MBLT_Engine):
-    """MNasNet1_0 model engine."""
+class MNASNet1_0(MBLT_Engine):
+    """MNASNet1_0 model engine."""
 
     def __init__(
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNasNet1_0 engine.
+        """Initializes the MNASNet1_0 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNasNet1_0_Set,
+            MNASNet1_0_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -196,26 +196,26 @@ class MNasNet1_0(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNasNet1_3(MBLT_Engine):
-    """MNasNet1_3 model engine."""
+class MNASNet1_3(MBLT_Engine):
+    """MNASNet1_3 model engine."""
 
     def __init__(
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNasNet1_3 engine.
+        """Initializes the MNASNet1_3 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNasNet1_3_Set,
+            MNASNet1_3_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,

@@ -258,7 +258,7 @@ class YOLOv9t(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv9t engine.
@@ -266,7 +266,7 @@ class YOLOv9t(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -286,7 +286,7 @@ class YOLOv9s(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv9s engine.
@@ -294,7 +294,7 @@ class YOLOv9s(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -314,7 +314,7 @@ class GELANs(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the GELANs engine.
@@ -322,7 +322,7 @@ class GELANs(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -342,7 +342,7 @@ class YOLOv9m(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv9m engine.
@@ -350,7 +350,7 @@ class YOLOv9m(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -370,7 +370,7 @@ class GELANm(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the GELANm engine.
@@ -378,7 +378,7 @@ class GELANm(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -398,7 +398,7 @@ class YOLOv9c(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv9c engine.
@@ -406,7 +406,7 @@ class YOLOv9c(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -426,7 +426,7 @@ class GELANc(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the GELANc engine.
@@ -434,7 +434,7 @@ class GELANc(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -454,7 +454,7 @@ class YOLOv9e(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv9e engine.
@@ -462,7 +462,7 @@ class YOLOv9e(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -482,7 +482,7 @@ class GELANe(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the GELANe engine.
@@ -490,7 +490,7 @@ class GELANe(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

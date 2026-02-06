@@ -13,7 +13,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/WideResNet50_2",
+            "repo_id": "mobilint/Wide_ResNet50_2.tv1_in1k",
             "filename": "wide_resnet50_2.mxq",
         },
         pre_cfg={
@@ -35,7 +35,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/WideResNet50_2",
+            "repo_id": "mobilint/Wide_ResNet50_2.tv2_in1k",
             "filename": "wide_resnet50_2.mxq",
         },
         pre_cfg={
@@ -63,7 +63,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/WideResNet101_2",
+            "repo_id": "mobilint/Wide_ResNet101_2.tv1_in1k",
             "filename": "wide_resnet101_2.mxq",
         },
         pre_cfg={
@@ -85,7 +85,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/WideResNet101_2",
+            "repo_id": "mobilint/Wide_ResNet101_2.tv2_in1k",
             "filename": "wide_resnet101_2.mxq",
         },
         pre_cfg={
@@ -115,7 +115,7 @@ class Wide_ResNet50_2(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the Wide_ResNet50_2 engine.
@@ -123,7 +123,7 @@ class Wide_ResNet50_2(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -143,7 +143,7 @@ class Wide_ResNet101_2(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the Wide_ResNet101_2 engine.
@@ -151,7 +151,7 @@ class Wide_ResNet101_2(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

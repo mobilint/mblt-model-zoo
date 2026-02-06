@@ -13,7 +13,7 @@ class YOLO26nPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLO26nPose",
+            "repo_id": "mobilint/YOLO26n-pose",
             "filename": "yolo26n-pose.mxq",
         },
         pre_cfg={
@@ -41,7 +41,7 @@ class YOLO26sPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLO26sPose",
+            "repo_id": "mobilint/YOLO26s-pose",
             "filename": "yolo26s-pose.mxq",
         },
         pre_cfg={
@@ -69,7 +69,7 @@ class YOLO26mPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLO26mPose",
+            "repo_id": "mobilint/YOLO26m-pose",
             "filename": "yolo26m-pose.mxq",
         },
         pre_cfg={
@@ -97,7 +97,7 @@ class YOLO26lPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLO26lPose",
+            "repo_id": "mobilint/YOLO26l-pose",
             "filename": "yolo26l-pose.mxq",
         },
         pre_cfg={
@@ -125,7 +125,7 @@ class YOLO26xPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLO26xPose",
+            "repo_id": "mobilint/YOLO26x-pose",
             "filename": "yolo26x-pose.mxq",
         },
         pre_cfg={
@@ -155,7 +155,7 @@ class YOLO26nPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLO26nPose engine.
@@ -163,7 +163,7 @@ class YOLO26nPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -183,7 +183,7 @@ class YOLO26sPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLO26sPose engine.
@@ -191,7 +191,7 @@ class YOLO26sPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -211,7 +211,7 @@ class YOLO26mPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLO26mPose engine.
@@ -219,7 +219,7 @@ class YOLO26mPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -239,7 +239,7 @@ class YOLO26lPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLO26lPose engine.
@@ -247,7 +247,7 @@ class YOLO26lPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -267,7 +267,7 @@ class YOLO26xPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLO26xPose engine.
@@ -275,7 +275,7 @@ class YOLO26xPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

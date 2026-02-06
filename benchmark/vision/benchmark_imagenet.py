@@ -111,7 +111,7 @@ if __name__ == "__main__":
         "--infer-mode",
         type=str,
         default="global8",
-        choices=["global", "single", "multi", "global4", "global8"],
+        choices=["single", "multi", "global4", "global8"],
         help="Inference mode",
     )
     parser.add_argument("--product", type=str, default="aries", help="Product")

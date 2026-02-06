@@ -13,7 +13,7 @@ class ResNeXt50_32x4d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/resnext50_32x4d",
+            "repo_id": "mobilint/ResNeXt50_32X4D.tv1_in1k",
             "filename": "resnext50_32x4d.mxq",
         },
         pre_cfg={
@@ -35,7 +35,7 @@ class ResNeXt50_32x4d_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/resnext50_32x4d",
+            "repo_id": "mobilint/ResNeXt50_32X4D.tv2_in1k",
             "filename": "resnext50_32x4d.mxq",
         },
         pre_cfg={
@@ -63,7 +63,7 @@ class ResNeXt101_32x8d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/resnext101_32x8d",
+            "repo_id": "mobilint/ResNeXt101_32X8D.tv1_in1k",
             "filename": "resnext101_32x8d.mxq",
         },
         pre_cfg={
@@ -85,7 +85,7 @@ class ResNeXt101_32x8d_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/resnext101_32x8d",
+            "repo_id": "mobilint/ResNeXt101_32X8D.tv2_in1k",
             "filename": "resnext101_32x8d.mxq",
         },
         pre_cfg={
@@ -113,7 +113,7 @@ class ResNeXt101_64x4d_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/resnext101_64x4d",
+            "repo_id": "mobilint/ResNeXt101_64X4D",
             "filename": "resnext101_64x4d.mxq",
         },
         pre_cfg={
@@ -143,7 +143,7 @@ class ResNeXt50_32x4d(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNext50_32x4d engine.
@@ -151,7 +151,7 @@ class ResNeXt50_32x4d(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -171,7 +171,7 @@ class ResNeXt101_32x8d(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNext101_32x8d engine.
@@ -179,7 +179,7 @@ class ResNeXt101_32x8d(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -199,7 +199,7 @@ class ResNeXt101_64x4d(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNext101_64x4d engine.
@@ -207,7 +207,7 @@ class ResNeXt101_64x4d(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

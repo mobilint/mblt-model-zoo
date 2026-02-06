@@ -178,7 +178,7 @@ class MXQ_Model:
     def __init__(
         self,
         product: str = "aries",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         repo_id: str = None,
         filename: str = None,
         local_path: str = None,
@@ -189,7 +189,7 @@ class MXQ_Model:
             repo_id (str, optional): Hugging Face repository ID. Defaults to None.
             filename (str, optional): Model filename. Defaults to None.
             local_path (str, optional): Path to local model file. Defaults to None.
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
 
         Raises:

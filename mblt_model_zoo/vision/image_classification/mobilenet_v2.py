@@ -13,7 +13,7 @@ class MobileNet_V2_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/mobilenet_v2",
+            "repo_id": "mobilint/MobileNet_V2.tv1_in1k",
             "filename": "mobilenet_v2.mxq",
         },
         pre_cfg={
@@ -33,7 +33,7 @@ class MobileNet_V2_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/mobilenet_v2",
+            "repo_id": "mobilint/MobileNet_V2.tv2_in1k",
             "filename": "mobilenet_v2.mxq",
         },
         pre_cfg={
@@ -61,7 +61,7 @@ class MobileNet_V2(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the MobileNet_V2 engine.
@@ -69,7 +69,7 @@ class MobileNet_V2(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

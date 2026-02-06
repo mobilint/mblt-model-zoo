@@ -57,8 +57,8 @@ resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
 
 # Set inference mode for better performance
-# ARIES supports "single", "multi", "global", "global4", and "global8" inference mode. Default is "global"
-resnet50 = ResNet50(infer_mode = "global")
+# ARIES supports "single", "multi", "global4", and "global8" inference mode. Default is "global8"
+resnet50 = ResNet50(infer_mode = "global8")
 
 # (Beta) If you are holding a model compiled for REGULUS, enable inference on the REGULUS device.
 resnet50 = ResNet50(product = "regulus")
@@ -68,7 +68,7 @@ resnet50 = ResNet50(product = "regulus")
 resnet50 = ResNet50(
     local_path = None,
     model_type = "DEFAULT",
-    infer_mode = "global",
+    infer_mode = "global8",
     product = "aries",
 )
 

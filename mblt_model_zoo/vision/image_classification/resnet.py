@@ -69,7 +69,7 @@ class ResNet50_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet50",
+            "repo_id": "mobilint/ResNet50.tv1_in1k",
             "filename": "resnet50-imagenet1k-v1.mxq",
         },
         pre_cfg={
@@ -91,7 +91,7 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet50",
+            "repo_id": "mobilint/ResNet50.tv2_in1k",
             "filename": "resnet50-imagenet1k-v2.mxq",
         },
         pre_cfg={
@@ -119,7 +119,7 @@ class ResNet101_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet101",
+            "repo_id": "mobilint/ResNet101.tv1_in1k",
             "filename": "resnet101-imagenet1k-v1.mxq",
         },
         pre_cfg={
@@ -141,7 +141,7 @@ class ResNet101_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet101",
+            "repo_id": "mobilint/ResNet101.tv2_in1k",
             "filename": "resnet101-imagenet1k-v2.mxq",
         },
         pre_cfg={
@@ -169,7 +169,7 @@ class ResNet152_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet152",
+            "repo_id": "mobilint/ResNet152.tv1_in1k",
             "filename": "resnet152-imagenet1k-v1.mxq",
         },
         pre_cfg={
@@ -191,7 +191,7 @@ class ResNet152_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet152",
+            "repo_id": "mobilint/ResNet152.tv2_in1k",
             "filename": "resnet152-imagenet1k-v2.mxq",
         },
         pre_cfg={
@@ -221,7 +221,7 @@ class ResNet18(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNet18 engine.
@@ -229,7 +229,7 @@ class ResNet18(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -249,7 +249,7 @@ class ResNet34(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNet34 engine.
@@ -257,7 +257,7 @@ class ResNet34(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -277,7 +277,7 @@ class ResNet50(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNet50 engine.
@@ -285,7 +285,7 @@ class ResNet50(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -305,7 +305,7 @@ class ResNet101(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNet101 engine.
@@ -313,7 +313,7 @@ class ResNet101(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -333,7 +333,7 @@ class ResNet152(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ResNet152 engine.
@@ -341,7 +341,7 @@ class ResNet152(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

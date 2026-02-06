@@ -13,7 +13,7 @@ class ShuffleNet_V2_X0_5_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/shufflenet_v2_x0_5",
+            "repo_id": "mobilint/ShuffleNet_V2_X0_5",
             "filename": "shufflenet_v2_x0_5.mxq",
         },
         pre_cfg={
@@ -41,7 +41,7 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/shufflenet_v2_x1_0",
+            "repo_id": "mobilint/ShuffleNet_V2_X1_0",
             "filename": "shufflenet_v2_x1_0.mxq",
         },
         pre_cfg={
@@ -69,7 +69,7 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/shufflenet_v2_x1_5",
+            "repo_id": "mobilint/ShuffleNet_V2_X1_5",
             "filename": "shufflenet_v2_x1_5.mxq",
         },
         pre_cfg={
@@ -97,7 +97,7 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
 
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/shufflenet_v2_x2_0",
+            "repo_id": "mobilint/ShuffleNet_V2_X2_0",
             "filename": "shufflenet_v2_x2_0.mxq",
         },
         pre_cfg={
@@ -127,7 +127,7 @@ class ShuffleNet_V2_X1_0(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ShuffleNet_V2_X1_0 engine.
@@ -135,7 +135,7 @@ class ShuffleNet_V2_X1_0(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -155,7 +155,7 @@ class ShuffleNet_V2_X1_5(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ShuffleNet_V2_X1_5 engine.
@@ -163,7 +163,7 @@ class ShuffleNet_V2_X1_5(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -183,7 +183,7 @@ class ShuffleNet_V2_X2_0(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the ShuffleNet_V2_X2_0 engine.
@@ -191,7 +191,7 @@ class ShuffleNet_V2_X2_0(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

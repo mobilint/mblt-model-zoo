@@ -13,7 +13,7 @@ class FlexiViT_Small_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/flexivit-small",
+            "repo_id": "mobilint/FlexiVit-Small",
             "filename": "flexivit-small.mxq",
         },
         pre_cfg={
@@ -38,7 +38,7 @@ class FlexiViT_Base_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/flexivit-base",
+            "repo_id": "mobilint/FlexiVit-Base",
             "filename": "flexivit-base.mxq",
         },
         pre_cfg={
@@ -63,7 +63,7 @@ class FlexiViT_Large_Set(ModelInfoSet):
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/flexivit-large",
+            "repo_id": "mobilint/FlexiVit-Large",
             "filename": "flexivit-large.mxq",
         },
         pre_cfg={
@@ -90,7 +90,7 @@ class FlexiViT_Small(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the FlexiViT_Small engine.
@@ -98,7 +98,7 @@ class FlexiViT_Small(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -118,7 +118,7 @@ class FlexiViT_Base(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the FlexiViT_Base engine.
@@ -126,7 +126,7 @@ class FlexiViT_Base(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -146,7 +146,7 @@ class FlexiViT_Large(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the FlexiViT_Large engine.
@@ -154,7 +154,7 @@ class FlexiViT_Large(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(

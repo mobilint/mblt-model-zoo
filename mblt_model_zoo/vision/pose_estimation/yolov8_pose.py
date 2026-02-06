@@ -13,7 +13,7 @@ class YOLOv8nPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLOv8nPose",
+            "repo_id": "mobilint/YOLOv8n-pose",
             "filename": "yolov8n-pose.mxq",
         },
         pre_cfg={
@@ -41,7 +41,7 @@ class YOLOv8sPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLOv8sPose",
+            "repo_id": "mobilint/YOLOv8s-pose",
             "filename": "yolov8s-pose.mxq",
         },
         pre_cfg={
@@ -69,7 +69,7 @@ class YOLOv8mPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLOv8mPose",
+            "repo_id": "mobilint/YOLOv8m-pose",
             "filename": "yolov8m-pose.mxq",
         },
         pre_cfg={
@@ -97,7 +97,7 @@ class YOLOv8lPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLOv8lPose",
+            "repo_id": "mobilint/YOLOv8l-pose",
             "filename": "yolov8l-pose.mxq",
         },
         pre_cfg={
@@ -125,7 +125,7 @@ class YOLOv8xPose_Set(ModelInfoSet):
 
     COCO_V1 = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/YOLOv8xPose",
+            "repo_id": "mobilint/YOLOv8x-pose",
             "filename": "yolov8x-pose.mxq",
         },
         pre_cfg={
@@ -155,7 +155,7 @@ class YOLOv8nPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv8nPose engine.
@@ -163,7 +163,7 @@ class YOLOv8nPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -183,7 +183,7 @@ class YOLOv8sPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv8sPose engine.
@@ -191,7 +191,7 @@ class YOLOv8sPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -211,7 +211,7 @@ class YOLOv8mPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv8mPose engine.
@@ -219,7 +219,7 @@ class YOLOv8mPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -239,7 +239,7 @@ class YOLOv8lPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv8lPose engine.
@@ -247,7 +247,7 @@ class YOLOv8lPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
@@ -267,7 +267,7 @@ class YOLOv8xPose(MBLT_Engine):
         self,
         local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global",
+        infer_mode: str = "global8",
         product: str = "aries",
     ):
         """Initializes the YOLOv8xPose engine.
@@ -275,7 +275,7 @@ class YOLOv8xPose(MBLT_Engine):
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
             model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
