@@ -11,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLOv7x
+from mblt_model_zoo.vision import YOLOv3
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_det():
-    """Fixture to initialize and dispose of the YOLO26m model."""
-    model = YOLOv7x()
+    """Fixture to initialize and dispose of the YOLOv3 model."""
+    model = YOLOv3()
     yield model
     model.dispose()
 
@@ -44,7 +44,7 @@ def test_yolo_det(yolo_det):
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolov7x_{os.path.basename(image_path)}",
+        f"yolov3_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_det, image_path, save_path)
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLOv7x(
+    model = YOLOv3(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolov7x_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolov3_{os.path.basename(args.input_path)}"
         )
 
     try:

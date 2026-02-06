@@ -2,6 +2,8 @@
 ConvNeXt model definitions.
 """
 
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
@@ -118,105 +120,113 @@ class ConvNeXt_Large_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-def ConvNeXt_Tiny(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ConvNeXt_Tiny model engine.
+class ConvNeXt_Tiny(MBLT_Engine):
+    """ConvNeXt_Tiny model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Tiny engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Tiny_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-
-
-def ConvNeXt_Small(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ConvNeXt_Small model engine.
-
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
-
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Small_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Tiny_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ConvNeXt_Base(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ConvNeXt_Base model engine.
+class ConvNeXt_Small(MBLT_Engine):
+    """ConvNeXt_Small model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Small engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Base_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Small_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ConvNeXt_Large(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ConvNeXt_Large model engine.
+class ConvNeXt_Base(MBLT_Engine):
+    """ConvNeXt_Base model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Base engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Large_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Base_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class ConvNeXt_Large(MBLT_Engine):
+    """ConvNeXt_Large model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Large engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Large_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

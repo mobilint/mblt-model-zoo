@@ -2,6 +2,8 @@
 ResNet model definitions (ResNet18, ResNet34, ResNet50, ResNet101, ResNet152).
 """
 
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
@@ -212,131 +214,141 @@ class ResNet152_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V2  # Default model
 
 
-def ResNet18(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ResNet18 model engine.
+class ResNet18(MBLT_Engine):
+    """ResNet18 model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet18 engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ResNet18_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-
-
-def ResNet34(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ResNet34 model engine.
-
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
-
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ResNet34_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet18_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet50(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ResNet50 model engine.
+class ResNet34(MBLT_Engine):
+    """ResNet34 model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet34 engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ResNet50_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-
-
-def ResNet101(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ResNet101 model engine.
-
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
-
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ResNet101_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet34_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet152(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a ResNet152 model engine.
+class ResNet50(MBLT_Engine):
+    """ResNet50 model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet50 engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        ResNet152_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet50_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class ResNet101(MBLT_Engine):
+    """ResNet101 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet101 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet101_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class ResNet152(MBLT_Engine):
+    """ResNet152 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet152 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet152_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

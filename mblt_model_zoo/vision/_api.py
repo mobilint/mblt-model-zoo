@@ -55,8 +55,9 @@ def list_models(tasks: Union[str, List[str]] = None) -> dict:
 
         for name, obj in inspect.getmembers(module):
             if (
-                inspect.isfunction(obj)
-                and inspect.signature(obj).return_annotation == MBLT_Engine
+                inspect.isclass(obj)
+                and issubclass(obj, MBLT_Engine)
+                and obj is not MBLT_Engine
             ):
                 available_models[task].append(name)
 

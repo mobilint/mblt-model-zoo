@@ -2,6 +2,8 @@
 YOLOv5 Segmentation model definitions.
 """
 
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
@@ -161,131 +163,141 @@ class YOLOv5xSeg_Set(ModelInfoSet):
     DEFAULT = COCO_V1
 
 
-def YOLOv5nSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a YOLOv5nSeg model engine.
+class YOLOv5nSeg(MBLT_Engine):
+    """YOLOv5nSeg model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv5nSeg engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        YOLOv5nSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-
-
-def YOLOv5sSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a YOLOv5sSeg model engine.
-
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
-
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        YOLOv5sSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv5nSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv5mSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a YOLOv5mSeg model engine.
+class YOLOv5sSeg(MBLT_Engine):
+    """YOLOv5sSeg model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv5sSeg engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        YOLOv5mSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-
-
-def YOLOv5lSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a YOLOv5lSeg model engine.
-
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
-
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        YOLOv5lSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv5sSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv5xSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    """Constructs a YOLOv5xSeg model engine.
+class YOLOv5mSeg(MBLT_Engine):
+    """YOLOv5mSeg model engine."""
 
-    Args:
-        local_path (str, optional): Path to a local model file. Defaults to None.
-        model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-        infer_mode (str, optional): Inference execution mode. Defaults to "global".
-        product (str, optional): Target hardware product. Defaults to "aries".
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv5mSeg engine.
 
-    Returns:
-        MBLT_Engine: A model engine instance.
-    """
-    return MBLT_Engine.from_model_info_set(
-        YOLOv5xSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv5mSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class YOLOv5lSeg(MBLT_Engine):
+    """YOLOv5lSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv5lSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv5lSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class YOLOv5xSeg(MBLT_Engine):
+    """YOLOv5xSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv5xSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv5xSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

@@ -38,7 +38,7 @@ from .regnet import (
     RegNet_Y_800MF,
 )
 from .resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
-from .resnext import ResNext50_32x4d, ResNext101_32x8d, ResNext101_64x4d
+from .resnext import ResNeXt50_32x4d, ResNeXt101_32x8d, ResNeXt101_64x4d
 from .shufflenet_v2 import ShuffleNet_V2_X1_0, ShuffleNet_V2_X1_5, ShuffleNet_V2_X2_0
 from .vgg import VGG11, VGG11_BN, VGG13, VGG13_BN, VGG16, VGG16_BN, VGG19, VGG19_BN
 from .vit import (

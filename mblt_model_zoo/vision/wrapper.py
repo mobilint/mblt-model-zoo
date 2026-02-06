@@ -39,16 +39,15 @@ class MBLT_Engine:
         self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
         self.device = torch.device("cpu")
 
-    @classmethod
-    def from_model_info_set(
-        cls,
+    @staticmethod
+    def _get_configs(
         model_info_set: ModelInfoSet,
         local_path: str = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global8",
         product: str = "aries",
-    ) -> "MBLT_Engine":
-        """Creates an instance of the model from a ModelInfoSet.
+    ):
+        """Extracts and prepares configuration dictionaries from a ModelInfoSet.
 
         Args:
             model_info_set (ModelInfoSet): Set of model configurations.
@@ -58,22 +57,22 @@ class MBLT_Engine:
             product (str, optional): Target hardware product. Defaults to "aries".
 
         Returns:
-            MBLT_Engine: A model engine instance.
+            tuple: (model_cfg, pre_cfg, post_cfg) dictionaries.
         """
-
         assert (
             model_type in model_info_set.__dict__.keys()
         ), f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
 
-        model_cfg = model_info_set.__dict__[model_type].value.model_cfg
+        # Use copy() to avoid modifying the original ModelInfo in-place
+        model_cfg = model_info_set.__dict__[model_type].value.model_cfg.copy()
         model_cfg["local_path"] = local_path
         model_cfg["infer_mode"] = infer_mode
         model_cfg["product"] = product
 
-        pre_cfg = model_info_set.__dict__[model_type].value.pre_cfg
-        post_cfg = model_info_set.__dict__[model_type].value.post_cfg
+        pre_cfg = model_info_set.__dict__[model_type].value.pre_cfg.copy()
+        post_cfg = model_info_set.__dict__[model_type].value.post_cfg.copy()
 
-        return cls(model_cfg, pre_cfg, post_cfg)
+        return model_cfg, pre_cfg, post_cfg
 
     def __call__(self, x: TensorLike):
         """Runs raw model inference on the input.
@@ -239,12 +238,16 @@ class MXQ_Model:
             ), "The model should be prepared on local path"
             cached_file = local_path
         elif repo_id is not None and filename is not None:
-            cached_file = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                subfolder=f"{self.product}/{self.infer_mode}",
-                local_dir=os.path.expanduser("~/.mblt_model_zoo/vision"),
-            )
+            try:
+                cached_file = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    subfolder=f"{self.product}/{self.infer_mode}",
+                    local_dir=os.path.expanduser("~/.mblt_model_zoo/vision"),
+                )
+            except Exception as e:
+                print(e)
+                print("Failed to download model from HuggingFace")
         else:
             raise ValueError("The model should be prepared on server or local path")
 
