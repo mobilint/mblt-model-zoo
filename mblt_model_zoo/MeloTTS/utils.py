@@ -21,7 +21,7 @@ class HParamsBase(metaclass=ABCMeta):
     @abstractmethod
     def __init__(self, **kwargs):
         pass
-    
+
     def keys(self):
         return self.__dict__.keys()
 
@@ -49,17 +49,17 @@ class HParamsBase(metaclass=ABCMeta):
 
 class TrainHParams(HParamsBase):
     def __init__(self, **kwargs):
-        self.segment_size: int = kwargs['segment_size'] # type: ignore
+        self.segment_size: int = kwargs["segment_size"]  # type: ignore
 
 
 class DataHParams(HParamsBase):
     def __init__(self, **kwargs):
-        self.sampling_rate: int = kwargs['sampling_rate'] # type: ignore
-        self.filter_length: int = kwargs['filter_length'] # type: ignore
-        self.hop_length: int = kwargs['hop_length'] # type: ignore
-        self.add_blank: bool = kwargs['add_blank'] # type: ignore
-        self.n_speakers: int = kwargs.get('n_speakers', 1) # type: ignore
-        self.spk2id: dict[str, int] = kwargs.get('spk2id', {}) # type: ignore
+        self.sampling_rate: int = kwargs["sampling_rate"]  # type: ignore
+        self.filter_length: int = kwargs["filter_length"]  # type: ignore
+        self.hop_length: int = kwargs["hop_length"]  # type: ignore
+        self.add_blank: bool = kwargs["add_blank"]  # type: ignore
+        self.n_speakers: int = kwargs.get("n_speakers", 1)  # type: ignore
+        self.spk2id: dict[str, int] = kwargs.get("spk2id", {})  # type: ignore
 
 
 class ModelHParams(HParamsBase):
@@ -93,10 +93,10 @@ class ModelHParams(HParamsBase):
 
 
 class HParams(HParamsBase):
-    def __init__(self, **kwargs):        
-        self.train = TrainHParams(**kwargs['train'])
-        self.data = DataHParams(**kwargs['data'])
-        self.model = ModelHParams(**kwargs['model'])
+    def __init__(self, **kwargs):
+        self.train = TrainHParams(**kwargs["train"])
+        self.data = DataHParams(**kwargs["data"])
+        self.model = ModelHParams(**kwargs["model"])
 
         self.num_languages: int = kwargs.get('num_languages') # type: ignore
         self.num_tones: int = kwargs.get('num_tones') # type: ignore

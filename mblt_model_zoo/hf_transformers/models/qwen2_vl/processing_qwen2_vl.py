@@ -6,9 +6,9 @@ import torch.nn.functional as F
 from cv2 import INTER_CUBIC
 from cv2 import resize as cv2_resize
 from PIL import Image
-from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import ImageInput, load_image
+from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.qwen2_vl.processing_qwen2_vl import (
     Qwen2VLProcessor,
     Qwen2VLProcessorKwargs,

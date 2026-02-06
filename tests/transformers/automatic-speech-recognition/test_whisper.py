@@ -2,7 +2,6 @@ import pytest
 from datasets import load_dataset
 from transformers import pipeline
 
-
 MODEL_PATHS = ("mobilint/whisper-small",)
 
 

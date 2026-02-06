@@ -8,7 +8,10 @@ from transformers.models.qwen2_vl.configuration_qwen2_vl import (
     Qwen2VLVisionConfig,
 )
 
-from ...utils.configuration_utils import MobilintConfigMixin, MobilintVisionTextConfigMixin
+from ...utils.configuration_utils import (
+    MobilintConfigMixin,
+    MobilintVisionTextConfigMixin,
+)
 
 
 class MobilintQwen2VLVisionConfig(MobilintConfigMixin, Qwen2VLVisionConfig):

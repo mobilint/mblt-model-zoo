@@ -1,3 +1,10 @@
+"""
+Test script for ResNet50 model.
+
+This script tests the ResNet50 model by running inference on a sample image.
+It can be run as a pytest test or as a standalone script.
+"""
+
 import argparse
 import os
 from pathlib import Path
@@ -11,6 +18,7 @@ TEST_DIR = Path(__file__).parent
 
 @pytest.fixture
 def resnet50():
+    """Fixture to initialize and dispose of the ResNet50 model."""
     model = ResNet50()
     yield model
     model.dispose()
@@ -32,6 +40,7 @@ def run_inference(model, image_path, save_path):
 
 
 def test_resnet50(resnet50):
+    """Test ResNet50 inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "volcano.jpg")
     save_path = os.path.join(
         TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}"
@@ -43,21 +52,22 @@ def test_resnet50(resnet50):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ResNet50 inference")
     parser.add_argument(
-        "--mxq_path",
+        "--mxq-path",
         type=str,
         default=None,
         help="Path to the ResNet50 model file (.mxq)",
     )
     parser.add_argument(
-        "--model_type",
+        "--model-type",
         type=str,
         default="DEFAULT",
         help="Model type",
     )
     parser.add_argument(
-        "--infer_mode",
+        "--infer-mode",
         type=str,
-        default="global",
+        default="global8",
+        choices=["single", "multi", "global4", "global8"],
         help="Inference mode",
     )
     parser.add_argument(
@@ -67,13 +77,13 @@ if __name__ == "__main__":
         help="Product",
     )
     parser.add_argument(
-        "--input_path",
+        "--input-path",
         type=str,
         default=os.path.join(TEST_DIR, "rc", "volcano.jpg"),
         help="Path to the input image",
     )
     parser.add_argument(
-        "--save_path",
+        "--save-path",
         type=str,
         default=None,
         help="Path to save the output image",

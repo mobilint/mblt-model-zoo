@@ -1,3 +1,7 @@
+"""
+Normalize image preprocessing
+"""
+
 from typing import Union
 
 import numpy as np
@@ -9,29 +13,34 @@ from .base import PreOps
 
 
 class Normalize(PreOps):
+    """
+    Normalize image pixel values.
+    Supports "torch" (standard ImageNet mean/std) and "tf" (range [-1, 1]) styles.
+    """
+
     def __init__(
         self,
         style: str = "torch",
     ):
-        """Normalize image
+        """Initializes the Normalize operation.
 
         Args:
-            style (str): Normalization style. Supported values are "torch", "tf"
-
+            style (str): Normalization style. Supported values are "torch", "tf".
+                Defaults to "torch".
         """
         super().__init__()
         self.style = style
         if self.style not in ["torch", "tf"]:
             raise ValueError(f"style {self.style} not supported.")
 
-    def __call__(self, x: Union[TensorLike, Image.Image]):
-        """Normalize image
+    def __call__(self, x: Union[TensorLike, Image.Image]) -> torch.Tensor:
+        """Normalizes the input image.
 
         Args:
-            x (np.ndarray): Image to be normalized.
+            x (Union[np.ndarray, torch.Tensor, Image.Image]): Image to be normalized.
 
         Returns:
-            x: Normalized image.
+            torch.Tensor: Normalized image as a float tensor on the target device.
         """
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).float().to(self.device)
@@ -41,7 +50,6 @@ class Normalize(PreOps):
             x = x.to(self.device)
         else:
             raise TypeError(f"Got unexpected type for x={type(x)})")
-
         if self.style == "torch":
             x = x / 255.0
             x -= torch.from_numpy(np.array([0.485, 0.456, 0.406])).to(self.device)

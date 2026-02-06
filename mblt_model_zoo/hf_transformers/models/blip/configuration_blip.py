@@ -12,7 +12,10 @@ from transformers.models.blip.configuration_blip import (
 )
 from transformers.utils import logging
 
-from ...utils.configuration_utils import MobilintConfigMixin, MobilintVisionTextConfigMixin
+from ...utils.configuration_utils import (
+    MobilintConfigMixin,
+    MobilintVisionTextConfigMixin,
+)
 
 logger = logging.get_logger(__name__)
 

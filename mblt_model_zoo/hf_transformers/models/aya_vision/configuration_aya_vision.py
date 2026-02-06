@@ -3,7 +3,6 @@ from transformers.models.aya_vision.configuration_aya_vision import AyaVisionCon
 
 from ...models.cohere2.configuration_cohere2 import MobilintCohere2Config
 from ...models.siglip.configuration_siglip import MobilintSiglipVisionConfig
-
 from ...utils.configuration_utils import MobilintVisionTextConfigMixin
 
 

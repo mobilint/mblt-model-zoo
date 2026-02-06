@@ -1,8 +1,7 @@
 import pytest
 import requests
 from PIL import Image
-from transformers import TextStreamer, AutoProcessor, pipeline
-
+from transformers import AutoProcessor, TextStreamer, pipeline
 
 MODEL_PATHS = ("mobilint/blip-image-captioning-large",)
 

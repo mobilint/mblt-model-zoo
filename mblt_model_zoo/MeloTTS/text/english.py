@@ -195,7 +195,7 @@ def g2p(text, pad_start_end=True, tokenized=None, tokenizer=None):
             ph_groups.append([t])
         else:
             ph_groups[-1].append(t.replace("#", ""))
-    
+
     phones = []
     tones = []
     word2ph = []

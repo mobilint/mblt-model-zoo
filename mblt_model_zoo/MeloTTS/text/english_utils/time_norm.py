@@ -16,7 +16,7 @@ _time_re = re.compile(
 
 
 def _expand_num(n: int) -> str:
-    return _inflect.number_to_words(n) # type: ignore
+    return _inflect.number_to_words(n)  # type: ignore
 
 
 def _expand_time_english(match: "re.Match") -> str:

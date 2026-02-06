@@ -1,3 +1,7 @@
+"""
+Image reader preprocessing.
+"""
+
 from typing import Union
 
 import cv2
@@ -10,16 +14,35 @@ from .base import PreOps
 
 
 class Reader(PreOps):
+    """
+    Reader for loading images from file paths or converting existing objects.
+    Supports "pil" and "numpy" reading styles.
+    """
+
     def __init__(self, style: str):
-        """Read image and convert to tensor"""
+        """Initializes the Reader operation.
+
+        Args:
+            style (str): Reading style, either "pil" or "numpy".
+        """
+        super().__init__()
         assert style.lower() in [
             "pil",
             "numpy",
         ], f"Unsupported style={style} for image reader."
-
         self.style = style.lower()
 
-    def __call__(self, x: Union[str, TensorLike, Image.Image]):
+    def __call__(
+        self, x: Union[str, TensorLike, Image.Image]
+    ) -> Union[np.ndarray, Image.Image]:
+        """Reads/converts the input into an image object.
+
+        Args:
+            x (Union[str, TensorLike, Image.Image]): Input image path or image object.
+
+        Returns:
+            Union[np.ndarray, Image.Image]: Read image in the specified style.
+        """
         if self.style == "numpy":
             if isinstance(x, np.ndarray):
                 return x

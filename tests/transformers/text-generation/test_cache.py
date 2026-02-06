@@ -65,7 +65,7 @@ def test_cache(pipe):
         past_key_values=past_key_values,
     )
 
-    messages = outputs[0]['generated_text']
+    messages = outputs[0]["generated_text"]
     messages += [{"role": "user", "content": "What is my name?"}]
 
     past_key_values.dump_cache_memory()

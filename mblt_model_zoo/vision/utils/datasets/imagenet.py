@@ -1,21 +1,26 @@
+"""
+ImageNet dataset constants and utilities.
+"""
+
+
 def get_imagenet_label(idx: int) -> str:
-    """Get the label of the imagenet class index
+    """Get the descriptive label for an ImageNet class index.
 
     Args:
-        idx (int): ImageNet class index
+        idx (int): ImageNet class index (0-999).
 
     Returns:
-        str: ImageNet class label string
+        str: Primary class label string.
     """
     label_str = imagenet1000_clsidx_to_labels[idx]
     return label_str.split(",")[0]
 
 
 def get_imagenet_class_num() -> int:
-    """Get the number of classes in ImageNet
+    """Get the total number of classes in the ImageNet dataset.
 
     Returns:
-        int: Number of classes in ImageNet
+        int: Total number of ImageNet classes.
     """
     return len(imagenet1000_clsidx_to_labels)
 
