@@ -14,7 +14,7 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ConvNext_Tiny",
-            "filename": "convnext_tiny.mxq",
+            "filename": "convnext_tiny_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -42,7 +42,7 @@ class ConvNeXt_Small_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ConvNext_Small",
-            "filename": "convnext_small.mxq",
+            "filename": "convnext_small_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -70,7 +70,7 @@ class ConvNeXt_Base_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ConvNext_Base",
-            "filename": "convnext_base.mxq",
+            "filename": "convnext_base_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -98,7 +98,7 @@ class ConvNeXt_Large_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ConvNext_Large",
-            "filename": "convnext_large.mxq",
+            "filename": "convnext_large_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {

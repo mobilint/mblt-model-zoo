@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv9t_Set(ModelInfoSet):
     """Configuration set for YOLOv9t models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv9t",
             "filename": "yolov9t.mxq",
@@ -32,13 +32,12 @@ class YOLOv9t_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9s_Set(ModelInfoSet):
     """Configuration set for YOLOv9s models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv9s",
             "filename": "yolov9s.mxq",
@@ -59,13 +58,12 @@ class YOLOv9s_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANs_Set(ModelInfoSet):
     """Configuration set for GELANs models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/GELANs",
             "filename": "gelans.mxq",
@@ -86,13 +84,12 @@ class GELANs_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9m_Set(ModelInfoSet):
     """Configuration set for YOLOv9m models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv9m",
             "filename": "yolov9m.mxq",
@@ -113,13 +110,12 @@ class YOLOv9m_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANm_Set(ModelInfoSet):
     """Configuration set for GELANm models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/GELANm",
             "filename": "gelanm.mxq",
@@ -140,13 +136,12 @@ class GELANm_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9c_Set(ModelInfoSet):
     """Configuration set for YOLOv9c models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv9c",
             "filename": "yolov9c.mxq",
@@ -167,13 +162,12 @@ class YOLOv9c_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANc_Set(ModelInfoSet):
     """Configuration set for GELANc models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/GELANc",
             "filename": "gelanc.mxq",
@@ -194,13 +188,12 @@ class GELANc_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9e_Set(ModelInfoSet):
     """Configuration set for YOLOv9e models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv9e",
             "filename": "yolov9e.mxq",
@@ -221,13 +214,12 @@ class YOLOv9e_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANe_Set(ModelInfoSet):
     """Configuration set for GELANe models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/GELANe",
             "filename": "gelane.mxq",
@@ -248,7 +240,6 @@ class GELANe_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9t(MBLT_Engine):

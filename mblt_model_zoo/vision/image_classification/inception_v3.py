@@ -14,7 +14,7 @@ class Inception_V3_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/Inception_V3",
-            "filename": "inception_v3.mxq",
+            "filename": "inception_v3_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {

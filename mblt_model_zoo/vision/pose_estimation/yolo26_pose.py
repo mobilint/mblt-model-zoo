@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLO26nPose_Set(ModelInfoSet):
     """Configuration set for YOLO26nPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26n-pose",
             "filename": "yolo26n-pose.mxq",
@@ -33,13 +33,12 @@ class YOLO26nPose_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26sPose_Set(ModelInfoSet):
     """Configuration set for YOLO26sPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26s-pose",
             "filename": "yolo26s-pose.mxq",
@@ -61,13 +60,12 @@ class YOLO26sPose_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26mPose_Set(ModelInfoSet):
     """Configuration set for YOLO26mPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26m-pose",
             "filename": "yolo26m-pose.mxq",
@@ -89,13 +87,12 @@ class YOLO26mPose_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26lPose_Set(ModelInfoSet):
     """Configuration set for YOLO26lPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26l-pose",
             "filename": "yolo26l-pose.mxq",
@@ -117,13 +114,12 @@ class YOLO26lPose_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26xPose_Set(ModelInfoSet):
     """Configuration set for YOLO26xPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26x-pose",
             "filename": "yolo26x-pose.mxq",
@@ -145,7 +141,6 @@ class YOLO26xPose_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26nPose(MBLT_Engine):

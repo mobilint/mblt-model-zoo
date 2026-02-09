@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLO26nSeg_Set(ModelInfoSet):
     """Configuration set for YOLO26nSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26n-seg",
             "filename": "yolo26n-seg.mxq",
@@ -33,13 +33,12 @@ class YOLO26nSeg_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26sSeg_Set(ModelInfoSet):
     """Configuration set for YOLO26sSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={"repo_id": "mobilint/YOLO26s-seg", "filename": "yolo26s-seg.mxq"},
         pre_cfg={
             "Reader": {
@@ -58,13 +57,12 @@ class YOLO26sSeg_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26mSeg_Set(ModelInfoSet):
     """Configuration set for YOLO26mSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={"repo_id": "mobilint/YOLO26m-seg", "filename": "yolo26m-seg.mxq"},
         pre_cfg={
             "Reader": {
@@ -83,13 +81,12 @@ class YOLO26mSeg_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26lSeg_Set(ModelInfoSet):
     """Configuration set for YOLO26lSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={"repo_id": "mobilint/YOLO26l-seg", "filename": "yolo26l-seg.mxq"},
         pre_cfg={
             "Reader": {
@@ -108,13 +105,12 @@ class YOLO26lSeg_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26xSeg_Set(ModelInfoSet):
     """Configuration set for YOLO26xSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={"repo_id": "mobilint/YOLO26x-seg", "filename": "yolo26x-seg.mxq"},
         pre_cfg={
             "Reader": {
@@ -133,7 +129,6 @@ class YOLO26xSeg_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26nSeg(MBLT_Engine):

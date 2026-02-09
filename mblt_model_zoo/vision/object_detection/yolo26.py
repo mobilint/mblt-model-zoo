@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLO26n_Set(ModelInfoSet):
     """Configuration set for YOLO26n models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26n",
             "filename": "yolo26n.mxq",
@@ -32,13 +32,12 @@ class YOLO26n_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26s_Set(ModelInfoSet):
     """Configuration set for YOLO26s models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26s",
             "filename": "yolo26s.mxq",
@@ -59,13 +58,12 @@ class YOLO26s_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26m_Set(ModelInfoSet):
     """Configuration set for YOLO26m models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26m",
             "filename": "yolo26m.mxq",
@@ -86,13 +84,12 @@ class YOLO26m_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26l_Set(ModelInfoSet):
     """Configuration set for YOLO26l models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26l",
             "filename": "yolo26l.mxq",
@@ -113,13 +110,12 @@ class YOLO26l_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26x_Set(ModelInfoSet):
     """Configuration set for YOLO26x models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO26x",
             "filename": "yolo26x.mxq",
@@ -140,7 +136,6 @@ class YOLO26x_Set(ModelInfoSet):
             "dflfree": True,  # dfl free yolo
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO26n(MBLT_Engine):

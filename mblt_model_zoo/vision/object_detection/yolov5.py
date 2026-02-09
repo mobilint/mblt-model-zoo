@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv5n_Set(ModelInfoSet):
     """Configuration set for YOLOv5n models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5n",
             "filename": "yolov5n.mxq",
@@ -35,13 +35,12 @@ class YOLOv5n_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5nu_Set(ModelInfoSet):
     """Configuration set for YOLOv5nu models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5nu",
             "filename": "yolov5nu.mxq",
@@ -62,13 +61,12 @@ class YOLOv5nu_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5n6_Set(ModelInfoSet):
     """Configuration set for YOLOv5n6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5n6",
             "filename": "yolov5n6.mxq",
@@ -93,13 +91,12 @@ class YOLOv5n6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5n6u_Set(ModelInfoSet):
     """Configuration set for YOLOv5n6u models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5n6u",
             "filename": "yolov5n6u.mxq",
@@ -120,13 +117,12 @@ class YOLOv5n6u_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5s_Set(ModelInfoSet):
     """Configuration set for YOLOv5s models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5s",
             "filename": "yolov5s.mxq",
@@ -150,13 +146,12 @@ class YOLOv5s_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5su_Set(ModelInfoSet):
     """Configuration set for YOLOv5su models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5su",
             "filename": "yolov5su.mxq",
@@ -177,13 +172,12 @@ class YOLOv5su_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5s6_Set(ModelInfoSet):
     """Configuration set for YOLOv5s6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5s6",
             "filename": "yolov5s6.mxq",
@@ -208,13 +202,12 @@ class YOLOv5s6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5s6u_Set(ModelInfoSet):
     """Configuration set for YOLOv5s6u models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5s6u",
             "filename": "yolov5s6u.mxq",
@@ -235,13 +228,12 @@ class YOLOv5s6u_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5m_Set(ModelInfoSet):
     """Configuration set for YOLOv5m models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5m",
             "filename": "yolov5m.mxq",
@@ -266,13 +258,12 @@ class YOLOv5m_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5mu_Set(ModelInfoSet):
     """Configuration set for YOLOv5mu models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5mu",
             "filename": "yolov5mu.mxq",
@@ -293,13 +284,12 @@ class YOLOv5mu_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5m6_Set(ModelInfoSet):
     """Configuration set for YOLOv5m6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5m6",
             "filename": "yolov5m6.mxq",
@@ -324,13 +314,12 @@ class YOLOv5m6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5m6u_Set(ModelInfoSet):
     """Configuration set for YOLOv5m6u models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5m6u",
             "filename": "yolov5m6u.mxq",
@@ -351,13 +340,12 @@ class YOLOv5m6u_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5l_Set(ModelInfoSet):
     """Configuration set for YOLOv5l models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5l",
             "filename": "yolov5l.mxq",
@@ -381,13 +369,12 @@ class YOLOv5l_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5lu_Set(ModelInfoSet):
     """Configuration set for YOLOv5lu models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5lu",
             "filename": "yolov5lu.mxq",
@@ -408,13 +395,12 @@ class YOLOv5lu_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5l6_Set(ModelInfoSet):
     """Configuration set for YOLOv5l6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5l6",
             "filename": "yolov5l6.mxq",
@@ -439,13 +425,12 @@ class YOLOv5l6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5l6u_Set(ModelInfoSet):
     """Configuration set for YOLOv5l6u models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5l6u",
             "filename": "yolov5l6u.mxq",
@@ -466,13 +451,12 @@ class YOLOv5l6u_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5x_Set(ModelInfoSet):
     """Configuration set for YOLOv5x models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5x",
             "filename": "yolov5x.mxq",
@@ -496,13 +480,12 @@ class YOLOv5x_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5xu_Set(ModelInfoSet):
     """Configuration set for YOLOv5xu models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5xu",
             "filename": "yolov5xu.mxq",
@@ -523,13 +506,12 @@ class YOLOv5xu_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5x6_Set(ModelInfoSet):
     """Configuration set for YOLOv5x6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5x6",
             "filename": "yolov5x6.mxq",
@@ -554,13 +536,12 @@ class YOLOv5x6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5x6u_Set(ModelInfoSet):
     """Configuration set for YOLOv5x6u models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv5x6u",
             "filename": "yolov5x6u.mxq",
@@ -581,7 +562,6 @@ class YOLOv5x6u_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv5n(MBLT_Engine):

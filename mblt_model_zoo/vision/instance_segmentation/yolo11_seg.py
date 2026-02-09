@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLO11nSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11nSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO11n-seg",
             "filename": "yolo11n-seg.mxq",
@@ -33,13 +33,12 @@ class YOLO11nSeg_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11sSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11sSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO11s-seg",
             "filename": "yolo11s-seg.mxq",
@@ -61,13 +60,12 @@ class YOLO11sSeg_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11mSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11mSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO11m-seg",
             "filename": "yolo11m-seg.mxq",
@@ -89,13 +87,12 @@ class YOLO11mSeg_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11lSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11lSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO11l-seg",
             "filename": "yolo11l-seg.mxq",
@@ -117,13 +114,12 @@ class YOLO11lSeg_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11xSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11xSeg models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLO11x-seg",
             "filename": "yolo11x-seg.mxq",
@@ -145,7 +141,6 @@ class YOLO11xSeg_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11nSeg(MBLT_Engine):

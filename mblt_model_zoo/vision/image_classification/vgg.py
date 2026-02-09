@@ -14,7 +14,7 @@ class VGG11_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG11",
-            "filename": "vgg11.mxq",
+            "filename": "vgg11_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -40,7 +40,7 @@ class VGG11_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG11_BN",
-            "filename": "vgg11_bn.mxq",
+            "filename": "vgg11_bn_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -66,7 +66,7 @@ class VGG13_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG13",
-            "filename": "vgg13.mxq",
+            "filename": "vgg13_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -92,7 +92,7 @@ class VGG13_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG13_BN",
-            "filename": "vgg13_bn.mxq",
+            "filename": "vgg13_bn_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -118,7 +118,7 @@ class VGG16_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG16",
-            "filename": "vgg16.mxq",
+            "filename": "vgg16_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -144,7 +144,7 @@ class VGG16_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG16_BN",
-            "filename": "vgg16_bn.mxq",
+            "filename": "vgg16_bn_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -170,7 +170,7 @@ class VGG19_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG19",
-            "filename": "vgg19.mxq",
+            "filename": "vgg19_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -196,7 +196,7 @@ class VGG19_BN_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/VGG19_BN",
-            "filename": "vgg19_bn.mxq",
+            "filename": "vgg19_bn_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {

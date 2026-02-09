@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv8nPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8nPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv8n-pose",
             "filename": "yolov8n-pose.mxq",
@@ -33,13 +33,12 @@ class YOLOv8nPose_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8sPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8sPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv8s-pose",
             "filename": "yolov8s-pose.mxq",
@@ -61,13 +60,12 @@ class YOLOv8sPose_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8mPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8mPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv8m-pose",
             "filename": "yolov8m-pose.mxq",
@@ -89,13 +87,12 @@ class YOLOv8mPose_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8lPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8lPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv8l-pose",
             "filename": "yolov8l-pose.mxq",
@@ -117,13 +114,12 @@ class YOLOv8lPose_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8xPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8xPose models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv8x-pose",
             "filename": "yolov8x-pose.mxq",
@@ -145,7 +141,6 @@ class YOLOv8xPose_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8nPose(MBLT_Engine):

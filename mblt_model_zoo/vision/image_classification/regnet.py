@@ -14,7 +14,7 @@ class RegNet_X_400MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_400MF.tv1_in1k",
-            "filename": "regnet_x_400mf.mxq",
+            "filename": "regnet_x_400mf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -34,7 +34,7 @@ class RegNet_X_400MF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_400MF.tv2_in1k",
-            "filename": "regnet_x_400mf.mxq",
+            "filename": "regnet_x_400mf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -60,7 +60,7 @@ class RegNet_X_800MF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_800MF.tv1_in1k",
-            "filename": "regnet_x_800mf.mxq",
+            "filename": "regnet_x_800mf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -80,7 +80,7 @@ class RegNet_X_800MF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_800MF.tv2_in1k",
-            "filename": "regnet_x_800mf.mxq",
+            "filename": "regnet_x_800mf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -106,7 +106,7 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_1_6GF.tv1_in1k",
-            "filename": "regnet_x_1_6gf.mxq",
+            "filename": "regnet_x_1_6gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -126,7 +126,7 @@ class RegNet_X_1_6GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_1_6GF.tv2_in1k",
-            "filename": "regnet_x_1_6gf.mxq",
+            "filename": "regnet_x_1_6gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -152,7 +152,7 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_3_2GF.tv1_in1k",
-            "filename": "regnet_x_3_2gf.mxq",
+            "filename": "regnet_x_3_2gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -172,7 +172,7 @@ class RegNet_X_3_2GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_3_2GF.tv2_in1k",
-            "filename": "regnet_x_3_2gf.mxq",
+            "filename": "regnet_x_3_2gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -198,7 +198,7 @@ class RegNet_X_8GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_8GF.tv1_in1k",
-            "filename": "regnet_x_8gf.mxq",
+            "filename": "regnet_x_8gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -218,7 +218,7 @@ class RegNet_X_8GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_8GF.tv2_in1k",
-            "filename": "regnet_x_8gf.mxq",
+            "filename": "regnet_x_8gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -244,7 +244,7 @@ class RegNet_X_16GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_16GF.tv1_in1k",
-            "filename": "regnet_x_16gf.mxq",
+            "filename": "regnet_x_16gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -264,7 +264,7 @@ class RegNet_X_16GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_16GF.tv2_in1k",
-            "filename": "regnet_x_16gf.mxq",
+            "filename": "regnet_x_16gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -290,7 +290,7 @@ class RegNet_X_32GF_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_32GF.tv1_in1k",
-            "filename": "regnet_x_32gf.mxq",
+            "filename": "regnet_x_32gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -310,7 +310,7 @@ class RegNet_X_32GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_X_32GF.tv2_in1k",
-            "filename": "regnet_x_32gf.mxq",
+            "filename": "regnet_x_32gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -331,10 +331,12 @@ class RegNet_X_32GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_400MF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 400MF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_400MF.tv1_in1k",
-            "filename": "regnet_y_400mf.mxq",
+            "filename": "regnet_y_400mf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -354,7 +356,7 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_400MF.tv2_in1k",
-            "filename": "regnet_y_400mf.mxq",
+            "filename": "regnet_y_400mf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -375,10 +377,12 @@ class RegNet_Y_400MF_Set(ModelInfoSet):
 
 
 class RegNet_Y_800MF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 800MF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_800MF.tv1_in1k",
-            "filename": "regnet_y_800mf.mxq",
+            "filename": "regnet_y_800mf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -398,7 +402,7 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_800MF.tv2_in1k",
-            "filename": "regnet_y_800mf.mxq",
+            "filename": "regnet_y_800mf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -419,10 +423,12 @@ class RegNet_Y_800MF_Set(ModelInfoSet):
 
 
 class RegNet_Y_1_6GF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 1.6GF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_1_6GF.tv1_in1k",
-            "filename": "regnet_y_1_6gf.mxq",
+            "filename": "regnet_y_1_6gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -442,7 +448,7 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_1_6GF.tv2_in1k",
-            "filename": "regnet_y_1_6gf.mxq",
+            "filename": "regnet_y_1_6gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -463,10 +469,12 @@ class RegNet_Y_1_6GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_3_2GF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 3.2GF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_3_2GF.tv1_in1k",
-            "filename": "regnet_y_3_2gf.mxq",
+            "filename": "regnet_y_3_2gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -486,7 +494,7 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_3_2GF.tv2_in1k",
-            "filename": "regnet_y_3_2gf.mxq",
+            "filename": "regnet_y_3_2gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -507,10 +515,12 @@ class RegNet_Y_3_2GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_8GF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 8GF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_8GF.tv1_in1k",
-            "filename": "regnet_y_8gf.mxq",
+            "filename": "regnet_y_8gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -530,7 +540,7 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_8GF.tv2_in1k",
-            "filename": "regnet_y_8gf.mxq",
+            "filename": "regnet_y_8gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -551,10 +561,12 @@ class RegNet_Y_8GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_16GF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 16GF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_16GF.tv1_in1k",
-            "filename": "regnet_y_16gf.mxq",
+            "filename": "regnet_y_16gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -574,7 +586,7 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_16GF.tv2_in1k",
-            "filename": "regnet_y_16gf.mxq",
+            "filename": "regnet_y_16gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -595,10 +607,12 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
 
 
 class RegNet_Y_32GF_Set(ModelInfoSet):
+    """Configuration set for RegNet Y 32GF models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_32GF.tv1_in1k",
-            "filename": "regnet_y_32gf.mxq",
+            "filename": "regnet_y_32gf_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -618,7 +632,7 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/RegNet_Y_32GF.tv2_in1k",
-            "filename": "regnet_y_32gf.mxq",
+            "filename": "regnet_y_32gf_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {

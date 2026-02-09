@@ -14,7 +14,7 @@ class GoogLeNet_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/GoogLeNet",
-            "filename": "GoogLeNet.mxq",
+            "filename": "googlenet_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv10n_Set(ModelInfoSet):
     """Configuration set for YOLOv10n models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10n",
             "filename": "yolov10n.mxq",
@@ -33,13 +33,12 @@ class YOLOv10n_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10s_Set(ModelInfoSet):
     """Configuration set for YOLOv10s models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10s",
             "filename": "yolov10s.mxq",
@@ -61,13 +60,12 @@ class YOLOv10s_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10m_Set(ModelInfoSet):
     """Configuration set for YOLOv10m models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10m",
             "filename": "yolov10m.mxq",
@@ -89,13 +87,12 @@ class YOLOv10m_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10b_Set(ModelInfoSet):
     """Configuration set for YOLOv10b models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10b",
             "filename": "yolov10b.mxq",
@@ -117,13 +114,12 @@ class YOLOv10b_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10l_Set(ModelInfoSet):
     """Configuration set for YOLOv10l models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10l",
             "filename": "yolov10l.mxq",
@@ -145,13 +141,12 @@ class YOLOv10l_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10x_Set(ModelInfoSet):
     """Configuration set for YOLOv10x models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv10x",
             "filename": "yolov10x.mxq",
@@ -173,7 +168,6 @@ class YOLOv10x_Set(ModelInfoSet):
             "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv10n(MBLT_Engine):

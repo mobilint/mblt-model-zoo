@@ -14,7 +14,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/Wide_ResNet50_2.tv1_in1k",
-            "filename": "wide_resnet50_2.mxq",
+            "filename": "wide_resnet50_2_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -36,7 +36,7 @@ class Wide_ResNet50_2_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/Wide_ResNet50_2.tv2_in1k",
-            "filename": "wide_resnet50_2.mxq",
+            "filename": "wide_resnet50_2_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -64,7 +64,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/Wide_ResNet101_2.tv1_in1k",
-            "filename": "wide_resnet101_2.mxq",
+            "filename": "wide_resnet101_2_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -86,7 +86,7 @@ class Wide_ResNet101_2_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/Wide_ResNet101_2.tv2_in1k",
-            "filename": "wide_resnet101_2.mxq",
+            "filename": "wide_resnet101_2_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {

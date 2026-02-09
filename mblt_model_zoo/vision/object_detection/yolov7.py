@@ -11,7 +11,7 @@ from ..wrapper import MBLT_Engine
 class YOLOv7_Set(ModelInfoSet):
     """Configuration set for YOLOv7 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7",
             "filename": "yolov7.mxq",
@@ -35,13 +35,12 @@ class YOLOv7_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7d6_Set(ModelInfoSet):
     """Configuration set for YOLOv7d6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7d6",
             "filename": "yolov7d6.mxq",
@@ -66,13 +65,12 @@ class YOLOv7d6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7e6_Set(ModelInfoSet):
     """Configuration set for YOLOv7e6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7e6",
             "filename": "yolov7e6.mxq",
@@ -97,13 +95,12 @@ class YOLOv7e6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7e6e_Set(ModelInfoSet):
     """Configuration set for YOLOv7e6e models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7e6e",
             "filename": "yolov7e6e.mxq",
@@ -128,13 +125,12 @@ class YOLOv7e6e_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7w6_Set(ModelInfoSet):
     """Configuration set for YOLOv7w6 models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7w6",
             "filename": "yolov7w6.mxq",
@@ -159,13 +155,12 @@ class YOLOv7w6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7x_Set(ModelInfoSet):
     """Configuration set for YOLOv7x models."""
 
-    COCO_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/YOLOv7x",
             "filename": "yolov7x.mxq",
@@ -189,7 +184,6 @@ class YOLOv7x_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7(MBLT_Engine):

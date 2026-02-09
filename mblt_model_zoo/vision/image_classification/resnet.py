@@ -14,7 +14,7 @@ class ResNet18_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet18",
-            "filename": "resnet18-imagenet1k-v1.mxq",
+            "filename": "resnet18_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -42,7 +42,7 @@ class ResNet34_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet34",
-            "filename": "resnet34-imagenet1k-v1.mxq",
+            "filename": "resnet34_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -70,7 +70,7 @@ class ResNet50_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet50.tv1_in1k",
-            "filename": "resnet50-imagenet1k-v1.mxq",
+            "filename": "resnet50_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -92,7 +92,7 @@ class ResNet50_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet50.tv2_in1k",
-            "filename": "resnet50-imagenet1k-v2.mxq",
+            "filename": "resnet50_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -120,7 +120,7 @@ class ResNet101_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet101.tv1_in1k",
-            "filename": "resnet101-imagenet1k-v1.mxq",
+            "filename": "resnet101_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -142,7 +142,7 @@ class ResNet101_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet101.tv2_in1k",
-            "filename": "resnet101-imagenet1k-v2.mxq",
+            "filename": "resnet101_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -170,7 +170,7 @@ class ResNet152_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet152.tv1_in1k",
-            "filename": "resnet152-imagenet1k-v1.mxq",
+            "filename": "resnet152_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -192,7 +192,7 @@ class ResNet152_Set(ModelInfoSet):
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/ResNet152.tv2_in1k",
-            "filename": "resnet152-imagenet1k-v2.mxq",
+            "filename": "resnet152_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {

@@ -14,7 +14,7 @@ class DenseNet121_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/DenseNet121",
-            "filename": "densenet121.mxq",
+            "filename": "densenet121_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -40,7 +40,7 @@ class DenseNet161_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/DenseNet161",
-            "filename": "densenet161.mxq",
+            "filename": "densenet161_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -66,7 +66,7 @@ class DenseNet169_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/DenseNet169",
-            "filename": "densenet169.mxq",
+            "filename": "densenet169_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -92,7 +92,7 @@ class DenseNet201_Set(ModelInfoSet):
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
             "repo_id": "mobilint/DenseNet201",
-            "filename": "densenet201.mxq",
+            "filename": "densenet201_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
