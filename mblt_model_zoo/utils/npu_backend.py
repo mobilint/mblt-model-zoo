@@ -34,9 +34,13 @@ class MobilintNPUBackend:
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        revision: Optional[str] = None,
+        commit_hash: Optional[str] = None,
         **kwargs,
     ):
         self.name_or_path: str = ""  # will be populated in MobilintModelMixin
+        self.revision = revision
+        self._commit_hash = commit_hash
         self.mxq_path = mxq_path
         self.dev_no = dev_no
         self.core_mode = core_mode
@@ -198,21 +202,10 @@ class MobilintNPUBackend:
             return basename
         if mxq_path in files:
             return mxq_path
-
-        mxq_files = [f for f in files if f.endswith(".mxq")]
-        if not mxq_files:
-            return None
-
-        for f in mxq_files:
-            if os.path.basename(f) == basename:
-                return f
-
-        base_stem = os.path.splitext(basename)[0]
-        for f in mxq_files:
-            if base_stem and base_stem in os.path.basename(f):
-                return f
-
-        return mxq_files[0]
+        
+        raise ValueError(
+            f"Cannot find {mxq_path} file from HuggingFace repo: f{repo_id}"
+        )
 
     def create(self):
         self.acc = Accelerator(self.dev_no)
@@ -338,4 +331,6 @@ class MobilintNPUBackend:
             core_mode=data.pop(f"{p}core_mode", "single"),
             target_cores=data.pop(f"{p}target_cores", None),
             target_clusters=data.pop(f"{p}target_clusters", None),
+            revision=data.pop(f"{p}revision", None),
+            commit_hash=data.pop(f"{p}commit_hash", None),
         )

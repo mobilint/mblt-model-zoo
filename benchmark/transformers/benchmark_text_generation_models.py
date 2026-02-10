@@ -2,9 +2,10 @@ import argparse
 import json
 import os
 from dataclasses import asdict
-from typing import Tuple
+from typing import Iterable, Tuple
 
 from transformers import pipeline as hf_pipeline
+from tqdm import tqdm
 
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -79,13 +80,67 @@ def _load_result(path: str) -> BenchmarkResult:
             x_values=prefill.get("x_values", []),
             tps_values=prefill.get("tps_values", []),
             time_values=prefill.get("time_values", []),
+            avg_total_token_latency_values=prefill.get("avg_total_token_latency_values", []),
+            avg_npu_token_latency_values=prefill.get("avg_npu_token_latency_values", []),
         ),
         decode_sweep=SweepData(
             x_values=decode.get("x_values", []),
             tps_values=decode.get("tps_values", []),
             time_values=decode.get("time_values", []),
+            avg_total_token_latency_values=decode.get("avg_total_token_latency_values", []),
+            avg_npu_token_latency_values=decode.get("avg_npu_token_latency_values", []),
         ),
     )
+
+
+def _revision_exists(model_id: str, revision: str) -> bool | None:
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        refs = api.list_repo_refs(model_id, repo_type="model")
+        return any(branch.name == revision for branch in getattr(refs, "branches", []))
+    except Exception:
+        return None
+
+
+def _iter_targets(
+    model_ids: Iterable[str],
+    *,
+    revision: str | None,
+    all_revisions: bool,
+) -> Iterable[tuple[str, list[str | None], str, str]]:
+    if not all_revisions:
+        for model_id in model_ids:
+            label = model_id
+            base = _safe_filename(model_id)
+            yield model_id, [revision], label, base
+        return
+
+    revision_map = [
+        (["W8"], "-W8"),
+        (["W4V8"], "-W4V8"),
+    ]
+    for model_id in model_ids:
+        for revs, suffix in revision_map:
+            label = f"{model_id}{suffix}"
+            base = f"{_safe_filename(model_id)}{suffix}"
+            yield model_id, revs, label, base
+
+
+def _select_revision(
+    model_id: str,
+    candidates: list[str | None],
+) -> str | None:
+    for candidate in candidates:
+        if not candidate:
+            return candidate
+        exists = _revision_exists(model_id, candidate)
+        if exists is True:
+            return candidate
+        if exists is None:
+            return candidate
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         "--revision",
         default=None,
         help="model revision (e.g., W8)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="benchmark W8 and W4W8 revisions only (skip main)",
     )
     parser.add_argument(
         "--prefill-range",
@@ -162,9 +222,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     os.makedirs(results_dir, exist_ok=True)
 
-    for model_id in model_ids:
-        print(f"=== {model_id} ===")
-        base = _safe_filename(model_id)
+    targets = list(
+        _iter_targets(
+            model_ids,
+            revision=args.revision,
+            all_revisions=args.all,
+        )
+    )
+    for model_id, revision_candidates, label, base in tqdm(
+        targets,
+        desc="Benchmarking models",
+        total=len(targets),
+        unit="model",
+    ):
+        print(f"=== {label} ===")
+        revision = _select_revision(model_id, revision_candidates)
+        if args.all and revision is None:
+            print("Skipping (missing revisions).")
+            continue
         json_path = os.path.join(results_dir, f"{base}.json")
         png_path = os.path.join(results_dir, f"{base}.png")
         if (
@@ -174,14 +249,21 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print("Skipping (results exist).")
             continue
-        pipeline = _build_pipeline(
-            model_id,
-            revision=args.revision,
-            device=args.device,
-            device_map=args.device_map,
-            dtype=args.dtype,
-            trust_remote_code=args.trust_remote_code,
-        )
+        try:
+            pipeline = _build_pipeline(
+                model_id,
+                revision=revision,
+                device=args.device,
+                device_map=args.device_map,
+                dtype=args.dtype,
+                trust_remote_code=args.trust_remote_code,
+            )
+        except Exception as e:
+            if args.all and _revision_exists(model_id, revision or "") is None:
+                print(f"Skipping (failed to load revision {revision}): {e}")
+            else:
+                print(f"Skipping (failed to load model): {e}")
+            continue
         measurer = TPSMeasurer(pipeline)
         result = measurer.measure_full(
             prefill_range=args.prefill_range,
@@ -189,6 +271,22 @@ def main(argv: list[str] | None = None) -> int:
             fixed_decode_len=args.fixed_decode,
             fixed_prefill_len=args.fixed_prefill,
         )
+        if result.prefill_sweep.avg_total_token_latency_values:
+            avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
+            avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
+            avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+            print(
+                "Avg prefill token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
+            )
+        if result.decode_sweep.avg_total_token_latency_values:
+            avg_total = result.decode_sweep.avg_total_token_latency_values[-1]
+            avg_npu = result.decode_sweep.avg_npu_token_latency_values[-1]
+            avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+            print(
+                "Avg decode token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
+            )
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(asdict(result), f, ensure_ascii=False, indent=2)
@@ -199,15 +297,14 @@ def main(argv: list[str] | None = None) -> int:
     combined_results = []
     combined_labels = []
     combined_rows = []
-    for model_id in model_ids:
-        base = _safe_filename(model_id)
+    for _, _, label, base in targets:
         json_path = os.path.join(results_dir, f"{base}.json")
         if not os.path.isfile(json_path):
             continue
         result = _load_result(json_path)
         combined_results.append(result)
-        combined_labels.append(model_id)
-        combined_rows.extend(list(BenchmarkResult.iter_rows(model_id, result)))
+        combined_labels.append(label)
+        combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
 
     if combined_results:
         combined_path = os.path.join(results_dir, "combined.png")

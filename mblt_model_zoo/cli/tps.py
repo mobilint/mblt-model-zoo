@@ -144,18 +144,36 @@ def _build_pipeline(
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
-    for x, tps, t in zip(
+    for x, tps, t, avg_total, avg_npu in zip(
         result.prefill_sweep.x_values,
         result.prefill_sweep.tps_values,
         result.prefill_sweep.time_values,
+        result.prefill_sweep.avg_total_token_latency_values,
+        result.prefill_sweep.avg_npu_token_latency_values,
     ):
-        yield {"phase": "prefill", "tokens": x, "tps": tps, "time_s": t}
-    for x, tps, t in zip(
+        yield {
+            "phase": "prefill",
+            "tokens": x,
+            "tps": tps,
+            "time_ms": t * 1000.0,
+            "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
+            "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+        }
+    for x, tps, t, avg_total, avg_npu in zip(
         result.decode_sweep.x_values,
         result.decode_sweep.tps_values,
         result.decode_sweep.time_values,
+        result.decode_sweep.avg_total_token_latency_values,
+        result.decode_sweep.avg_npu_token_latency_values,
     ):
-        yield {"phase": "decode", "tokens": x, "tps": tps, "time_s": t}
+        yield {
+            "phase": "decode",
+            "tokens": x,
+            "tps": tps,
+            "time_ms": t * 1000.0,
+            "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
+            "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+        }
 
 
 def _write_json(path: str, payload: Any) -> None:
@@ -166,12 +184,19 @@ def _write_json(path: str, payload: Any) -> None:
 
 def _write_csv(path: str, rows: Sequence[dict[str, Any]]) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-    fieldnames = ["phase", "tokens", "tps", "time_s"]
+    fieldnames = [
+        "phase",
+        "tokens",
+        "tps",
+        "time_ms",
+        "avg_total_token_latency_ms",
+        "avg_npu_token_latency_ms",
+    ]
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
@@ -205,12 +230,48 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     )
 
     print(
-        f"prefill: {res.num_prefill} tokens | {res.prefill_tps:.2f} tok/s | TTFT {res.prefill_latency:.4f}s"
+        f"prefill: {res.num_prefill} tokens | {res.prefill_tps:.2f} tok/s | TTFT {res.prefill_latency * 1000.0:.2f}ms"
     )
     print(
-        f"decode:  {res.num_decode} tokens | {res.decode_tps:.2f} tok/s | duration {res.decode_duration:.4f}s"
+        f"decode:  {res.num_decode} tokens | {res.decode_tps:.2f} tok/s | duration {res.decode_duration * 1000.0:.2f}ms"
     )
-    print(f"total:   {res.total_time:.4f}s")
+    print(f"total:   {res.total_time * 1000.0:.2f}ms")
+    npu_prefill_ratio = None
+    if (
+        res.avg_npu_prefill_token_latency is not None
+        and res.avg_total_prefill_token_latency > 0
+    ):
+        npu_prefill_ratio = (
+            res.avg_npu_prefill_token_latency / res.avg_total_prefill_token_latency
+        )
+    npu_decode_ratio = None
+    if (
+        res.avg_npu_decode_token_latency is not None
+        and res.avg_total_decode_token_latency > 0
+    ):
+        npu_decode_ratio = (
+            res.avg_npu_decode_token_latency / res.avg_total_decode_token_latency
+        )
+    npu_prefill = (
+        f"{res.avg_npu_prefill_token_latency * 1000.0:.3f}ms"
+        if res.avg_npu_prefill_token_latency is not None
+        else "n/a"
+    )
+    npu_decode = (
+        f"{res.avg_npu_decode_token_latency * 1000.0:.3f}ms"
+        if res.avg_npu_decode_token_latency is not None
+        else "n/a"
+    )
+    npu_prefill_pct = f"{npu_prefill_ratio * 100:.1f}%" if npu_prefill_ratio is not None else "n/a"
+    npu_decode_pct = f"{npu_decode_ratio * 100:.1f}%" if npu_decode_ratio is not None else "n/a"
+    print(
+        "prefill avg token latency: "
+        f"total={res.avg_total_prefill_token_latency * 1000.0:.3f}ms npu={npu_prefill} ({npu_prefill_pct})"
+    )
+    print(
+        "decode  avg token latency: "
+        f"total={res.avg_total_decode_token_latency * 1000.0:.3f}ms npu={npu_decode} ({npu_decode_pct})"
+    )
 
     if args.json:
         _write_json(args.json, asdict(res))
@@ -250,6 +311,32 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         fixed_prefill_len=args.fixed_prefill,
         trace_path=args.trace,
     )
+    if result.prefill_sweep.avg_total_token_latency_values:
+        avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
+        avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
+        avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+        avg_npu_pct = (
+            f"{(avg_npu / avg_total) * 100:.1f}%"
+            if avg_npu is not None and avg_total > 0
+            else "n/a"
+        )
+        print(
+            "prefill avg token latency (last): "
+            f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str} ({avg_npu_pct})"
+        )
+    if result.decode_sweep.avg_total_token_latency_values:
+        avg_total = result.decode_sweep.avg_total_token_latency_values[-1]
+        avg_npu = result.decode_sweep.avg_npu_token_latency_values[-1]
+        avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+        avg_npu_pct = (
+            f"{(avg_npu / avg_total) * 100:.1f}%"
+            if avg_npu is not None and avg_total > 0
+            else "n/a"
+        )
+        print(
+            "decode  avg token latency (last): "
+            f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str} ({avg_npu_pct})"
+        )
 
     if args.json:
         _write_json(args.json, asdict(result))
@@ -356,13 +443,13 @@ def add_tps_parser(
     p_sweep.add_argument(
         "--prefill-range",
         type=_parse_range,
-        default=(128, 2048, 128),
+        default=(128, 512, 128),
         help="prefill sweep range (start:end:step)",
     )
     p_sweep.add_argument(
         "--decode-range",
         type=_parse_range,
-        default=(128, 1024, 128),
+        default=(128, 512, 128),
         help="decode sweep range (start:end:step)",
     )
     p_sweep.add_argument(

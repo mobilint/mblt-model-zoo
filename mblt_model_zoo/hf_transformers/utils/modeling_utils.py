@@ -1,8 +1,11 @@
 import math
-from typing import TYPE_CHECKING, Literal, Optional
+import os
+import time
+from typing import TYPE_CHECKING, Literal, Optional, Union, cast
 
 import numpy as np
 import torch
+import torch.nn as nn
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.npu_backend import MobilintNPUBackend
@@ -21,11 +24,81 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             self.config = config
         
         assert self.config.name_or_path is not None, "config.name_or_path is None!"
+
+        # Used for benchmark
+        self.npu_time = None
         
         self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
         self.npu_backend.name_or_path = self.config.name_or_path
+        revision = getattr(self.config, "revision", None)
+        if revision:
+            self.npu_backend.revision = revision
+        commit_hash = getattr(self.config, "_commit_hash", None)
+        if commit_hash:
+            self.npu_backend._commit_hash = commit_hash
         self.npu_backend.create()
         self.launch()
+    
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
+        embedding_weight_path = kwargs.pop("embedding_weight", None)
+        revision = kwargs.get("revision", None)
+
+        model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+
+        if embedding_weight_path:
+            cls._inject_custom_embeddings(model, embedding_weight_path)
+
+        if hasattr(model, "npu_backend"):
+            if revision is not None:
+                setattr(model.npu_backend, "revision", revision)
+            commit_hash = getattr(getattr(model, "config", None), "_commit_hash", None)
+            if commit_hash:
+                setattr(model.npu_backend, "_commit_hash", commit_hash)
+
+        return model
+
+    @staticmethod
+    def _inject_custom_embeddings(model: PreTrainedModel, path: str):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Custom embedding path not found: {path}")
+
+        print(f"[Mobilint] Loading custom embeddings from: {path}")
+        
+        custom_data = torch.load(path, map_location="cpu")
+        
+        # Handle dict (state_dict) vs Tensor
+        if isinstance(custom_data, dict):
+            # Try to find common keys for weights
+            if "weight" in custom_data:
+                new_weight = custom_data["weight"]
+            else:
+                # If ambiguous, take the first value
+                new_weight = next(iter(custom_data.values()))
+        elif isinstance(custom_data, torch.Tensor):
+            new_weight = custom_data
+        else:
+            raise ValueError(f"Unsupported data format in {path}. Expected dict or Tensor.")
+
+        input_embeddings: nn.Embedding = cast(nn.Embedding, model.get_input_embeddings())
+        
+        original_vocab_size = input_embeddings.weight.shape[0]
+        new_vocab_size = new_weight.shape[0]
+        embed_dim = input_embeddings.weight.shape[1]
+
+        if new_weight.shape[1] != embed_dim:
+            raise ValueError(f"Embedding dimension mismatch! Model expects {embed_dim}, but file has {new_weight.shape[1]}")
+
+        if original_vocab_size != new_vocab_size:
+            raise ValueError(f"Vocab size mismatch! Model expects {original_vocab_size}, but file has {new_vocab_size}")
+
+        with torch.no_grad():
+            input_embeddings.weight.data = new_weight.to(
+                device=input_embeddings.weight.device,
+                dtype=input_embeddings.weight.dtype
+            )
+        
+        print("[Mobilint] Custom embeddings successfully injected.")
     
     def launch(self):
         self.npu_backend.launch()
@@ -55,6 +128,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
     ):
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
 
@@ -65,13 +139,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / chunk_size)
 
         mxq_model = self.npu_backend.mxq_model
+        self.npu_time = 0.0 if count_npu_time else None
         
         for i in range(num_of_chunks):
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds_numpy.shape[2])
             cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
 
-            result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+            if count_npu_time:
+                t0 = time.perf_counter()
+                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+                self.npu_time += time.perf_counter() - t0
+            else:
+                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+
             assert result is not None, "mxq infer result is None!"
             logits_ndarray = result[0]
 
@@ -79,7 +160,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
 
         logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
-        
+
         return logits
 
     def decoder_forward(

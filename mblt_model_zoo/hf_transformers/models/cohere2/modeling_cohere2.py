@@ -41,6 +41,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs], # type: ignore
     ) -> CausalLMOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -74,7 +75,13 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
 
-        logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
+        logits = self.llm_forward(
+            inputs_embeds,
+            past_key_values,
+            cache_position,
+            chunk_size,
+            count_npu_time=count_npu_time,
+        )
         logits = logits * self.logit_scale  # main diff from Llama
 
         loss = None

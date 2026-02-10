@@ -83,6 +83,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         logits_to_keep: int | torch.Tensor = 0,
         image_sizes: torch.Tensor | None = None,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | AyaVisionCausalLMOutputWithPast:
         if logits_to_keep > 1:
@@ -118,6 +119,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             cache_position=cache_position,
             image_sizes=image_sizes,
             chunk_size=chunk_size,
+            count_npu_time=count_npu_time,
             **kwargs,
         )
 

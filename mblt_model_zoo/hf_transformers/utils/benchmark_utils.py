@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -36,12 +36,20 @@ class SingleMeasurement:
     decode_duration: float  # seconds
     decode_tps: float       # tokens/sec
     total_time: float       # seconds
+    avg_total_prefill_token_latency: float  # seconds
+    avg_npu_prefill_token_latency: Optional[float]  # seconds
+    avg_total_decode_token_latency: float  # seconds
+    avg_npu_decode_token_latency: Optional[float]  # seconds
+    npu_prefill_time: Optional[float] = None
+    npu_decode_time: Optional[float] = None
 
 @dataclass
 class SweepData:
     x_values: List[int] = field(default_factory=list)      # Token Counts
     tps_values: List[float] = field(default_factory=list)  # TPS
     time_values: List[float] = field(default_factory=list) # Latency/Duration
+    avg_total_token_latency_values: List[Optional[float]] = field(default_factory=list)
+    avg_npu_token_latency_values: List[Optional[float]] = field(default_factory=list)
 
 @dataclass
 class BenchmarkResult:
@@ -49,48 +57,66 @@ class BenchmarkResult:
     decode_sweep: SweepData = field(default_factory=SweepData)
 
     @staticmethod
-    def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, float | int | str]]:
-        for x, tps, t in zip(
+    def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, float | int | str | None]]:
+        for x, tps, t, avg_total, avg_npu in zip(
             result.prefill_sweep.x_values,
             result.prefill_sweep.tps_values,
             result.prefill_sweep.time_values,
+            result.prefill_sweep.avg_total_token_latency_values,
+            result.prefill_sweep.avg_npu_token_latency_values,
         ):
             yield {
                 "model": model_id,
                 "phase": "prefill",
                 "tokens": x,
                 "tps": tps,
-                "time_s": t,
+                "time_ms": t * 1000.0,
+                "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
+                "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
             }
-        for x, tps, t in zip(
+        for x, tps, t, avg_total, avg_npu in zip(
             result.decode_sweep.x_values,
             result.decode_sweep.tps_values,
             result.decode_sweep.time_values,
+            result.decode_sweep.avg_total_token_latency_values,
+            result.decode_sweep.avg_npu_token_latency_values,
         ):
             yield {
                 "model": model_id,
                 "phase": "decode",
                 "tokens": x,
                 "tps": tps,
-                "time_s": t,
+                "time_ms": t * 1000.0,
+                "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
+                "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
             }
 
     @staticmethod
     def write_combined_csv(
-        path: str, rows: Iterable[dict[str, float | int | str]]
+        path: str, rows: Iterable[dict[str, float | int | str | None]]
     ) -> None:
         import csv
 
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["model", "phase", "tokens", "tps", "time_s"]
+                f,
+                fieldnames=[
+                    "model",
+                    "phase",
+                    "tokens",
+                    "tps",
+                    "time_ms",
+                    "avg_total_token_latency_ms",
+                    "avg_npu_token_latency_ms",
+                ],
             )
             writer.writeheader()
-            writer.writerows(rows)
+            for row in rows:
+                writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
 
     @staticmethod
     def write_combined_markdown(
-        path: str, rows: Iterable[dict[str, float | int | str]]
+        path: str, rows: Iterable[dict[str, float | int | str | None]]
     ) -> None:
         row_list = list(rows)
         model_ids = sorted({str(row["model"]) for row in row_list})
@@ -110,9 +136,18 @@ class BenchmarkResult:
         )
 
         tps_map: dict[tuple[str, str, int], float] = {}
+        avg_total_map: dict[tuple[str, str, int], Optional[float]] = {}
+        avg_npu_map: dict[tuple[str, str, int], Optional[float]] = {}
         for row in row_list:
-            key = (str(row["model"]), str(row["phase"]), int(row["tokens"]))
-            tps_map[key] = float(row["tps"])
+            model = str(row["model"])
+            phase = str(row["phase"])
+            tokens = int(row["tokens"])
+            key = (model, phase, tokens)
+            tps_value = row.get("tps")
+            if tps_value is not None:
+                tps_map[key] = float(tps_value)
+            avg_total_map[key] = row.get("avg_total_token_latency_ms")
+            avg_npu_map[key] = row.get("avg_npu_token_latency_ms")
 
         lines = [
             "<table>\n",
@@ -149,11 +184,37 @@ class BenchmarkResult:
             lines.append(f"      <td>{model_id}</td>\n")
             for token in prefill_tokens:
                 tps = tps_map.get((model_id, "prefill", token))
-                cell = f"{tps:.4f}" if tps is not None else ""
+                avg_total = avg_total_map.get((model_id, "prefill", token))
+                avg_npu = avg_npu_map.get((model_id, "prefill", token))
+                if (
+                    tps is not None
+                    and avg_total is not None
+                    and avg_total > 0
+                    and avg_npu is not None
+                ):
+                    npu_ratio = avg_npu / avg_total
+                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                elif tps is not None:
+                    cell = f"{tps:.4f}"
+                else:
+                    cell = ""
                 lines.append(f"      <td>{cell}</td>\n")
             for token in decode_tokens:
                 tps = tps_map.get((model_id, "decode", token))
-                cell = f"{tps:.4f}" if tps is not None else ""
+                avg_total = avg_total_map.get((model_id, "decode", token))
+                avg_npu = avg_npu_map.get((model_id, "decode", token))
+                if (
+                    tps is not None
+                    and avg_total is not None
+                    and avg_total > 0
+                    and avg_npu is not None
+                ):
+                    npu_ratio = avg_npu / avg_total
+                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                elif tps is not None:
+                    cell = f"{tps:.4f}"
+                else:
+                    cell = ""
                 lines.append(f"      <td>{cell}</td>\n")
             lines.append("    </tr>\n")
 
@@ -161,6 +222,50 @@ class BenchmarkResult:
 
         with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
+
+        def _write_avg_table(
+            title: str,
+            value_map: dict[tuple[str, str, int], Optional[float]],
+            phase: str,
+            tokens: list[int],
+            fmt: str = "{:.6f}",
+        ) -> None:
+            if not tokens:
+                return
+            table_lines = [
+                "\n<table>\n",
+                "  <thead>\n",
+                "    <tr>\n",
+                '      <th rowspan="2">model</th>\n',
+                f'      <th colspan="{len(tokens)}">{title}</th>\n',
+                "    </tr>\n",
+                "    <tr>\n",
+            ]
+            for token in tokens:
+                table_lines.append(f"      <th>{token}</th>\n")
+            table_lines.extend(
+                [
+                    "    </tr>\n",
+                    "  </thead>\n",
+                    "  <tbody>\n",
+                ]
+            )
+            for model_id in model_ids:
+                table_lines.append("    <tr>\n")
+                table_lines.append(f"      <td>{model_id}</td>\n")
+                for token in tokens:
+                    value = value_map.get((model_id, phase, token))
+                    cell = fmt.format(value) if value is not None else ""
+                    table_lines.append(f"      <td>{cell}</td>\n")
+                table_lines.append("    </tr>\n")
+            table_lines.extend(["  </tbody>\n", "</table>\n"])
+            with open(path, "a", encoding="utf-8") as f:
+                f.writelines(table_lines)
+
+        _write_avg_table("prefill avg total token latency (ms)", avg_total_map, "prefill", prefill_tokens)
+        _write_avg_table("prefill avg npu token latency (ms)", avg_npu_map, "prefill", prefill_tokens)
+        _write_avg_table("decode avg total token latency (ms)", avg_total_map, "decode", decode_tokens)
+        _write_avg_table("decode avg npu token latency (ms)", avg_npu_map, "decode", decode_tokens)
 
 class TPSMeasurer:
     def __init__(self, pipeline):
@@ -212,7 +317,8 @@ class TPSMeasurer:
                 max_new_tokens=num_decode + 1,
                 do_sample=False,
                 eos_token_id=None,
-                pad_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.eos_token_id,
+                count_npu_time=True,
             )
 
             # 3. Execution
@@ -223,11 +329,21 @@ class TPSMeasurer:
             
             first_token_time = None
             decoded_tokens = 0
+            npu_prefill_time = 0.0
+            npu_decode_time = 0.0
+            has_npu_time = False
             
             for _ in streamer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
                 decoded_tokens += 1
+                npu_time = getattr(self.model, "npu_time", None)
+                if npu_time is not None:
+                    has_npu_time = True
+                    if decoded_tokens == 1:
+                        npu_prefill_time += npu_time
+                    else:
+                        npu_decode_time += npu_time
                 
             t_end = time.perf_counter()
             thread.join()
@@ -243,6 +359,16 @@ class TPSMeasurer:
             
             total_time = t_end - t_start
 
+            decode_count = max(decoded_tokens - 1, 0)
+            avg_total_prefill_token_latency = prefill_latency / num_prefill if num_prefill > 0 else 0
+            avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0
+            avg_npu_prefill_token_latency = (
+                npu_prefill_time / num_prefill if has_npu_time and num_prefill > 0 else None
+            )
+            avg_npu_decode_token_latency = (
+                npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
+            )
+
             return SingleMeasurement(
                 num_prefill=num_prefill,
                 num_decode=num_decode,
@@ -250,7 +376,13 @@ class TPSMeasurer:
                 prefill_tps=prefill_tps,
                 decode_duration=decode_duration,
                 decode_tps=decode_tps,
-                total_time=total_time
+                total_time=total_time,
+                avg_total_prefill_token_latency=avg_total_prefill_token_latency,
+                avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
+                avg_total_decode_token_latency=avg_total_decode_token_latency,
+                avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+                npu_prefill_time=npu_prefill_time if has_npu_time else None,
+                npu_decode_time=npu_decode_time if has_npu_time else None,
             )
         finally:
             self._stop_trace(trace_handle)
@@ -277,8 +409,23 @@ class TPSMeasurer:
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
                 full_result.prefill_sweep.time_values.append(res.prefill_latency)
+                full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
+                full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
                 
-                print(f"In: {p_len} | TPS: {res.prefill_tps:.1f} | Latency: {res.prefill_latency:.4f}s")
+                if (
+                    res.avg_npu_prefill_token_latency is not None
+                    and res.avg_total_prefill_token_latency > 0
+                ):
+                    npu_ratio = res.avg_npu_prefill_token_latency / res.avg_total_prefill_token_latency
+                    npu_cell = f"{res.avg_npu_prefill_token_latency * 1000.0:.3f}ms ({npu_ratio * 100:.1f}%)"
+                else:
+                    npu_cell = "n/a"
+                print(
+                    f"In: {p_len} | TPS: {res.prefill_tps:.1f} | "
+                    f"Latency: {res.prefill_latency * 1000.0:.2f}ms | "
+                    f"AvgTotal: {res.avg_total_prefill_token_latency * 1000.0:.3f}ms | "
+                    f"AvgNPU: {npu_cell}"
+                )
 
             # 2. Decode Sweep
             d_start, d_end, d_step = decode_range
@@ -294,10 +441,15 @@ class TPSMeasurer:
                 max_new_tokens=d_end,
                 do_sample=False,
                 eos_token_id=None,
-                pad_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.eos_token_id,
+                count_npu_time=True,
             )
 
             targets = set(range(d_start, d_end + 1, d_step))
+
+            npu_decode_time = 0.0
+            npu_decode_tokens = 0
+            first_decode_seen = False
 
             thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
             thread.start()
@@ -308,17 +460,41 @@ class TPSMeasurer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
                 decoded_tokens += 1
+                if getattr(self.model, "npu_time", None) is not None:
+                    if decoded_tokens == 1:
+                        first_decode_seen = True
+                    else:
+                        npu_decode_time += self.model.npu_time
+                        npu_decode_tokens += 1
                 if decoded_tokens in targets:
                     t_hit = time.perf_counter()
                     decode_duration = t_hit - first_token_time
                     decode_count = decoded_tokens - 1
                     decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+                    avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
+                    avg_npu_token_latency = (
+                        npu_decode_time / npu_decode_tokens
+                        if npu_decode_tokens > 0
+                        else None
+                    )
 
                     full_result.decode_sweep.x_values.append(decoded_tokens)
                     full_result.decode_sweep.tps_values.append(decode_tps)
                     full_result.decode_sweep.time_values.append(decode_duration)
+                    full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
+                    full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
 
-                    print(f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | Time: {decode_duration:.4f}s")
+                    if avg_npu_token_latency is not None and avg_total_token_latency > 0:
+                        npu_ratio = avg_npu_token_latency / avg_total_token_latency
+                        npu_cell = f"{avg_npu_token_latency * 1000.0:.3f}ms ({npu_ratio * 100:.1f}%)"
+                    else:
+                        npu_cell = "n/a"
+                    print(
+                        f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | "
+                        f"Time: {decode_duration * 1000.0:.2f}ms | "
+                        f"AvgTotal: {avg_total_token_latency * 1000.0:.3f}ms | "
+                        f"AvgNPU: {npu_cell}"
+                    )
 
             thread.join()
 
@@ -340,10 +516,14 @@ class TPSMeasurer:
         axs[0, 0].grid(True)
 
         # 2. Prefill: Token vs Latency
-        axs[0, 1].plot(result.prefill_sweep.x_values, result.prefill_sweep.time_values, 'r-o')
+        axs[0, 1].plot(
+            result.prefill_sweep.x_values,
+            [t * 1000.0 for t in result.prefill_sweep.time_values],
+            'r-o',
+        )
         axs[0, 1].set_title('Prefill: Tokens vs Latency (TTFT)')
         axs[0, 1].set_xlabel('Input Tokens')
-        axs[0, 1].set_ylabel('Latency (seconds)')
+        axs[0, 1].set_ylabel('Latency (ms)')
         axs[0, 1].grid(True)
 
         # 3. Decode: Token vs TPS
@@ -354,10 +534,14 @@ class TPSMeasurer:
         axs[1, 0].grid(True)
 
         # 4. Decode: Token vs Time
-        axs[1, 1].plot(result.decode_sweep.x_values, result.decode_sweep.time_values, 'm-o')
+        axs[1, 1].plot(
+            result.decode_sweep.x_values,
+            [t * 1000.0 for t in result.decode_sweep.time_values],
+            'm-o',
+        )
         axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
         axs[1, 1].set_xlabel('Output Tokens')
-        axs[1, 1].set_ylabel('Total Generation Time (seconds)')
+        axs[1, 1].set_ylabel('Total Generation Time (ms)')
         axs[1, 1].grid(True)
 
         plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
@@ -378,9 +562,19 @@ class TPSMeasurer:
 
         for result, label in zip(results, labels):
             axs[0, 0].plot(result.prefill_sweep.x_values, result.prefill_sweep.tps_values, '-o', label=label)
-            axs[0, 1].plot(result.prefill_sweep.x_values, result.prefill_sweep.time_values, '-o', label=label)
+            axs[0, 1].plot(
+                result.prefill_sweep.x_values,
+                [t * 1000.0 for t in result.prefill_sweep.time_values],
+                '-o',
+                label=label,
+            )
             axs[1, 0].plot(result.decode_sweep.x_values, result.decode_sweep.tps_values, '-o', label=label)
-            axs[1, 1].plot(result.decode_sweep.x_values, result.decode_sweep.time_values, '-o', label=label)
+            axs[1, 1].plot(
+                result.decode_sweep.x_values,
+                [t * 1000.0 for t in result.decode_sweep.time_values],
+                '-o',
+                label=label,
+            )
 
         axs[0, 0].set_title('Prefill: Tokens vs TPS (Higher is Better)')
         axs[0, 0].set_xlabel('Input Tokens')
@@ -389,7 +583,7 @@ class TPSMeasurer:
 
         axs[0, 1].set_title('Prefill: Tokens vs Latency (TTFT)')
         axs[0, 1].set_xlabel('Input Tokens')
-        axs[0, 1].set_ylabel('Latency (seconds)')
+        axs[0, 1].set_ylabel('Latency (ms)')
         axs[0, 1].grid(True)
 
         axs[1, 0].set_title('Decode: Tokens vs TPS')
@@ -399,7 +593,7 @@ class TPSMeasurer:
 
         axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
         axs[1, 1].set_xlabel('Output Tokens')
-        axs[1, 1].set_ylabel('Total Generation Time (seconds)')
+        axs[1, 1].set_ylabel('Total Generation Time (ms)')
         axs[1, 1].grid(True)
 
         for ax in axs.flat:
