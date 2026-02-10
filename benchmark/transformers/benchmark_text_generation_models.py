@@ -80,11 +80,15 @@ def _load_result(path: str) -> BenchmarkResult:
             x_values=prefill.get("x_values", []),
             tps_values=prefill.get("tps_values", []),
             time_values=prefill.get("time_values", []),
+            avg_total_token_latency_values=prefill.get("avg_total_token_latency_values", []),
+            avg_npu_token_latency_values=prefill.get("avg_npu_token_latency_values", []),
         ),
         decode_sweep=SweepData(
             x_values=decode.get("x_values", []),
             tps_values=decode.get("tps_values", []),
             time_values=decode.get("time_values", []),
+            avg_total_token_latency_values=decode.get("avg_total_token_latency_values", []),
+            avg_npu_token_latency_values=decode.get("avg_npu_token_latency_values", []),
         ),
     )
 
@@ -267,6 +271,22 @@ def main(argv: list[str] | None = None) -> int:
             fixed_decode_len=args.fixed_decode,
             fixed_prefill_len=args.fixed_prefill,
         )
+        if result.prefill_sweep.avg_total_token_latency_values:
+            avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
+            avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
+            avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+            print(
+                "Avg prefill token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
+            )
+        if result.decode_sweep.avg_total_token_latency_values:
+            avg_total = result.decode_sweep.avg_total_token_latency_values[-1]
+            avg_npu = result.decode_sweep.avg_npu_token_latency_values[-1]
+            avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
+            print(
+                "Avg decode token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
+            )
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(asdict(result), f, ensure_ascii=False, indent=2)

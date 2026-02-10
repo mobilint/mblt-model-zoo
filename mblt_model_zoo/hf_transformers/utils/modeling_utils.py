@@ -1,5 +1,6 @@
 import math
 import os
+import time
 from typing import TYPE_CHECKING, Literal, Optional, Union, cast
 
 import numpy as np
@@ -23,6 +24,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             self.config = config
         
         assert self.config.name_or_path is not None, "config.name_or_path is None!"
+
+        # Used for benchmark
+        self.npu_time = None
         
         self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
         self.npu_backend.name_or_path = self.config.name_or_path
@@ -124,6 +128,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
     ):
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
 
@@ -134,13 +139,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / chunk_size)
 
         mxq_model = self.npu_backend.mxq_model
+        self.npu_time = 0.0 if count_npu_time else None
         
         for i in range(num_of_chunks):
             start_index = i * chunk_size
             end_index = min(start_index + chunk_size, inputs_embeds_numpy.shape[2])
             cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
 
-            result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+            if count_npu_time:
+                t0 = time.perf_counter()
+                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+                self.npu_time += time.perf_counter() - t0
+            else:
+                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+
             assert result is not None, "mxq infer result is None!"
             logits_ndarray = result[0]
 
@@ -148,7 +160,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
 
         logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
-        
+
         return logits
 
     def decoder_forward(

@@ -307,12 +307,22 @@ If you installed the optional extra (`pip install mblt-model-zoo[transformers]`)
 
 ```bash
 # single measurement
-mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 512 --decode 128
+mblt-model-zoo tps measure --model mobilint/Llama-3.2-1B-Instruct --prefill 512 --decode 128
 
 # sweep (writes JSON/CSV and a PNG plot by default)
-mblt-model-zoo tps sweep --model mobilint/Llama-3.2-3B-Instruct \
-  --prefill-range 128:2048:128 --decode-range 128:1024:128 \
+mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
+  --prefill-range 128:512:128 --decode-range 128:512:128 \
   --json tps.json --csv tps.csv --plot tps.png
+```
+
+Example output includes average token latency (total/NPU) and NPU share (% of total):
+
+```text
+prefill: 512 tokens | 933.23 tok/s | TTFT 548.63ms
+decode:  128 tokens | 25.32 tok/s | duration 5055.16ms
+total:   5603.79ms
+prefill avg token latency: total=1.072ms npu=1.067ms (99.5%)
+decode  avg token latency: total=39.493ms npu=38.016ms (96.3%)
 ```
 
 For TPS Benchmark, you can use any keyword parameters explained in [Keyword Parameters](#keyword-parameters) section.
