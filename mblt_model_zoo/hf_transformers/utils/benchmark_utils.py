@@ -184,11 +184,37 @@ class BenchmarkResult:
             lines.append(f"      <td>{model_id}</td>\n")
             for token in prefill_tokens:
                 tps = tps_map.get((model_id, "prefill", token))
-                cell = f"{tps:.4f}" if tps is not None else ""
+                avg_total = avg_total_map.get((model_id, "prefill", token))
+                avg_npu = avg_npu_map.get((model_id, "prefill", token))
+                if (
+                    tps is not None
+                    and avg_total is not None
+                    and avg_total > 0
+                    and avg_npu is not None
+                ):
+                    npu_ratio = avg_npu / avg_total
+                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                elif tps is not None:
+                    cell = f"{tps:.4f}"
+                else:
+                    cell = ""
                 lines.append(f"      <td>{cell}</td>\n")
             for token in decode_tokens:
                 tps = tps_map.get((model_id, "decode", token))
-                cell = f"{tps:.4f}" if tps is not None else ""
+                avg_total = avg_total_map.get((model_id, "decode", token))
+                avg_npu = avg_npu_map.get((model_id, "decode", token))
+                if (
+                    tps is not None
+                    and avg_total is not None
+                    and avg_total > 0
+                    and avg_npu is not None
+                ):
+                    npu_ratio = avg_npu / avg_total
+                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                elif tps is not None:
+                    cell = f"{tps:.4f}"
+                else:
+                    cell = ""
                 lines.append(f"      <td>{cell}</td>\n")
             lines.append("    </tr>\n")
 
