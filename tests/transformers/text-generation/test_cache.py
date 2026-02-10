@@ -1,5 +1,5 @@
 import pytest
-from transformers import AutoTokenizer, TextStreamer, pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
 
@@ -24,60 +24,87 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, revision, npu_params):
-    model_path = request.param
+def model_path(request):
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def model(model_path, revision, npu_params):
     npu_params.warn_unused({"base"})
     model_kwargs = npu_params.base
-    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
-
-    if model_kwargs:
-        pipe = pipeline(
-            "text-generation",
-            model=model_path,
-            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-            trust_remote_code=True,
-            revision=revision,
-            model_kwargs=model_kwargs,
-        )
-    else:
-        pipe = pipeline(
-            "text-generation",
-            model=model_path,
-            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-            trust_remote_code=True,
-            revision=revision,
-        )
-    yield pipe
-    del pipe
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        revision=revision,
+        **model_kwargs,
+    )
+    yield model
+    del model
 
 
-def test_cache(pipe):
-    pipe.generation_config.max_new_tokens = None
+@pytest.fixture(scope="module")
+def tokenizer(model_path, revision):
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        revision=revision
+    )
+    yield tokenizer
+
+
+def test_cache(model, tokenizer):
+    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     messages = [{"role": "user", "content": "My name is James."}]
 
-    past_key_values = MobilintCache(pipe.model.get_cache_mxq_model())
+    past_key_values = MobilintCache(model.get_cache_mxq_model())
 
-    outputs = pipe(
+    input_ids = tokenizer.apply_chat_template(
         messages,
-        max_length=512,
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=False,
+        return_tensors="pt"
+    )
+    
+    prefix_length = input_ids.shape[1]
+
+    output_ids = model.generate(
+        input_ids,
         use_cache=True,
         past_key_values=past_key_values,
+        do_sample=False,
+        streamer=streamer,
+        max_new_tokens=1024,
     )
-
-    messages = outputs[0]['generated_text']
+    
+    assistant_text = tokenizer.decode(output_ids[0, input_ids.shape[-1]:], skip_special_tokens=True)
+    messages += [{"role": "assistant", "content": assistant_text}]
     messages += [{"role": "user", "content": "What is my name?"}]
 
     past_key_values.dump_cache_memory()
 
-    pipe.model.dispose()
-    pipe.model.launch()
+    model.dispose()
+    model.launch()
 
+    past_key_values.layers[0]._seen_tokens = prefix_length
     past_key_values.load_cache_memory()
-
-    outputs = pipe(
+    
+    input_ids = tokenizer.apply_chat_template(
         messages,
-        max_length=512,
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=False,
+        return_tensors="pt"
+    )
+    
+    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False)
+    
+    output_ids = model.generate(
+        input_ids,
         use_cache=True,
         past_key_values=past_key_values,
+        do_sample=False,
+        streamer=streamer,
     )
+    final_message = tokenizer.decode(output_ids[0, input_ids.shape[-1]:], skip_special_tokens=True)
+    assert "James" in final_message
