@@ -18,6 +18,7 @@ Common CLI options:
 - `--device` (default: `cpu`)
 - `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
 - `--revision` (e.g., `W8`)
+- `--all` (benchmark `W8` and `W4W8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
 - `--prefill-range` (e.g., `128:512:128`)
 - `--decode-range` (e.g., `128:512:128`)
 - `--fixed-decode` (default: `10`)
@@ -33,3 +34,13 @@ python benchmark/transformers/benchmark_text_generation_models.py \
   --decode-range 128:512:128 \
   --skip-existing
 ```
+
+Example (`--all`):
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py --all --skip-existing
+```
+
+When `--all` is used, results are saved with suffixes in both the output files and table labels, for example:
+- `{model}-W8.json`, `{model}-W8.png`
+- `{model}-W4V8.json`, `{model}-W4V8.png`

@@ -63,6 +63,8 @@ def korean_text_to_phonemes(text, character: str = "hangeul") -> str:
     """
     global g2p_kr  # pylint: disable=global-statement
     if g2p_kr is None:
+        warnings.filterwarnings("ignore", category=UserWarning)
+        
         g2p_kr = G2p()
 
     if character == "english":

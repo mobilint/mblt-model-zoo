@@ -99,6 +99,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         return_dict: bool | None = None,
         cache_position: torch.LongTensor | None = None,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
     ) -> tuple | BaseModelOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -131,7 +132,13 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
         
-        logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
+        logits = self.llm_forward(
+            inputs_embeds,
+            past_key_values,
+            cache_position,
+            chunk_size,
+            count_npu_time=count_npu_time,
+        )
 
         if not return_dict:
             return tuple(

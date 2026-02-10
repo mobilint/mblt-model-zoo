@@ -42,6 +42,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
     ) -> Union[Tuple[torch.Tensor | MobilintCache, ...], CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -73,7 +74,13 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
 
-        lm_logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
+        lm_logits = self.llm_forward(
+            inputs_embeds,
+            past_key_values,
+            cache_position,
+            chunk_size,
+            count_npu_time=count_npu_time,
+        )
 
         loss = None
         if labels is not None:

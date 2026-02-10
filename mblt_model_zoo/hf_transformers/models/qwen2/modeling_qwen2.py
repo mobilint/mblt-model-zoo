@@ -38,6 +38,7 @@ class MobilintQwen2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
         chunk_size: int = 128,
+        count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
         if logits_to_keep > 1:
@@ -60,7 +61,13 @@ class MobilintQwen2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             ))
 
-        logits = self.llm_forward(inputs_embeds, past_key_values, cache_position, chunk_size)
+        logits = self.llm_forward(
+            inputs_embeds,
+            past_key_values,
+            cache_position,
+            chunk_size,
+            count_npu_time=count_npu_time,
+        )
 
         loss = None
         if labels is not None:
