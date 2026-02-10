@@ -54,7 +54,7 @@ def tokenizer(model_path, revision):
 def test_cache(model, tokenizer):
     streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
-    messages = [{"role": "user", "content": "My name is James."}]
+    messages = [{"role": "user", "content": 'My name is James. You should remember my name. If I ask "What is my name?", you should answer "Your name is James."'}]
 
     past_key_values = MobilintCache(model.get_cache_mxq_model())
 
@@ -105,6 +105,7 @@ def test_cache(model, tokenizer):
         past_key_values=past_key_values,
         do_sample=False,
         streamer=streamer,
+        max_new_tokens=1024,
     )
     final_message = tokenizer.decode(output_ids[0, input_ids.shape[-1]:], skip_special_tokens=True)
     assert "James" in final_message
