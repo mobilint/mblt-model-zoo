@@ -22,11 +22,11 @@ Currently supported languages include:
 pip install "mblt-model-zoo[MeloTTS]"
 ```
 
-The `MeloTTS` extra installs `unidic`. `unidic` requires downloading its dictionary once:
+The `MeloTTS` extra installs `unidic` and `nltk`. `unidic` requires downloading its dictionary once. Also, `nltk` requires downloading its resource once.
+We prepared script for downloading needed files for `MeloTTS`.
 
 ```bash
-mblt-unidic-download
-# Or: python -m unidic download
+mblt-melotts-download
 ```
 
 ### WebUI
