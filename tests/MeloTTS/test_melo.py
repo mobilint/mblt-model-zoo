@@ -1,5 +1,7 @@
 import pytest
 
+import os
+
 from mblt_model_zoo.MeloTTS.api import TTS
 
 LANGUAGES = (
@@ -39,7 +41,10 @@ def test_melo(pipe: TTS):
     }
     speaker = speakers[pipe.language]
 
-    output_path = f"tests/tmp/{pipe.language}.wav"
+    output_dir = os.path.join(".", "tests", "tmp")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{pipe.language}.wav")
+    
     pipe.tts_to_file(
         text,
         speaker_ids[speaker],
