@@ -30,6 +30,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        no_launch: bool = False,
     ):
         super().__init__()
         
@@ -56,7 +57,8 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         
         self.npu_backend.name_or_path = name_or_path
         self.npu_backend.create()
-        self.npu_backend.launch()
+        if no_launch != True:
+            self.npu_backend.launch()
         
         num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
@@ -165,6 +167,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        no_launch: bool = False,
     ):
         assert channels % 2 == 0, "channels should be divisible by 2"
         super().__init__()
@@ -182,7 +185,8 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         
         self.npu_backend.name_or_path = name_or_path
         self.npu_backend.create()
-        self.npu_backend.launch()
+        if no_launch != True:
+            self.npu_backend.launch()
         
         num_model_variants = self.npu_backend.mxq_model.get_num_model_variants()
         self.allowed_chunks = [
