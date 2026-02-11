@@ -56,7 +56,7 @@ class Results:
         self.set_output(output)
         self.conf_thres = kwargs.get("conf_thres", 0.25)
 
-    def _read_image(self, source_path: Union[str, cv2.typing.MatLike, Image.Image]):
+    def _read_image(self, source_path: Union[str, np.ndarray, Image.Image]):
         """
         Internal method to read an image from various input types and convert to BGR format.
         Args:
@@ -69,7 +69,7 @@ class Results:
             source_img = source_path.convert("RGB")
             source_img = np.array(source_img)
             source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
-        elif isinstance(source_path, cv2.typing.MatLike):
+        elif isinstance(source_path, np.ndarray):
             source_img = np.array(
                 source_path
             )  # assume imread or video read is made in BGR format
@@ -112,7 +112,7 @@ class Results:
 
     def plot(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path: str = None,
         **kwargs,
     ):
@@ -120,10 +120,10 @@ class Results:
         Plots the results on the source image.
         Plots the inference results on the source image.
         Args:
-            source_path (Union[str, cv2.typing.MatLike, Image.Image]): Path or image object.
+            source_path (Union[str, np.ndarray, Image.Image]): Path or image object.
             save_path (str, optional): Path to save the plotted image. Defaults to None.
             **kwargs: Additional arguments.
-            source_path (Union[str, cv2.typing.MatLike, Image.Image]): The image to plot on.
+            source_path (Union[str, np.ndarray, Image.Image]): The image to plot on.
             save_path (str, optional): If provided, the result image will be saved to this path.
             **kwargs: Additional task-specific plotting options (e.g., topk for classification).
         Returns:
@@ -150,7 +150,7 @@ class Results:
 
     def _plot_image_classification(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image] = None,
+        source_path: Union[str, np.ndarray, Image.Image] = None,
         save_path: str = None,
         topk=5,
         **kwargs,
@@ -201,7 +201,7 @@ class Results:
 
     def _plot_object_detection(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path: str = None,
         **kwargs,
     ):
@@ -254,7 +254,7 @@ class Results:
 
     def _plot_instance_segmentation(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path=None,
         **kwargs,
     ):
@@ -284,7 +284,7 @@ class Results:
 
     def _plot_pose_estimation(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path=None,
         **kwargs,
     ):

@@ -2,7 +2,7 @@
 Common postprocessing utility functions.
 """
 
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -369,7 +369,7 @@ def crop_mask(masks, boxes):
 def scale_masks(
     masks: torch.Tensor,
     shape: tuple[int, int],
-    ratio_pad: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    ratio_pad: Optional[tuple[tuple[int, int], tuple[int, int]]] = None,
     padding: bool = True,
 ) -> torch.Tensor:
     """Rescales segment masks to the target shape.

@@ -1,13 +1,13 @@
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, List, Optional
 
 import pytest
 
 _WARNED_UNUSED_PREFIXES: set[str] = set()
 
 
-def _parse_target_cores(value: str | None) -> list[str] | None:
+def _parse_target_cores(value: Optional[str]) -> Optional[List[str]]:
     if value is None:
         return None
     text = value.strip()
@@ -16,7 +16,7 @@ def _parse_target_cores(value: str | None) -> list[str] | None:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
-def _parse_target_clusters(value: str | None) -> list[int] | None:
+def _parse_target_clusters(value: Optional[str]) -> Optional[List[int]]:
     if value is None:
         return None
     text = value.strip()
