@@ -1,20 +1,20 @@
+"""
+YOLOv7 model definitions.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv7_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7 models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7/aries/single/yolov7.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7/aries/multi/yolov7.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7/aries/global/yolov7.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7",
+            "filename": "yolov7.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -23,7 +23,7 @@ class YOLOv7_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -35,22 +35,15 @@ class YOLOv7_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7d6_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7d6 models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7d6/aries/single/yolov7d6.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7d6/aries/multi/yolov7d6.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7d6/aries/global/yolov7d6.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7d6",
+            "filename": "yolov7d6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -59,7 +52,7 @@ class YOLOv7d6_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [1280, 1280],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -72,22 +65,15 @@ class YOLOv7d6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7e6_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7e6 models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6/aries/single/yolov7e6.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6/aries/multi/yolov7e6.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6/aries/global/yolov7e6.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7e6",
+            "filename": "yolov7e6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -96,7 +82,7 @@ class YOLOv7e6_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [1280, 1280],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -109,22 +95,15 @@ class YOLOv7e6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7e6e_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7e6e models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6e/aries/single/yolov7e6e.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6e/aries/multi/yolov7e6e.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7e6e/aries/global/yolov7e6e.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7e6e",
+            "filename": "yolov7e6e.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -133,7 +112,7 @@ class YOLOv7e6e_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [1280, 1280],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -146,22 +125,15 @@ class YOLOv7e6e_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7w6_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7w6 models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7w6/aries/single/yolov7w6.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7w6/aries/multi/yolov7w6.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7w6/aries/global/yolov7w6.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7w6",
+            "filename": "yolov7w6.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -170,7 +142,7 @@ class YOLOv7w6_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [1280, 1280],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -183,22 +155,15 @@ class YOLOv7w6_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv7x_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv7x models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov7x/aries/single/yolov7x.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov7x/aries/multi/yolov7x.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov7x/aries/global/yolov7x.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv7x",
+            "filename": "yolov7x.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -207,7 +172,7 @@ class YOLOv7x_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
@@ -219,94 +184,171 @@ class YOLOv7x_Set(ModelInfoSet):
             ],
         },
     )
-    DEFAULT = COCO_V1
 
 
-def YOLOv7(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7(MBLT_Engine):
+    """YOLOv7 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv7d6(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7d6_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7d6(MBLT_Engine):
+    """YOLOv7d6 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7d6 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7d6_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv7e6(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7e6_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7e6(MBLT_Engine):
+    """YOLOv7e6 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7e6 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7e6_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv7e6e(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7e6e_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7e6e(MBLT_Engine):
+    """YOLOv7e6e model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7e6e engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7e6e_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv7w6(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7w6_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7w6(MBLT_Engine):
+    """YOLOv7w6 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7w6 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7w6_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv7x(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv7x_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv7x(MBLT_Engine):
+    """YOLOv7x model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv7x engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv7x_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

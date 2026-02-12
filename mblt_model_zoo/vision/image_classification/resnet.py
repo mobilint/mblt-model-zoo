@@ -1,20 +1,20 @@
+"""
+ResNet model definitions (ResNet18, ResNet34, ResNet50, ResNet101, ResNet152).
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class ResNet18_Set(ModelInfoSet):
+    """Configuration set for ResNet18 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/single/resnet18_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/multi/resnet18_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/global/resnet18_IMAGENET1K_V1.mxq",
-                    "global4": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/global4/resnet18_IMAGENET1K_V1.mxq",
-                    "global8": "https://dl.mobilint.com/model/vision/image_classification/resnet18_IMAGENET1K_V1/aries/global8/resnet18_IMAGENET1K_V1.mxq",
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet18",
+            "filename": "resnet18_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -27,8 +27,7 @@ class ResNet18_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -38,18 +37,12 @@ class ResNet18_Set(ModelInfoSet):
 
 
 class ResNet34_Set(ModelInfoSet):
+    """Configuration set for ResNet34 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/single/resnet34_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/multi/resnet34_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/global/resnet34_IMAGENET1K_V1.mxq",
-                    "global4": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/global4/resnet34_IMAGENET1K_V1.mxq",
-                    "global8": "https://dl.mobilint.com/model/vision/image_classification/resnet34_IMAGENET1K_V1/aries/global8/resnet34_IMAGENET1K_V1.mxq",
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet34",
+            "filename": "resnet34_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -62,8 +55,7 @@ class ResNet34_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -73,18 +65,12 @@ class ResNet34_Set(ModelInfoSet):
 
 
 class ResNet50_Set(ModelInfoSet):
+    """Configuration set for ResNet50 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/single/resnet50_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/multi/resnet50_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V1/aries/global/resnet50_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet50.tv1_in1k",
+            "filename": "resnet50_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -97,8 +83,7 @@ class ResNet50_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -106,16 +91,8 @@ class ResNet50_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/single/resnet50_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/multi/resnet50_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet50_IMAGENET1K_V2/aries/global/resnet50_IMAGENET1K_V2.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet50.tv2_in1k",
+            "filename": "resnet50_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -128,8 +105,7 @@ class ResNet50_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -139,18 +115,12 @@ class ResNet50_Set(ModelInfoSet):
 
 
 class ResNet101_Set(ModelInfoSet):
+    """Configuration set for ResNet101 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/single/resnet101_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/multi/resnet101_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V1/aries/global/resnet101_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet101.tv1_in1k",
+            "filename": "resnet101_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -163,8 +133,7 @@ class ResNet101_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -172,16 +141,8 @@ class ResNet101_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/single/resnet101_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/multi/resnet101_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet101_IMAGENET1K_V2/aries/global/resnet101_IMAGENET1K_V2.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet101.tv2_in1k",
+            "filename": "resnet101_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -194,8 +155,7 @@ class ResNet101_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -205,18 +165,12 @@ class ResNet101_Set(ModelInfoSet):
 
 
 class ResNet152_Set(ModelInfoSet):
+    """Configuration set for ResNet152 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/single/resnet152_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/multi/resnet152_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V1/aries/global/resnet152_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet152.tv1_in1k",
+            "filename": "resnet152_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -229,8 +183,7 @@ class ResNet152_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -238,16 +191,8 @@ class ResNet152_Set(ModelInfoSet):
     )
     IMAGENET1K_V2 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/single/resnet152_IMAGENET1K_V2.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/multi/resnet152_IMAGENET1K_V2.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/resnet152_IMAGENET1K_V2/aries/global/resnet152_IMAGENET1K_V2.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ResNet152.tv2_in1k",
+            "filename": "resnet152_IMAGENET1K_V2.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -260,8 +205,7 @@ class ResNet152_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -270,76 +214,141 @@ class ResNet152_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V2  # Default model
 
 
-def ResNet18(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ResNet18_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ResNet18(MBLT_Engine):
+    """ResNet18 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet18 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet18_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet34(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ResNet34_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ResNet34(MBLT_Engine):
+    """ResNet34 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet34 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet34_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet50(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ResNet50_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ResNet50(MBLT_Engine):
+    """ResNet50 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet50 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet50_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet101(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ResNet101_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ResNet101(MBLT_Engine):
+    """ResNet101 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet101 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet101_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ResNet152(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ResNet152_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ResNet152(MBLT_Engine):
+    """ResNet152 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ResNet152 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ResNet152_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

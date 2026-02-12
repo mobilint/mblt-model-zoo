@@ -1,3 +1,7 @@
+"""
+Type definitions for MBLT vision models.
+"""
+
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
@@ -13,7 +17,12 @@ ListTensorLike = List[TensorLike]
 @dataclass
 class ModelInfo:
     """
-    This class is used to store model information.
+    Data class for storing model configurations.
+
+    Attributes:
+        pre_cfg (OrderedDict): Preprocessing configuration.
+        post_cfg (OrderedDict): Postprocessing configuration.
+        model_cfg (OrderedDict): Model configuration.
     """
 
     pre_cfg: OrderedDict
@@ -23,5 +32,5 @@ class ModelInfo:
 
 class ModelInfoSet(Enum):
     """
-    This class is used to store model informations.
+    Enum for model information sets.
     """

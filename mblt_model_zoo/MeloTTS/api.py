@@ -6,8 +6,8 @@ import soundfile
 import torch
 from torch import nn
 from tqdm import tqdm
-from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModelForMaskedLM
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
 from . import utils
 from .download_utils import (
@@ -35,11 +35,13 @@ class TTS(nn.Module):
                 decoder_mxq_path: Optional[str] = None,
         ):
         nn.Module.__init__(self)
-        if device == 'auto':
-            device = 'cpu'
-            if torch.cuda.is_available(): device = 'cuda'
-            if torch.backends.mps.is_available(): device = 'mps'
-        if 'cuda' in device:
+        if device == "auto":
+            device = "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            if torch.backends.mps.is_available():
+                device = "mps"
+        if "cuda" in device:
             assert torch.cuda.is_available()
 
         # config_path = 
@@ -77,7 +79,7 @@ class TTS(nn.Module):
         self.symbol_to_id = {s: i for i, s in enumerate(symbols)}
         self.hps = hps
         self.device = device
-    
+
         # load state_dict
         checkpoint_dict = load_or_download_model(language, device, ckpt_path=ckpt_path, local_files_only=local_files_only)
         self.model.load_state_dict(checkpoint_dict['model'], strict=True)
@@ -101,7 +103,7 @@ class TTS(nn.Module):
         )
     
     @staticmethod
-    def audio_numpy_concat(segment_data_list, sr, speed=1.):
+    def audio_numpy_concat(segment_data_list, sr, speed=1.0):
         audio_segments = []
         for segment_data in segment_data_list:
             audio_segments += segment_data.reshape(-1).tolist()
@@ -114,7 +116,7 @@ class TTS(nn.Module):
         texts = split_sentence(text, language_str=language)
         if not quiet:
             print(" > Text split to sentences.")
-            print('\n'.join(texts))
+            print("\n".join(texts))
             print(" > ===========================")
         return texts
     
@@ -132,8 +134,8 @@ class TTS(nn.Module):
             else:
                 tx = tqdm(texts)
         for t in tx:
-            if language in ['EN', 'ZH_MIX_EN']:
-                t = re.sub(r'([a-z])([A-Z])', r'\1 \2', t)
+            if language in ["EN", "ZH_MIX_EN"]:
+                t = re.sub(r"([a-z])([A-Z])", r"\1 \2", t)
             device = self.device
             bert, ja_bert, phones, tones, lang_ids = utils.get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id, tokenizer=self.tokenizer, bert=self.bert)
             with torch.no_grad():
@@ -145,7 +147,8 @@ class TTS(nn.Module):
                 x_tst_lengths = torch.LongTensor([phones.size(0)]).to(device)
                 del phones
                 speakers = torch.LongTensor([speaker_id]).to(device)
-                audio = self.model.infer(
+                audio = (
+                    self.model.infer(
                         x_tst,
                         x_tst_lengths,
                         speakers,
@@ -156,10 +159,14 @@ class TTS(nn.Module):
                         sdp_ratio=sdp_ratio,
                         noise_scale=noise_scale,
                         noise_scale_w=noise_scale_w,
-                        length_scale=1. / speed,
-                    )[0][0, 0].data.cpu().float().numpy()
+                        length_scale=1.0 / speed,
+                    )[0][0, 0]
+                    .data.cpu()
+                    .float()
+                    .numpy()
+                )
                 del x_tst, tones, lang_ids, bert, ja_bert, x_tst_lengths, speakers
-                # 
+                #
             audio_list.append(audio)
         torch.cuda.empty_cache()
         audio = self.audio_numpy_concat(audio_list, sr=self.hps.data.sampling_rate, speed=speed)
@@ -168,12 +175,14 @@ class TTS(nn.Module):
             return audio
         else:
             if format:
-                soundfile.write(output_path, audio, self.hps.data.sampling_rate, format=format)
+                soundfile.write(
+                    output_path, audio, self.hps.data.sampling_rate, format=format
+                )
             else:
                 soundfile.write(output_path, audio, self.hps.data.sampling_rate)
 
     def launch(self):
         self.model.launch()
-    
+
     def dispose(self):
         self.model.dispose()

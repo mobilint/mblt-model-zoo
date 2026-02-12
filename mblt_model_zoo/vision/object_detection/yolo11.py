@@ -1,20 +1,20 @@
+"""
+YOLO11 model definitions.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLO11n_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLO11n models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11n",
+            "filename": "yolo11n.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -23,30 +23,24 @@ class YOLO11n_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11s_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLO11s models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/single/yolo11s.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/multi/yolo11s.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11s/aries/global/yolo11s.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11s",
+            "filename": "yolo11s.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -55,30 +49,24 @@ class YOLO11s_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11m_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLO11m models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/single/yolo11m.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/multi/yolo11m.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11m/aries/global/yolo11m.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11m",
+            "filename": "yolo11m.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -87,30 +75,24 @@ class YOLO11m_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11l_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLO11l models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/single/yolo11l.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/multi/yolo11l.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11l/aries/global/yolo11l.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11l",
+            "filename": "yolo11l.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -119,30 +101,24 @@ class YOLO11l_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLO11x_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLO11x models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/single/yolo11x.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/multi/yolo11x.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolo11x/aries/global/yolo11x.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLO11x",
+            "filename": "yolo11x.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -151,87 +127,152 @@ class YOLO11x_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
-def YOLO11n(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLO11n_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLO11n(MBLT_Engine):
+    """YOLO11n model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLO11n engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLO11n_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLO11s(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLO11s_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLO11s(MBLT_Engine):
+    """YOLO11s model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLO11s engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLO11s_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLO11m(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLO11m_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLO11m(MBLT_Engine):
+    """YOLO11m model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLO11m engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLO11m_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLO11l(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLO11l_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLO11l(MBLT_Engine):
+    """YOLO11l model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLO11l engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLO11l_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLO11x(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLO11x_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLO11x(MBLT_Engine):
+    """YOLO11x model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLO11x engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLO11x_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

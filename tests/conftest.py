@@ -1,14 +1,13 @@
-from dataclasses import dataclass
-from typing import Any
 import warnings
+from dataclasses import dataclass
+from typing import Any, List, Optional
 
 import pytest
-
 
 _WARNED_UNUSED_PREFIXES: set[str] = set()
 
 
-def _parse_target_cores(value: str | None) -> list[str] | None:
+def _parse_target_cores(value: Optional[str]) -> Optional[List[str]]:
     if value is None:
         return None
     text = value.strip()
@@ -16,7 +15,8 @@ def _parse_target_cores(value: str | None) -> list[str] | None:
         return None
     return [item.strip() for item in text.split(";") if item.strip()]
 
-def _parse_target_clusters(value: str | None) -> list[int] | None:
+
+def _parse_target_clusters(value: Optional[str]) -> Optional[List[int]]:
     if value is None:
         return None
     text = value.strip()
@@ -31,7 +31,9 @@ def _parse_target_clusters(value: str | None) -> list[int] | None:
     return clusters
 
 
-def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, Any], bool]:
+def _collect_npu_kwargs(
+    config: pytest.Config, prefix: str
+) -> tuple[dict[str, Any], bool]:
     opt_prefix = f"--{prefix}-" if prefix else "--"
     mxq_path = config.getoption(f"{opt_prefix}mxq-path")
     dev_no = config.getoption(f"{opt_prefix}dev-no")
@@ -74,7 +76,11 @@ class NpuParams:
 
     def warn_unused(self, used_prefixes: set[str]) -> None:
         for prefix, provided in self._provided.items():
-            if provided and prefix not in used_prefixes and prefix not in _WARNED_UNUSED_PREFIXES:
+            if (
+                provided
+                and prefix not in used_prefixes
+                and prefix not in _WARNED_UNUSED_PREFIXES
+            ):
                 _WARNED_UNUSED_PREFIXES.add(prefix)
                 warnings.warn(
                     f"Provided {prefix} NPU backend options will be ignored for this model.",

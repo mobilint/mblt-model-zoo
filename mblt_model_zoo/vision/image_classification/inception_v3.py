@@ -1,20 +1,20 @@
+"""
+Inception V3 model definition.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class Inception_V3_Set(ModelInfoSet):
+    """Configuration set for Inception V3 models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/single/inception_v3_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/multi/inception_v3_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/inception_v3_IMAGENET1K_V1/aries/global/inception_v3_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/Inception_V3",
+            "filename": "inception_v3_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -28,7 +28,7 @@ class Inception_V3_Set(ModelInfoSet):
                 "size": [299, 299],
             },
             "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -37,16 +37,29 @@ class Inception_V3_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-def Inception_V3(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        Inception_V3_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class Inception_V3(MBLT_Engine):
+    """Inception_V3 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the Inception_V3 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            Inception_V3_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

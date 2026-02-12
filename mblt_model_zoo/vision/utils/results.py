@@ -1,3 +1,7 @@
+"""
+Results processing and plotting.
+"""
+
 import os
 from typing import Union
 
@@ -6,17 +10,31 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .datasets import *
-from .postprocess.common import *
+from .datasets import (
+    get_coco_class_num,
+    get_coco_det_palette,
+    get_coco_keypoint_palette,
+    get_coco_label,
+    get_coco_limb_palette,
+    get_coco_pose_skeleton,
+    get_imagenet_label,
+)
+from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks
 from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width
 RADIUS = 5  # circle radius
 ALPHA = 0.3  # alpha for overlay
+
+
 # for drawing bounding box
-
-
 class Results:
+    """
+    Class for handling and plotting model inference results.
+    Class for handling, processing, and plotting model inference results.
+    Provides methods to visualize detections, masks, and keypoints on images.
+    """
+
     def __init__(
         self,
         pre_cfg: dict,
@@ -24,20 +42,34 @@ class Results:
         output: Union[TensorLike, ListTensorLike],
         **kwargs,
     ):
+        """
+        Initializes the Results object.
+        Args:
+            pre_cfg (dict): Preprocessing configuration.
+            post_cfg (dict): Postprocessing configuration.
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+            **kwargs: Additional arguments.
+        """
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
         self.set_output(output)
         self.conf_thres = kwargs.get("conf_thres", 0.25)
 
-    def _read_image(self, source_path: Union[str, cv2.typing.MatLike, Image.Image]):
+    def _read_image(self, source_path: Union[str, np.ndarray, Image.Image]):
+        """
+        Internal method to read an image from various input types and convert to BGR format.
+        Args:
+            source_path (Union[str, np.ndarray, Image.Image]): Path to image or image object.
+        Returns:
+            np.ndarray: Image in BGR format (cv2 style).
+        """
         source_img = None
-
         if isinstance(source_path, Image.Image):  # PIL image open
             source_img = source_path.convert("RGB")
             source_img = np.array(source_img)
             source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
-        elif isinstance(source_path, cv2.typing.MatLike):
+        elif isinstance(source_path, np.ndarray):
             source_img = np.array(
                 source_path
             )  # assume imread or video read is made in BGR format
@@ -49,40 +81,29 @@ class Results:
                 source_path
             ), f"File {source_path} does not exist or is not a file."
             source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
-
         return source_img
 
     def set_output(self, output: Union[TensorLike, ListTensorLike]):
+        """
+        Sets variables from the raw model output based on the task.
+        Args:
+            output (Union[TensorLike, ListTensorLike]): Raw model output.
+        Raises:
+            NotImplementedError: If the task is not supported.
+        """
         self.acc = None
         self.box_cls = None
         self.mask = None
-
         if self.task.lower() == "image_classification":
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
             self.acc = output
         elif (
             self.task.lower() == "object_detection"
             or self.task.lower() == "pose_estimation"
         ):
-            if isinstance(output, list):
-                assert len(output) == 1, f"Got unexpected output={output}."
-                output = output[0]
-            self.box_cls = output
-        elif self.task.lower() == "instance_segmentation":
-            assert isinstance(
-                output, list
-            ), f"Got unexpected output={output}. It should be a list."
-            if len(output) == 2:  # [box_cls, mask]
-                pass
-            elif len(output) == 1:  # [[box_cls, mask]]
-                assert len(output[0]) == 2, f"Got unexpected output={output}."
-                output = output[0]
-            else:
-                raise ValueError(f"Got unexpected output={output}.")
             self.box_cls = output[0]
-            self.mask = output[1]
+        elif self.task.lower() == "instance_segmentation":
+            self.box_cls = output[0][0]
+            self.mask = output[0][1]
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."
@@ -91,13 +112,29 @@ class Results:
 
     def plot(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path: str = None,
         **kwargs,
     ):
+        """
+        Plots the results on the source image.
+        Plots the inference results on the source image.
+        Args:
+            source_path (Union[str, np.ndarray, Image.Image]): Path or image object.
+            save_path (str, optional): Path to save the plotted image. Defaults to None.
+            **kwargs: Additional arguments.
+            source_path (Union[str, np.ndarray, Image.Image]): The image to plot on.
+            save_path (str, optional): If provided, the result image will be saved to this path.
+            **kwargs: Additional task-specific plotting options (e.g., topk for classification).
+        Returns:
+            np.ndarray: The image with plotted results.
+            np.ndarray: The image with results visualized (in BGR format).
+        Raises:
+            NotImplementedError: If the task is not supported.
+            NotImplementedError: If the task is not supported for plotting.
+        """
         if save_path is not None:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
         if self.task.lower() == "image_classification":
             return self._plot_image_classification(source_path, save_path, **kwargs)
         elif self.task.lower() == "object_detection":
@@ -113,7 +150,7 @@ class Results:
 
     def _plot_image_classification(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image] = None,
+        source_path: Union[str, np.ndarray, Image.Image] = None,
         save_path: str = None,
         topk=5,
         **kwargs,
@@ -121,18 +158,15 @@ class Results:
         assert self.acc is not None, "No accuracy output found."
         if isinstance(self.acc, np.ndarray):
             self.acc = torch.tensor(self.acc)
-
         topk_probs, topk_indices = torch.topk(self.acc, topk)
         topk_probs = topk_probs.squeeze().numpy()
         topk_indices = topk_indices.squeeze().numpy()
-
         # load labels
         labels = [get_imagenet_label(i) for i in topk_indices]
         comments = []
         for i in range(topk):
             comments.append(f"{labels[i]}: {topk_probs[i]*100:.2f}%")
             print(f"Label: {labels[i]}, Probability: {topk_probs[i]*100:.2f}%")
-
         if source_path is not None and save_path is not None:
             comments = "\n".join(comments)
             img = self._read_image(source_path)
@@ -161,23 +195,20 @@ class Results:
                 )
                 cv2.imwrite(save_path, img)
                 cv2.destroyAllWindows()
-
             return img
         else:
             return None
 
     def _plot_object_detection(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path: str = None,
         **kwargs,
     ):
         assert self.box_cls.shape[1] == 6 + self.post_cfg.get(
             "n_extra", 0
         ), f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
-
         img = self._read_image(source_path)
-
         self.labels = self.box_cls[:, 5].to(torch.int64)
         self.scores = self.box_cls[:, 4]
         self.boxes = scale_boxes(
@@ -186,7 +217,6 @@ class Results:
             img.shape[:2],
         )
         contours = {i: [] for i in list(range(get_coco_class_num()))}
-
         for box, score, label in zip(self.boxes, self.scores, self.labels):
             img = cv2.putText(
                 img,
@@ -208,7 +238,6 @@ class Results:
                     ]
                 )
             )
-
         for label, contour in contours.items():
             if len(contour) > 0:
                 cv2.drawContours(
@@ -218,7 +247,6 @@ class Results:
                     get_coco_det_palette(label),
                     LW,
                 )
-
         if save_path is not None:
             cv2.imwrite(save_path, img)
             cv2.destroyAllWindows()
@@ -226,25 +254,29 @@ class Results:
 
     def _plot_instance_segmentation(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path=None,
         **kwargs,
     ):
         img = self._plot_object_detection(source_path, None, **kwargs)
-        masks = scale_image(self.mask.permute(1, 2, 0), img.shape[:2])
+        masks = (
+            crop_mask(scale_masks(self.mask, img.shape[:2]), self.boxes)
+            .gt_(0.0)
+            .permute(1, 2, 0)
+            .to(torch.float32)
+            .cpu()
+            .numpy()
+        )
         overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
-
         for i, label in enumerate(self.labels):
             overlay = np.maximum(
                 overlay,
                 masks[:, :, i][:, :, np.newaxis]
                 * np.array(get_coco_det_palette(label)).reshape(1, 1, 3),
             )
-
         total_mask = overlay.max(axis=2, keepdims=True)
         inv_mask = 1 - ALPHA * total_mask / 255
         img = (img * inv_mask + overlay * ALPHA).astype(np.uint8)
-
         if save_path is not None:
             cv2.imwrite(save_path, img)
             cv2.destroyAllWindows()
@@ -252,7 +284,7 @@ class Results:
 
     def _plot_pose_estimation(
         self,
-        source_path: Union[str, cv2.typing.MatLike, Image.Image],
+        source_path: Union[str, np.ndarray, Image.Image],
         save_path=None,
         **kwargs,
     ):
@@ -264,9 +296,9 @@ class Results:
         )
         for kpt in self.kpts:
             for i, (x, y, v) in enumerate(kpt):
-                color_k = KEYPOINT_PALLETE[i]
-                if v < self.conf_thres:
-                    continue
+                color_k = get_coco_keypoint_palette(i)
+                # if v < self.conf_thres:
+                #    continue
                 cv2.circle(
                     img,
                     (int(x), int(y)),
@@ -275,21 +307,18 @@ class Results:
                     -1,
                     lineType=cv2.LINE_AA,
                 )
-
-            for j, sk in enumerate(POSE_SKELETON):
+            for j, sk in enumerate(get_coco_pose_skeleton()):
                 pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
                 pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
-
                 conf1 = kpt[sk[0] - 1, 2]
                 conf2 = kpt[sk[1] - 1, 2]
-
-                if conf1 < self.conf_thres or conf2 < self.conf_thres:
-                    continue
+                # if conf1 < self.conf_thres or conf2 < self.conf_thres:
+                #    continue
                 cv2.line(
                     img,
                     pos1,
                     pos2,
-                    LIMB_PALLETE[j],
+                    get_coco_limb_palette(j),
                     thickness=int(np.ceil(LW / 2)),
                     lineType=cv2.LINE_AA,
                 )

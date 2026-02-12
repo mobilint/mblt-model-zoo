@@ -57,8 +57,8 @@ resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded
 resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
 
 # Set inference mode for better performance
-# ARIES supports "single", "multi", "global", "global4", and "global8" inference mode. Default is "global"
-resnet50 = ResNet50(infer_mode = "global")
+# ARIES supports "single", "multi", "global4", and "global8" inference mode. Default is "global8"
+resnet50 = ResNet50(infer_mode = "global8")
 
 # (Beta) If you are holding a model compiled for REGULUS, enable inference on the REGULUS device.
 resnet50 = ResNet50(product = "regulus")
@@ -68,7 +68,7 @@ resnet50 = ResNet50(product = "regulus")
 resnet50 = ResNet50(
     local_path = None,
     model_type = "DEFAULT",
-    infer_mode = "global",
+    infer_mode = "global8",
     product = "aries",
 )
 
@@ -115,8 +115,8 @@ Currently, these optional functions are only available on environment equipped w
 
 |Name|Use|Details|
 |-------|------|------|
-|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md) |
-|MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md) |
+|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
+|MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 
 > Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
 

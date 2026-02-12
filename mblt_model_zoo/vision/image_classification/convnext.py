@@ -1,20 +1,20 @@
+"""
+ConvNeXt model definitions.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class ConvNeXt_Tiny_Set(ModelInfoSet):
+    """Configuration set for ConvNeXt Tiny models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/single/convnext_tiny_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/multi/convnext_tiny_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_tiny_IMAGENET1K_V1/aries/global/convnext_tiny_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Tiny",
+            "filename": "convnext_tiny_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -27,8 +27,7 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -38,18 +37,12 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
 
 
 class ConvNeXt_Small_Set(ModelInfoSet):
+    """Configuration set for ConvNeXt Small models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/single/convnext_small_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/multi/convnext_small_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_small_IMAGENET1K_V1/aries/global/convnext_small_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Small",
+            "filename": "convnext_small_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -62,8 +55,7 @@ class ConvNeXt_Small_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -73,18 +65,12 @@ class ConvNeXt_Small_Set(ModelInfoSet):
 
 
 class ConvNeXt_Base_Set(ModelInfoSet):
+    """Configuration set for ConvNeXt Base models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/single/convnext_base_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/multi/convnext_base_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_base_IMAGENET1K_V1/aries/global/convnext_base_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Base",
+            "filename": "convnext_base_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -97,8 +83,7 @@ class ConvNeXt_Base_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -108,18 +93,12 @@ class ConvNeXt_Base_Set(ModelInfoSet):
 
 
 class ConvNeXt_Large_Set(ModelInfoSet):
+    """Configuration set for ConvNeXt Large models."""
+
     IMAGENET1K_V1 = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/single/convnext_large_IMAGENET1K_V1.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/multi/convnext_large_IMAGENET1K_V1.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/image_classification/convnext_large_IMAGENET1K_V1/aries/global/convnext_large_IMAGENET1K_V1.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/ConvNext_Large",
+            "filename": "convnext_large_IMAGENET1K_V1.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -132,8 +111,7 @@ class ConvNeXt_Large_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "image_classification",
@@ -142,61 +120,113 @@ class ConvNeXt_Large_Set(ModelInfoSet):
     DEFAULT = IMAGENET1K_V1  # Default model
 
 
-def ConvNeXt_Tiny(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Tiny_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ConvNeXt_Tiny(MBLT_Engine):
+    """ConvNeXt_Tiny model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Tiny engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Tiny_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ConvNeXt_Small(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Small_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ConvNeXt_Small(MBLT_Engine):
+    """ConvNeXt_Small model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Small engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Small_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ConvNeXt_Base(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Base_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ConvNeXt_Base(MBLT_Engine):
+    """ConvNeXt_Base model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Base engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Base_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def ConvNeXt_Large(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        ConvNeXt_Large_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class ConvNeXt_Large(MBLT_Engine):
+    """ConvNeXt_Large model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the ConvNeXt_Large engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            ConvNeXt_Large_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

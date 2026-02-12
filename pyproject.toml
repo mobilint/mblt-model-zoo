@@ -14,7 +14,7 @@ description = "A codebase for pre-quantized AI models for Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.9,<3.13"
-keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries"]
+keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries", "regulus", "qb"]
 dependencies = [
     "mobilint-qb-runtime>=1.0.0",
     "numpy>=1.26.0",
@@ -22,6 +22,9 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "pillow>=11.1.0",
     "setuptools>=70.0.0",
+    "faster-coco-eval",
+    "huggingface-hub",
+    "scipy",
     "tqdm",
     "wheel",
 ]

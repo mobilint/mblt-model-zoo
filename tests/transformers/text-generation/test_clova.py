@@ -1,9 +1,7 @@
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-MODEL_PATHS = (
-    "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
-)
+MODEL_PATHS = ("mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")

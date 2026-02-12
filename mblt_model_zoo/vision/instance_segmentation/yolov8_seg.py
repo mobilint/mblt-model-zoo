@@ -1,20 +1,20 @@
+"""
+YOLOv8 Segmentation model definitions.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv8nSeg_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv8nSeg models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv8n-seg",
+            "filename": "yolov8n-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -23,31 +23,25 @@ class YOLOv8nSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
             "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8sSeg_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv8sSeg models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/single/yolov8s-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/multi/yolov8s-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8s-seg/aries/global/yolov8s-seg.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv8s-seg",
+            "filename": "yolov8s-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -56,31 +50,25 @@ class YOLOv8sSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
             "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8mSeg_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv8mSeg models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/single/yolov8m-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/multi/yolov8m-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8m-seg/aries/global/yolov8m-seg.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv8m-seg",
+            "filename": "yolov8m-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -89,31 +77,25 @@ class YOLOv8mSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
             "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8lSeg_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv8lSeg models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/single/yolov8l-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/multi/yolov8l-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8l-seg/aries/global/yolov8l-seg.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv8l-seg",
+            "filename": "yolov8l-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -122,31 +104,25 @@ class YOLOv8lSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
             "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv8xSeg_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv8xSeg models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/single/yolov8x-seg.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/multi/yolov8x-seg.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/instance_segmentation/yolov8x-seg/aries/global/yolov8x-seg.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv8x-seg",
+            "filename": "yolov8x-seg.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -155,88 +131,153 @@ class YOLOv8xSeg_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "instance_segmentation",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
             "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
-def YOLOv8nSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv8nSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv8nSeg(MBLT_Engine):
+    """YOLOv8nSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8nSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8nSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv8sSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv8sSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv8sSeg(MBLT_Engine):
+    """YOLOv8sSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8sSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8sSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv8mSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv8mSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv8mSeg(MBLT_Engine):
+    """YOLOv8mSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8mSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8mSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv8lSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv8lSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv8lSeg(MBLT_Engine):
+    """YOLOv8lSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8lSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8lSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv8xSeg(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv8xSeg_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv8xSeg(MBLT_Engine):
+    """YOLOv8xSeg model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8xSeg engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8xSeg_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

@@ -1,20 +1,20 @@
+"""
+YOLOv9 model definitions.
+"""
+
+from typing import Optional
+
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
 class YOLOv9t_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv9t models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9t",
+            "filename": "yolov9t.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -23,30 +23,24 @@ class YOLOv9t_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9s_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv9s models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9s",
+            "filename": "yolov9s.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -55,30 +49,24 @@ class YOLOv9s_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANs_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for GELANs models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/GELANs",
+            "filename": "gelans.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -87,30 +75,24 @@ class GELANs_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9m_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv9m models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/single/yolov9m.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/multi/yolov9m.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov9m/aries/global/yolov9m.mxq",
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9m",
+            "filename": "yolov9m.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -119,30 +101,24 @@ class YOLOv9m_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANm_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for GELANm models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/gelanm/aries/single/gelanm.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/gelanm/aries/multi/gelanm.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/gelanm/aries/global8/gelanm.mxq",
-                    "global4": "https://dl.mobilint.com/model/vision/object_detection/gelanm/aries/global4/gelanm.mxq",
-                    "global8": "https://dl.mobilint.com/model/vision/object_detection/gelanm/aries/global8/gelanm.mxq",
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/GELANm",
+            "filename": "gelanm.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -151,30 +127,24 @@ class GELANm_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9c_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv9c models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/single/yolov9c.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/multi/yolov9c.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/global/yolov9c.mxq",
-                    "global4": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/global4/yolov9c.mxq",
-                    "global8": "https://dl.mobilint.com/model/vision/object_detection/yolov9c/aries/global8/yolov9c.mxq",
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9c",
+            "filename": "yolov9c.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -183,30 +153,24 @@ class YOLOv9c_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANc_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for GELANc models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": "https://dl.mobilint.com/model/vision/object_detection/gelanc/aries/single/gelanc.mxq",
-                    "multi": "https://dl.mobilint.com/model/vision/object_detection/gelanc/aries/multi/gelanc.mxq",
-                    "global": "https://dl.mobilint.com/model/vision/object_detection/gelanc/aries/global8/gelanc.mxq",
-                    "global4": "https://dl.mobilint.com/model/vision/object_detection/gelanc/aries/global4/gelanc.mxq",
-                    "global8": "https://dl.mobilint.com/model/vision/object_detection/gelanc/aries/global8/gelanc.mxq",
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/GELANc",
+            "filename": "gelanc.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -215,30 +179,24 @@ class GELANc_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class YOLOv9e_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for YOLOv9e models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/YOLOv9e",
+            "filename": "yolov9e.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -247,30 +205,24 @@ class YOLOv9e_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
 class GELANe_Set(ModelInfoSet):
-    COCO_V1 = ModelInfo(
+    """Configuration set for GELANe models."""
+
+    DEFAULT = ModelInfo(
         model_cfg={
-            "url_dict": {
-                "aries": {
-                    "single": None,
-                    "multi": None,
-                    "global": None,
-                    "global4": None,
-                    "global8": None,
-                },
-                "regulus": {"single": None},
-            },
+            "repo_id": "mobilint/GELANe",
+            "filename": "gelane.mxq",
         },
         pre_cfg={
             "Reader": {
@@ -279,147 +231,264 @@ class GELANe_Set(ModelInfoSet):
             "YoloPre": {
                 "img_size": [640, 640],
             },
-            "SetOrder": {"shape": "CHW"},
+            "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
             "task": "object_detection",
             "nc": 80,  # Number of classes
             "nl": 3,  # Number of detection layers
+            "reg_max": 16,
         },
     )
-    DEFAULT = COCO_V1
 
 
-def YOLOv9t(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv9t_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv9t(MBLT_Engine):
+    """YOLOv9t model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv9t engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv9t_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv9s(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv9s_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv9s(MBLT_Engine):
+    """YOLOv9s model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv9s engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv9s_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def GELANs(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        GELANs_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class GELANs(MBLT_Engine):
+    """GELANs model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the GELANs engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            GELANs_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv9m(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv9m_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv9m(MBLT_Engine):
+    """YOLOv9m model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv9m engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv9m_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def GELANm(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        GELANm_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class GELANm(MBLT_Engine):
+    """GELANm model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the GELANm engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            GELANm_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv9c(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv9c_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv9c(MBLT_Engine):
+    """YOLOv9c model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv9c engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv9c_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def GELANc(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        GELANc_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class GELANc(MBLT_Engine):
+    """GELANc model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the GELANc engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            GELANc_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def YOLOv9e(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        YOLOv9e_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class YOLOv9e(MBLT_Engine):
+    """YOLOv9e model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv9e engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv9e_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-def GELANe(
-    local_path: str = None,
-    model_type: str = "DEFAULT",
-    infer_mode: str = "global",
-    product: str = "aries",
-) -> MBLT_Engine:
-    return MBLT_Engine.from_model_info_set(
-        GELANe_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
+class GELANe(MBLT_Engine):
+    """GELANe model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the GELANe engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            GELANe_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

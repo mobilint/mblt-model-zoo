@@ -1,7 +1,6 @@
 from typing import List
 
 import cv2
-import numpy as np
 import torch
 
 from ..types import TensorLike
@@ -9,18 +8,32 @@ from .base import PreOps
 
 
 class YoloPre(PreOps):
-    """
-    Preprocess for YOLO model.
-    Original code:
-    https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
-    Use default values, where scale fill is False, scale up is True, and auto is False, and center is True.
+    """Preprocessing for YOLO models, implementing letterbox resizing.
+
+    Resizes the image while maintaining aspect ratio, adding padding to meet
+    target dimensions. Based on Ultralytics implementation.
+
+    Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
 
     def __init__(self, img_size: List[int]):
+        """Initializes YoloPre with target image size.
+
+        Args:
+            img_size (List[int]): Target image size [h, w].
+        """
         super().__init__()
         self.img_size = img_size
 
-    def __call__(self, x: TensorLike):
+    def __call__(self, x: TensorLike) -> torch.Tensor:
+        """Executes YOLO preprocessing (letterbox resizing).
+
+        Args:
+            x (TensorLike): Input image.
+
+        Returns:
+            torch.Tensor: Preprocessed image in HWC format on the selected device.
+        """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
         img = x
@@ -31,7 +44,6 @@ class YoloPre(PreOps):
             self.img_size[0] - new_unpad[1],
             self.img_size[1] - new_unpad[0],
         )  # wh padding
-
         dw /= 2  # divide padding into 2 sides
         dh /= 2
         if (img.shape[1], img.shape[0]) != new_unpad:
@@ -41,6 +53,4 @@ class YoloPre(PreOps):
         img = cv2.copyMakeBorder(
             img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
         )  # add border
-        img = (img / 255).astype(np.float32)
-
-        return torch.from_numpy(img).to(self.device)
+        return torch.from_numpy(img).to(self.device).byte()

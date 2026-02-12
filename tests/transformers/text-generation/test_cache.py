@@ -44,17 +44,19 @@ def model(model_path, revision, npu_params):
 
 @pytest.fixture(scope="module")
 def tokenizer(model_path, revision):
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
-        revision=revision
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
     yield tokenizer
 
 
 def test_cache(model, tokenizer):
-    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False)
+    streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
-    messages = [{"role": "user", "content": 'My name is James. You should remember my name. If I ask "What is my name?", you should answer "Your name is James."'}]
+    messages = [
+        {
+            "role": "user",
+            "content": 'My name is James. You should remember my name. If I ask "What is my name?", you should answer "Your name is James."',
+        }
+    ]
 
     past_key_values = MobilintCache(model.get_cache_mxq_model())
 
@@ -63,9 +65,9 @@ def test_cache(model, tokenizer):
         tokenize=True,
         add_generation_prompt=True,
         enable_thinking=False,
-        return_tensors="pt"
+        return_tensors="pt",
     )
-    
+
     prefix_length = input_ids.shape[1]
 
     output_ids = model.generate(
@@ -76,8 +78,10 @@ def test_cache(model, tokenizer):
         streamer=streamer,
         max_new_tokens=1024,
     )
-    
-    assistant_text = tokenizer.decode(output_ids[0, input_ids.shape[-1]:], skip_special_tokens=True)
+
+    assistant_text = tokenizer.decode(
+        output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True
+    )
     messages += [{"role": "assistant", "content": assistant_text}]
     messages += [{"role": "user", "content": "What is my name?"}]
 
@@ -88,17 +92,17 @@ def test_cache(model, tokenizer):
 
     past_key_values.layers[0]._seen_tokens = prefix_length
     past_key_values.load_cache_memory()
-    
+
     input_ids = tokenizer.apply_chat_template(
         messages,
         tokenize=True,
         add_generation_prompt=True,
         enable_thinking=False,
-        return_tensors="pt"
+        return_tensors="pt",
     )
-    
-    streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False)
-    
+
+    streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
+
     output_ids = model.generate(
         input_ids,
         use_cache=True,
@@ -107,5 +111,7 @@ def test_cache(model, tokenizer):
         streamer=streamer,
         max_new_tokens=1024,
     )
-    final_message = tokenizer.decode(output_ids[0, input_ids.shape[-1]:], skip_special_tokens=True)
+    final_message = tokenizer.decode(
+        output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True
+    )
     assert "James" in final_message

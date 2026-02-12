@@ -1,82 +1,124 @@
+"""
+YOLO NMS-free postprocessing.
+"""
+
+from typing import List
+
 import torch
 
-from .common import *
+from .common import dist2bbox, dual_topk
 from .yolo_anchorless_post import YOLOAnchorlessPost
 
 
 class YOLONMSFreePost(YOLOAnchorlessPost):
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
-        super().__init__(pre_cfg, post_cfg)
-        assert (
-            self.n_extra == 0
-        ), "YOLOv10 is not implemented for segmentation, pose estimation"
+    """Postprocessing for YOLO NMS-free models."""
 
-    def decode(self, x):
-        batch_box_cls = torch.cat(x, axis=-1)  # (b, no=144, 8400)
+    def __call__(self, x, conf_thres: float, iou_thres: float) -> List[torch.Tensor]:
+        """Executes YOLO postprocessing for NMS-free models.
 
-        y = []
-        for xi in batch_box_cls:
-            ic = (torch.amax(xi[-self.nc :, :], dim=0) > self.inv_conf_thres).to(
-                self.device
+        Args:
+            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
+            conf_thres (float): Confidence threshold.
+            iou_thres (float): IoU threshold.
+
+        Returns:
+            List[torch.Tensor]: List of detections per image.
+        """
+        self.set_threshold(conf_thres, iou_thres)
+        x = self.check_input(x)
+        if len(x) == 2:
+            x = self.conversion(x)
+            x = self.filter_conversion(x)
+        else:
+            x = self.rearrange(x)
+            x = self.decode(x)
+        x = self.nms(x)
+        return x
+
+    def conversion(self, x: List[torch.Tensor]):
+        """Convert input tensors.
+        Args:
+            x (List[torch.Tensor]): Input tensors.
+        Returns:
+            torch.Tensor: Converted tensor.
+        """
+        assert len(x) == 2, f"Expected 2 output tensors, but got {len(x)}"
+        # sort by element number
+        x = sorted(x, key=lambda x: x.size(), reverse=False)
+        return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
+
+    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
+        """Filters out low-confidence detections from a single output tensor.
+
+        Args:
+            x (torch.Tensor): Model output tensor.
+
+        Returns:
+            List[torch.Tensor]: Decoded and filtered outputs for each image.
+        """
+        x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
+
+        def process_conversion(x):
+            x = x.squeeze(0)
+            if self.n_extra == 0:
+                ic = torch.amax(x[..., -self.nc :], dim=-1) > self.conf_thres
+            else:
+                ic = (
+                    torch.amax(x[..., -self.nc - self.n_extra : -self.n_extra], dim=-1)
+                    > self.conf_thres
+                )
+            pre_topk = x[ic]  # (*, 84)
+            return dual_topk(
+                pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres
             )
 
-            xi = xi[:, ic]  # (144, *)
+        return [process_conversion(xi) for xi in x_list]
 
-            if xi.numel() == 0:
-                y.append(
-                    torch.zeros(
-                        (0, 6),
-                        dtype=torch.float32,
-                        device=self.device,
-                    )
-                )
-                continue
-
-            box, score = torch.split(
-                xi[None], [self.reg_max * 4, self.nc], 1
-            )  # (1, 64, *), (1, nc, *)
-            dbox = (
-                dist2bbox(self.dfl(box), self.anchors[:, ic], xywh=False, dim=1)
-                * self.stride[:, ic]
+    def process_box_cls(self, box_cls):
+        """
+        Process detection results for a single image.
+        Args:
+            box_cls (torch.Tensor): Raw detections for one image.
+        Returns:
+            torch.Tensor: Decoded and top-k filtered detections.
+        """
+        ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
+        box_cls = box_cls[:, ic]  # (144, *)
+        if box_cls.numel() == 0:
+            return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
+        box, scores = torch.split(
+            box_cls[None], [self.reg_max * 4, self.nc], dim=1
+        )  # (1, 64, *), (1, 80, *)
+        dbox = (
+            dist2bbox(
+                self.dfl(box),
+                self.anchors[:, ic],
+                xywh=False,
+                dim=1,
             )
-            pre_topk = (
-                torch.cat([dbox, score.sigmoid()], dim=1).squeeze(0).transpose(0, 1)
-            )  # (*, 84)
+            * self.stride[:, ic]
+        )
+        pre_topk = (
+            torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)
+        )  # (*, 84)
+        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
 
-            max_det = min(pre_topk.shape[0], 300)
+    def nms(
+        self,
+        x: List[torch.Tensor],
+        max_det: int = 300,
+        max_nms: int = 30000,
+        max_wh: int = 7680,
+    ) -> List[torch.Tensor]:
+        """Perform Non-Maximum Suppression (no-op for NMS-free models).
 
-            box, score = pre_topk.split([4, self.nc], dim=-1)
-            max_score = score.amax(dim=-1)
-            max_score, index = torch.topk(
-                max_score, max_det, dim=-1
-            )  # max deteciton is 300
-            index = index.unsqueeze(-1)
-            box = torch.gather(box, dim=0, index=index.repeat(1, 4))
-            score = torch.gather(score, dim=0, index=index.repeat(1, self.nc))
+        Args:
+            x (List[torch.Tensor]): Decoded detections.
+            max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
+            max_nms (int, optional): Maximum candidates for NMS. Defaults to 30000.
+            max_wh (int, optional): Maximum box width/height. Defaults to 7680.
 
-            # second topk
-            score, index = torch.topk(score.flatten(), max_det)
-            index = index.unsqueeze(-1)
-            score = score.unsqueeze(-1)
-            label = index % self.nc
-            index = index // self.nc
-            box = box.gather(dim=0, index=index.repeat(1, 4))
-
-            box_cls = torch.cat([box, score, label], dim=1)  # (300, 6)
-            box_cls = box_cls[box_cls[:, 4] > self.conf_thres]  # final filtering
-
-            if box_cls.numel() == 0:
-                y.append(
-                    torch.zeros(
-                        (0, 6),
-                        dtype=torch.float32,
-                        device=self.device,
-                    )
-                )
-                continue
-            y.append(box_cls)
-
-        return y
-
-    def nms(self, x):  # Do nothing on NMS Free model
+        Returns:
+            List[torch.Tensor]: The input detections unchanged.
+        """
         return x
