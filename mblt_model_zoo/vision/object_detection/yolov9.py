@@ -20,7 +20,7 @@ class YOLOv9t_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -46,7 +46,7 @@ class YOLOv9s_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -72,7 +72,7 @@ class GELANs_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -98,7 +98,7 @@ class YOLOv9m_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -124,7 +124,7 @@ class GELANm_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -150,7 +150,7 @@ class YOLOv9c_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -176,7 +176,7 @@ class GELANc_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -202,7 +202,7 @@ class YOLOv9e_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -228,7 +228,7 @@ class GELANe_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

@@ -55,7 +55,7 @@ class YOLOPostBase(PostBase):
             post_cfg (dict): Postprocessing configuration.
         """
         super().__init__()
-        img_size = pre_cfg.get("YoloPre")["img_size"]
+        img_size = pre_cfg.get("LetterBox")["img_size"]
         if isinstance(img_size, int):
             self.imh = self.imw = img_size
         elif isinstance(img_size, list):

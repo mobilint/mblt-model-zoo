@@ -20,7 +20,7 @@ class GELANcSeg_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -47,7 +47,7 @@ class YOLOv9cSeg_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -74,7 +74,7 @@ class YOLOv9eSeg_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

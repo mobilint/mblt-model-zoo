@@ -20,7 +20,7 @@ class YOLOv7_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -49,7 +49,7 @@ class YOLOv7d6_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [1280, 1280],
             },
             "SetOrder": {"shape": "HWC"},
@@ -79,7 +79,7 @@ class YOLOv7e6_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [1280, 1280],
             },
             "SetOrder": {"shape": "HWC"},
@@ -109,7 +109,7 @@ class YOLOv7e6e_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [1280, 1280],
             },
             "SetOrder": {"shape": "HWC"},
@@ -139,7 +139,7 @@ class YOLOv7w6_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [1280, 1280],
             },
             "SetOrder": {"shape": "HWC"},
@@ -169,7 +169,7 @@ class YOLOv7x_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

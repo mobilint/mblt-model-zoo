@@ -20,7 +20,7 @@ class YOLO26nPose_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -47,7 +47,7 @@ class YOLO26sPose_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -74,7 +74,7 @@ class YOLO26mPose_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -101,7 +101,7 @@ class YOLO26lPose_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -128,7 +128,7 @@ class YOLO26xPose_Set(ModelInfoSet):
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

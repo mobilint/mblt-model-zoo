@@ -6,11 +6,11 @@ from collections import OrderedDict
 
 from .base import PreBase
 from .center_crop import CenterCrop
+from .letterbox import LetterBox
 from .normalize import Normalize
 from .order import SetOrder
 from .reader import Reader
 from .resize import Resize
-from .yolo_pre import YoloPre
 
 
 def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
@@ -33,8 +33,8 @@ def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
             res.append(CenterCrop(**pre_attr))
         elif pre_type_lower == SetOrder.__name__.lower():
             res.append(SetOrder(**pre_attr))
-        elif pre_type_lower == YoloPre.__name__.lower():
-            res.append(YoloPre(**pre_attr))
+        elif pre_type_lower == LetterBox.__name__.lower():
+            res.append(LetterBox(**pre_attr))
         elif pre_type_lower == Normalize.__name__.lower():
             res.append(Normalize(**pre_attr))
         else:

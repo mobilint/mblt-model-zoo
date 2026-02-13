@@ -16,7 +16,7 @@ if __name__ == "__main__":
         "--image-dir", type=str, required=True, help="Path to the image zip file"
     )
     parser.add_argument(
-        "--annotation-dir",
+        "--ann-dir",
         type=str,
         required=True,
         help="Path to the annotation zip file",
@@ -31,6 +31,6 @@ if __name__ == "__main__":
 
     organize_coco(
         image_dir=args.image_dir,
-        annotation_dir=args.annotation_dir,
+        annotation_dir=args.ann_dir,
         output_dir=args.output_dir,
     )
