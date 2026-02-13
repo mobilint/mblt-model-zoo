@@ -296,7 +296,7 @@ class YOLODFLFreePosePost(YOLODFLFreePost):
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=True)
         kpt = x.pop(0)
-        kpt = kpt.permute(0, -1, -3, -2).flatten(-2)
+        kpt = kpt.permute(0, -2, -3, -1).flatten(-2)
         return torch.cat(
             [torch.cat(x, dim=-1).squeeze(1), kpt], dim=-1
         )  # [b, 8400, 56]
