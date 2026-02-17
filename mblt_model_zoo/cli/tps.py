@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from typing import Any, Iterable, Sequence, Tuple
+from typing import Any, Iterable, Sequence, Tuple, Union
 
 from transformers import HfArgumentParser
 
@@ -49,7 +49,7 @@ def _parse_range(spec: str) -> Tuple[int, int, int]:
     return start, end, step
 
 
-def _parse_target_cores(spec: str | None) -> list[str] | None:
+def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
     if spec is None:
         return None
     text = spec.strip()
@@ -58,7 +58,7 @@ def _parse_target_cores(spec: str | None) -> list[str] | None:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
-def _parse_target_clusters(spec: str | None) -> list[int] | None:
+def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
     if spec is None:
         return None
     text = spec.strip()
@@ -90,17 +90,17 @@ def _build_pipeline(
     *,
     task: str,
     model: str,
-    tokenizer: str | None,
+    tokenizer: Union[str, None],
     device: str,
     trust_remote_code: bool,
-    dtype: str | None,
-    device_map: str | None,
-    revision: str | None,
-    embedding_weight: str | None,
-    mxq_path: str | None,
-    core_mode: str | None,
-    target_cores: list[str] | None,
-    target_clusters: list[int] | None,
+    dtype: Union[str, None],
+    device_map: Union[str, None],
+    revision: Union[str, None],
+    embedding_weight: Union[str, None],
+    mxq_path: Union[str, None],
+    core_mode: Union[str, None],
+    target_cores: Union[list[str], None],
+    target_clusters: Union[list[int], None],
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline

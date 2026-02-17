@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -57,7 +57,7 @@ class BenchmarkResult:
     decode_sweep: SweepData = field(default_factory=SweepData)
 
     @staticmethod
-    def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, float | int | str | None]]:
+    def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
         for x, tps, t, avg_total, avg_npu in zip(
             result.prefill_sweep.x_values,
             result.prefill_sweep.tps_values,
@@ -93,7 +93,7 @@ class BenchmarkResult:
 
     @staticmethod
     def write_combined_csv(
-        path: str, rows: Iterable[dict[str, float | int | str | None]]
+        path: str, rows: Iterable[dict[str, Union[float, int, str, None]]]
     ) -> None:
         import csv
 
@@ -116,7 +116,7 @@ class BenchmarkResult:
 
     @staticmethod
     def write_combined_markdown(
-        path: str, rows: Iterable[dict[str, float | int | str | None]]
+        path: str, rows: Iterable[dict[str, Union[float, int, str, None]]]
     ) -> None:
         row_list = list(rows)
         model_ids = sorted({str(row["model"]) for row in row_list})
@@ -277,7 +277,7 @@ class TPSMeasurer:
         plt.switch_backend('Agg') 
 
     @staticmethod
-    def _start_trace(trace_path: str | None):
+    def _start_trace(trace_path: Union[str, None]):
         if not trace_path:
             return None
         try:
@@ -297,7 +297,7 @@ class TPSMeasurer:
         self,
         num_prefill=512,
         num_decode=128,
-        trace_path: str | None = None,
+        trace_path: Union[str, None] = None,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -392,7 +392,7 @@ class TPSMeasurer:
                      decode_range: Tuple[int, int, int] = (128, 1024, 128),
                      fixed_decode_len=10, 
                      fixed_prefill_len=128,
-                     trace_path: str | None = None) -> BenchmarkResult:
+                     trace_path: Union[str, None] = None) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
