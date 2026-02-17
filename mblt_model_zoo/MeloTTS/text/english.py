@@ -5,6 +5,7 @@ import re
 # Suppress warnings about regex deprecation
 import warnings
 
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 from g2p_en import G2p
