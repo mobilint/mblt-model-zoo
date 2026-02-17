@@ -60,13 +60,13 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 
 [project.optional-dependencies]
 transformers = [
-    "transformers[serving]>=4.54.0, <=4.57.1",
+    "transformers[serving]>=4.54.0, <=4.57.6",
     "sentencepiece",
     "torchvision",
     "matplotlib",
 ]
 MeloTTS = [
-    "transformers>=4.54.0, <=4.57.1",
+    "transformers>=4.54.0, <=4.57.6",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",
@@ -76,7 +76,6 @@ MeloTTS = [
     "soundfile",
     "gradio",
     "click",
-    "eunjeon",
 ]
 
 # Tools setting -----------------------------------------

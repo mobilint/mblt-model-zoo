@@ -2,6 +2,11 @@ import os
 import pickle
 import re
 
+# Suppress warnings about regex deprecation
+import warnings
+
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+
 from g2p_en import G2p
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 
