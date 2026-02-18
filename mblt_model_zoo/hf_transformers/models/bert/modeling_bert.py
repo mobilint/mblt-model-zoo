@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Union, cast
 
 import torch
 import torch.nn as nn
@@ -51,18 +51,18 @@ class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
     
     def forward(
         self,
-        input_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        token_type_ids: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        encoder_hidden_states: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
+        input_ids: Union[torch.Tensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        token_type_ids: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.Tensor, None] = None,
+        inputs_embeds: Union[torch.Tensor, None] = None,
+        encoder_hidden_states: Union[torch.Tensor, None] = None,
+        encoder_attention_mask: Union[torch.Tensor, None] = None,
         past_key_values: None = None,
-        use_cache: bool | None = None,
-        cache_position: torch.Tensor | None = None,
+        use_cache: Union[bool, None] = None,
+        cache_position: Union[torch.Tensor, None] = None,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple[torch.Tensor] | BaseModelOutputWithPoolingAndCrossAttentions:
+    ) -> Union[tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
         if self.config.is_decoder:
             use_cache = use_cache if use_cache is not None else self.config.use_cache
         else:
@@ -128,16 +128,16 @@ class MobilintBertForMaskedLM(PretrainedOnlyMixin, MobilintBertPreTrainedModel):
 
     def forward(
         self,
-        input_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        token_type_ids: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        encoder_hidden_states: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-        labels: torch.Tensor | None = None,
+        input_ids: Union[torch.Tensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        token_type_ids: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.Tensor, None] = None,
+        inputs_embeds: Union[torch.Tensor, None] = None,
+        encoder_hidden_states: Union[torch.Tensor, None] = None,
+        encoder_attention_mask: Union[torch.Tensor, None] = None,
+        labels: Union[torch.Tensor, None] = None,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple[torch.Tensor] | MaskedLMOutput:
+    ) -> Union[tuple[torch.Tensor], MaskedLMOutput]:
         outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,

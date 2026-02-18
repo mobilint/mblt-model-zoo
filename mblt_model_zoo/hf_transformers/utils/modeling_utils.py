@@ -17,7 +17,7 @@ from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConf
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     npu_backend_prefix: Literal["", "encoder_", "decoder_"] = ""
     
-    def __init__(self, config: MobilintConfigMixin | MobilintEncoderDecoderConfigMixin, *args, **kwargs):
+    def __init__(self, config: Union[MobilintConfigMixin, MobilintEncoderDecoderConfigMixin], *args, **kwargs):
         no_launch = kwargs.pop("no_launch", False)
         
         super().__init__(config, *args, **kwargs)

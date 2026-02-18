@@ -70,22 +70,22 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
     
     def forward(
         self,
-        input_ids: torch.LongTensor | None = None,
-        pixel_values: torch.FloatTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: MobilintCache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        vision_feature_layer: int | list[int] | None = None,
-        vision_feature_select_strategy: str | None = None,
-        labels: torch.LongTensor | None = None,
-        cache_position: torch.LongTensor | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
-        image_sizes: torch.Tensor | None = None,
+        input_ids: Union[torch.LongTensor, None] = None,
+        pixel_values: Union[torch.FloatTensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.LongTensor, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        inputs_embeds: Union[torch.FloatTensor, None] = None,
+        vision_feature_layer: Union[int, list[int], None] = None,
+        vision_feature_select_strategy: Union[str, None] = None,
+        labels: Union[torch.LongTensor, None] = None,
+        cache_position: Union[torch.LongTensor, None] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
+        image_sizes: Union[torch.Tensor, None] = None,
         chunk_size: int = 128,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | AyaVisionCausalLMOutputWithPast:
+    ) -> Union[tuple, AyaVisionCausalLMOutputWithPast]:
         if logits_to_keep > 1:
             logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
         
@@ -137,7 +137,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            image_hidden_states=cast(torch.FloatTensor | None, image_features if pixel_values is not None else None),
+            image_hidden_states=cast(Union[torch.FloatTensor, None], image_features if pixel_values is not None else None),
         )
     
     def prepare_inputs_for_generation(
@@ -147,7 +147,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         inputs_embeds=None,
         pixel_values=None,
         attention_mask=None,
-        cache_position: torch.LongTensor | None = None,
+        cache_position: Union[torch.LongTensor, None] = None,
         logits_to_keep=None,
         is_first_iteration=False,
         **kwargs,
