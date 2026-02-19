@@ -268,6 +268,58 @@ class YOLOv8xPose_Set(ModelInfoSet):
     )
 
 
+class YOLOv8xPoseP6_Set(ModelInfoSet):
+    """Configuration set for YOLOv8xPoseP6 models."""
+
+    DEFAULT = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8x-pose-p6",
+            "filename": "yolov8x-pose-p6.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 4,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8x-pose-p6",
+            "filename": "yolov8x-pose-p6.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [1280, 1280],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 4,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+
 class YOLOv8nPose(MBLT_Engine):
     """YOLOv8nPose model engine."""
 
@@ -400,6 +452,34 @@ class YOLOv8xPose(MBLT_Engine):
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
             YOLOv8xPose_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
+
+
+class YOLOv8xPoseP6(MBLT_Engine):
+    """YOLOv8xPoseP6 model engine."""
+
+    def __init__(
+        self,
+        local_path: Optional[str] = None,
+        model_type: str = "DEFAULT",
+        infer_mode: str = "global8",
+        product: str = "aries",
+    ):
+        """Initializes the YOLOv8xPoseP6 engine.
+
+        Args:
+            local_path (str, optional): Path to a local model file. Defaults to None.
+            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
+            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
+            product (str, optional): Target hardware product. Defaults to "aries".
+        """
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            YOLOv8xPoseP6_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
