@@ -15,6 +15,34 @@ class YOLOv5nSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv5n-seg",
             "filename": "yolov5n-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv5n-seg",
+            "filename": "yolov5n-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -45,6 +73,34 @@ class YOLOv5sSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv5s-seg",
             "filename": "yolov5s-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv5s-seg",
+            "filename": "yolov5s-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -75,6 +131,34 @@ class YOLOv5mSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv5m-seg",
             "filename": "yolov5m-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv5m-seg",
+            "filename": "yolov5m-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -105,6 +189,34 @@ class YOLOv5lSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv5l-seg",
             "filename": "yolov5l-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv5l-seg",
+            "filename": "yolov5l-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -135,6 +247,34 @@ class YOLOv5xSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv5x-seg",
             "filename": "yolov5x-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "anchors": [
+                [10, 13, 16, 30, 33, 23],  # P3/8
+                [30, 61, 62, 45, 59, 119],  # P4/16
+                [116, 90, 156, 198, 373, 326],  # P5/32
+            ],
+            "n_extra": 32,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv5x-seg",
+            "filename": "yolov5x-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

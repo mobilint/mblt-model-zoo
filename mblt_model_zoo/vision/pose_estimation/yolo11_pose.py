@@ -15,6 +15,31 @@ class YOLO11nPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11n-pose",
             "filename": "yolo11n-pose.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11n-pose",
+            "filename": "yolo11n-pose.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -42,6 +67,31 @@ class YOLO11sPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11s-pose",
             "filename": "yolo11s-pose.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11s-pose",
+            "filename": "yolo11s-pose.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -69,6 +119,31 @@ class YOLO11mPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11m-pose",
             "filename": "yolo11m-pose.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11m-pose",
+            "filename": "yolo11m-pose.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -96,6 +171,31 @@ class YOLO11lPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11l-pose",
             "filename": "yolo11l-pose.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11l-pose",
+            "filename": "yolo11l-pose.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -123,6 +223,31 @@ class YOLO11xPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11x-pose",
             "filename": "yolo11x-pose.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11x-pose",
+            "filename": "yolo11x-pose.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

@@ -15,6 +15,31 @@ class GELANcSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GELANc-seg",
             "filename": "gelanc-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/GELANc-seg",
+            "filename": "gelanc-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -42,6 +67,31 @@ class YOLOv9cSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9c-seg",
             "filename": "yolov9c-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9c-seg",
+            "filename": "yolov9c-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -69,6 +119,31 @@ class YOLOv9eSeg_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9e-seg",
             "filename": "yolov9e-seg.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9e-seg",
+            "filename": "yolov9e-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

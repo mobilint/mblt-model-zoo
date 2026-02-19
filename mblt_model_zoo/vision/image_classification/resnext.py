@@ -15,6 +15,7 @@ class ResNeXt50_32x4d_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ResNeXt50_32X4D.tv1_in1k",
             "filename": "resnext50_32x4d_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -37,6 +38,7 @@ class ResNeXt50_32x4d_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ResNeXt50_32X4D.tv2_in1k",
             "filename": "resnext50_32x4d_IMAGENET1K_V2.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -65,6 +67,7 @@ class ResNeXt101_32x8d_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ResNeXt101_32X8D.tv1_in1k",
             "filename": "resnext101_32x8d_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -87,6 +90,7 @@ class ResNeXt101_32x8d_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ResNeXt101_32X8D.tv2_in1k",
             "filename": "resnext101_32x8d_IMAGENET1K_V2.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -115,6 +119,7 @@ class ResNeXt101_64x4d_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ResNeXt101_64X4D",
             "filename": "resnext101_64x4d_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

@@ -15,6 +15,7 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Small_Patch16_224",
             "filename": "deit3_small_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -40,6 +41,7 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Small_Patch16_384",
             "filename": "deit3_small_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -65,6 +67,7 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Medium_Patch16_224",
             "filename": "deit3_medium_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -90,6 +93,7 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Base_Patch16_224",
             "filename": "deit3_base_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -115,6 +119,7 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Base_Patch16_384",
             "filename": "deit3_base_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -140,6 +145,7 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Large_Patch16_224",
             "filename": "deit3_large_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -165,6 +171,7 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT3_Large_Patch16_384",
             "filename": "deit3_large_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

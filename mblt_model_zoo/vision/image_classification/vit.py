@@ -15,6 +15,7 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Tiny_Patch16_224",
             "filename": "vit_tiny_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -40,6 +41,7 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Tiny_Patch16_384",
             "filename": "vit_tiny_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -65,6 +67,7 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Small_Patch16_224",
             "filename": "vit_small_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -90,6 +93,7 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Small_Patch16_384",
             "filename": "vit_small_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -115,6 +119,7 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Small_Patch32_224",
             "filename": "vit_small_patch32_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -140,6 +145,7 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Small_Patch32_384",
             "filename": "vit_small_patch32_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -165,6 +171,7 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Base_Patch8_224",
             "filename": "vit_base_patch8_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -190,6 +197,7 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Base_Patch16_224",
             "filename": "vit_base_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -215,6 +223,7 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Base_Patch16_384",
             "filename": "vit_base_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -240,6 +249,7 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Base_Patch32_224",
             "filename": "vit_base_patch32_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -265,6 +275,7 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Base_Patch32_384",
             "filename": "vit_base_patch32_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -290,6 +301,7 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Large_Patch16_224",
             "filename": "vit_large_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -315,6 +327,7 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Large_Patch16_384",
             "filename": "vit_large_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -340,6 +353,7 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ViT_Large_Patch32_384",
             "filename": "vit_large_patch32_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

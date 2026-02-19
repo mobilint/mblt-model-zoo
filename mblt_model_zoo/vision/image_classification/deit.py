@@ -15,6 +15,7 @@ class DeiT_Tiny_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT_Tiny_Patch16_224",
             "filename": "deit_tiny_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -40,6 +41,7 @@ class DeiT_Small_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT_Small_Patch16_224",
             "filename": "deit_small_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -65,6 +67,7 @@ class DeiT_Base_Patch16_224_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT_Base_Patch16_224",
             "filename": "deit_base_patch16_224.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -90,6 +93,7 @@ class DeiT_Base_Patch16_384_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/DeiT_Base_Patch16_384",
             "filename": "deit_base_patch16_384.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

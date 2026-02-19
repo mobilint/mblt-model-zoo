@@ -15,6 +15,30 @@ class YOLO11n_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11n",
             "filename": "yolo11n.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11n",
+            "filename": "yolo11n.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -41,6 +65,30 @@ class YOLO11s_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11s",
             "filename": "yolo11s.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11s",
+            "filename": "yolo11s.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -67,6 +115,30 @@ class YOLO11m_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11m",
             "filename": "yolo11m.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11m",
+            "filename": "yolo11m.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -93,6 +165,30 @@ class YOLO11l_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11l",
             "filename": "yolo11l.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11l",
+            "filename": "yolo11l.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -119,6 +215,30 @@ class YOLO11x_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO11x",
             "filename": "yolo11x.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO11x",
+            "filename": "yolo11x.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

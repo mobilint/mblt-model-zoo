@@ -15,6 +15,29 @@ class YOLO26n_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26n",
             "filename": "yolo26n.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26n",
+            "filename": "yolo26n.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -41,6 +64,29 @@ class YOLO26s_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26s",
             "filename": "yolo26s.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26s",
+            "filename": "yolo26s.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -67,6 +113,30 @@ class YOLO26m_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26m",
             "filename": "yolo26m.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26m",
+            "filename": "yolo26m.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -93,6 +163,30 @@ class YOLO26l_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26l",
             "filename": "yolo26l.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26l",
+            "filename": "yolo26l.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -119,6 +213,30 @@ class YOLO26x_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26x",
             "filename": "yolo26x.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26x",
+            "filename": "yolo26x.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

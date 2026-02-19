@@ -15,6 +15,7 @@ class MNASNet0_5_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MNASNet0_5",
             "filename": "mnasnet0_5_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -41,6 +42,7 @@ class MNASNet0_75_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MNASNet0_75",
             "filename": "mnasnet0_75_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -67,6 +69,7 @@ class MNASNet1_0_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MNASNet1_0",
             "filename": "mnasnet1_0_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -93,6 +96,7 @@ class MNASNet1_3_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MNASNet1_3",
             "filename": "mnasnet1_3_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

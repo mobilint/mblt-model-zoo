@@ -15,6 +15,30 @@ class YOLOv9t_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9t",
             "filename": "yolov9t.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9t",
+            "filename": "yolov9t.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -41,6 +65,30 @@ class YOLOv9s_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9s",
             "filename": "yolov9s.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9s",
+            "filename": "yolov9s.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -67,6 +115,30 @@ class GELANs_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GELANs",
             "filename": "gelans.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/GELANs",
+            "filename": "gelans.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -93,6 +165,30 @@ class YOLOv9m_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9m",
             "filename": "yolov9m.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9m",
+            "filename": "yolov9m.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -119,6 +215,30 @@ class GELANm_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GELANm",
             "filename": "gelanm.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/GELANm",
+            "filename": "gelanm.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -145,6 +265,30 @@ class YOLOv9c_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9c",
             "filename": "yolov9c.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9c",
+            "filename": "yolov9c.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -171,6 +315,30 @@ class GELANc_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GELANc",
             "filename": "gelanc.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/GELANc",
+            "filename": "gelanc.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -197,6 +365,30 @@ class YOLOv9e_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv9e",
             "filename": "yolov9e.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv9e",
+            "filename": "yolov9e.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
@@ -223,6 +415,30 @@ class GELANe_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GELANe",
             "filename": "gelane.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/GELANe",
+            "filename": "gelane.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {

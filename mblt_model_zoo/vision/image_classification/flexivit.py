@@ -15,6 +15,7 @@ class FlexiViT_Small_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/FlexiVit_Small",
             "filename": "flexivit_small.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -40,6 +41,7 @@ class FlexiViT_Base_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/FlexiVit_Base",
             "filename": "flexivit_base.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -65,6 +67,7 @@ class FlexiViT_Large_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/FlexiVit_Large",
             "filename": "flexivit_large.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

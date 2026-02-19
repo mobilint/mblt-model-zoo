@@ -15,6 +15,7 @@ class VGG11_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG11",
             "filename": "vgg11_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -41,6 +42,7 @@ class VGG11_BN_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG11_BN",
             "filename": "vgg11_bn_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -67,6 +69,7 @@ class VGG13_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG13",
             "filename": "vgg13_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -93,6 +96,7 @@ class VGG13_BN_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG13_BN",
             "filename": "vgg13_bn_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -119,6 +123,7 @@ class VGG16_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG16",
             "filename": "vgg16_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -145,6 +150,7 @@ class VGG16_BN_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG16_BN",
             "filename": "vgg16_bn_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -171,6 +177,7 @@ class VGG19_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG19",
             "filename": "vgg19_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -197,6 +204,7 @@ class VGG19_BN_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/VGG19_BN",
             "filename": "vgg19_bn_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
