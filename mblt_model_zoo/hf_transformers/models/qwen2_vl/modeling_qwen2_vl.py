@@ -1,4 +1,4 @@
-from typing import Optional, cast
+from typing import Optional, Union, cast
 
 import torch
 import torch.nn as nn
@@ -88,19 +88,19 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     
     def forward(
         self,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: MobilintCache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        cache_position: torch.LongTensor | None = None,
+        input_ids: Union[torch.LongTensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.LongTensor, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        inputs_embeds: Union[torch.FloatTensor, None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        return_dict: Union[bool, None] = None,
+        cache_position: Union[torch.LongTensor, None] = None,
         chunk_size: int = 128,
         count_npu_time: bool = False,
-    ) -> tuple | BaseModelOutputWithPast:
+    ) -> Union[tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

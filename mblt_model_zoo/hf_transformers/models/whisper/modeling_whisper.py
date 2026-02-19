@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Union, cast
 
 import torch
 import torch.nn as nn
@@ -207,7 +207,7 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
     def _mask_input_features(
         self,
         input_features: torch.FloatTensor,
-        attention_mask: torch.LongTensor | None = None,
+        attention_mask: Union[torch.LongTensor, None] = None,
     ):
         # `config.apply_spec_augment` can set masking to False
         if not getattr(self.config, "apply_spec_augment", True):
@@ -244,21 +244,21 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
 
     def forward(
         self,
-        input_features: torch.FloatTensor | None = None,
-        attention_mask: torch.LongTensor | None = None,
-        decoder_input_ids: torch.LongTensor | None = None,
-        decoder_attention_mask: torch.LongTensor | None = None,
-        encoder_outputs: tuple[torch.FloatTensor] | BaseModelOutput | None = None,
-        past_key_values: MobilintCache | None = None,
-        decoder_inputs_embeds: tuple[torch.FloatTensor] | None = None,
-        decoder_position_ids: tuple[torch.LongTensor] | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        cache_position: torch.LongTensor | None = None,
+        input_features: Union[torch.FloatTensor, None] = None,
+        attention_mask: Union[torch.LongTensor, None] = None,
+        decoder_input_ids: Union[torch.LongTensor, None] = None,
+        decoder_attention_mask: Union[torch.LongTensor, None] = None,
+        encoder_outputs: Union[tuple[torch.FloatTensor], BaseModelOutput, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        decoder_inputs_embeds: Union[tuple[torch.FloatTensor], None] = None,
+        decoder_position_ids: Union[tuple[torch.LongTensor], None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        return_dict: Union[bool, None] = None,
+        cache_position: Union[torch.LongTensor, None] = None,
         **kwargs,
-    ) -> tuple[torch.Tensor] | Seq2SeqModelOutput:
+    ) -> Union[tuple[torch.Tensor], Seq2SeqModelOutput]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -343,22 +343,22 @@ class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGe
     
     def forward(
         self,
-        input_features: torch.FloatTensor | None = None,
-        attention_mask: torch.LongTensor | None = None,
-        decoder_input_ids: torch.LongTensor | None = None,
-        decoder_attention_mask: torch.LongTensor | None = None,
-        encoder_outputs: tuple[tuple[torch.FloatTensor]] | None = None,
-        past_key_values: MobilintCache | None = None,
-        decoder_inputs_embeds: tuple[torch.FloatTensor] | None = None,
-        decoder_position_ids: tuple[torch.LongTensor] | None = None,
-        labels: torch.LongTensor | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        cache_position: torch.LongTensor | None = None,
+        input_features: Union[torch.FloatTensor, None] = None,
+        attention_mask: Union[torch.LongTensor, None] = None,
+        decoder_input_ids: Union[torch.LongTensor, None] = None,
+        decoder_attention_mask: Union[torch.LongTensor, None] = None,
+        encoder_outputs: Union[tuple[tuple[torch.FloatTensor]], None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        decoder_inputs_embeds: Union[tuple[torch.FloatTensor], None] = None,
+        decoder_position_ids: Union[tuple[torch.LongTensor], None] = None,
+        labels: Union[torch.LongTensor, None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        return_dict: Union[bool, None] = None,
+        cache_position: Union[torch.LongTensor, None] = None,
         **kwargs,
-    ) -> tuple[torch.Tensor] | Seq2SeqLMOutput:
+    ) -> Union[tuple[torch.Tensor], Seq2SeqLMOutput]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if labels is not None:

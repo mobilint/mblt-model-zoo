@@ -10,12 +10,31 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 import re
 
 from anyascii import anyascii
-from g2pkk import G2p
+from g2pkk import G2p as OriginalG2p
 from jamo import hangul_to_jamo
-from transformers.models.auto.tokenization_auto import AutoTokenizer
+import re, sys, importlib
+import subprocess
 
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
+
+
+class G2p(OriginalG2p):
+    def check_mecab(self):
+        spam_spec = importlib.util.find_spec("mecab")
+        non_found = spam_spec is None
+        if non_found:
+            print(f'you have to install python-mecab-ko. install it...')
+            p = subprocess.Popen([sys.executable, "-m", "pip", "install", 'python-mecab-ko'])
+            p.wait()
+
+
+    def get_mecab(self):
+        try:
+            m = self.load_module_func('mecab')
+            return m.MeCab()
+        except Exception as e:
+            print(f'you have to install python-mecab-ko. "pip install python-mecab-ko"')
 
 
 def normalize(text):

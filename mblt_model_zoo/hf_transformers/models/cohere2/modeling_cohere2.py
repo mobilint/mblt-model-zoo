@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Union, cast
 
 import torch
 import torch.nn as nn
@@ -29,17 +29,17 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
 
     def forward(
         self,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: MobilintCache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        labels: torch.LongTensor | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        cache_position: torch.LongTensor | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
+        input_ids: Union[torch.LongTensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.LongTensor, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        inputs_embeds: Union[torch.FloatTensor, None] = None,
+        labels: Union[torch.LongTensor, None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        cache_position: Union[torch.LongTensor, None] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         chunk_size: int = 128,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs], # type: ignore

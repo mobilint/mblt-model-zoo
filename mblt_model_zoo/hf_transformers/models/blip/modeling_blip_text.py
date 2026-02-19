@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Union, cast
 
 import torch
 import torch.nn as nn
@@ -34,22 +34,22 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
     
     def forward(
         self,
-        input_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        encoder_embeds: torch.Tensor | None = None,
-        encoder_hidden_states: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-        past_key_values: MobilintCache | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        is_decoder: bool | None = False,
-        cache_position: torch.Tensor | None = None,
+        input_ids: Union[torch.Tensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.Tensor, None] = None,
+        inputs_embeds: Union[torch.Tensor, None] = None,
+        encoder_embeds: Union[torch.Tensor, None] = None,
+        encoder_hidden_states: Union[torch.Tensor, None] = None,
+        encoder_attention_mask: Union[torch.Tensor, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        return_dict: Union[bool, None] = None,
+        is_decoder: Union[bool, None] = False,
+        cache_position: Union[torch.Tensor, None] = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None | MobilintCache, ...] | BaseModelOutputWithPoolingAndCrossAttentions:
+    ) -> Union[tuple[Union[torch.Tensor, None, MobilintCache], ...], BaseModelOutputWithPoolingAndCrossAttentions]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -118,25 +118,25 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
 
     def forward(
         self,
-        input_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        inputs_embeds: torch.Tensor | None = None,
-        encoder_hidden_states: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-        labels: torch.Tensor | None = None,
-        past_key_values: MobilintCache | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        return_logits: bool | None = False,
-        is_decoder: bool | None = True,
-        reduction: str | None = "mean",
-        cache_position: torch.Tensor | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
+        input_ids: Union[torch.Tensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
+        position_ids: Union[torch.Tensor, None] = None,
+        inputs_embeds: Union[torch.Tensor, None] = None,
+        encoder_hidden_states: Union[torch.Tensor, None] = None,
+        encoder_attention_mask: Union[torch.Tensor, None] = None,
+        labels: Union[torch.Tensor, None] = None,
+        past_key_values: Union[MobilintCache, None] = None,
+        use_cache: Union[bool, None] = None,
+        output_attentions: Union[bool, None] = None,
+        output_hidden_states: Union[bool, None] = None,
+        return_dict: Union[bool, None] = None,
+        return_logits: Union[bool, None] = False,
+        is_decoder: Union[bool, None] = True,
+        reduction: Union[str, None] = "mean",
+        cache_position: Union[torch.Tensor, None] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         **kwargs,
-    ) -> torch.Tensor | tuple[torch.Tensor | MobilintCache, ...] | CausalLMOutputWithCrossAttentions:            
+    ) -> Union[torch.Tensor, tuple[Union[torch.Tensor, MobilintCache], ...], CausalLMOutputWithCrossAttentions]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         if labels is not None:
             use_cache = False
@@ -172,7 +172,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
         if return_logits:
             return logits
 
-        lm_loss: torch.Tensor | None = None
+        lm_loss: Union[torch.Tensor, None] = None
         if labels is not None:
             # we are doing next-token prediction; shift prediction scores and input ids by one
             shifted_prediction_scores = logits

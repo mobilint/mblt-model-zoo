@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Union, cast
 
 import torch
 from transformers.generation.utils import GenerateOutput
@@ -35,10 +35,10 @@ class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
 
     def forward(
         self,
-        pixel_values: torch.FloatTensor | None = None,
+        pixel_values: Union[torch.FloatTensor, None] = None,
         interpolate_pos_encoding: bool = False,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | BaseModelOutputWithPooling:
+    ) -> Union[tuple, BaseModelOutputWithPooling]:
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
@@ -71,13 +71,13 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
     def forward(
         self,
         pixel_values: torch.FloatTensor,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.LongTensor | None = None,
-        labels: torch.LongTensor | None = None,
+        input_ids: Union[torch.LongTensor, None] = None,
+        attention_mask: Union[torch.LongTensor, None] = None,
+        labels: Union[torch.LongTensor, None] = None,
         interpolate_pos_encoding: bool = False,
-        logits_to_keep: int | torch.Tensor = 0,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | BlipForConditionalGenerationModelOutput:
+    ) -> Union[tuple, BlipForConditionalGenerationModelOutput]:
         vision_outputs = self.vision_model(
             pixel_values=pixel_values,
             interpolate_pos_encoding=interpolate_pos_encoding,
@@ -109,11 +109,11 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
     def generate(
         self,
         pixel_values: torch.FloatTensor,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.LongTensor | None = None,
+        input_ids: Union[torch.LongTensor, None] = None,
+        attention_mask: Union[torch.LongTensor, None] = None,
         interpolate_pos_encoding: bool = False,
         **generate_kwargs,
-    ) -> GenerateOutput | torch.LongTensor:
+    ) -> Union[GenerateOutput, torch.LongTensor]:
         batch_size = pixel_values.shape[0]
         vision_outputs = self.vision_model(
             pixel_values=pixel_values,
