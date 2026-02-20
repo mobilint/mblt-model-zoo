@@ -75,14 +75,14 @@ class VisFormer_Tiny(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
 
-    model_cfg, pre_cfg, post_cfg = self._get_configs(
-        VisFormer_Tiny_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-    super().__init__(model_cfg, pre_cfg, post_cfg)
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            VisFormer_Tiny_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
 class VisFormer_Small(MBLT_Engine):
@@ -104,11 +104,11 @@ class VisFormer_Small(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
 
-    model_cfg, pre_cfg, post_cfg = self._get_configs(
-        VisFormer_Small_Set,
-        local_path=local_path,
-        model_type=model_type,
-        infer_mode=infer_mode,
-        product=product,
-    )
-    super().__init__(model_cfg, pre_cfg, post_cfg)
+        model_cfg, pre_cfg, post_cfg = self._get_configs(
+            VisFormer_Small_Set,
+            local_path=local_path,
+            model_type=model_type,
+            infer_mode=infer_mode,
+            product=product,
+        )
+        super().__init__(model_cfg, pre_cfg, post_cfg)

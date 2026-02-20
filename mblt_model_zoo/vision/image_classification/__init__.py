@@ -1,10 +1,9 @@
 from .alexnet import AlexNet
 from .caformer import CAFormer_B36, CAFormer_M36, CAFormer_S18, CAFormer_S36
 from .coatnet import (
-    CoatNet_0_RW_224,
-    CoatNet_1_RW_224,
-    CoatNet_2_RW_224,
-    CoatNet_3_RW_224,
+    CoAtNet_0_RW_224,
+    CoAtNet_1_RW_224,
+    CoAtNet_2_RW_224,
 )
 from .convformer import ConvFormer_B36, ConvFormer_M36, ConvFormer_S18, ConvFormer_S36
 from .convnext import ConvNeXt_Base, ConvNeXt_Large, ConvNeXt_Small, ConvNeXt_Tiny
