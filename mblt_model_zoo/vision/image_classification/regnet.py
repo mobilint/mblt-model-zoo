@@ -629,6 +629,49 @@ class RegNet_Y_16GF_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
+    IMAGENET1K_SWAG_E2E_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/RegNet_Y_16GF.swag_e2e_in1k",
+            "filename": "regnet_y_16gf_IMAGENET1K_SWAG_E2E_V1.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 384,
+                "interpolation": "bicubic",
+            },
+            "CenterCrop": {
+                "size": [384, 384],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={"task": "image_classification"},
+    )
+    IMAGENET1K_SWAG_LINEAR_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/RegNet_Y_16GF.swag_linear_in1k",
+            "filename": "regnet_y_16gf_IMAGENET1K_SWAG_LINEAR_V1.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 224,
+                "interpolation": "bicubic",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={"task": "image_classification"},
+    )
+
     DEFAULT = IMAGENET1K_V2  # Default model
 
 
@@ -669,6 +712,48 @@ class RegNet_Y_32GF_Set(ModelInfoSet):
             "Resize": {
                 "size": 232,
                 "interpolation": "bilinear",
+            },
+            "CenterCrop": {
+                "size": [224, 224],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={"task": "image_classification"},
+    )
+    IMAGENET1K_SWAG_E2E_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/RegNet_Y_32GF.swag_e2e_in1k",
+            "filename": "regnet_y_32gf_IMAGENET1K_SWAG_E2E_V1.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 384,
+                "interpolation": "bicubic",
+            },
+            "CenterCrop": {
+                "size": [384, 384],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={"task": "image_classification"},
+    )
+    IMAGENET1K_SWAG_LINEAR_V1 = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/RegNet_Y_32GF.swag_linear_in1k",
+            "filename": "regnet_y_32gf_IMAGENET1K_SWAG_LINEAR_V1.mxq",
+            "revision": "main",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "pil",
+            },
+            "Resize": {
+                "size": 224,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
                 "size": [224, 224],
