@@ -28,7 +28,6 @@ class Inception_V3_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [299, 299],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
