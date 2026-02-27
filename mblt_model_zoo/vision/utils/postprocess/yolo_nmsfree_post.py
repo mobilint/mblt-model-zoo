@@ -42,9 +42,8 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         Returns:
             torch.Tensor: Converted tensor.
         """
-        assert len(x) == 2, f"Expected 2 output tensors, but got {len(x)}"
         # sort by element number
-        x = sorted(x, key=lambda x: x.size(), reverse=False)
+        x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
 
     def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:

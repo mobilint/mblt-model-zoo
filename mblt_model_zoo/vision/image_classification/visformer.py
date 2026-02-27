@@ -1,20 +1,16 @@
-"""
-FlexiViT model definitions.
-"""
-
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class FlexiViT_Small_Set(ModelInfoSet):
-    """Configuration set for FlexiViT Small models."""
+class VisFormer_Tiny_Set(ModelInfoSet):
+    """Configuration set for VisFormer_Tiny models."""
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/FlexiVit_Small",
-            "filename": "flexivit_small.mxq",
+            "repo_id": "mobilint/VisFormer_Tiny",
+            "filename": "visformer_tiny.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -22,11 +18,11 @@ class FlexiViT_Small_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 252,
+                "size": 248,
                 "interpolation": "bicubic",
             },
             "CenterCrop": {
-                "size": [240, 240],
+                "size": [224, 224],
             },
             "SetOrder": {"shape": "HWC"},
         },
@@ -34,13 +30,13 @@ class FlexiViT_Small_Set(ModelInfoSet):
     )
 
 
-class FlexiViT_Base_Set(ModelInfoSet):
-    """Configuration set for FlexiViT Base models."""
+class VisFormer_Small_Set(ModelInfoSet):
+    """Configuration set for VisFormer_Small models."""
 
     DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/FlexiVit_Base",
-            "filename": "flexivit_base.mxq",
+            "repo_id": "mobilint/VisFormer_Small",
+            "filename": "visformer_small.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -48,11 +44,11 @@ class FlexiViT_Base_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 252,
+                "size": 248,
                 "interpolation": "bicubic",
             },
             "CenterCrop": {
-                "size": [240, 240],
+                "size": [224, 224],
             },
             "SetOrder": {"shape": "HWC"},
         },
@@ -60,34 +56,8 @@ class FlexiViT_Base_Set(ModelInfoSet):
     )
 
 
-class FlexiViT_Large_Set(ModelInfoSet):
-    """Configuration set for FlexiViT Large models."""
-
-    DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/FlexiVit_Large",
-            "filename": "flexivit_large.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 252,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [240, 240],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
-    )
-
-
-class FlexiViT_Small(MBLT_Engine):
-    """FlexiViT_Small model engine."""
+class VisFormer_Tiny(MBLT_Engine):
+    """VisFormer_Tiny model engine."""
 
     def __init__(
         self,
@@ -96,7 +66,7 @@ class FlexiViT_Small(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the FlexiViT_Small engine.
+        """Initializes the VisFormer_Tiny engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -104,8 +74,9 @@ class FlexiViT_Small(MBLT_Engine):
             infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
+
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            FlexiViT_Small_Set,
+            VisFormer_Tiny_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -114,8 +85,8 @@ class FlexiViT_Small(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class FlexiViT_Base(MBLT_Engine):
-    """FlexiViT_Base model engine."""
+class VisFormer_Small(MBLT_Engine):
+    """VisFormer_Small model engine."""
 
     def __init__(
         self,
@@ -124,7 +95,7 @@ class FlexiViT_Base(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the FlexiViT_Base engine.
+        """Initializes the VisFormer_Small engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -132,36 +103,9 @@ class FlexiViT_Base(MBLT_Engine):
             infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
         """
+
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            FlexiViT_Base_Set,
-            local_path=local_path,
-            model_type=model_type,
-            infer_mode=infer_mode,
-            product=product,
-        )
-        super().__init__(model_cfg, pre_cfg, post_cfg)
-
-
-class FlexiViT_Large(MBLT_Engine):
-    """FlexiViT_Large model engine."""
-
-    def __init__(
-        self,
-        local_path: Optional[str] = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global8",
-        product: str = "aries",
-    ):
-        """Initializes the FlexiViT_Large engine.
-
-        Args:
-            local_path (str, optional): Path to a local model file. Defaults to None.
-            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
-            product (str, optional): Target hardware product. Defaults to "aries".
-        """
-        model_cfg, pre_cfg, post_cfg = self._get_configs(
-            FlexiViT_Large_Set,
+            VisFormer_Small_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,

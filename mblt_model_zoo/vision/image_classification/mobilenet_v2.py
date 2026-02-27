@@ -15,6 +15,7 @@ class MobileNet_V2_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MobileNet_V2.tv1_in1k",
             "filename": "mobilenet_v2_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -35,6 +36,7 @@ class MobileNet_V2_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/MobileNet_V2.tv2_in1k",
             "filename": "mobilenet_v2_IMAGENET1K_V2.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

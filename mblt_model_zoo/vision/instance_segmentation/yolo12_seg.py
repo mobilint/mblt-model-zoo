@@ -1,5 +1,5 @@
 """
-ResNet model definitions (ResNet18, ResNet34, ResNet50, ResNet101, ResNet152).
+YOLO12 Segmentation model definitions.
 """
 
 from typing import Optional
@@ -8,222 +8,268 @@ from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class ResNet18_Set(ModelInfoSet):
-    """Configuration set for ResNet18 models."""
+class YOLO12nSeg_Set(ModelInfoSet):
+    """Configuration set for YOLO12nSeg models."""
 
-    IMAGENET1K_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet18",
-            "filename": "resnet18_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/YOLO12n-seg",
+            "filename": "yolo12n-seg.mxq",
             "revision": "main",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
-
-class ResNet34_Set(ModelInfoSet):
-    """Configuration set for ResNet34 models."""
-
-    IMAGENET1K_V1 = ModelInfo(
+    TURBO = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet34",
-            "filename": "resnet34_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/YOLO12n-seg",
+            "filename": "yolo12n-seg.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+
+class YOLO12sSeg_Set(ModelInfoSet):
+    """Configuration set for YOLO12sSeg models."""
+
+    DEFAULT = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO12s-seg",
+            "filename": "yolo12s-seg.mxq",
             "revision": "main",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
-
-class ResNet50_Set(ModelInfoSet):
-    """Configuration set for ResNet50 models."""
-
-    IMAGENET1K_V1 = ModelInfo(
+    TURBO = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet50.tv1_in1k",
-            "filename": "resnet50_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/YOLO12s-seg",
+            "filename": "yolo12s-seg.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+
+class YOLO12mSeg_Set(ModelInfoSet):
+    """Configuration set for YOLO12mSeg models."""
+
+    DEFAULT = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO12m-seg",
+            "filename": "yolo12m-seg.mxq",
             "revision": "main",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    IMAGENET1K_V2 = ModelInfo(
+
+    TURBO = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet50.tv2_in1k",
-            "filename": "resnet50_IMAGENET1K_V2.mxq",
+            "repo_id": "mobilint/YOLO12m-seg",
+            "filename": "yolo12m-seg.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+
+class YOLO12lSeg_Set(ModelInfoSet):
+    """Configuration set for YOLO12lSeg models."""
+
+    DEFAULT = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO12l-seg",
+            "filename": "yolo12l-seg.mxq",
             "revision": "main",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = IMAGENET1K_V2  # Default model
 
-
-class ResNet101_Set(ModelInfoSet):
-    """Configuration set for ResNet101 models."""
-
-    IMAGENET1K_V1 = ModelInfo(
+    TURBO = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet101.tv1_in1k",
-            "filename": "resnet101_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/YOLO12l-seg",
+            "filename": "yolo12l-seg.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
+        },
+    )
+
+
+class YOLO12xSeg_Set(ModelInfoSet):
+    """Configuration set for YOLO12xSeg models."""
+
+    DEFAULT = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO12x-seg",
+            "filename": "yolo12x-seg.mxq",
             "revision": "main",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    IMAGENET1K_V2 = ModelInfo(
+
+    TURBO = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/ResNet101.tv2_in1k",
-            "filename": "resnet101_IMAGENET1K_V2.mxq",
-            "revision": "main",
+            "repo_id": "mobilint/YOLO12x-seg",
+            "filename": "yolo12x-seg.mxq",
+            "revision": "TURBO",
         },
         pre_cfg={
             "Reader": {
-                "style": "pil",
+                "style": "numpy",
             },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
+            "LetterBox": {
+                "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={
-            "task": "image_classification",
+            "task": "instance_segmentation",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 32,
+            "reg_max": 16,
         },
     )
-    DEFAULT = IMAGENET1K_V2  # Default model
 
 
-class ResNet152_Set(ModelInfoSet):
-    """Configuration set for ResNet152 models."""
-
-    IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNet152.tv1_in1k",
-            "filename": "resnet152_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
-    )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNet152.tv2_in1k",
-            "filename": "resnet152_IMAGENET1K_V2.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
-    )
-    DEFAULT = IMAGENET1K_V2  # Default model
-
-
-class ResNet18(MBLT_Engine):
-    """ResNet18 model engine."""
+class YOLO12nSeg(MBLT_Engine):
+    """YOLO12nSeg model engine."""
 
     def __init__(
         self,
@@ -232,7 +278,7 @@ class ResNet18(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the ResNet18 engine.
+        """Initializes the YOLO12nSeg engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -241,7 +287,7 @@ class ResNet18(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            ResNet18_Set,
+            YOLO12nSeg_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -250,8 +296,8 @@ class ResNet18(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class ResNet34(MBLT_Engine):
-    """ResNet34 model engine."""
+class YOLO12sSeg(MBLT_Engine):
+    """YOLO12sSeg model engine."""
 
     def __init__(
         self,
@@ -260,7 +306,7 @@ class ResNet34(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the ResNet34 engine.
+        """Initializes the YOLO12sSeg engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -269,7 +315,7 @@ class ResNet34(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            ResNet34_Set,
+            YOLO12sSeg_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -278,8 +324,8 @@ class ResNet34(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class ResNet50(MBLT_Engine):
-    """ResNet50 model engine."""
+class YOLO12mSeg(MBLT_Engine):
+    """YOLO12mSeg model engine."""
 
     def __init__(
         self,
@@ -288,7 +334,7 @@ class ResNet50(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the ResNet50 engine.
+        """Initializes the YOLO12mSeg engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -297,7 +343,7 @@ class ResNet50(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            ResNet50_Set,
+            YOLO12mSeg_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -306,8 +352,8 @@ class ResNet50(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class ResNet101(MBLT_Engine):
-    """ResNet101 model engine."""
+class YOLO12lSeg(MBLT_Engine):
+    """YOLO12lSeg model engine."""
 
     def __init__(
         self,
@@ -316,7 +362,7 @@ class ResNet101(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the ResNet101 engine.
+        """Initializes the YOLO12lSeg engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -325,7 +371,7 @@ class ResNet101(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            ResNet101_Set,
+            YOLO12lSeg_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -334,8 +380,8 @@ class ResNet101(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class ResNet152(MBLT_Engine):
-    """ResNet152 model engine."""
+class YOLO12xSeg(MBLT_Engine):
+    """YOLO12xSeg model engine."""
 
     def __init__(
         self,
@@ -344,7 +390,7 @@ class ResNet152(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the ResNet152 engine.
+        """Initializes the YOLO12xSeg engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -353,7 +399,7 @@ class ResNet152(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            ResNet152_Set,
+            YOLO12xSeg_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,

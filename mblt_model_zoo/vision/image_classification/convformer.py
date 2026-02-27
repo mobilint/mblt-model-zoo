@@ -1,20 +1,16 @@
-"""
-MNasNet model definitions.
-"""
-
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
 from ..wrapper import MBLT_Engine
 
 
-class MNASNet0_5_Set(ModelInfoSet):
-    """Configuration set for MNASNet 1.0 models."""
+class ConvFormer_S18_Set(ModelInfoSet):
+    """Configuration set for ConvFormer_S18 models."""
 
-    IMAGENET1K_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNASNet0_5",
-            "filename": "mnasnet0_5_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/ConvFormer_S18",
+            "filename": "convformer_s18.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -22,8 +18,8 @@ class MNASNet0_5_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 224,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
                 "size": [224, 224],
@@ -32,16 +28,15 @@ class MNASNet0_5_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNASNet0_75_Set(ModelInfoSet):
-    """Configuration set for MNASNet 1.0 models."""
+class ConvFormer_S36_Set(ModelInfoSet):
+    """Configuration set for ConvFormer_S36 models."""
 
-    IMAGENET1K_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNASNet0_75",
-            "filename": "mnasnet0_75_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/ConvFormer_S36",
+            "filename": "convformer_s36.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -49,8 +44,8 @@ class MNASNet0_75_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 224,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
                 "size": [224, 224],
@@ -59,16 +54,15 @@ class MNASNet0_75_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNASNet1_0_Set(ModelInfoSet):
-    """Configuration set for MNASNet 1.0 models."""
+class ConvFormer_M36_Set(ModelInfoSet):
+    """Configuration set for ConvFormer_M36 models."""
 
-    IMAGENET1K_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNASNet1_0",
-            "filename": "mnasnet1_0_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/ConvFormer_M36",
+            "filename": "convformer_m36.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -76,8 +70,8 @@ class MNASNet1_0_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
+                "size": 224,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
                 "size": [224, 224],
@@ -86,16 +80,15 @@ class MNASNet1_0_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNASNet1_3_Set(ModelInfoSet):
-    """Configuration set for MNASNet 1.3 models."""
+class ConvFormer_B36_Set(ModelInfoSet):
+    """Configuration set for ConvFormer_B36 models."""
 
-    IMAGENET1K_V1 = ModelInfo(
+    DEFAULT = ModelInfo(
         model_cfg={
-            "repo_id": "mobilint/MNASNet1_3",
-            "filename": "mnasnet1_3_IMAGENET1K_V1.mxq",
+            "repo_id": "mobilint/ConvFormer_B36",
+            "filename": "convformer_b36.mxq",
             "revision": "main",
         },
         pre_cfg={
@@ -103,8 +96,8 @@ class MNASNet1_3_Set(ModelInfoSet):
                 "style": "pil",
             },
             "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
+                "size": 224,
+                "interpolation": "bicubic",
             },
             "CenterCrop": {
                 "size": [224, 224],
@@ -113,11 +106,10 @@ class MNASNet1_3_Set(ModelInfoSet):
         },
         post_cfg={"task": "image_classification"},
     )
-    DEFAULT = IMAGENET1K_V1  # Default model
 
 
-class MNASNet0_5(MBLT_Engine):
-    """MNASNet0_5 model engine."""
+class ConvFormer_S18(MBLT_Engine):
+    """ConvFormer_S18 model engine."""
 
     def __init__(
         self,
@@ -126,7 +118,7 @@ class MNASNet0_5(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNASNet0_5 engine.
+        """Initializes the ConvFormer_S18 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -135,7 +127,7 @@ class MNASNet0_5(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNASNet0_5_Set,
+            ConvFormer_S18_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -144,8 +136,8 @@ class MNASNet0_5(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNASNet0_75(MBLT_Engine):
-    """MNASNet0_75 model engine."""
+class ConvFormer_S36(MBLT_Engine):
+    """ConvFormer_S36 model engine."""
 
     def __init__(
         self,
@@ -154,7 +146,7 @@ class MNASNet0_75(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNASNet0_75 engine.
+        """Initializes the ConvFormer_S36 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -163,7 +155,7 @@ class MNASNet0_75(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNASNet0_75_Set,
+            ConvFormer_S36_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -172,8 +164,8 @@ class MNASNet0_75(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNASNet1_0(MBLT_Engine):
-    """MNASNet1_0 model engine."""
+class ConvFormer_M36(MBLT_Engine):
+    """ConvFormer_M36 model engine."""
 
     def __init__(
         self,
@@ -182,7 +174,7 @@ class MNASNet1_0(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNASNet1_0 engine.
+        """Initializes the ConvFormer_M36 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -191,7 +183,7 @@ class MNASNet1_0(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNASNet1_0_Set,
+            ConvFormer_M36_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
@@ -200,8 +192,8 @@ class MNASNet1_0(MBLT_Engine):
         super().__init__(model_cfg, pre_cfg, post_cfg)
 
 
-class MNASNet1_3(MBLT_Engine):
-    """MNASNet1_3 model engine."""
+class ConvFormer_B36(MBLT_Engine):
+    """ConvFormer_B36 model engine."""
 
     def __init__(
         self,
@@ -210,7 +202,7 @@ class MNASNet1_3(MBLT_Engine):
         infer_mode: str = "global8",
         product: str = "aries",
     ):
-        """Initializes the MNASNet1_3 engine.
+        """Initializes the ConvFormer_B36 engine.
 
         Args:
             local_path (str, optional): Path to a local model file. Defaults to None.
@@ -219,7 +211,7 @@ class MNASNet1_3(MBLT_Engine):
             product (str, optional): Target hardware product. Defaults to "aries".
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
-            MNASNet1_3_Set,
+            ConvFormer_B36_Set,
             local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,

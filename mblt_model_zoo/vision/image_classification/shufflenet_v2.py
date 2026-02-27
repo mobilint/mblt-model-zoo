@@ -15,6 +15,7 @@ class ShuffleNet_V2_X0_5_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ShuffleNet_V2_X0_5",
             "filename": "shufflenet_v2_x0_5_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -43,6 +44,7 @@ class ShuffleNet_V2_X1_0_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ShuffleNet_V2_X1_0",
             "filename": "shufflenet_v2_x1_0_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -71,6 +73,7 @@ class ShuffleNet_V2_X1_5_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ShuffleNet_V2_X1_5",
             "filename": "shufflenet_v2_x1_5_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -99,6 +102,7 @@ class ShuffleNet_V2_X2_0_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/ShuffleNet_V2_X2_0",
             "filename": "shufflenet_v2_x2_0_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

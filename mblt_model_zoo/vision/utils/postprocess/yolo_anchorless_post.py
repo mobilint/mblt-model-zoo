@@ -399,15 +399,3 @@ class YOLOAnchorlessPosePost(YOLOAnchorlessPost):
             .squeeze(0)
             .transpose(0, 1)
         )  # (*, 56)
-
-    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
-        """Filters out low-confidence detections from a single concatenated output tensor.
-
-        Args:
-            x (torch.Tensor): Concatenated output tensor from the model.
-
-        Returns:
-            List[torch.Tensor]: Filtered detections for each image in the batch.
-        """
-        x = x.transpose(-1, -2)
-        return super().filter_conversion(x)

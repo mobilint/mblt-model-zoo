@@ -15,6 +15,7 @@ class Inception_V3_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/Inception_V3",
             "filename": "inception_v3_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -27,7 +28,6 @@ class Inception_V3_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [299, 299],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={

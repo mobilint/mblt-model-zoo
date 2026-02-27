@@ -181,6 +181,7 @@ class MXQ_Model:
         infer_mode: str = "global8",
         repo_id: str = None,
         filename: str = None,
+        revision: str = None,
         local_path: str = None,
     ):
         """Initializes the MXQ_Model.
@@ -188,6 +189,7 @@ class MXQ_Model:
         Args:
             repo_id (str, optional): Hugging Face repository ID. Defaults to None.
             filename (str, optional): Model filename. Defaults to None.
+            revision (str, optional): Model revision. Defaults to None.
             local_path (str, optional): Path to local model file. Defaults to None.
             infer_mode (str, optional): Inference execution mode. Defaults to "global8".
             product (str, optional): Target hardware product. Defaults to "aries".
@@ -243,6 +245,7 @@ class MXQ_Model:
                     repo_id=repo_id,
                     filename=filename,
                     subfolder=f"{self.product}/{self.infer_mode}",
+                    revision=revision,
                     local_dir=os.path.expanduser("~/.mblt_model_zoo/vision"),
                 )
             except Exception as e:

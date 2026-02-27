@@ -15,12 +15,36 @@ class YOLOv8n_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv8n",
             "filename": "yolov8n.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8n",
+            "filename": "yolov8n.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -41,12 +65,36 @@ class YOLOv8s_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv8s",
             "filename": "yolov8s.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8s",
+            "filename": "yolov8s.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -67,12 +115,36 @@ class YOLOv8m_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv8m",
             "filename": "yolov8m.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8m",
+            "filename": "yolov8m.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -93,12 +165,36 @@ class YOLOv8l_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv8l",
             "filename": "yolov8l.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8l",
+            "filename": "yolov8l.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -119,12 +215,36 @@ class YOLOv8x_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv8x",
             "filename": "yolov8x.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv8x",
+            "filename": "yolov8x.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

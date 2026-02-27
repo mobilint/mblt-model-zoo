@@ -1,7 +1,7 @@
 """
-Test script for YOLO26mSeg model.
+Test script for YOLO11mSeg model.
 
-This script tests the YOLO26mSeg model by running inference on a sample image.
+This script tests the YOLO11mSeg model by running inference on a sample image.
 It can be run as a pytest test or as a standalone script.
 """
 
@@ -11,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from mblt_model_zoo.vision import YOLO26mSeg
+from mblt_model_zoo.vision import YOLO11mSeg
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
 def yolo_seg():
-    """Fixture to initialize and dispose of the YOLO26mSeg model."""
-    model = YOLO26mSeg()
+    """Fixture to initialize and dispose of the YOLO11mSeg model."""
+    model = YOLO11mSeg()
     yield model
     model.dispose()
 
@@ -39,24 +39,24 @@ def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
 
 
 def test_yolo_seg(yolo_seg):
-    """Test YOLO26mSeg inference on a sample image."""
+    """Test YOLO11mSeg inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
         TEST_DIR,
         "tmp",
-        f"yolo26m_seg_{os.path.basename(image_path)}",
+        f"yolo11m_seg_{os.path.basename(image_path)}",
     )
 
     run_inference(yolo_seg, image_path, save_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO26mSeg inference")
+    parser = argparse.ArgumentParser(description="Run YOLO11mSeg inference")
     parser.add_argument(
         "--mxq-path",
         type=str,
         default=None,
-        help="Path to the YOLO26mSeg model file (.mxq)",
+        help="Path to the YOLO11mSeg model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load model with the specified mxq_path
-    model = YOLO26mSeg(
+    model = YOLO11mSeg(
         local_path=args.mxq_path,
         model_type=args.model_type,
         infer_mode=args.infer_mode,
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     )
     if args.save_path is None:
         args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolo26m_seg_{os.path.basename(args.input_path)}"
+            TEST_DIR, "tmp", f"yolo11m_seg_{os.path.basename(args.input_path)}"
         )
 
     try:

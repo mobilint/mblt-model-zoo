@@ -15,12 +15,37 @@ class YOLOv10n_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10n",
             "filename": "yolov10n.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10n",
+            "filename": "yolov10n.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -42,12 +67,37 @@ class YOLOv10s_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10s",
             "filename": "yolov10s.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10s",
+            "filename": "yolov10s.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -69,12 +119,37 @@ class YOLOv10m_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10m",
             "filename": "yolov10m.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10m",
+            "filename": "yolov10m.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -96,12 +171,37 @@ class YOLOv10b_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10b",
             "filename": "yolov10b.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10b",
+            "filename": "yolov10b.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -123,12 +223,37 @@ class YOLOv10l_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10l",
             "filename": "yolov10l.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10l",
+            "filename": "yolov10l.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -150,12 +275,37 @@ class YOLOv10x_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLOv10x",
             "filename": "yolov10x.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "object_detection",
+            "nc": 80,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "nmsfree": True,  # nms free yolo
+            "reg_max": 16,
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLOv10x",
+            "filename": "yolov10x.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

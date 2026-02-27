@@ -2,6 +2,8 @@
 *.ckpt.index
 *.egg-info
 *.h5
+*.jpg
+*.jpeg
 *.json
 *.keras
 *.log
@@ -12,6 +14,7 @@
 *.onnx
 *.pb
 *.pt
+*.png
 *.pth
 *.pyc
 *.safetensors
@@ -31,3 +34,5 @@ build/
 dist/
 tmp/
 uv.lock
+!assets/
+!rc/

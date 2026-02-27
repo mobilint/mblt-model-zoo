@@ -15,12 +15,37 @@ class YOLO26nPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26n-pose",
             "filename": "yolo26n-pose.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26n-pose",
+            "filename": "yolo26n-pose.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -42,12 +67,37 @@ class YOLO26sPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26s-pose",
             "filename": "yolo26s-pose.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26s-pose",
+            "filename": "yolo26s-pose.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -69,12 +119,37 @@ class YOLO26mPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26m-pose",
             "filename": "yolo26m-pose.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26m-pose",
+            "filename": "yolo26m-pose.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -96,12 +171,37 @@ class YOLO26lPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26l-pose",
             "filename": "yolo26l-pose.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26l-pose",
+            "filename": "yolo26l-pose.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},
@@ -123,12 +223,37 @@ class YOLO26xPose_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/YOLO26x-pose",
             "filename": "yolo26x-pose.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
                 "style": "numpy",
             },
-            "YoloPre": {
+            "LetterBox": {
+                "img_size": [640, 640],
+            },
+            "SetOrder": {"shape": "HWC"},
+        },
+        post_cfg={
+            "task": "pose_estimation",
+            "nc": 1,  # Number of classes
+            "nl": 3,  # Number of detection layers
+            "n_extra": 51,
+            "dflfree": True,  # dfl free yolo
+        },
+    )
+
+    TURBO = ModelInfo(
+        model_cfg={
+            "repo_id": "mobilint/YOLO26x-pose",
+            "filename": "yolo26x-pose.mxq",
+            "revision": "TURBO",
+        },
+        pre_cfg={
+            "Reader": {
+                "style": "numpy",
+            },
+            "LetterBox": {
                 "img_size": [640, 640],
             },
             "SetOrder": {"shape": "HWC"},

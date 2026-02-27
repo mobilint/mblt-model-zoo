@@ -40,11 +40,8 @@ class YOLODFLFreePost(YOLOPostBase):
         Returns:
             torch.Tensor: Concatenated tensor of shape (batch, num_anchors, 4 + nc + n_extra).
         """
-        assert (
-            len(x) == 2
-        ), f"Assume return is a list of two outputs, but got {len(x)} outputs"
         # sort by element number
-        x = sorted(x, key=lambda x: x.size(), reverse=False)
+        x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
 
     def rearrange(self, x):
@@ -205,10 +202,8 @@ class YOLODFLFreeSegPost(YOLODFLFreePost):
                 - outputs (torch.Tensor): Processed outputs.
                 - proto (torch.Tensor): Prototype masks.
         """
-        assert (
-            len(x) == 4
-        ), f"Assume return is a list of four outputs, but got {len(x)} outputs"
-        x = sorted(x, key=lambda x: x.size(), reverse=False)
+
+        x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         outputs = []
         protos = []
         for xi in x:
@@ -216,7 +211,7 @@ class YOLODFLFreeSegPost(YOLODFLFreePost):
                 protos.append(xi)
             else:
                 outputs.append(xi)
-        proto = protos.pop(-1)
+        proto = protos.pop(0 if self.nc < 4 else -1)
         outputs = torch.cat(outputs + protos, dim=-1).squeeze(1)
         return outputs, proto
 
@@ -290,13 +285,10 @@ class YOLODFLFreePosePost(YOLODFLFreePost):
         Returns:
             torch.Tensor: Converted tensor.
         """
-        assert (
-            len(x) == 3
-        ), f"Assume return is a list of three outputs, but got {len(x)} outputs"
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=True)
         kpt = x.pop(0)
-        kpt = kpt.permute(0, -1, -3, -2).flatten(-2)
+        kpt = kpt.permute(0, 3, 1, 2).flatten(-2)
         return torch.cat(
             [torch.cat(x, dim=-1).squeeze(1), kpt], dim=-1
         )  # [b, 8400, 56]

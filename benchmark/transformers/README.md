@@ -11,10 +11,12 @@ python benchmark/transformers/benchmark_text_generation_models.py
 ```
 
 Outputs (created under `benchmark/transformers/results/text_generation/`):
+
 - `{model}.json` and `{model}.png` for each model
 - `combined.png`, `combined.csv`, and `combined.md`
 
 Common CLI options:
+
 - `--device` (default: `cpu`)
 - `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
 - `--revision` (e.g., `W8`)
@@ -42,5 +44,6 @@ python benchmark/transformers/benchmark_text_generation_models.py --all --skip-e
 ```
 
 When `--all` is used, results are saved with suffixes in both the output files and table labels, for example:
+
 - `{model}-W8.json`, `{model}-W8.png`
 - `{model}-W4V8.json`, `{model}-W4V8.png`

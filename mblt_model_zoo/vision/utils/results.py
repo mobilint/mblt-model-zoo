@@ -212,7 +212,7 @@ class Results:
         self.labels = self.box_cls[:, 5].to(torch.int64)
         self.scores = self.box_cls[:, 4]
         self.boxes = scale_boxes(
-            self.pre_cfg["YoloPre"]["img_size"],
+            self.pre_cfg["LetterBox"]["img_size"],
             self.box_cls[:, :4],
             img.shape[:2],
         )
@@ -290,7 +290,7 @@ class Results:
     ):
         img = self._plot_object_detection(source_path, None, **kwargs)
         self.kpts = scale_coords(
-            self.pre_cfg["YoloPre"]["img_size"],
+            self.pre_cfg["LetterBox"]["img_size"],
             self.box_cls[:, 6:].reshape(-1, 17, 3),
             img.shape[:2],
         )

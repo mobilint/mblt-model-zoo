@@ -15,6 +15,7 @@ class AlexNet_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/AlexNet",
             "filename": "alexnet_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {

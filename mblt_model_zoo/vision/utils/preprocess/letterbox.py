@@ -7,7 +7,7 @@ from ..types import TensorLike
 from .base import PreOps
 
 
-class YoloPre(PreOps):
+class LetterBox(PreOps):
     """Preprocessing for YOLO models, implementing letterbox resizing.
 
     Resizes the image while maintaining aspect ratio, adding padding to meet
@@ -17,7 +17,7 @@ class YoloPre(PreOps):
     """
 
     def __init__(self, img_size: List[int]):
-        """Initializes YoloPre with target image size.
+        """Initializes LetterBox with target image size.
 
         Args:
             img_size (List[int]): Target image size [h, w].

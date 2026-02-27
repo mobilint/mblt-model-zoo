@@ -15,6 +15,7 @@ class GoogLeNet_Set(ModelInfoSet):
         model_cfg={
             "repo_id": "mobilint/GoogLeNet",
             "filename": "googlenet_IMAGENET1K_V1.mxq",
+            "revision": "main",
         },
         pre_cfg={
             "Reader": {
@@ -27,7 +28,6 @@ class GoogLeNet_Set(ModelInfoSet):
             "CenterCrop": {
                 "size": [224, 224],
             },
-            "Normalize": {"style": "torch"},
             "SetOrder": {"shape": "HWC"},
         },
         post_cfg={"task": "image_classification"},

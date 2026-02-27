@@ -52,7 +52,7 @@ pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
 
 For any test, you can use keyword parameters explained in README.md [Keyword Parameters](../../mblt_model_zoo/hf_transformers/README.md#keyword-parameters) section. Please note that overriding parameters affect every tests you run. We recommend to narrow tests down to only single model case, described [above](#run-a-single-model-case)
 
-```
+```text
   --mxq-path=MXQ_PATH   Override default mxq_path for pipeline loading.
   --dev-no=DEV_NO       NPU device number.
   --core-mode=CORE_MODE
