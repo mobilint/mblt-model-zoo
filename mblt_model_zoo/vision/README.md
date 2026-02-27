@@ -115,7 +115,7 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | YOLOv5n-cls | (224,224,3) | 63.366 | 63.982 | 0.43 | 2.49 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5s-cls | (224,224,3) | 70.564 | 70.854 | 1.42 | 5.45 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5m-cls | (224,224,3) | 75.194 | 75.418 | 4.03 | 12.95 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5l-cls | (224,224,3) |  | 77.528 | 8.82 | 26.54 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5l-cls | (224,224,3) | 77.226 | 77.528 | 8.82 | 26.54 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5x-cls | (224,224,3) |  | 78.312 | 16.46 | 48.07 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv8n-cls | (224,224,3) |  | 68.912 | 0.48 | 2.72 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLOv8s-cls | (224,224,3) |  | 73.774 | 1.67 | 6.36 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
