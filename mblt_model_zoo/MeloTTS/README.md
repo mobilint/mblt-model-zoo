@@ -9,8 +9,8 @@ Currently supported languages include:
 
 | Language | Link |
 | --- | --- |
-| English (American)    | [Link](https://huggingface.co/mobilint/MeloTTS-English-v3) |
-| Korean                | [Link](https://huggingface.co/mobilint/MeloTTS-Korean) |
+| English (American) | [Link](https://huggingface.co/mobilint/MeloTTS-English-v3) |
+| Korean | [Link](https://huggingface.co/mobilint/MeloTTS-Korean) |
 
 ## Usage
 
@@ -120,8 +120,9 @@ model.tts_to_file(text, speaker_ids['KR'], output_path, speed=speed)
 - [Xumin Yu](https://yuxumin.github.io) at Tsinghua University
 - [Zengyi Qin](https://www.qinzy.tech) (project lead) at MIT and MyShell
 
-**Citation**
-```
+### Citation
+
+```bibtex
 @software{zhao2024melo,
   author={Zhao, Wenliang and Yu, Xumin and Qin, Zengyi},
   title = {MeloTTS: High-quality Multi-lingual Multi-accent Text-to-Speech},

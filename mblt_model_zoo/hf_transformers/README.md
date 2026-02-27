@@ -167,41 +167,41 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
 
 - `mxq_path` (`str`)
 
-    Overrides which `*.mxq` file to load.
-    You can pass either a local path or a path within the Hugging Face repository.
-    Resolution order is:
-    1) If `mxq_path` exists on disk (relative or absolute), it is used as-is.
-    2) If `name_or_path` is a local directory, `os.path.join(name_or_path, mxq_path)` is tried.
-    3) Otherwise, the loader tries to download `mxq_path` from the Hugging Face Hub (preferring the current `revision`), with fallbacks:
-       - retry without `revision`
-       - try to reuse a cached `*.mxq` from the local HF cache
-       - finally, pick a best-effort `*.mxq` candidate from the repo if the exact path is not found
+  Overrides which `*.mxq` file to load.
+  You can pass either a local path or a path within the Hugging Face repository.
+  Resolution order is:
+  1) If `mxq_path` exists on disk (relative or absolute), it is used as-is.
+  2) If `name_or_path` is a local directory, `os.path.join(name_or_path, mxq_path)` is tried.
+  3) Otherwise, the loader tries to download `mxq_path` from the Hugging Face Hub (preferring the current `revision`), with fallbacks:
+     - retry without `revision`
+     - try to reuse a cached `*.mxq` from the local HF cache
+     - finally, pick a best-effort `*.mxq` candidate from the repo if the exact path is not found
 
 - `core_mode` (`str`)
 
-    Selects how the NPU runtime schedules work across cores/clusters.
-    Supported values:
-    - `single`: run on specific cores (use `target_cores`)
-    - `multi`: run on one or more clusters (use `target_clusters`)
-    - `global4`: global scheduling across 4 cores (use `target_clusters`)
-    - `global8`: global scheduling across all cores (requires all clusters)
+  Selects how the NPU runtime schedules work across cores/clusters.
+  Supported values:
+  - `single`: run on specific cores (use `target_cores`)
+  - `multi`: run on one or more clusters (use `target_clusters`)
+  - `global4`: global scheduling across 4 cores (use `target_clusters`)
+  - `global8`: global scheduling across all cores (requires all clusters)
 
-    Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
+  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
 
 - `target_cores` (`list[str]`)
 
-    Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"`.
-    - `cluster`: `0` or `1`
-    - `core`: `0`, `1`, `2`, or `3`
+  Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"`.
+  - `cluster`: `0` or `1`
+  - `core`: `0`, `1`, `2`, or `3`
 
-    Example: `target_cores=["0:0", "0:1"]`
+  Example: `target_cores=["0:0", "0:1"]`
 
 - `target_clusters` (`list[int]`)
 
-    Used when `core_mode` is `multi`, `global4`, or `global8`. Each entry is a cluster index (`0` or `1`).
-    - For `global8`, all clusters must be included (e.g. `target_clusters=[0, 1]`).
+  Used when `core_mode` is `multi`, `global4`, or `global8`. Each entry is a cluster index (`0` or `1`).
+  - For `global8`, all clusters must be included (e.g. `target_clusters=[0, 1]`).
 
-    Example: `target_clusters=[0]`
+  Example: `target_clusters=[0]`
 
 #### Prefixes for multi-backend models
 
@@ -244,6 +244,7 @@ The repositories on HuggingFace Hub work like a git repository, so they can have
 We provide multiple quantized variants of a single original model via these branches (revisions).
 
 We use the following revision labels for quantized variants:
+
 - `W8`: all weights are quantized to INT8.
 - `W4`: all weights are quantized to INT4.
 - `W4V8`: in the attention QKV matrices, the Value (V) matrix is INT8, and the rest are INT4.
@@ -259,13 +260,13 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
 - `embedding_weight` (`str`)
 
-    Path to a PyTorch checkpoint file loadable via `torch.load` (commonly `*.pt` or `*.pth`).
-    The file can contain:
-    - a `torch.Tensor` with shape `[vocab_size, hidden_size]`, or
-    - a `dict` (e.g. `state_dict`) containing a `"weight"` entry, or (as a fallback) any single tensor value.
+  Path to a PyTorch checkpoint file loadable via `torch.load` (commonly `*.pt` or `*.pth`).
+  The file can contain:
+  - a `torch.Tensor` with shape `[vocab_size, hidden_size]`, or
+  - a `dict` (e.g. `state_dict`) containing a `"weight"` entry, or (as a fallback) any single tensor value.
 
-    The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
-    The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
+  The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
+  The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
 
 ### Original Keyword Parameters from `transformers`
 

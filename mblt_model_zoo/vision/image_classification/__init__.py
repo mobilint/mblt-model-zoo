@@ -105,3 +105,7 @@ from .vit import (
     ViT_Tiny_Patch16_384,
 )
 from .wide_resnet import Wide_ResNet50_2, Wide_ResNet101_2
+from .yolo11_cls import YOLO11lCls, YOLO11mCls, YOLO11nCls, YOLO11sCls, YOLO11xCls
+from .yolo26_cls import YOLO26lCls, YOLO26mCls, YOLO26nCls, YOLO26sCls, YOLO26xCls
+from .yolov5_cls import YOLOv5lCls, YOLOv5mCls, YOLOv5nCls, YOLOv5sCls, YOLOv5xCls
+from .yolov8_cls import YOLOv8lCls, YOLOv8mCls, YOLOv8nCls, YOLOv8sCls, YOLOv8xCls
