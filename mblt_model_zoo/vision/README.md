@@ -16,6 +16,10 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | CoAtNet_0_RW_224 | (224,224,3) | 81.080 | 82.418 | 10.06 | 30.46 |  [Link](https://huggingface.co/timm/coatnet_0_rw_224.sw_in1k) | sw_in1k |
 | CoAtNet_1_RW_224 | (224,224,3) | 83.094 | 83.600 | 18.17 | 47.91 |  [Link](https://huggingface.co/timm/coatnet_1_rw_224.sw_in1k) | sw_in1k |
 | CoAtNet_2_RW_224 | (224,224,3) | 84.952 | 86.534 | 32.80 | 82.11 |  [Link](https://huggingface.co/timm/coatnet_2_rw_224.sw_in12k_ft_in1k) | sw_in12k_ft_in1k |
+| ConvFormer S18 | (224,224,3) | 81.946 | 82.866 | 8.59 | 26.77 | [Link](https://huggingface.co/timm/convformer_s18.sail_in1k) | sail_in1k |
+| ConvFormer S36 | (224,224,3) | 83.216 | 84.016 | 16.66 | 40.01 |  [Link](https://huggingface.co/timm/caformer_s36.sail_in1k) | sail_in1k |
+| ConvFormer M36 | (224,224,3) | 84.084 | 84.448 | 27.58 | 57.05 |  [Link](https://huggingface.co/timm/caformer_m36.sail_in1k) | sail_in1k |
+| ConvFormer B36 | (224,224,3) | 84.384 | 84.830 | 49.79 | 99.88 |  [Link](https://huggingface.co/timm/caformer_b36.sail_in1k) | sail_in1k |
 | ConvNeXt_Tiny | (224,224,3) | 82.352 | 82.458 | 9.11 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) | |
 | ConvNeXt_Small | (224,224,3) | 83.486 | 83.560 | 17.68 | 50.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_small.html) | |
 | ConvNeXt_Base | (224,224,3) | 83.986 | 84.048 | 31.13 | 88.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_base.html) | |
@@ -31,9 +35,10 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | DeiT3_Base_Patch16_384 | (384,384,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit3_base_patch16_384.fb_in1k) | fb_in1k |
 | DeiT3_Large_Patch16_224 | (224,224,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit3_large_patch16_224.fb_in1k) | fb_in1k |
 | DeiT3_Large_Patch16_384 | (384,384,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit3_large_patch16_384.fb_in1k) | fb_in1k |
-| DenseNet121 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) | |
-| DenseNet169 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) | |
-| DenseNet201 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) | |
+| DenseNet121 | (224,224,3) | 74.186 | 74.422 | 6.37 | 8.04 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) | |
+| DenseNet161 | (224,224,3) | 77.200 | 77.142 | 16.85 | 28.86 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet161.html) | |
+| DenseNet169 | (224,224,3) | 75.530 | 75.568 | 7.62 | 14.28 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) | |
+| DenseNet201 | (224,224,3) | 76.760 | 76.882 | 9.82 | 20.21 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) | |
 | FlexiViT_Small | (240,240,3) |  |  |  |  | [Link](https://huggingface.co/timm/flexivit_small.1200ep_in1k) | 1200ep_in1k |
 | FlexiViT_Base | (240,240,3) |  |  |  |  | [Link](https://huggingface.co/timm/flexivit_base.1200ep_in1k) | 1200ep_in1k |
 | FlexiViT_Large | (240,240,3) |  |  |  |  | [Link](https://huggingface.co/timm/flexivit_large.1200ep_in1k) | 1200ep_in1k |
@@ -116,22 +121,22 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | YOLOv5s-cls | (224,224,3) | 70.564 | 70.854 | 1.42 | 5.45 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5m-cls | (224,224,3) | 75.194 | 75.418 | 4.03 | 12.95 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv5l-cls | (224,224,3) | 77.226 | 77.528 | 8.82 | 26.54 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5x-cls | (224,224,3) |  | 78.312 | 16.46 | 48.07 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5x-cls | (224,224,3) | 78.180 | 78.312 | 16.46 | 48.07 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv8n-cls | (224,224,3) |  | 68.912 | 0.48 | 2.72 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8s-cls | (224,224,3) |  | 73.774 | 1.67 | 6.36 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8m-cls | (224,224,3) |  | 76.824 | 5.37 | 17.04 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8l-cls | (224,224,3) |  | 78.276 | 12.53 | 37.47 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8x-cls | (224,224,3) |  | 78.936 | 19.38 | 57.40 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8s-cls | (224,224,3) | 72.352 | 73.774 | 1.67 | 6.36 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8m-cls | (224,224,3) | 76.038 | 76.824 | 5.37 | 17.04 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8l-cls | (224,224,3) | 77.660 | 78.276 | 12.53 | 37.47 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8x-cls | (224,224,3) | 78.544 | 78.936 | 19.38 | 57.40 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLO11n-cls | (224,224,3) |  | 70.078 | 0.47 | 2.81 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| YOLO11s-cls | (224,224,3) |  | 75.244 | 1.63 | 6.72 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| YOLO11m-cls | (224,224,3) |  | 77.388 | 5.17 | 11.62 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| YOLO11l-cls | (224,224,3) |  | 78.284 | 6.51 | 14.10 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| YOLO11x-cls | (224,224,3) |  | 79.426 | 14.20 | 29.61 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
-| YOLO26n-cls | (224,224,3) |  | 71.304 | 0.47 | 2.81 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
-| YOLO26s-cls | (224,224,3) |  | 75.910 | 1.63 | 6.72 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
-| YOLO26m-cls | (224,224,3) |  | 78.078 | 5.17 | 11.62 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
-| YOLO26l-cls | (224,224,3) |  | 79.060 | 6.51 | 14.10 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
-| YOLO26x-cls | (224,224,3) |  | 79.866 | 14.20 | 29.61 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
+| YOLO11s-cls | (224,224,3) | 74.594 | 75.244 | 1.63 | 6.72 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11m-cls | (224,224,3) | 76.662 | 77.388 | 5.17 | 11.62 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11l-cls | (224,224,3) | 77.676 | 78.284 | 6.51 | 14.10 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO11x-cls | (224,224,3) | 78.808 | 79.426 | 14.20 | 29.61 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
+| YOLO26n-cls | (224,224,3) | 70.118 | 71.304 | 0.47 | 2.81 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
+| YOLO26s-cls | (224,224,3) | 75.138 | 75.910 | 1.63 | 6.72 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
+| YOLO26m-cls | (224,224,3) | 77.536 | 78.078 | 5.17 | 11.62 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
+| YOLO26l-cls | (224,224,3) | 78.576 | 79.060 | 6.51 | 14.10 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
+| YOLO26x-cls | (224,224,3) | 79.576 | 79.866 | 14.20 | 29.61 | [Link](https://docs.ultralytics.com/models/yolo26/) | |
 <details>
 <summary>Image Classification (ImageNet)</summary>
 
@@ -202,14 +207,15 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 
 | Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| YOLOv5l-seg | (640,640,3) |  |  |  |  | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5x-seg | (640,640,3) |  |  |  |  | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv8s-seg | (640,640,3) |  |  | |  | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8m-seg | (640,640,3) |  |  |  |  | [Link](https://docs.ultralytics.com/models/yolov8/) | |
-| YOLOv8l-seg | (640,640,3) |  |  |  |  | [Link](https://docs.ultralytics.com/models/yolov8/) |  |
-| YOLOv8x-seg | (640,640,3) |  |  |  |  | [Link](https://docs.ultralytics.com/models/yolov8/) |  |
+| YOLOv5l-seg | (640,640,3) | 39.370 | 39.942 | 153.53 | 47.89 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5x-seg | (640,640,3) | 40.977 | 41.318 | 273.99 | 88.77 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv8s-seg | (640,640,3) | 36.190 | 36.691 | 44.86 | 11.81 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8m-seg | (640,640,3) | 40.249 | 40.596 | 114.06 | 27.27 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
+| YOLOv8l-seg | (640,640,3) | 42.187 | 42.462 | 226.27 | 45.97 | [Link](https://docs.ultralytics.com/models/yolov8/) |  |
+| YOLOv8x-seg | (640,640,3) | 42.998 | 43.155 | 351.31 | 71.80 | [Link](https://docs.ultralytics.com/models/yolov8/) |  |
 | GELANc-seg | (640,640,3) | 41.894 | 42.204 | 150.93 | 27.47 | [Link](https://docs.ultralytics.com/models/yolov9/) | |
-| YOLOv9c-seg | (640,640,3) |  |  |  |  | [Link](https://docs.ultralytics.com/models/yolov9/) | |
+| YOLOv9c-seg | (640,640,3) | 42.246 | 42.655 | 152.44 | 27.45 | [Link](https://github.com/WongKinYiu/yolov9/) | |
+| YOLOv9e-seg | (640,640,3) | 44.123 | 44.394 | 256.38 | 59.74 | [Link](https://github.com/WongKinYiu/yolov9/) | |
 | YOLO11s-seg | (640,640,3) | 37.224 | 37.726 | 38.18 | 10.14 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | YOLO11m-seg | (640,640,3) | 41.219 | 41.683 | 128.82 | 22.44 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
 | YOLO11l-seg | (640,640,3) | 42.637 | 42.974 | 149.22 | 27.69 | [Link](https://docs.ultralytics.com/models/yolo11/) | |
