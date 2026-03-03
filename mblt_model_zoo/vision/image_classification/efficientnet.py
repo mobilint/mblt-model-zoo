@@ -289,7 +289,7 @@ class EfficientNet_B1(MBLT_Engine):
         """
         model_cfg, pre_cfg, post_cfg = self._get_configs(
             EfficientNet_B1_Set,
-            local_path=local,
+            local_path=local_path,
             model_type=model_type,
             infer_mode=infer_mode,
             product=product,
