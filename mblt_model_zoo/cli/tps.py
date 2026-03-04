@@ -598,19 +598,13 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     _print_summary("ttft", ttft_ms, "ms")
     _print_summary("decode_duration", decode_ms, "ms")
     _print_summary("total", total_ms, "ms")
-    if avg_power_w:
+    if args.power:
         _print_summary("avg_power", avg_power_w, "W")
-    if p99_power_w:
         _print_summary("p99_power", p99_power_w, "W")
-    if total_energy_j:
         _print_summary("total_energy", total_energy_j, "J")
-    if prefill_tok_per_j:
         _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
-    if decode_tok_per_j:
         _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
-    if prefill_j_per_tok:
         _print_summary("prefill_j_per_tok", prefill_j_per_tok, "J/tok")
-    if decode_j_per_tok:
         _print_summary("decode_j_per_tok", decode_j_per_tok, "J/tok")
     _print_summary_footer()
 
@@ -727,19 +721,13 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
     if decode_last:
         _print_summary("decode_tps(last_point)", decode_last, "tok/s")
-    if run_avg_power:
+    if args.power:
         _print_summary("avg_power", run_avg_power, "W")
-    if run_p99_power:
         _print_summary("p99_power", run_p99_power, "W")
-    if run_total_energy:
         _print_summary("total_energy", run_total_energy, "J")
-    if prefill_last_tpj:
         _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
-    if decode_last_tpj:
         _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
-    if prefill_last_jpt:
         _print_summary("prefill_j_per_tok(last)", prefill_last_jpt, "J/tok")
-    if decode_last_jpt:
         _print_summary("decode_j_per_tok(last)", decode_last_jpt, "J/tok")
     _print_summary_footer()
 
