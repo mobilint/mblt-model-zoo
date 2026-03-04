@@ -163,6 +163,18 @@ def _build_pipeline(
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
+    def _raise_cuda_nvml_hint(exc: Exception) -> None:
+        msg = str(exc)
+        if "nvmlInit_v2" in msg or "Can't initialize NVML" in msg:
+            raise SystemExit(
+                "CUDA/NVML initialization failed while creating the pipeline.\n"
+                "This happens before power tracking starts and is a host GPU driver/runtime issue.\n"
+                "Check: `nvidia-smi`, `python -c \"import torch; print(torch.cuda.is_available())\"`.\n"
+                "If running in container, verify NVIDIA runtime and libnvidia-ml visibility.\n"
+                "Temporary workaround for this run: set `PYTORCH_NO_CUDA_MEMORY_CACHING=1` and retry."
+            ) from exc
+        raise exc
+
     if dtype:
         try:
             pipeline_kwargs["dtype"] = dtype
@@ -170,9 +182,17 @@ def _build_pipeline(
         except TypeError:
             pipeline_kwargs.pop("dtype", None)
             pipeline_kwargs["torch_dtype"] = dtype
-            return hf_pipeline(**pipeline_kwargs)
+            try:
+                return hf_pipeline(**pipeline_kwargs)
+            except Exception as e:
+                _raise_cuda_nvml_hint(e)
+        except Exception as e:
+            _raise_cuda_nvml_hint(e)
 
-    return hf_pipeline(**pipeline_kwargs)
+    try:
+        return hf_pipeline(**pipeline_kwargs)
+    except Exception as e:
+        _raise_cuda_nvml_hint(e)
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
