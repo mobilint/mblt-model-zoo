@@ -27,6 +27,8 @@ dependencies = [
     "scipy",
     "tqdm",
     "wheel",
+    "pynvml>=13.0.1",
+    "apscheduler>=3.11.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
