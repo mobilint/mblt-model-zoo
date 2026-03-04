@@ -68,7 +68,8 @@ class NPUPowerTracker(BasePowerTracker):
         ts = time.time()
         self._npu_power_glance.append(npu_power_w)
         self._total_power_glance.append(total_power_w)
-        self._power_trace.append((ts, npu_power_w))
+        # Use total board/system power as the primary trace for efficiency metrics.
+        self._power_trace.append((ts, total_power_w))
 
     def start(self):
         self.reset()
@@ -115,8 +116,9 @@ class NPUPowerTracker(BasePowerTracker):
             else None
         )
         return {
-            "avg_power_w": npu_avg,
-            "p99_power_w": npu_p99,
+            # Primary metrics now follow total power for fair board-level comparison.
+            "avg_power_w": total_avg,
+            "p99_power_w": total_p99,
             "avg_npu_power_w": npu_avg,
             "p99_npu_power_w": npu_p99,
             "avg_total_power_w": total_avg,
