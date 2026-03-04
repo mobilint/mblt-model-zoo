@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
+from tqdm.auto import tqdm
 from transformers import HfArgumentParser
 
 
@@ -546,14 +547,14 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in range(args.warmup):
+    for _ in tqdm(range(args.warmup), desc="warmup", leave=False):
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
             trace_path=None,
         )
     runs = []
-    for i in range(args.repeat):
+    for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
         run_start_t = time.time()
         if tracker is not None:
             tracker.start()
@@ -661,7 +662,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in range(args.warmup):
+    for _ in tqdm(range(args.warmup), desc="warmup", leave=False):
         measurer.measure(
             num_prefill=args.fixed_prefill,
             num_decode=args.fixed_decode,
@@ -671,7 +672,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     run_avg_power: list[float] = []
     run_p99_power: list[float] = []
     run_total_energy: list[float] = []
-    for i in range(args.repeat):
+    for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         run_start_t = time.time()
         if tracker is not None:
             tracker.start()
@@ -683,6 +684,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
                     trace_path=args.trace if i == 0 else None,
+                    show_progress=True,
                 )
             )
         finally:
@@ -798,8 +800,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
 
     resolution_payloads = []
     csv_rows: list[dict[str, Any]] = []
-    for resolution in args.image_resolutions:
-        for _ in range(args.warmup):
+    for resolution in tqdm(args.image_resolutions, desc="vision resolutions"):
+        for _ in tqdm(range(args.warmup), desc=f"warmup@{resolution}", leave=False):
             measurer.measure_vision(
                 image_resolution=resolution,
                 repeat=1,
@@ -812,7 +814,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         vision_energy_j = []
         vision_img_per_j = []
         vision_j_per_img = []
-        for _ in range(args.repeat):
+        for _ in tqdm(range(args.repeat), desc=f"vision@{resolution}", leave=False):
             if tracker is not None:
                 tracker.start()
             try:
@@ -820,7 +822,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     image_resolution=resolution,
                     repeat=1,
                     prompt=args.prompt,
-                    show_progress=True,
+                    show_progress=False,
                 )[0]
             finally:
                 if tracker is not None:
@@ -914,7 +916,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         if args.llm_resolution is not None
         else args.image_resolutions[0]
     )
-    for _ in range(args.warmup):
+    for _ in tqdm(range(args.warmup), desc=f"llm warmup@{llm_resolution}", leave=False):
         measurer.measure_llm(
             image_resolution=llm_resolution,
             num_decode=args.decode,
@@ -923,7 +925,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             show_progress=False,
         )
     llm_runs = []
-    for _ in range(args.repeat):
+    for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
         run_start_t = time.time()
         if tracker is not None:
             tracker.start()
@@ -933,7 +935,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 num_decode=args.decode,
                 repeat=1,
                 prompt=args.prompt,
-                show_progress=True,
+                show_progress=False,
             )[0]
         finally:
             if tracker is not None:

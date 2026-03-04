@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import torch
 from transformers import TextIteratorStreamer
+from tqdm.auto import tqdm
 
 
 class TokenIteratorStreamer(TextIteratorStreamer):
@@ -400,23 +401,26 @@ class TPSMeasurer:
         finally:
             self._stop_trace(trace_handle)
 
-    def measure_full(self, 
-                     prefill_range: Tuple[int, int, int] = (128, 2048, 128), 
-                     decode_range: Tuple[int, int, int] = (128, 1024, 128),
-                     fixed_decode_len=10, 
-                     fixed_prefill_len=128,
-                     trace_path: Union[str, None] = None) -> BenchmarkResult:
+    def measure_full(
+        self,
+        prefill_range: Tuple[int, int, int] = (128, 2048, 128),
+        decode_range: Tuple[int, int, int] = (128, 1024, 128),
+        fixed_decode_len=10,
+        fixed_prefill_len=128,
+        trace_path: Union[str, None] = None,
+        show_progress: bool = False,
+    ) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
 
-            print(f"🚀 Starting Full Measurement...")
-
             # 1. Prefill Sweep
             p_start, p_end, p_step = prefill_range
-            print(f"--- [1/2] Prefill Sweep ({p_start} ~ {p_end}) ---")
-            
-            for p_len in range(p_start, p_end + 1, p_step):
+            prefill_iter = range(p_start, p_end + 1, p_step)
+            if show_progress:
+                prefill_iter = tqdm(prefill_iter, desc="prefill sweep", leave=False)
+
+            for p_len in prefill_iter:
                 res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
                 
                 full_result.prefill_sweep.x_values.append(p_len)
@@ -425,24 +429,8 @@ class TPSMeasurer:
                 full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
                 full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
                 
-                if (
-                    res.avg_npu_prefill_token_latency is not None
-                    and res.avg_total_prefill_token_latency > 0
-                ):
-                    npu_ratio = res.avg_npu_prefill_token_latency / res.avg_total_prefill_token_latency
-                    npu_cell = f"{res.avg_npu_prefill_token_latency * 1000.0:.3f}ms ({npu_ratio * 100:.1f}%)"
-                else:
-                    npu_cell = "n/a"
-                print(
-                    f"In: {p_len} | TPS: {res.prefill_tps:.1f} | "
-                    f"Latency: {res.prefill_latency * 1000.0:.2f}ms | "
-                    f"AvgTotal: {res.avg_total_prefill_token_latency * 1000.0:.3f}ms | "
-                    f"AvgNPU: {npu_cell}"
-                )
-
             # 2. Decode Sweep
             d_start, d_end, d_step = decode_range
-            print(f"--- [2/2] Decode Sweep ({d_start} ~ {d_end}) ---")
             input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
             input_ids = input_ids.to(self.device)
 
@@ -460,6 +448,11 @@ class TPSMeasurer:
                 gen_kwargs["count_npu_time"] = True
 
             targets = set(range(d_start, d_end + 1, d_step))
+            pbar_decode = (
+                tqdm(total=len(targets), desc="decode sweep", leave=False)
+                if show_progress
+                else None
+            )
 
             npu_decode_time = 0.0
             npu_decode_tokens = 0
@@ -498,19 +491,12 @@ class TPSMeasurer:
                     full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
                     full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
 
-                    if avg_npu_token_latency is not None and avg_total_token_latency > 0:
-                        npu_ratio = avg_npu_token_latency / avg_total_token_latency
-                        npu_cell = f"{avg_npu_token_latency * 1000.0:.3f}ms ({npu_ratio * 100:.1f}%)"
-                    else:
-                        npu_cell = "n/a"
-                    print(
-                        f"Out: {decoded_tokens} | TPS: {decode_tps:.1f} | "
-                        f"Time: {decode_duration * 1000.0:.2f}ms | "
-                        f"AvgTotal: {avg_total_token_latency * 1000.0:.3f}ms | "
-                        f"AvgNPU: {npu_cell}"
-                    )
+                    if pbar_decode is not None:
+                        pbar_decode.update(1)
 
             thread.join()
+            if pbar_decode is not None:
+                pbar_decode.close()
 
             assert first_token_time is not None
 
