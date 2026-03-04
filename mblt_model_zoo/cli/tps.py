@@ -606,7 +606,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     if prefill_tok_per_j:
         _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
     if decode_tok_per_j:
-        _print_summary("decode_tok_per_j(DFI)", decode_tok_per_j, "tok/J")
+        _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
     if prefill_j_per_tok:
         _print_summary("prefill_j_per_tok", prefill_j_per_tok, "J/tok")
     if decode_j_per_tok:
@@ -734,7 +734,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     if prefill_last_tpj:
         _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
     if decode_last_tpj:
-        _print_summary("decode_tok_per_j(last,DFI)", decode_last_tpj, "tok/J")
+        _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
     if prefill_last_jpt:
         _print_summary("prefill_j_per_tok(last)", prefill_last_jpt, "J/tok")
     if decode_last_jpt:
@@ -978,7 +978,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     if llm_prefill_tok_per_j:
         _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
     if llm_decode_tok_per_j:
-        _print_summary("llm_decode_tok_per_j(DFI)", llm_decode_tok_per_j, "tok/J")
+        _print_summary("llm_decode_tok_per_j", llm_decode_tok_per_j, "tok/J")
     if llm_prefill_j_per_tok:
         _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
     if llm_decode_j_per_tok:
