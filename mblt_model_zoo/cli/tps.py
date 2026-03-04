@@ -305,13 +305,39 @@ def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
     if not args.power:
         return None
 
+    def _has_npu_backend(obj: Any, depth: int = 0, seen: Optional[set[int]] = None) -> bool:
+        if obj is None:
+            return False
+        if seen is None:
+            seen = set()
+        oid = id(obj)
+        if oid in seen:
+            return False
+        seen.add(oid)
+        if hasattr(obj, "npu_backend"):
+            return True
+        if depth >= 2:
+            return False
+        for name in (
+            "model",
+            "language_model",
+            "vision_model",
+            "text_model",
+            "encoder",
+            "decoder",
+        ):
+            child = getattr(obj, name, None)
+            if child is not None and _has_npu_backend(child, depth + 1, seen):
+                return True
+        return False
+
     is_mobilint_model = False
     try:
         from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
-        is_mobilint_model = isinstance(pipeline.model, MobilintModelMixin)
+        is_mobilint_model = isinstance(pipeline.model, MobilintModelMixin) or _has_npu_backend(pipeline.model)
     except Exception:
-        is_mobilint_model = False
+        is_mobilint_model = _has_npu_backend(getattr(pipeline, "model", None))
 
     backend = args.power_device
     if backend == "auto":
@@ -357,6 +383,16 @@ def _avg_power_in_window(
     if vals:
         return float(sum(vals) / len(vals))
     return default_power
+
+
+def _print_power_status(args: argparse.Namespace, tracker: Any) -> None:
+    if not args.power:
+        print("[power] disabled by --no-power")
+        return
+    if tracker is None:
+        print("[power] enabled but no compatible tracker initialized (auto detection fallback)")
+        return
+    print(f"[power] enabled with {tracker.__class__.__name__} (interval={args.power_interval}s)")
 
 
 def _safe_div(a: float, b: float) -> Optional[float]:
@@ -489,6 +525,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
+    _print_power_status(args, tracker)
     for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.prefill,
@@ -603,6 +640,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
 
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
+    _print_power_status(args, tracker)
     for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.fixed_prefill,
@@ -736,6 +774,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
+    _print_power_status(args, tracker)
 
     resolution_payloads = []
     csv_rows: list[dict[str, Any]] = []

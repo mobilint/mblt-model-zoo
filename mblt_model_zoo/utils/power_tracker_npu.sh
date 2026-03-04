@@ -50,8 +50,15 @@ if [[ -z "$status_output" ]]; then
     exit 1
 fi
 
+# Remove ANSI escape sequences if CLI outputs colored table text.
+status_output="$(printf '%s' "$status_output" | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g')"
+
 # Expected power line shape: |   X.XXW  Y.YYW |
-power_line="$(echo "$status_output" | grep -oP '\|\s+[0-9]+(?:\.[0-9]+)?W\s+[0-9]+(?:\.[0-9]+)?W\s+\|' | head -n 1)"
+power_line="$(
+    echo "$status_output" \
+    | grep -E '\|\s*[0-9]+(\.[0-9]+)?W\s+[0-9]+(\.[0-9]+)?W\s+\|' \
+    | head -n 1
+)"
 if [[ -z "$power_line" ]]; then
     if [[ "$JSON_MODE" == "true" ]]; then
         printf '{"ok":false,"error":"power line not found","timestamp":%s}\n' "$(date +%s)"
@@ -61,8 +68,14 @@ if [[ -z "$power_line" ]]; then
     exit 1
 fi
 
-npu_power_w="$(echo "$power_line" | grep -oP '\|\s+\K[0-9]+(?:\.[0-9]+)?(?=W)' | head -n 1)"
-total_power_w="$(echo "$power_line" | grep -oP '[0-9]+(?:\.[0-9]+)?(?=W\s+\|)' | head -n 1)"
+npu_power_w="$(
+    echo "$power_line" \
+    | sed -E 's/^.*\|\s*([0-9]+(\.[0-9]+)?)W\s+([0-9]+(\.[0-9]+)?)W\s+\|.*$/\1/'
+)"
+total_power_w="$(
+    echo "$power_line" \
+    | sed -E 's/^.*\|\s*([0-9]+(\.[0-9]+)?)W\s+([0-9]+(\.[0-9]+)?)W\s+\|.*$/\3/'
+)"
 timestamp="$(date +%s)"
 
 if [[ -z "$npu_power_w" || -z "$total_power_w" ]]; then
