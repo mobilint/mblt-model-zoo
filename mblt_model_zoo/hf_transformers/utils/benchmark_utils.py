@@ -285,6 +285,9 @@ class TPSMeasurer:
         
         plt.switch_backend('Agg') 
 
+    def _supports_npu_timing(self) -> bool:
+        return hasattr(self.model, "npu_backend")
+
     @staticmethod
     def _start_trace(trace_path: Union[str, None]):
         if not trace_path:
@@ -327,8 +330,9 @@ class TPSMeasurer:
                 do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
-                count_npu_time=True,
             )
+            if self._supports_npu_timing():
+                gen_kwargs["count_npu_time"] = True
 
             # 3. Execution
             thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
@@ -451,8 +455,9 @@ class TPSMeasurer:
                 do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
-                count_npu_time=True,
             )
+            if self._supports_npu_timing():
+                gen_kwargs["count_npu_time"] = True
 
             targets = set(range(d_start, d_end + 1, d_step))
 
@@ -631,6 +636,10 @@ class VLMTPSMeasurer:
             raise ValueError("VLM benchmark requires a pipeline with processor.")
         self.model.eval()
 
+    @staticmethod
+    def _supports_npu_timing(model) -> bool:
+        return hasattr(model, "npu_backend")
+
     def _build_inputs(self, image_resolution: int, prompt: str):
         image = torch.randint(
             low=0,
@@ -789,8 +798,9 @@ class VLMTPSMeasurer:
             do_sample=False,
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
-            count_npu_time=True,
         )
+        if self._supports_npu_timing(lm_for_npu) or self._supports_npu_timing(gen_model):
+            gen_kwargs["count_npu_time"] = True
 
         thread_error: list[Exception] = []
 
