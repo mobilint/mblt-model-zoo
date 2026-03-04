@@ -8,6 +8,7 @@ from typing import Dict, Optional
 
 import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.base import STATE_RUNNING
 
 from .power_tracker import BasePowerTracker
 
@@ -25,7 +26,8 @@ class NPUPowerTracker(BasePowerTracker):
             if status_cmd is not None
             else f"bash {script_path} --sample-once --json"
         )
-        self._scheduler = BackgroundScheduler()
+        self._scheduler: Optional[BackgroundScheduler] = None
+        self._job_id = "npu_power_track"
         self._npu_power_glance = []
         self._total_power_glance = []
         self._power_trace = []
@@ -70,14 +72,26 @@ class NPUPowerTracker(BasePowerTracker):
 
     def start(self):
         self.reset()
+        if self._scheduler is None or self._scheduler.state != STATE_RUNNING:
+            self._scheduler = BackgroundScheduler()
+            self._scheduler.start()
+
+        if self._scheduler.get_job(self._job_id) is not None:
+            self._scheduler.remove_job(self._job_id)
+
         self._scheduler.add_job(
-            self._func_for_sched, "interval", seconds=self._interval
+            self._func_for_sched,
+            "interval",
+            seconds=self._interval,
+            id=self._job_id,
         )
-        self._scheduler.start()
 
     def stop(self):
-        if self._scheduler.running:
-            self._scheduler.shutdown()
+        if self._scheduler is not None:
+            try:
+                self._scheduler.shutdown(wait=True)
+            finally:
+                self._scheduler = None
 
     def get_power_metric(self) -> Dict[str, Optional[float]]:
         npu_avg = (

@@ -4,6 +4,7 @@ from typing import List, Union
 import numpy as np
 import pynvml
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.base import STATE_RUNNING
 
 from .power_tracker import BasePowerTracker
 
@@ -45,7 +46,8 @@ class GPUPowerTracker(BasePowerTracker):
                 assert i < self.num_gpus, f"Invalid GPU ID: {i}"
 
         self._gpu_id = gpu_id
-        self._scheduler = BackgroundScheduler()
+        self._scheduler = None
+        self._job_id = "gpu_power_track"
         self._power_glance = {
             gpu: [] for gpu in self._gpu_id
         }  # Store power consumption per GPU
@@ -85,15 +87,22 @@ class GPUPowerTracker(BasePowerTracker):
     def start(self):
         """Start tracking GPU power consumption"""
         self.reset()
+        if self._scheduler is None or self._scheduler.state != STATE_RUNNING:
+            self._scheduler = BackgroundScheduler()
+            self._scheduler.start()
+        if self._scheduler.get_job(self._job_id) is not None:
+            self._scheduler.remove_job(self._job_id)
         self._scheduler.add_job(
-            self._func_for_sched, "interval", seconds=self._interval
+            self._func_for_sched, "interval", seconds=self._interval, id=self._job_id
         )
-        self._scheduler.start()
 
     def stop(self):
         """Stop tracking GPU power consumption"""
-        if self._scheduler.running:
-            self._scheduler.shutdown()
+        if self._scheduler is not None:
+            try:
+                self._scheduler.shutdown(wait=True)
+            finally:
+                self._scheduler = None
 
     def get_power_metric(self):
         """Get the average power consumption in watts over the tracked period"""
