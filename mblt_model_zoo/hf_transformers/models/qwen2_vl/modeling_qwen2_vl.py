@@ -176,6 +176,15 @@ class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2
     
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
+
+    def forward(
+        self,
+        *args,
+        count_npu_time: bool = False,
+        **kwargs,
+    ):
+        kwargs["count_npu_time"] = count_npu_time
+        return super().forward(*args, **kwargs)
         
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)

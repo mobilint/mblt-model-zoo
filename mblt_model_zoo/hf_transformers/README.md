@@ -302,31 +302,42 @@ mblt-model-zoo chat mobilint/Llama-3.2-1B-Instruct --trust-remote-code
 
 Supporting [Keyword Parameters](#keyword-parameters) is still in development.
 
-## TPS Benchmark CLI (Sweep)
+## TPS Benchmark CLI
 
-If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run a simple TPS measure/sweep from the command line:
+If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run TPS benchmarks from the CLI.
+
+### Text-generation TPS
 
 ```bash
-# single measurement
-mblt-model-zoo tps measure --model mobilint/Llama-3.2-1B-Instruct --prefill 512 --decode 128
+# repeated single measurement (prints mean/p50/p95/p99/min/max)
+mblt-model-zoo tps measure --model mobilint/Llama-3.2-1B-Instruct \
+  --prefill 512 --decode 128 --repeat 10
 
-# sweep (writes JSON/CSV and a PNG plot by default)
+# repeated sweep (writes aggregate curve + per-run payload)
 mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
   --prefill-range 128:512:128 --decode-range 128:512:128 \
-  --json tps.json --csv tps.csv --plot tps.png
+  --repeat 5 --json tps.json --csv tps.csv --plot tps.png
 ```
 
-Example output includes average token latency (total/NPU) and NPU share (% of total):
+### VLM synthetic sweep
 
-```text
-prefill: 512 tokens | 933.23 tok/s | TTFT 548.63ms
-decode:  128 tokens | 25.32 tok/s | duration 5055.16ms
-total:   5603.79ms
-prefill avg token latency: total=1.072ms npu=1.067ms (99.5%)
-decode  avg token latency: total=39.493ms npu=38.016ms (96.3%)
+`vlm-sweep` measures:
+- Vision encode latency (`vision_encode_ms`) and FPS (`vision_fps`) per image resolution
+- LLM-phase prefill/decode TPS separately, using one reference resolution (`--llm-resolution`)
+
+```bash
+mblt-model-zoo tps vlm-sweep --model mobilint/Qwen2-VL-2B-Instruct \
+  --image-resolutions 224,384,512,768 \
+  --llm-resolution 224 \
+  --decode 128 --repeat 10 \
+  --json vlm_tps.json --csv vlm_tps.csv
 ```
 
-For TPS Benchmark, you can use any keyword parameters explained in [Keyword Parameters](#keyword-parameters) section.
+Note:
+- `vlm-sweep` uses synthetic random image inputs.
+- Some models/backends may enforce a fixed effective input size at runtime.
+
+For TPS benchmark commands, you can use keyword parameters explained in [Keyword Parameters](#keyword-parameters).
 
 ## Model List
 
