@@ -5,8 +5,9 @@ import csv
 import json
 import os
 import sys
+import time
 from dataclasses import asdict
-from typing import Any, Iterable, Sequence, Tuple, Union
+from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 from transformers import HfArgumentParser
 
@@ -64,6 +65,20 @@ def _parse_positive_int(spec: str) -> int:
     if value <= 0:
         raise argparse.ArgumentTypeError("must be > 0")
     return value
+
+
+def _parse_int_list_optional(spec: Union[str, None]) -> Union[list[int], None]:
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    values = [int(x.strip()) for x in text.split(",") if x.strip()]
+    if not values:
+        return None
+    if any(v < 0 for v in values):
+        raise argparse.ArgumentTypeError("power-gpu-id values must be >= 0")
+    return values
 
 
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
@@ -273,6 +288,147 @@ def _print_summary_footer() -> None:
     )
 
 
+def _infer_gpu_ids(device: str, power_gpu_id: Optional[list[int]]) -> Optional[Union[int, list[int]]]:
+    if power_gpu_id is not None:
+        return power_gpu_id[0] if len(power_gpu_id) == 1 else power_gpu_id
+    text = (device or "").strip().lower()
+    if text.startswith("cuda:"):
+        try:
+            gpu_id = int(text.split(":", 1)[1])
+            return gpu_id
+        except ValueError:
+            return None
+    return None
+
+
+def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
+    if not args.power:
+        return None
+
+    is_mobilint_model = False
+    try:
+        from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
+
+        is_mobilint_model = isinstance(pipeline.model, MobilintModelMixin)
+    except Exception:
+        is_mobilint_model = False
+
+    backend = args.power_device
+    if backend == "auto":
+        if is_mobilint_model:
+            backend = "npu"
+        else:
+            device_text = (args.device or "").strip().lower()
+            backend = "gpu" if device_text.startswith("cuda") else "none"
+
+    if backend == "none":
+        return None
+
+    if backend == "npu":
+        from mblt_model_zoo.utils.power_tracker_npu import NPUPowerTracker
+        try:
+            return NPUPowerTracker(interval=args.power_interval)
+        except Exception as e:
+            print(f"[power] failed to initialize NPU tracker: {e}", file=sys.stderr)
+            return None
+
+    if backend == "gpu":
+        from mblt_model_zoo.utils.power_tracker_gpu import GPUPowerTracker
+
+        gpu_id = _infer_gpu_ids(args.device, args.power_gpu_id)
+        try:
+            return GPUPowerTracker(interval=args.power_interval, gpu_id=gpu_id)
+        except Exception as e:
+            print(f"[power] failed to initialize GPU tracker: {e}", file=sys.stderr)
+            return None
+
+    return None
+
+
+def _avg_power_in_window(
+    trace: Sequence[tuple[float, float]],
+    start_t: float,
+    end_t: float,
+    default_power: Optional[float],
+) -> Optional[float]:
+    if end_t <= start_t:
+        return default_power
+    vals = [p for ts, p in trace if start_t <= ts <= end_t]
+    if vals:
+        return float(sum(vals) / len(vals))
+    return default_power
+
+
+def _safe_div(a: float, b: float) -> Optional[float]:
+    if b == 0:
+        return None
+    return a / b
+
+
+def _enrich_single_run_power(
+    run: Any,
+    power_metric: dict[str, Any],
+    power_trace: Sequence[tuple[float, float]],
+    run_start_t: float,
+) -> None:
+    avg_power = power_metric.get("avg_power_w")
+    p99_power = power_metric.get("p99_power_w")
+    if avg_power is None:
+        return
+
+    prefill_start = run_start_t
+    prefill_end = run_start_t + run.prefill_latency
+    decode_start = prefill_end
+    decode_end = decode_start + run.decode_duration
+
+    prefill_avg_power = _avg_power_in_window(power_trace, prefill_start, prefill_end, avg_power)
+    decode_avg_power = _avg_power_in_window(power_trace, decode_start, decode_end, avg_power)
+
+    prefill_energy = (
+        prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
+    )
+    decode_energy = (
+        decode_avg_power * run.decode_duration if decode_avg_power is not None else None
+    )
+    total_energy = None
+    if prefill_energy is not None and decode_energy is not None:
+        total_energy = prefill_energy + decode_energy
+
+    total_tokens = run.num_prefill + run.num_decode
+
+    run.avg_power_w = float(avg_power)
+    run.p99_power_w = float(p99_power) if p99_power is not None else None
+    run.total_energy_j = total_energy
+    run.prefill_tokens_per_j = (
+        _safe_div(float(run.num_prefill), prefill_energy)
+        if prefill_energy is not None
+        else None
+    )
+    run.prefill_j_per_token = (
+        _safe_div(prefill_energy, float(run.num_prefill))
+        if prefill_energy is not None and run.num_prefill > 0
+        else None
+    )
+    run.decode_tokens_per_j = (
+        _safe_div(float(run.num_decode), decode_energy)
+        if decode_energy is not None
+        else None
+    )
+    run.decode_j_per_token = (
+        _safe_div(decode_energy, float(run.num_decode))
+        if decode_energy is not None and run.num_decode > 0
+        else None
+    )
+    run.total_tokens_per_j = (
+        _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
+    )
+    run.total_j_per_token = (
+        _safe_div(total_energy, float(total_tokens))
+        if total_energy is not None and total_tokens > 0
+        else None
+    )
+
+
 def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
     if len(results) == 1:
         return results[0]
@@ -332,26 +488,48 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
+    tracker = _build_power_tracker(args, pipeline)
     for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
             trace_path=None,
         )
-    runs = [
-        measurer.measure(
-            num_prefill=args.prefill,
-            num_decode=args.decode,
-            trace_path=args.trace if i == 0 else None,
-        )
-        for i in range(args.repeat)
-    ]
+    runs = []
+    for i in range(args.repeat):
+        run_start_t = time.time()
+        if tracker is not None:
+            tracker.start()
+        try:
+            run = measurer.measure(
+                num_prefill=args.prefill,
+                num_decode=args.decode,
+                trace_path=args.trace if i == 0 else None,
+            )
+        finally:
+            if tracker is not None:
+                tracker.stop()
+        if tracker is not None:
+            _enrich_single_run_power(
+                run=run,
+                power_metric=tracker.get_power_metric(),
+                power_trace=tracker.get_power_trace(),
+                run_start_t=run_start_t,
+            )
+        runs.append(run)
 
     prefill_tps = [r.prefill_tps for r in runs]
     decode_tps = [r.decode_tps for r in runs]
     ttft_ms = [r.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.decode_duration * 1000.0 for r in runs]
     total_ms = [r.total_time * 1000.0 for r in runs]
+    avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
+    p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
+    total_energy_j = [r.total_energy_j for r in runs if r.total_energy_j is not None]
+    prefill_tok_per_j = [r.prefill_tokens_per_j for r in runs if r.prefill_tokens_per_j is not None]
+    decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
+    prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
+    decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -362,6 +540,20 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     _print_summary("ttft", ttft_ms, "ms")
     _print_summary("decode_duration", decode_ms, "ms")
     _print_summary("total", total_ms, "ms")
+    if avg_power_w:
+        _print_summary("avg_power", avg_power_w, "W")
+    if p99_power_w:
+        _print_summary("p99_power", p99_power_w, "W")
+    if total_energy_j:
+        _print_summary("total_energy", total_energy_j, "J")
+    if prefill_tok_per_j:
+        _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
+    if decode_tok_per_j:
+        _print_summary("decode_tok_per_j(DFI)", decode_tok_per_j, "tok/J")
+    if prefill_j_per_tok:
+        _print_summary("prefill_j_per_tok", prefill_j_per_tok, "J/tok")
+    if decode_j_per_tok:
+        _print_summary("decode_j_per_tok", decode_j_per_tok, "J/tok")
     _print_summary_footer()
 
     if args.json:
@@ -374,6 +566,13 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "ttft_ms": _summary(ttft_ms),
                 "decode_duration_ms": _summary(decode_ms),
                 "total_ms": _summary(total_ms),
+                "avg_power_w": _summary(avg_power_w),
+                "p99_power_w": _summary(p99_power_w),
+                "total_energy_j": _summary(total_energy_j),
+                "prefill_tok_per_j": _summary(prefill_tok_per_j),
+                "decode_tok_per_j_dfi": _summary(decode_tok_per_j),
+                "prefill_j_per_tok": _summary(prefill_j_per_tok),
+                "decode_j_per_tok": _summary(decode_j_per_tok),
             },
         }
         _write_json(args.json, payload)
@@ -403,6 +602,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
+    tracker = _build_power_tracker(args, pipeline)
     for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.fixed_prefill,
@@ -410,21 +610,56 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             trace_path=None,
         )
     runs = []
+    run_avg_power: list[float] = []
+    run_p99_power: list[float] = []
+    run_total_energy: list[float] = []
     for i in range(args.repeat):
-        runs.append(
-            measurer.measure_full(
-                prefill_range=args.prefill_range,
-                decode_range=args.decode_range,
-                fixed_decode_len=args.fixed_decode,
-                fixed_prefill_len=args.fixed_prefill,
-                trace_path=args.trace if i == 0 else None,
+        run_start_t = time.time()
+        if tracker is not None:
+            tracker.start()
+        try:
+            runs.append(
+                measurer.measure_full(
+                    prefill_range=args.prefill_range,
+                    decode_range=args.decode_range,
+                    fixed_decode_len=args.fixed_decode,
+                    fixed_prefill_len=args.fixed_prefill,
+                    trace_path=args.trace if i == 0 else None,
+                )
             )
-        )
+        finally:
+            if tracker is not None:
+                tracker.stop()
+        if tracker is not None:
+            metric = tracker.get_power_metric()
+            avg_power = metric.get("avg_power_w")
+            p99_power = metric.get("p99_power_w")
+            if avg_power is not None:
+                run_avg_power.append(float(avg_power))
+            if p99_power is not None:
+                run_p99_power.append(float(p99_power))
+            elapsed = time.time() - run_start_t
+            if avg_power is not None:
+                run_total_energy.append(float(avg_power) * elapsed)
 
     result = _aggregate_sweep_results(runs)
 
     prefill_last = [r.prefill_sweep.tps_values[-1] for r in runs if r.prefill_sweep.tps_values]
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]
+    prefill_last_tpj: list[float] = []
+    decode_last_tpj: list[float] = []
+    prefill_last_jpt: list[float] = []
+    decode_last_jpt: list[float] = []
+    for i, p_tps in enumerate(prefill_last):
+        if i < len(run_avg_power) and run_avg_power[i] > 0:
+            tpj = p_tps / run_avg_power[i]
+            prefill_last_tpj.append(tpj)
+            prefill_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
+    for i, d_tps in enumerate(decode_last):
+        if i < len(run_avg_power) and run_avg_power[i] > 0:
+            tpj = d_tps / run_avg_power[i]
+            decode_last_tpj.append(tpj)
+            decode_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     _print_summary_header()
@@ -432,6 +667,20 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
     if decode_last:
         _print_summary("decode_tps(last_point)", decode_last, "tok/s")
+    if run_avg_power:
+        _print_summary("avg_power", run_avg_power, "W")
+    if run_p99_power:
+        _print_summary("p99_power", run_p99_power, "W")
+    if run_total_energy:
+        _print_summary("total_energy", run_total_energy, "J")
+    if prefill_last_tpj:
+        _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
+    if decode_last_tpj:
+        _print_summary("decode_tok_per_j(last,DFI)", decode_last_tpj, "tok/J")
+    if prefill_last_jpt:
+        _print_summary("prefill_j_per_tok(last)", prefill_last_jpt, "J/tok")
+    if decode_last_jpt:
+        _print_summary("decode_j_per_tok(last)", decode_last_jpt, "J/tok")
     _print_summary_footer()
 
     if args.json:
@@ -442,6 +691,13 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             "summary": {
                 "prefill_tps_last": _summary(prefill_last),
                 "decode_tps_last": _summary(decode_last),
+                "avg_power_w": _summary(run_avg_power),
+                "p99_power_w": _summary(run_p99_power),
+                "total_energy_j": _summary(run_total_energy),
+                "prefill_tok_per_j_last": _summary(prefill_last_tpj),
+                "decode_tok_per_j_last_dfi": _summary(decode_last_tpj),
+                "prefill_j_per_tok_last": _summary(prefill_last_jpt),
+                "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
         }
         _write_json(args.json, payload)
@@ -479,6 +735,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
 
     measurer = VLMTPSMeasurer(pipeline)
+    tracker = _build_power_tracker(args, pipeline)
 
     resolution_payloads = []
     csv_rows: list[dict[str, Any]] = []
@@ -490,12 +747,39 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 prompt=args.prompt,
                 show_progress=False,
             )
-        vision_runs = measurer.measure_vision(
-            image_resolution=resolution,
-            repeat=args.repeat,
-            prompt=args.prompt,
-            show_progress=True,
-        )
+        vision_runs = []
+        vision_power_avg = []
+        vision_power_p99 = []
+        vision_energy_j = []
+        vision_img_per_j = []
+        vision_j_per_img = []
+        for _ in range(args.repeat):
+            if tracker is not None:
+                tracker.start()
+            try:
+                single = measurer.measure_vision(
+                    image_resolution=resolution,
+                    repeat=1,
+                    prompt=args.prompt,
+                    show_progress=True,
+                )[0]
+            finally:
+                if tracker is not None:
+                    tracker.stop()
+            vision_runs.append(single)
+            if tracker is not None:
+                metric = tracker.get_power_metric()
+                avg_power = metric.get("avg_power_w")
+                p99_power = metric.get("p99_power_w")
+                if avg_power is not None:
+                    avg_power_f = float(avg_power)
+                    energy = avg_power_f * float(single[0])
+                    vision_power_avg.append(avg_power_f)
+                    vision_energy_j.append(energy)
+                    vision_img_per_j.append(1.0 / energy if energy > 0 else 0.0)
+                    vision_j_per_img.append(energy)
+                if p99_power is not None:
+                    vision_power_p99.append(float(p99_power))
 
         vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
         vision_fps = [fps for _, fps in vision_runs]
@@ -504,6 +788,16 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary_header()
         _print_summary("vision_encode", vision_ms, "ms")
         _print_summary("vision_fps", vision_fps, "fps")
+        if vision_power_avg:
+            _print_summary("vision_avg_power", vision_power_avg, "W")
+        if vision_power_p99:
+            _print_summary("vision_p99_power", vision_power_p99, "W")
+        if vision_energy_j:
+            _print_summary("vision_energy", vision_energy_j, "J")
+        if vision_img_per_j:
+            _print_summary("vision_img_per_j", vision_img_per_j, "img/J")
+        if vision_j_per_img:
+            _print_summary("vision_j_per_img", vision_j_per_img, "J/img")
         _print_summary_footer()
 
         for idx, (latency, fps) in enumerate(vision_runs, start=1):
@@ -521,6 +815,15 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "llm_ttft_ms": None,
                     "llm_decode_ms": None,
                     "llm_total_ms": None,
+                    "avg_power_w": vision_power_avg[idx - 1] if idx - 1 < len(vision_power_avg) else None,
+                    "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
+                    "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
+                    "prefill_tok_per_j": None,
+                    "decode_tok_per_j_dfi": None,
+                    "prefill_j_per_tok": None,
+                    "decode_j_per_tok": None,
+                    "vision_img_per_j": vision_img_per_j[idx - 1] if idx - 1 < len(vision_img_per_j) else None,
+                    "vision_j_per_img": vision_j_per_img[idx - 1] if idx - 1 < len(vision_j_per_img) else None,
                 }
             )
 
@@ -538,6 +841,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "summary": {
                     "vision_encode_ms": _summary(vision_ms),
                     "vision_fps": _summary(vision_fps),
+                    "avg_power_w": _summary(vision_power_avg),
+                    "p99_power_w": _summary(vision_power_p99),
+                    "energy_j": _summary(vision_energy_j),
+                    "vision_img_per_j": _summary(vision_img_per_j),
+                    "vision_j_per_img": _summary(vision_j_per_img),
                 },
             }
         )
@@ -555,19 +863,43 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             prompt=args.prompt,
             show_progress=False,
         )
-    llm_runs = measurer.measure_llm(
-        image_resolution=llm_resolution,
-        num_decode=args.decode,
-        repeat=args.repeat,
-        prompt=args.prompt,
-        show_progress=True,
-    )
+    llm_runs = []
+    for _ in range(args.repeat):
+        run_start_t = time.time()
+        if tracker is not None:
+            tracker.start()
+        try:
+            run = measurer.measure_llm(
+                image_resolution=llm_resolution,
+                num_decode=args.decode,
+                repeat=1,
+                prompt=args.prompt,
+                show_progress=True,
+            )[0]
+        finally:
+            if tracker is not None:
+                tracker.stop()
+        if tracker is not None:
+            _enrich_single_run_power(
+                run=run,
+                power_metric=tracker.get_power_metric(),
+                power_trace=tracker.get_power_trace(),
+                run_start_t=run_start_t,
+            )
+        llm_runs.append(run)
 
     llm_prefill_tps = [r.prefill_tps for r in llm_runs]
     llm_decode_tps = [r.decode_tps for r in llm_runs]
     llm_ttft_ms = [r.prefill_latency * 1000.0 for r in llm_runs]
     llm_decode_ms = [r.decode_duration * 1000.0 for r in llm_runs]
     llm_total_ms = [r.total_time * 1000.0 for r in llm_runs]
+    llm_avg_power_w = [r.avg_power_w for r in llm_runs if r.avg_power_w is not None]
+    llm_p99_power_w = [r.p99_power_w for r in llm_runs if r.p99_power_w is not None]
+    llm_total_energy_j = [r.total_energy_j for r in llm_runs if r.total_energy_j is not None]
+    llm_prefill_tok_per_j = [r.prefill_tokens_per_j for r in llm_runs if r.prefill_tokens_per_j is not None]
+    llm_decode_tok_per_j = [r.decode_tokens_per_j for r in llm_runs if r.decode_tokens_per_j is not None]
+    llm_prefill_j_per_tok = [r.prefill_j_per_token for r in llm_runs if r.prefill_j_per_token is not None]
+    llm_decode_j_per_tok = [r.decode_j_per_token for r in llm_runs if r.decode_j_per_token is not None]
 
     print(
         f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}"
@@ -578,6 +910,20 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     _print_summary("llm_ttft", llm_ttft_ms, "ms")
     _print_summary("llm_decode_duration", llm_decode_ms, "ms")
     _print_summary("llm_total", llm_total_ms, "ms")
+    if llm_avg_power_w:
+        _print_summary("llm_avg_power", llm_avg_power_w, "W")
+    if llm_p99_power_w:
+        _print_summary("llm_p99_power", llm_p99_power_w, "W")
+    if llm_total_energy_j:
+        _print_summary("llm_total_energy", llm_total_energy_j, "J")
+    if llm_prefill_tok_per_j:
+        _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
+    if llm_decode_tok_per_j:
+        _print_summary("llm_decode_tok_per_j(DFI)", llm_decode_tok_per_j, "tok/J")
+    if llm_prefill_j_per_tok:
+        _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
+    if llm_decode_j_per_tok:
+        _print_summary("llm_decode_j_per_tok", llm_decode_j_per_tok, "J/tok")
     _print_summary_footer()
 
     for idx, run in enumerate(llm_runs, start=1):
@@ -595,6 +941,15 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "llm_ttft_ms": run.prefill_latency * 1000.0,
                 "llm_decode_ms": run.decode_duration * 1000.0,
                 "llm_total_ms": run.total_time * 1000.0,
+                "avg_power_w": run.avg_power_w,
+                "p99_power_w": run.p99_power_w,
+                "total_energy_j": run.total_energy_j,
+                "prefill_tok_per_j": run.prefill_tokens_per_j,
+                "decode_tok_per_j_dfi": run.decode_tokens_per_j,
+                "prefill_j_per_tok": run.prefill_j_per_token,
+                "decode_j_per_tok": run.decode_j_per_token,
+                "vision_img_per_j": None,
+                "vision_j_per_img": None,
             }
         )
 
@@ -617,6 +972,13 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                         "llm_ttft_ms": _summary(llm_ttft_ms),
                         "llm_decode_duration_ms": _summary(llm_decode_ms),
                         "llm_total_ms": _summary(llm_total_ms),
+                        "avg_power_w": _summary(llm_avg_power_w),
+                        "p99_power_w": _summary(llm_p99_power_w),
+                        "total_energy_j": _summary(llm_total_energy_j),
+                        "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
+                        "decode_tok_per_j_dfi": _summary(llm_decode_tok_per_j),
+                        "prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
+                        "decode_j_per_tok": _summary(llm_decode_j_per_tok),
                     },
                 },
             },
@@ -710,6 +1072,30 @@ def add_tps_parser(
             "--trace",
             default=None,
             help="write qbruntime trace to the given JSON path (first run only)",
+        )
+        p.add_argument(
+            "--power",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="enable power tracking (default: on, disable via --no-power)",
+        )
+        p.add_argument(
+            "--power-device",
+            choices=["auto", "gpu", "npu"],
+            default="auto",
+            help="power backend selection (default: auto)",
+        )
+        p.add_argument(
+            "--power-interval",
+            type=float,
+            default=0.2,
+            help="power sampling interval in seconds",
+        )
+        p.add_argument(
+            "--power-gpu-id",
+            type=_parse_int_list_optional,
+            default=None,
+            help="comma-separated GPU ids for power tracking (e.g., 0,1)",
         )
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")

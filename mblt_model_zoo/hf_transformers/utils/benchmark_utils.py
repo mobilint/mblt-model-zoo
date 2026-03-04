@@ -42,6 +42,15 @@ class SingleMeasurement:
     avg_npu_decode_token_latency: Optional[float]  # seconds
     npu_prefill_time: Optional[float] = None
     npu_decode_time: Optional[float] = None
+    avg_power_w: Optional[float] = None
+    p99_power_w: Optional[float] = None
+    total_energy_j: Optional[float] = None
+    prefill_tokens_per_j: Optional[float] = None
+    prefill_j_per_token: Optional[float] = None
+    decode_tokens_per_j: Optional[float] = None
+    decode_j_per_token: Optional[float] = None
+    total_tokens_per_j: Optional[float] = None
+    total_j_per_token: Optional[float] = None
 
 @dataclass
 class SweepData:
