@@ -837,16 +837,14 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary_header()
         _print_summary("vision_encode", vision_ms, "ms")
         _print_summary("vision_fps", vision_fps, "fps")
-        if vision_power_avg:
+        if args.power:
             _print_summary("vision_avg_power", vision_power_avg, "W")
-        if vision_power_p99:
             _print_summary("vision_p99_power", vision_power_p99, "W")
-        if vision_energy_j:
             _print_summary("vision_energy", vision_energy_j, "J")
-        if vision_img_per_j:
             _print_summary("vision_img_per_j", vision_img_per_j, "img/J")
-        if vision_j_per_img:
             _print_summary("vision_j_per_img", vision_j_per_img, "J/img")
+            if not vision_power_avg:
+                print("[power] warning: no vision power samples were collected for this resolution")
         _print_summary_footer()
 
         for idx, (latency, fps) in enumerate(vision_runs, start=1):
@@ -959,20 +957,16 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     _print_summary("llm_ttft", llm_ttft_ms, "ms")
     _print_summary("llm_decode_duration", llm_decode_ms, "ms")
     _print_summary("llm_total", llm_total_ms, "ms")
-    if llm_avg_power_w:
+    if args.power:
         _print_summary("llm_avg_power", llm_avg_power_w, "W")
-    if llm_p99_power_w:
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
-    if llm_total_energy_j:
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
-    if llm_prefill_tok_per_j:
         _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
-    if llm_decode_tok_per_j:
         _print_summary("llm_decode_tok_per_j", llm_decode_tok_per_j, "tok/J")
-    if llm_prefill_j_per_tok:
         _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
-    if llm_decode_j_per_tok:
         _print_summary("llm_decode_j_per_tok", llm_decode_j_per_tok, "J/tok")
+        if not llm_avg_power_w:
+            print("[power] warning: no llm power samples were collected")
     _print_summary_footer()
 
     for idx, run in enumerate(llm_runs, start=1):
