@@ -87,6 +87,12 @@ class GPUPowerTracker(BasePowerTracker):
     def start(self):
         """Start tracking GPU power consumption"""
         self.reset()
+        # Capture one immediate sample so very short phases (e.g., vision encode)
+        # still have power data even before the first interval tick.
+        try:
+            self._func_for_sched()
+        except Exception:
+            pass
         if self._scheduler is None or self._scheduler.state != STATE_RUNNING:
             self._scheduler = BackgroundScheduler()
             self._scheduler.start()
@@ -98,6 +104,11 @@ class GPUPowerTracker(BasePowerTracker):
 
     def stop(self):
         """Stop tracking GPU power consumption"""
+        # Capture one final sample near phase end.
+        try:
+            self._func_for_sched()
+        except Exception:
+            pass
         if self._scheduler is not None:
             try:
                 self._scheduler.shutdown(wait=True)

@@ -73,6 +73,11 @@ class NPUPowerTracker(BasePowerTracker):
 
     def start(self):
         self.reset()
+        # Capture one immediate sample so short phases still get power data.
+        try:
+            self._func_for_sched()
+        except Exception:
+            pass
         if self._scheduler is None or self._scheduler.state != STATE_RUNNING:
             self._scheduler = BackgroundScheduler()
             self._scheduler.start()
@@ -88,6 +93,11 @@ class NPUPowerTracker(BasePowerTracker):
         )
 
     def stop(self):
+        # Capture one final sample near phase end.
+        try:
+            self._func_for_sched()
+        except Exception:
+            pass
         if self._scheduler is not None:
             try:
                 self._scheduler.shutdown(wait=True)
