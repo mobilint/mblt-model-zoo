@@ -547,7 +547,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in tqdm(range(args.warmup), desc="warmup", leave=False):
+    for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
@@ -656,7 +656,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in tqdm(range(args.warmup), desc="warmup", leave=False):
+    for _ in range(args.warmup):
         measurer.measure(
             num_prefill=args.fixed_prefill,
             num_decode=args.fixed_decode,
@@ -678,7 +678,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
                     trace_path=args.trace if i == 0 else None,
-                    show_progress=True,
+                    show_progress=False,
                 )
             )
         finally:
@@ -788,8 +788,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
 
     resolution_payloads = []
     csv_rows: list[dict[str, Any]] = []
-    for resolution in tqdm(args.image_resolutions, desc="vision resolutions"):
-        for _ in tqdm(range(args.warmup), desc=f"warmup@{resolution}", leave=False):
+    for resolution in args.image_resolutions:
+        for _ in range(args.warmup):
             measurer.measure_vision(
                 image_resolution=resolution,
                 repeat=1,
@@ -902,7 +902,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         if args.llm_resolution is not None
         else args.image_resolutions[0]
     )
-    for _ in tqdm(range(args.warmup), desc=f"llm warmup@{llm_resolution}", leave=False):
+    for _ in range(args.warmup):
         measurer.measure_llm(
             image_resolution=llm_resolution,
             num_decode=args.decode,
