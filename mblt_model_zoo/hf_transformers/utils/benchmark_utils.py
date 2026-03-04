@@ -603,3 +603,304 @@ class TPSMeasurer:
         plt.savefig(save_path, dpi=300)
         print(f"\n✅ Graph saved to: {save_path}")
         plt.close(fig)
+
+@dataclass
+class VLMSingleMeasurement:
+    image_resolution: int
+    vision_encode_latency: float  # seconds/image
+    vision_fps: float  # images/sec
+    llm: SingleMeasurement
+
+
+class VLMTPSMeasurer:
+    def __init__(self, pipeline):
+        self.pipeline = pipeline
+        self.model = pipeline.model
+        self.tokenizer = pipeline.tokenizer
+        self.processor = getattr(pipeline, "processor", None)
+        if self.processor is None:
+            raise ValueError("VLM benchmark requires a pipeline with processor.")
+        self.model.eval()
+
+    def _build_inputs(self, image_resolution: int, prompt: str):
+        image = torch.randint(
+            low=0,
+            high=256,
+            size=(3, image_resolution, image_resolution),
+            dtype=torch.uint8,
+        )
+
+        text = prompt
+        image_token = getattr(self.processor, "image_token", None)
+        if isinstance(image_token, str) and image_token:
+            if image_token not in text:
+                text = f"{image_token}\n{text}"
+
+        processor_kwargs = dict(
+            images=image,
+            text=text,
+            return_tensors="pt",
+        )
+        try:
+            return self.processor(**processor_kwargs)
+        except ValueError as e:
+            msg = str(e).lower()
+            if "placeholder" not in msg or "image" not in msg:
+                raise
+            image_token = getattr(self.processor, "image_token", "<image>")
+            if image_token not in processor_kwargs["text"]:
+                processor_kwargs["text"] = f"{image_token}\n{processor_kwargs['text']}"
+            return self.processor(**processor_kwargs)
+
+    def _get_language_model(self):
+        if hasattr(self.model, "model") and hasattr(self.model.model, "language_model"):
+            return self.model.model.language_model
+        if hasattr(self.model, "language_model"):
+            return self.model.language_model
+        raise ValueError("Could not find language_model from VLM model.")
+
+    def _measure_vision_encode(self, inputs: dict):
+        pixel_values = inputs["pixel_values"].to(self.model.device)
+
+        with torch.no_grad():
+            t0 = time.perf_counter()
+            if "image_grid_thw" in inputs and hasattr(self.model, "model") and hasattr(self.model.model, "get_image_features"):
+                image_grid_thw = inputs["image_grid_thw"].to(self.model.device)
+                image_features = self.model.model.get_image_features(
+                    pixel_values=pixel_values,
+                    image_grid_thw=image_grid_thw,
+                )
+            else:
+                image_features = self.model.get_image_features(pixel_values=pixel_values)
+            t1 = time.perf_counter()
+
+        if isinstance(image_features, (list, tuple)):
+            assert len(image_features) > 0
+            return t1 - t0, image_features[0]
+        return t1 - t0, image_features
+
+    def _build_inputs_embeds(self, inputs: dict, image_features: torch.Tensor) -> torch.Tensor:
+        input_ids = inputs["input_ids"].to(self.model.device)
+        if hasattr(self.model, "model") and hasattr(self.model.model, "language_model"):
+            inputs_embeds = self.model.model.language_model.get_input_embeddings()(input_ids)
+
+            image_token_id = self.model.config.image_token_id
+            image_mask = input_ids == image_token_id
+            n_image_tokens = int(image_mask.sum().item())
+            assert n_image_tokens == int(image_features.shape[0]), (
+                "Image token count does not match image features: "
+                f"{n_image_tokens} vs {int(image_features.shape[0])}"
+            )
+
+            image_features = image_features.to(device=inputs_embeds.device, dtype=inputs_embeds.dtype)
+            image_mask = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
+            return inputs_embeds.masked_scatter(image_mask, image_features)
+
+        inputs_embeds = self.model.get_input_embeddings()(input_ids)
+        image_features = image_features.to(device=inputs_embeds.device, dtype=inputs_embeds.dtype)
+        special_image_mask = self.model.get_placeholder_mask(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            image_features=image_features,
+        )
+        return inputs_embeds.masked_scatter(special_image_mask, image_features)
+
+    def _measure_llm_once(self, inputs_embeds: torch.Tensor, num_decode: int) -> SingleMeasurement:
+        seq_len = int(inputs_embeds.shape[1])
+        lm_for_npu = self._get_language_model()
+        gen_model = self.model
+
+        streamer = TokenIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+        )
+        attention_mask = torch.ones(
+            (inputs_embeds.shape[0], inputs_embeds.shape[1]),
+            dtype=torch.long,
+            device=inputs_embeds.device,
+        )
+        seq_len_tensor = int(inputs_embeds.shape[1])
+        batch_size = int(inputs_embeds.shape[0])
+        cache_position = torch.arange(seq_len_tensor, device=inputs_embeds.device)
+        position_ids = cache_position.view(1, -1).expand(batch_size, -1)
+        gen_kwargs = dict(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            cache_position=cache_position,
+            streamer=streamer,
+            min_new_tokens=num_decode + 1,
+            max_new_tokens=num_decode + 1,
+            do_sample=False,
+            eos_token_id=None,
+            pad_token_id=self.tokenizer.eos_token_id,
+            count_npu_time=True,
+        )
+
+        thread_error: list[Exception] = []
+
+        def _run_generate():
+            try:
+                gen_model.generate(**gen_kwargs)
+            except Exception as e:
+                thread_error.append(e)
+                streamer.end()
+
+        thread = Thread(target=_run_generate)
+        t_start = time.perf_counter()
+        thread.start()
+
+        first_token_time = None
+        decoded_tokens = 0
+        npu_prefill_time = 0.0
+        npu_decode_time = 0.0
+        has_npu_time = False
+
+        for _ in streamer:
+            if first_token_time is None:
+                first_token_time = time.perf_counter()
+            decoded_tokens += 1
+            npu_time = getattr(lm_for_npu, "npu_time", None)
+            if npu_time is not None:
+                has_npu_time = True
+                if decoded_tokens == 1:
+                    npu_prefill_time += npu_time
+                else:
+                    npu_decode_time += npu_time
+
+        t_end = time.perf_counter()
+        thread.join()
+        if thread_error:
+            raise RuntimeError(f"VLM LLM-phase generate failed: {thread_error[0]}") from thread_error[0]
+        assert first_token_time is not None
+
+        prefill_latency = first_token_time - t_start
+        prefill_tps = seq_len / prefill_latency if prefill_latency > 0 else 0.0
+
+        decode_duration = t_end - first_token_time
+        decode_count = max(decoded_tokens - 1, 0)
+        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
+        total_time = t_end - t_start
+
+        avg_total_prefill_token_latency = prefill_latency / seq_len if seq_len > 0 else 0.0
+        avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+        avg_npu_prefill_token_latency = (
+            npu_prefill_time / seq_len if has_npu_time and seq_len > 0 else None
+        )
+        avg_npu_decode_token_latency = (
+            npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
+        )
+
+        return SingleMeasurement(
+            num_prefill=seq_len,
+            num_decode=decode_count,
+            prefill_latency=prefill_latency,
+            prefill_tps=prefill_tps,
+            decode_duration=decode_duration,
+            decode_tps=decode_tps,
+            total_time=total_time,
+            avg_total_prefill_token_latency=avg_total_prefill_token_latency,
+            avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
+            avg_total_decode_token_latency=avg_total_decode_token_latency,
+            avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+            npu_prefill_time=npu_prefill_time if has_npu_time else None,
+            npu_decode_time=npu_decode_time if has_npu_time else None,
+        )
+
+    def _build_reference_inputs_embeds(
+        self,
+        image_resolution: int,
+        prompt: str,
+    ) -> torch.Tensor:
+        inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+        _, image_features = self._measure_vision_encode(inputs)
+        return self._build_inputs_embeds(inputs, image_features=image_features)
+
+    def measure_vision(
+        self,
+        image_resolution: int,
+        repeat: int,
+        prompt: str,
+        show_progress: bool = False,
+    ) -> list[tuple[float, float]]:
+        assert repeat > 0, "repeat must be > 0"
+        results: list[tuple[float, float]] = []
+        for idx in range(repeat):
+            if show_progress:
+                print(
+                    f"[vlm][vision] resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
+                )
+            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+            vision_encode_latency, _ = self._measure_vision_encode(inputs)
+            vision_fps = (1.0 / vision_encode_latency) if vision_encode_latency > 0 else 0.0
+            results.append((vision_encode_latency, vision_fps))
+            if show_progress:
+                print(
+                    f"[vlm][vision] resolution={image_resolution} run={idx + 1}/{repeat}: done "
+                    f"(vision={vision_encode_latency * 1000.0:.2f}ms, fps={vision_fps:.2f})"
+                )
+        return results
+
+    def measure_llm(
+        self,
+        image_resolution: int,
+        num_decode: int,
+        repeat: int,
+        prompt: str,
+        show_progress: bool = False,
+    ) -> list[SingleMeasurement]:
+        assert repeat > 0, "repeat must be > 0"
+        inputs_embeds = self._build_reference_inputs_embeds(
+            image_resolution=image_resolution,
+            prompt=prompt,
+        )
+        results: list[SingleMeasurement] = []
+        for idx in range(repeat):
+            if show_progress:
+                print(
+                    f"[vlm][llm] ref_resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
+                )
+            llm = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=num_decode)
+            results.append(llm)
+            if show_progress:
+                print(
+                    f"[vlm][llm] ref_resolution={image_resolution} run={idx + 1}/{repeat}: done "
+                    f"(prefill_tps={llm.prefill_tps:.2f}, decode_tps={llm.decode_tps:.2f})"
+                )
+        return results
+
+    def measure(
+        self,
+        image_resolution: int,
+        num_decode: int,
+        repeat: int,
+        prompt: str,
+        show_progress: bool = False,
+    ) -> list[VLMSingleMeasurement]:
+        assert repeat > 0, "repeat must be > 0"
+        results: list[VLMSingleMeasurement] = []
+        for idx in range(repeat):
+            if show_progress:
+                print(
+                    f"[vlm] resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
+                )
+            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+            vision_encode_latency, image_features = self._measure_vision_encode(inputs)
+            inputs_embeds = self._build_inputs_embeds(inputs, image_features=image_features)
+            llm = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=num_decode)
+            results.append(
+                VLMSingleMeasurement(
+                    image_resolution=image_resolution,
+                    vision_encode_latency=vision_encode_latency,
+                    vision_fps=(1.0 / vision_encode_latency) if vision_encode_latency > 0 else 0.0,
+                    llm=llm,
+                )
+            )
+            if show_progress:
+                print(
+                    f"[vlm] resolution={image_resolution} run={idx + 1}/{repeat}: done "
+                    f"(vision={vision_encode_latency * 1000.0:.2f}ms, "
+                    f"prefill_tps={llm.prefill_tps:.2f}, decode_tps={llm.decode_tps:.2f})"
+                )
+        return results
