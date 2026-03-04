@@ -700,7 +700,19 @@ class VLMTPSMeasurer:
             hidden_size = int(inputs_embeds.shape[-1])
             # Different VLM families return image features with different layouts.
             # Normalize to [num_image_tokens_total, hidden_size] before masked_scatter.
-            if image_features.ndim == 3:
+            if image_features.ndim == 4:
+                # e.g. [batch, h, w, hidden] or [batch, hidden, h, w]
+                if int(image_features.shape[-1]) == hidden_size:
+                    image_features = image_features.reshape(-1, hidden_size)
+                elif int(image_features.shape[1]) == hidden_size:
+                    image_features = image_features.permute(0, 2, 3, 1).contiguous()
+                    image_features = image_features.reshape(-1, hidden_size)
+                else:
+                    raise AssertionError(
+                        "Unexpected 4D image feature layout: "
+                        f"{tuple(int(x) for x in image_features.shape)}"
+                    )
+            elif image_features.ndim == 3:
                 if int(image_features.shape[-1]) == hidden_size:
                     image_features = image_features.reshape(-1, hidden_size)
                 else:
