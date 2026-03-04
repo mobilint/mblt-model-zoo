@@ -27,7 +27,7 @@ dependencies = [
     "scipy",
     "tqdm",
     "wheel",
-    "pynvml>=13.0.1",
+    "nvidia-ml-py>=12.560.30",
     "apscheduler>=3.11.2",
 ]
 classifiers = [
