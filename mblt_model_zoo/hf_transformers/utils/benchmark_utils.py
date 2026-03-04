@@ -696,12 +696,45 @@ class VLMTPSMeasurer:
             image_token_id = self.model.config.image_token_id
             image_mask = input_ids == image_token_id
             n_image_tokens = int(image_mask.sum().item())
+
+            hidden_size = int(inputs_embeds.shape[-1])
+            # Different VLM families return image features with different layouts.
+            # Normalize to [num_image_tokens_total, hidden_size] before masked_scatter.
+            if image_features.ndim == 3:
+                if int(image_features.shape[-1]) == hidden_size:
+                    image_features = image_features.reshape(-1, hidden_size)
+                else:
+                    raise AssertionError(
+                        "Unexpected 3D image feature layout: "
+                        f"{tuple(int(x) for x in image_features.shape)}"
+                    )
+            elif image_features.ndim == 2:
+                if int(image_features.shape[-1]) == hidden_size:
+                    pass
+                elif int(image_features.shape[0]) == hidden_size:
+                    image_features = image_features.transpose(0, 1).contiguous()
+                else:
+                    raise AssertionError(
+                        "Unexpected 2D image feature layout: "
+                        f"{tuple(int(x) for x in image_features.shape)}"
+                    )
+            else:
+                raise AssertionError(
+                    "Unsupported image feature rank: "
+                    f"{image_features.ndim} for shape "
+                    f"{tuple(int(x) for x in image_features.shape)}"
+                )
+
             assert n_image_tokens == int(image_features.shape[0]), (
-                "Image token count does not match image features: "
-                f"{n_image_tokens} vs {int(image_features.shape[0])}"
+                "Image token count does not match image features after normalization: "
+                f"{n_image_tokens} vs {int(image_features.shape[0])}, "
+                f"feature_shape={tuple(int(x) for x in image_features.shape)}"
             )
 
-            image_features = image_features.to(device=inputs_embeds.device, dtype=inputs_embeds.dtype)
+            image_features = image_features.to(
+                device=inputs_embeds.device,
+                dtype=inputs_embeds.dtype,
+            )
             image_mask = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
             return inputs_embeds.masked_scatter(image_mask, image_features)
 
