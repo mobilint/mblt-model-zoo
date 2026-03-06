@@ -14,7 +14,6 @@ from g2pkk import G2p as OriginalG2p
 from jamo import hangul_to_jamo
 import re, sys, importlib
 import subprocess
-import platform
 
 from . import punctuation
 from .ko_dictionary import english_dictionary, etc_dictionary
@@ -22,70 +21,20 @@ from .ko_dictionary import english_dictionary, etc_dictionary
 
 class G2p(OriginalG2p):
     def check_mecab(self):
-        if platform.system() == "Windows":
-            has_mecab = importlib.util.find_spec("mecab") is not None
-            has_eunjeon = importlib.util.find_spec("eunjeon") is not None
-            if not has_mecab and not has_eunjeon:
-                print('you have to install python-mecab-ko or eunjeon.')
-                p = subprocess.Popen([sys.executable, "-m", "pip", "install", "python-mecab-ko"])
-                p.wait()
-            return
-
-        if importlib.util.find_spec("mecab") is None:
-            print('you have to install python-mecab-ko. install it...')
-            p = subprocess.Popen([sys.executable, "-m", "pip", "install", "python-mecab-ko"])
+        spam_spec = importlib.util.find_spec("mecab")
+        non_found = spam_spec is None
+        if non_found:
+            print(f'you have to install python-mecab-ko. install it...')
+            p = subprocess.Popen([sys.executable, "-m", "pip", "install", 'python-mecab-ko'])
             p.wait()
 
 
     def get_mecab(self):
-        class _MeCabTaggerAdapter:
-            def __init__(self, tagger):
-                self._tagger = tagger
-
-            def pos(self, text):
-                parsed = self._tagger.parse(text) or ""
-                tokens = []
-                for line in parsed.splitlines():
-                    if not line or line == "EOS":
-                        continue
-                    if "\t" in line:
-                        token, features = line.split("\t", 1)
-                    else:
-                        token, features = line, ""
-                    tag = features.split(",", 1)[0] if features else "NNG"
-                    tokens.append((token, tag))
-                return tokens
-
-        def _create_backend(module):
-            if hasattr(module, "MeCab"):
-                return module.MeCab()
-            if hasattr(module, "Tagger"):
-                return _MeCabTaggerAdapter(module.Tagger())
-            raise RuntimeError("Unsupported mecab module API.")
-
-        if platform.system() == "Windows":
-            try:
-                e = importlib.import_module("eunjeon")
-                return e.Mecab()
-            except Exception:
-                pass
-
-            try:
-                m = importlib.import_module("mecab")
-                return _create_backend(m)
-            except Exception as e:
-                raise RuntimeError(
-                    'You have to install a usable Korean MeCab backend on Windows. '
-                    'Try "pip install python-mecab-ko" or "pip install eunjeon".'
-                ) from e
-
         try:
-            m = importlib.import_module("mecab")
-            return _create_backend(m)
+            m = self.load_module_func('mecab')
+            return m.MeCab()
         except Exception as e:
-            raise RuntimeError(
-                'you have to install python-mecab-ko. "pip install python-mecab-ko"'
-            ) from e
+            print(f'you have to install python-mecab-ko. "pip install python-mecab-ko"')
 
 
 def normalize(text):
