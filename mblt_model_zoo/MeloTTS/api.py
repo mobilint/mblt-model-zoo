@@ -100,7 +100,7 @@ class TTS(nn.Module):
 
             dev_no=hps.model.dev_no,
             target_cores=[hps.model.target_core],
-        )
+        ).to(device)
     
     @staticmethod
     def audio_numpy_concat(segment_data_list, sr, speed=1.0):
