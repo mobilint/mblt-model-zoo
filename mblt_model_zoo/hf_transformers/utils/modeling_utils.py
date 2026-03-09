@@ -231,13 +231,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if inputs_embeds_numpy.ndim == 3:
                 inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
 
-            batch_param = qbruntime.BatchParam(
-                sequence_lengths=sequence_lengths_chunks,
-                cache_sizes=cache_sizes_chunks,
-                cache_ids=cache_ids,
-                prefill_masks=prefill_masks,
-            )
-            result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
+            batch_params = [
+                qbruntime.BatchParam(
+                    sequence_length=sequence_lengths_chunks[k],
+                    cache_size=cache_sizes_chunks[k],
+                    cache_id=cache_ids[k],
+                    prefill_mask=prefill_masks[k],
+                )
+                for k in range(len(cache_ids))
+            ]
+            result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
             assert result is not None, "mxq infer result is None!"
 
             logits_chunks = cast(
