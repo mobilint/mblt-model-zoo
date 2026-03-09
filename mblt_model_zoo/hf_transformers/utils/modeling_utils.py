@@ -2,6 +2,8 @@ import math
 import os
 import time
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
+import logging
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import numpy as np
 import qbruntime
@@ -13,6 +15,8 @@ from ...utils.npu_backend import MobilintNPUBackend
 from ..utils.cache_utils import MobilintCache
 from .base_utils import PretrainedOnlyMixin
 from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConfigMixin
+
+logger = logging.getLogger(__name__)
 
 
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
@@ -194,6 +198,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
             sequence_lengths = [1 for _ in range(batch_size)]
 
+        logger.warning(
+            "[BATCH-LLM][START] inputs_embeds=%s attention_mask=%s batch_size=%d sequence_lengths=%s",
+            tuple(inputs_embeds.shape),
+            tuple(attention_mask.shape),
+            batch_size,
+            sequence_lengths,
+        )
+
         max_sequence_length = max(sequence_lengths)
         mxq_model = self.npu_backend.mxq_model
         if chunk_size == 0:
@@ -241,12 +253,35 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 )
                 for k in range(len(cache_ids))
             ]
+
+            batch_seq_sum = sum(param.sequence_length for param in batch_params)
+            logger.warning(
+                "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d",
+                i + 1,
+                num_of_chunks,
+                start_index,
+                len(cache_ids),
+                cache_ids,
+                sequence_lengths_chunks,
+                cache_sizes_chunks,
+                prefill_masks,
+                tuple(inputs_embeds_numpy.shape),
+                batch_seq_sum,
+            )
+
             result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
             assert result is not None, "mxq infer result is None!"
 
             logits_chunks = cast(
                 torch.FloatTensor,
                 torch.tensor(result[0], dtype=torch.float32).reshape([len(cache_ids), 1, -1]),
+            )
+
+            logger.warning(
+                "[BATCH-LLM][CHUNK %d/%d] infer_output_shape=%s",
+                i + 1,
+                num_of_chunks,
+                tuple(logits_chunks.shape),
             )
 
             for j, prefill_mask in enumerate(prefill_masks):
@@ -256,6 +291,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
+
+        missing_ids = [cache_id for cache_id in range(batch_size) if cache_id not in logits_dict]
+        logger.warning(
+            "[BATCH-LLM][END] logits_dict_keys=%s missing_ids=%s",
+            sorted(list(logits_dict.keys())),
+            missing_ids,
+        )
 
         logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
         return cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
