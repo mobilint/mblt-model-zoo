@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -8,25 +9,32 @@ class Swin_T_Set(ModelInfoSet):
     """Configuration set for Swin_T models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/Swin_T",
-            "filename": "swin_t_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/Swin_T",
+                "filename": "swin_t_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 232,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -35,25 +43,32 @@ class Swin_S_Set(ModelInfoSet):
     """Configuration set for Swin_S models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/Swin_S",
-            "filename": "swin_s_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 246,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/Swin_S",
+                "filename": "swin_s_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 246,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -62,25 +77,32 @@ class Swin_B_Set(ModelInfoSet):
     """Configuration set for Swin_B models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/Swin_B",
-            "filename": "swin_b_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 238,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/Swin_B",
+                "filename": "swin_b_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 238,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 

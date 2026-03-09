@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -8,25 +9,32 @@ class LeViT_Conv_128S_Set(ModelInfoSet):
     """Configuration set for LeViT_Conv_128S models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/LeViT_Conv_128S",
-            "filename": "levit_conv_128s.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/LeViT_Conv_128S",
+                "filename": "levit_conv_128s.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -34,25 +42,32 @@ class LeViT_Conv_128_Set(ModelInfoSet):
     """Configuration set for LeViT_Conv_128 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/LeViT_Conv_128",
-            "filename": "levit_conv_128.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/LeViT_Conv_128",
+                "filename": "levit_conv_128.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -60,25 +75,32 @@ class LeViT_Conv_192_Set(ModelInfoSet):
     """Configuration set for LeViT_Conv_192 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/LeViT_Conv_192",
-            "filename": "levit_conv_192.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/LeViT_Conv_192",
+                "filename": "levit_conv_192.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -86,25 +108,32 @@ class LeViT_Conv_256_Set(ModelInfoSet):
     """Configuration set for LeViT_Conv_256 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/LeViT_Conv_256",
-            "filename": "levit_conv_256.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/LeViT_Conv_256",
+                "filename": "levit_conv_256.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -112,25 +141,32 @@ class LeViT_Conv_384_Set(ModelInfoSet):
     """Configuration set for LeViT_Conv_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/LeViT_Conv_384",
-            "filename": "levit_conv_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/LeViT_Conv_384",
+                "filename": "levit_conv_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

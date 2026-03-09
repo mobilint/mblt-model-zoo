@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -8,25 +9,32 @@ class ConvFormer_S18_Set(ModelInfoSet):
     """Configuration set for ConvFormer_S18 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvFormer_S18",
-            "filename": "convformer_s18.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvFormer_S18",
+                "filename": "convformer_s18.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -34,25 +42,32 @@ class ConvFormer_S36_Set(ModelInfoSet):
     """Configuration set for ConvFormer_S36 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvFormer_S36",
-            "filename": "convformer_s36.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvFormer_S36",
+                "filename": "convformer_s36.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -60,25 +75,32 @@ class ConvFormer_M36_Set(ModelInfoSet):
     """Configuration set for ConvFormer_M36 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvFormer_M36",
-            "filename": "convformer_m36.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvFormer_M36",
+                "filename": "convformer_m36.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -86,25 +108,32 @@ class ConvFormer_B36_Set(ModelInfoSet):
     """Configuration set for ConvFormer_B36 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvFormer_B36",
-            "filename": "convformer_b36.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvFormer_B36",
+                "filename": "convformer_b36.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

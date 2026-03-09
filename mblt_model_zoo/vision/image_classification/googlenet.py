@@ -2,6 +2,7 @@
 GoogLeNet model definition.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,25 +13,32 @@ class GoogLeNet_Set(ModelInfoSet):
     """Configuration set for GoogLeNet models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/GoogLeNet",
-            "filename": "googlenet_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/GoogLeNet",
+                "filename": "googlenet_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 

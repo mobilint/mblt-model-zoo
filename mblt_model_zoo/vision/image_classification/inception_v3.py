@@ -2,6 +2,7 @@
 Inception V3 model definition.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,27 +13,36 @@ class Inception_V3_Set(ModelInfoSet):
     """Configuration set for Inception V3 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/Inception_V3",
-            "filename": "inception_v3_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 342,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [299, 299],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/Inception_V3",
+                "filename": "inception_v3_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 342,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [299, 299],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 

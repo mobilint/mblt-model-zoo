@@ -101,17 +101,24 @@ def norm_score(pred):
     pred {key: [[x1,y1,x2,y2,s]]}
     """
 
-    max_score = 0
-    min_score = 1
+    max_score = -1e9
+    min_score = 1e9
+    found = False
 
     for _, k in pred.items():
         for _, v in k.items():
             if len(v) == 0:
                 continue
-            _min = np.min(v[:, -1])
-            _max = np.max(v[:, -1])
-            max_score = max(_max, max_score)
-            min_score = min(_min, min_score)
+            found = True
+            _min = float(np.min(v[:, -1]))
+            _max = float(np.max(v[:, -1]))
+            if _max > max_score:
+                max_score = _max
+            if _min < min_score:
+                min_score = _min
+
+    if not found:
+        return pred
 
     diff = max_score - min_score
     for _, k in pred.items():

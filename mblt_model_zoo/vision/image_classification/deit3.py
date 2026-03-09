@@ -2,6 +2,7 @@
 DeiT3 (Data-efficient Image Transformers v3) model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,25 +13,32 @@ class DeiT3_Small_Patch16_224_Set(ModelInfoSet):
     """Configuration set for DeiT3 Small Patch16 224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Small_Patch16_224",
-            "filename": "deit3_small_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Small_Patch16_224",
+                "filename": "deit3_small_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -38,25 +46,32 @@ class DeiT3_Small_Patch16_384_Set(ModelInfoSet):
     """Configuration set for DeiT3 Small Patch16 384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Small_Patch16_384",
-            "filename": "deit3_small_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Small_Patch16_384",
+                "filename": "deit3_small_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -64,25 +79,32 @@ class DeiT3_Medium_Patch16_224_Set(ModelInfoSet):
     """Configuration set for DeiT3 Medium Patch16 224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Medium_Patch16_224",
-            "filename": "deit3_medium_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Medium_Patch16_224",
+                "filename": "deit3_medium_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -90,25 +112,32 @@ class DeiT3_Base_Patch16_224_Set(ModelInfoSet):
     """Configuration set for DeiT3 Base Patch16 224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Base_Patch16_224",
-            "filename": "deit3_base_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Base_Patch16_224",
+                "filename": "deit3_base_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -116,25 +145,32 @@ class DeiT3_Base_Patch16_384_Set(ModelInfoSet):
     """Configuration set for DeiT3 Base Patch16 384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Base_Patch16_384",
-            "filename": "deit3_base_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Base_Patch16_384",
+                "filename": "deit3_base_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -142,25 +178,32 @@ class DeiT3_Large_Patch16_224_Set(ModelInfoSet):
     """Configuration set for DeiT3 Large Patch16 224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Large_Patch16_224",
-            "filename": "deit3_large_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Large_Patch16_224",
+                "filename": "deit3_large_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -168,25 +211,32 @@ class DeiT3_Large_Patch16_384_Set(ModelInfoSet):
     """Configuration set for DeiT3 Large Patch16 384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/DeiT3_Large_Patch16_384",
-            "filename": "deit3_large_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/DeiT3_Large_Patch16_384",
+                "filename": "deit3_large_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

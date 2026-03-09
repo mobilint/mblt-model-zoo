@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -8,25 +9,32 @@ class YOLO11nCls_Set(ModelInfoSet):
     """Configuration set for YOLO11nCls models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11n-cls",
-            "filename": "yolo11n-cls.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11n-cls",
+                "filename": "yolo11n-cls.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -34,25 +42,32 @@ class YOLO11sCls_Set(ModelInfoSet):
     """Configuration set for YOLO11sCls models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11s-cls",
-            "filename": "yolo11s-cls.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11s-cls",
+                "filename": "yolo11s-cls.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -60,25 +75,32 @@ class YOLO11mCls_Set(ModelInfoSet):
     """Configuration set for YOLO11mCls models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11m-cls",
-            "filename": "yolo11m-cls.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11m-cls",
+                "filename": "yolo11m-cls.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -86,25 +108,32 @@ class YOLO11lCls_Set(ModelInfoSet):
     """Configuration set for YOLO11lCls models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11l-cls",
-            "filename": "yolo11l-cls.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11l-cls",
+                "filename": "yolo11l-cls.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -112,25 +141,32 @@ class YOLO11xCls_Set(ModelInfoSet):
     """Configuration set for YOLO11xCls models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11x-cls",
-            "filename": "yolo11x-cls.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11x-cls",
+                "filename": "yolo11x-cls.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 224,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

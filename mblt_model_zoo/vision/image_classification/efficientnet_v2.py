@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -8,25 +9,32 @@ class EfficientNet_V2_S_Set(ModelInfoSet):
     """Configuration set for EfficientNet_V2_S models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/EfficientNet_V2_S",
-            "filename": "efficientnet_v2_s_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/EfficientNet_V2_S",
+                "filename": "efficientnet_v2_s_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -35,25 +43,32 @@ class EfficientNet_V2_M_Set(ModelInfoSet):
     """Configuration set for EfficientNet_V2_M models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/EfficientNet_V2_M",
-            "filename": "efficientnet_v2_m_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 480,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [480, 480],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/EfficientNet_V2_M",
+                "filename": "efficientnet_v2_m_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 480,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [480, 480],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -62,25 +77,32 @@ class EfficientNet_V2_L_Set(ModelInfoSet):
     """Configuration set for EfficientNet_V2_L models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/EfficientNet_V2_L",
-            "filename": "efficientnet_v2_l_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 480,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [480, 480],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/EfficientNet_V2_L",
+                "filename": "efficientnet_v2_l_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 480,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [480, 480],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 

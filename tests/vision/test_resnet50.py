@@ -24,8 +24,18 @@ def resnet50():
     model.dispose()
 
 
-def run_inference(model, image_path, save_path):
-    """Run inference with the given model and image."""
+def run_inference(
+    model,
+    image_path,
+    save_path,
+):
+    """Run inference with the given model and image.
+
+    Args:
+            model: The vision model to use.
+            image_path: Path to the input image.
+            save_path: Path to save the output visualization.
+    """
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     input_img = model.preprocess(image_path)

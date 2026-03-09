@@ -2,6 +2,7 @@
 ConvNeXt model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,27 +13,36 @@ class ConvNeXt_Tiny_Set(ModelInfoSet):
     """Configuration set for ConvNeXt Tiny models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvNext_Tiny",
-            "filename": "convnext_tiny_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 236,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvNext_Tiny",
+                "filename": "convnext_tiny_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 236,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 
@@ -41,27 +51,36 @@ class ConvNeXt_Small_Set(ModelInfoSet):
     """Configuration set for ConvNeXt Small models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvNext_Small",
-            "filename": "convnext_small_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 230,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvNext_Small",
+                "filename": "convnext_small_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 230,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 
@@ -70,27 +89,36 @@ class ConvNeXt_Base_Set(ModelInfoSet):
     """Configuration set for ConvNeXt Base models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvNext_Base",
-            "filename": "convnext_base_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvNext_Base",
+                "filename": "convnext_base_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 232,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 
@@ -99,27 +127,36 @@ class ConvNeXt_Large_Set(ModelInfoSet):
     """Configuration set for ConvNeXt Large models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ConvNext_Large",
-            "filename": "convnext_large_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ConvNext_Large",
+                "filename": "convnext_large_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 232,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 

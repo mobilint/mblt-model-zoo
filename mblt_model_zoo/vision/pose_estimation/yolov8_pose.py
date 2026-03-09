@@ -2,6 +2,7 @@
 YOLOv8 Pose Estimation model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,312 +13,234 @@ class YOLOv8nPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8nPose models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8n-pose",
-            "filename": "yolov8n-pose.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8n-pose",
+                "filename": "yolov8n-pose.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8n-pose",
-            "filename": "yolov8n-pose.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8sPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8sPose models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8s-pose",
-            "filename": "yolov8s-pose.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8s-pose",
+                "filename": "yolov8s-pose.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8s-pose",
-            "filename": "yolov8s-pose.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8mPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8mPose models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8m-pose",
-            "filename": "yolov8m-pose.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8m-pose",
+                "filename": "yolov8m-pose.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8m-pose",
-            "filename": "yolov8m-pose.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8lPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8lPose models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8l-pose",
-            "filename": "yolov8l-pose.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8l-pose",
+                "filename": "yolov8l-pose.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8l-pose",
-            "filename": "yolov8l-pose.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8xPose_Set(ModelInfoSet):
     """Configuration set for YOLOv8xPose models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8x-pose",
-            "filename": "yolov8x-pose.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8x-pose",
+                "filename": "yolov8x-pose.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8x-pose",
-            "filename": "yolov8x-pose.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8xPoseP6_Set(ModelInfoSet):
     """Configuration set for YOLOv8xPoseP6 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8x-pose-p6",
-            "filename": "yolov8x-pose-p6.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 4,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv8x-pose-p6",
+                "filename": "yolov8x-pose-p6.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [1280, 1280],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "pose_estimation",
+                "nc": 1,  # Number of classes
+                "nl": 4,  # Number of detection layers
+                "n_extra": 51,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv8x-pose-p6",
-            "filename": "yolov8x-pose-p6.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "pose_estimation",
-            "nc": 1,  # Number of classes
-            "nl": 4,  # Number of detection layers
-            "n_extra": 51,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv8nPose(MBLT_Engine):

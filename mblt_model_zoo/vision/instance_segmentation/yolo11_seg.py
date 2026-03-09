@@ -2,6 +2,7 @@
 YOLO11 Segmentation model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,260 +13,195 @@ class YOLO11nSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11nSeg models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11n-seg",
-            "filename": "yolo11n-seg.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11n-seg",
+                "filename": "yolo11n-seg.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "instance_segmentation",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 32,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11n-seg",
-            "filename": "yolo11n-seg.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO11sSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11sSeg models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11s-seg",
-            "filename": "yolo11s-seg.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11s-seg",
+                "filename": "yolo11s-seg.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "instance_segmentation",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 32,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11s-seg",
-            "filename": "yolo11s-seg.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO11mSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11mSeg models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11m-seg",
-            "filename": "yolo11m-seg.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11m-seg",
+                "filename": "yolo11m-seg.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "instance_segmentation",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 32,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11m-seg",
-            "filename": "yolo11m-seg.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO11lSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11lSeg models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11l-seg",
-            "filename": "yolo11l-seg.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11l-seg",
+                "filename": "yolo11l-seg.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "instance_segmentation",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 32,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11l-seg",
-            "filename": "yolo11l-seg.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO11xSeg_Set(ModelInfoSet):
     """Configuration set for YOLO11xSeg models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11x-seg",
-            "filename": "yolo11x-seg.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO11x-seg",
+                "filename": "yolo11x-seg.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "instance_segmentation",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "n_extra": 32,
+                "reg_max": 16,
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO11x-seg",
-            "filename": "yolo11x-seg.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "instance_segmentation",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "n_extra": 32,
-            "reg_max": 16,
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO11nSeg(MBLT_Engine):

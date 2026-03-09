@@ -26,7 +26,7 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | ConvNeXt_Large | (224,224,3) | 84.348 | 84.410 | 69.35 | 197.77 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_large.html) | |
 | DeiT_Tiny_Patch16_224 | (224,224,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit_tiny_patch16_224.fb_in1k) | fb_in1k |
 | DeiT_Small_Patch16_224 | (224,224,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit_small_patch16_224.fb_in1k) | fb_in1k |
-| DeiT_Base_Patch16_224 | (224,224,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit_base_patch16_224.fb_in1k) | fb_in1k |
+| DeiT_Base_Patch16_224 | (224,224,3) | 81.932 | 81.980 | 35.73 | 86.57 | [Link](https://huggingface.co/timm/deit_base_patch16_224.fb_in1k) | fb_in1k |
 | DeiT_Base_Patch16_384 | (384,384,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit_base_patch16_384.fb_in1k) | fb_in1k |
 | DeiT3_Small_Patch16_224 | (224,224,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit3_small_patch16_224.fb_in1k) | fb_in1k |
 | DeiT3_Small_Patch16_384 | (384,384,3) |  |  |  |  | [Link](https://huggingface.co/timm/deit3_small_patch16_384.fb_in1k) | fb_in1k |

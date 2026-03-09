@@ -2,6 +2,7 @@
 YOLO26 model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,248 +13,188 @@ class YOLO26n_Set(ModelInfoSet):
     """Configuration set for YOLO26n models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26n",
-            "filename": "yolo26n.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO26n",
+                "filename": "yolo26n.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "dflfree": True,  # dfl free yolo
+            }
+        ),
     )
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26n",
-            "filename": "yolo26n.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO26s_Set(ModelInfoSet):
     """Configuration set for YOLO26s models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26s",
-            "filename": "yolo26s.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO26s",
+                "filename": "yolo26s.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "dflfree": True,  # dfl free yolo
+            }
+        ),
     )
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26s",
-            "filename": "yolo26s.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO26m_Set(ModelInfoSet):
     """Configuration set for YOLO26m models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26m",
-            "filename": "yolo26m.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO26m",
+                "filename": "yolo26m.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "dflfree": True,  # dfl free yolo
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26m",
-            "filename": "yolo26m.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO26l_Set(ModelInfoSet):
     """Configuration set for YOLO26l models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26l",
-            "filename": "yolo26l.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO26l",
+                "filename": "yolo26l.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "dflfree": True,  # dfl free yolo
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26l",
-            "filename": "yolo26l.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO26x_Set(ModelInfoSet):
     """Configuration set for YOLO26x models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26x",
-            "filename": "yolo26x.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLO26x",
+                "filename": "yolo26x.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "nl": 3,  # Number of detection layers
+                "dflfree": True,  # dfl free yolo
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLO26x",
-            "filename": "yolo26x.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "nl": 3,  # Number of detection layers
-            "dflfree": True,  # dfl free yolo
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLO26n(MBLT_Engine):
