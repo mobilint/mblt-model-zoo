@@ -1,10 +1,6 @@
 import pytest
+from transformers import AutoTokenizer, TextStreamer, pipeline
 from utils import BatchTextStreamer
-
-from mblt_model_zoo.transformers import AutoTokenizer, pipeline
-from mblt_model_zoo.transformers.large_language_model.llama_batch import (
-    MobilintLlamaBatchForCausalLM,
-)
 
 MODEL_PATHS = (
     "mobilint/Llama-3.2-3B-Instruct-Batch16",
@@ -14,24 +10,39 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request):
+def pipe(request, revision, npu_params):
     model_path = request.param
+    npu_params.warn_unused({"base"})
+    model_kwargs = npu_params.base
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     tokenizer.padding_side = "left"
 
-    pipe = pipeline(
-        "text-generation",
-        model=model_path,
-        tokenizer=tokenizer,
-    )
+    if model_kwargs:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            tokenizer=tokenizer,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
+            revision=revision,
+            model_kwargs=model_kwargs,
+        )
+    else:
+        pipe = pipeline(
+            "text-generation",
+            model=model_path,
+            tokenizer=tokenizer,
+            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+            trust_remote_code=True,
+            revision=revision,
+        )
     yield pipe
-    if isinstance(pipe.model, MobilintLlamaBatchForCausalLM):
-        pipe.model.dispose()
+    del pipe
 
 
 def test_llama(pipe):

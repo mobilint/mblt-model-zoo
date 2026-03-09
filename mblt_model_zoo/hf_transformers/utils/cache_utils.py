@@ -1,6 +1,6 @@
 import copy
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import qbruntime
 import torch
@@ -58,34 +58,8 @@ class MobilintLayer(CacheLayerMixin):
             self.mxq_model.reset_cache_memory()
             self.mxq_model.load_cache_memory(self.buffer, self.cache_id)
 
-
-class MobilintCache(Cache):
-    def __init__(self, mxq_model: qbruntime.Model):
-        self.mxq_model = mxq_model
-
-        self.layers: list[MobilintLayer] = [MobilintLayer(self.mxq_model)]
-        self.layer_classes = MobilintLayer
-
-        self.num_hidden_layers = 1
-        self.cache_processor = None
-        self.buffer: List[bytes] = []
-
-    def reset(self):
-        super().reset()
-        self.buffer = []
-
-    def update_cache_position(self, cache_position: torch.Tensor):
-        self.layers[0].update_cache_position(cache_position)
-
-    def dump_cache_memory(self):
-        self.buffer = self.mxq_model.dump_cache_memory()
-
-    def load_cache_memory(self):
-        if self.get_seq_length() > 0:
-            self.mxq_model.load_cache_memory(self.buffer)
-
     def dump_cache_memory_to(self, cache_dir: str):
-        self.mxq_model.dump_cache_memory_to(cache_dir)
+        self.mxq_model.dump_cache_memory_to(cache_dir, self.cache_id)
         seq_path = Path(cache_dir) / "seq_length.txt"
         seq_path.write_text(f"{self.get_seq_length()}\n", encoding="utf-8")
 
@@ -96,35 +70,56 @@ class MobilintCache(Cache):
             seq_length = int(seq_path.read_text(encoding="utf-8").strip())
         else:
             seq_length = 0
-        self.layers[0]._seen_tokens = seq_length
-        self.mxq_model.load_cache_memory_from(cache_dir)
+        self._seen_tokens = seq_length
+        self.mxq_model.load_cache_memory_from(cache_dir, self.cache_id)
 
-    def copy(self):
-        copied = MobilintCache(self.mxq_model)
-        copied.layers[0]._seen_tokens = self.layers[0]._seen_tokens
+    def copy(self) -> "MobilintLayer":
+        copied = MobilintLayer(self.mxq_model, self.cache_id)
+        copied._seen_tokens = self._seen_tokens
         copied.buffer = copy.deepcopy(self.buffer)
         return copied
 
 
-class MobilintBatchCache(Cache):
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 16):
+class MobilintCache(Cache):
+    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1):
         self.mxq_model = mxq_model
-        self.mxq_model.reset_cache_memory()
-        self.batch_size = batch_size
+        self.batch_size = max(1, batch_size)
 
         self.layers: list[MobilintLayer] = [MobilintLayer(self.mxq_model, cache_id) for cache_id in range(self.batch_size)]
         self.layer_classes = MobilintLayer
+
+        self.num_hidden_layers = 1
         self.cache_processor = None
 
     def get_seq_length(self, index: int = 0) -> int:
         return self.layers[index].get_seq_length()
-    
-    def update_seen_tokens(self, sequence_lengths: dict[int, int]):
+
+    def update_cache_position(self, cache_position: torch.Tensor, index: int = 0):
+        self.layers[index].update_cache_position(cache_position)
+
+    def update_seen_tokens(self, sequence_lengths: Union[dict[int, int], int], index: int = 0):
+        if isinstance(sequence_lengths, int):
+            self.layers[index].update_seen_tokens(sequence_lengths)
+            return
         for cache_id, seq_len in sequence_lengths.items():
             self.layers[cache_id].update_seen_tokens(seq_len)
-    
-    def dump_cache_memory(self, cache_id: int):
-        self.layers[cache_id].dump_cache_memory()
 
-    def load_cache_memory(self, cache_id: int):
-        self.layers[cache_id].load_cache_memory()
+    def dump_cache_memory(self):
+        for layer_idx in range(len(self.layers)):
+            self.layers[layer_idx].dump_cache_memory()
+
+    def load_cache_memory(self):
+        for layer_idx in range(len(self.layers)):
+            self.layers[layer_idx].load_cache_memory()
+
+    def dump_cache_memory_to(self, cache_dir: str, index: int = 0):
+        self.layers[index].dump_cache_memory_to(cache_dir)
+
+    def load_cache_memory_from(self, cache_dir: str, index: int = 0):
+        self.layers[index].load_cache_memory_from(cache_dir)
+
+    def copy(self):
+        copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
+        for i in range(self.batch_size):
+            copied.layers[i] = self.layers[i].copy()
+        return copied

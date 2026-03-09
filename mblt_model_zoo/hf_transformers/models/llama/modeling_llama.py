@@ -14,15 +14,15 @@ from .configuration_llama import MobilintLlamaConfig
 
 logger = logging.get_logger(__name__)
 
+
 class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
     config: MobilintLlamaConfig
     base_model_prefix = "model"
 
     def __init__(self, config: MobilintLlamaConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
-        
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
-    
+
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
 
@@ -49,11 +49,13 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
-            
+
         assert inputs_embeds is not None
 
+        configured_batch_size = max(1, self.config.max_batch_size)
+
         if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+            past_key_values = self._get_cache("", configured_batch_size, 0)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -61,12 +63,16 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             ))
 
+        if configured_batch_size > 1 and attention_mask is None:
+            raise ValueError("attention_mask is required when config.max_batch_size > 1")
+
         logits = self.llm_forward(
             inputs_embeds,
             past_key_values,
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=attention_mask if configured_batch_size > 1 else None,
         )
 
         loss = None
@@ -80,7 +86,8 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             hidden_states=None,
             attentions=None,
         )
-        
+
+
 AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 

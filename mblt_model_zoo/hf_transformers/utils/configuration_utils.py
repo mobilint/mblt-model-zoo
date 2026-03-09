@@ -40,6 +40,14 @@ class MobilintConfigMixin(PretrainedConfig):
     @core_mode.setter
     def core_mode(self, value: str) -> None:
         self.npu_backend.core_mode = value
+    
+    @property
+    def max_batch_size(self) -> int:
+        return self.npu_backend.max_batch_size
+
+    @max_batch_size.setter
+    def max_batch_size(self, value: int) -> None:
+        self.npu_backend.max_batch_size = max(1, value)
 
     @property
     def target_cores(self) -> list:
@@ -109,6 +117,14 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @encoder_core_mode.setter
     def encoder_core_mode(self, value: str) -> None:
         self.encoder_npu_backend.core_mode = value
+    
+    @property
+    def encoder_max_batch_size(self) -> int:
+        return self.encoder_npu_backend.max_batch_size
+
+    @encoder_max_batch_size.setter
+    def encoder_max_batch_size(self, value: int) -> None:
+        self.encoder_npu_backend.max_batch_size = max(1, value)
 
     @property
     def encoder_target_cores(self) -> list:
@@ -149,6 +165,14 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_core_mode.setter
     def decoder_core_mode(self, value: str) -> None:
         self.decoder_npu_backend.core_mode = value
+    
+    @property
+    def decoder_max_batch_size(self) -> int:
+        return self.decoder_npu_backend.max_batch_size
+
+    @decoder_max_batch_size.setter
+    def decoder_max_batch_size(self, value: int) -> None:
+        self.decoder_npu_backend.max_batch_size = max(1, value)
 
     @property
     def decoder_target_cores(self) -> list:
@@ -213,6 +237,14 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     @vision_core_mode.setter
     def vision_core_mode(self, value: str) -> None:
         self.vision_config.core_mode = value
+    
+    @property
+    def vision_max_batch_size(self) -> int:
+        return self.vision_config.max_batch_size
+
+    @vision_max_batch_size.setter
+    def vision_max_batch_size(self, value: int) -> None:
+        self.vision_config.max_batch_size = max(1, value)
 
     @property
     def vision_target_cores(self) -> list:
@@ -253,6 +285,14 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     @text_core_mode.setter
     def text_core_mode(self, value: str) -> None:
         self.text_config.core_mode = value
+    
+    @property
+    def text_max_batch_size(self) -> int:
+        return self.text_config.max_batch_size
+
+    @text_max_batch_size.setter
+    def text_max_batch_size(self, value: int) -> None:
+        self.text_config.max_batch_size = max(1, value)
 
     @property
     def text_target_cores(self) -> list:
