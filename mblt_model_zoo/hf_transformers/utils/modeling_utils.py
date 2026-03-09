@@ -4,6 +4,7 @@ import time
 from typing import TYPE_CHECKING, Literal, Optional, Union, cast
 
 import numpy as np
+import qbruntime
 import torch
 import torch.nn as nn
 from transformers.modeling_utils import PreTrainedModel
@@ -132,9 +133,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         cache_position: torch.Tensor,
         chunk_size: int = 128,
         count_npu_time: bool = False,
+        attention_mask: Optional[torch.Tensor] = None,
     ):
-        inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
+        if attention_mask is not None:
+            return self._llm_forward_batch(
+                inputs_embeds,
+                attention_mask,
+                past_key_values,
+                chunk_size,
+            )
 
+        inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
@@ -165,6 +174,87 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
 
         return logits
+    
+    def _llm_forward_batch(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        past_key_values: Optional[MobilintCache],
+        chunk_size: int = 0,
+    ):
+        batch_size = attention_mask.shape[0]
+
+        if attention_mask.shape == inputs_embeds.shape[:-1]:
+            attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
+            inputs_embeds_masked = [inputs_embeds[i, attention_mask_bool[i, :], :] for i in range(batch_size)]
+            sequence_lengths = cast(list[int], attention_mask.sum(dim=1).tolist())
+        else:
+            assert inputs_embeds.shape[1] == 1
+            inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
+            sequence_lengths = [1 for _ in range(batch_size)]
+
+        max_sequence_length = max(sequence_lengths)
+        mxq_model = self.npu_backend.mxq_model
+        if chunk_size == 0:
+            chunk_size = mxq_model.get_input_buffer_info()[0].max_width
+        assert chunk_size > 0, "chunk_size should be a positive number! chunk_size: %d" % chunk_size
+        num_of_chunks = math.ceil(max_sequence_length / chunk_size)
+
+        logits_dict: dict[int, torch.Tensor] = {}
+
+        for i in range(num_of_chunks):
+            start_index = i * chunk_size
+
+            sequence_lengths_chunks: list[int] = []
+            cache_sizes_chunks: list[int] = []
+            cache_ids: list[int] = []
+            prefill_masks: list[bool] = []
+            inputs_embeds_chunks: list[torch.Tensor] = []
+            seen_tokens: dict[int, int] = {}
+
+            for j in range(batch_size):
+                end_index = min(start_index + chunk_size, sequence_lengths[j])
+                if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
+                    sequence_lengths_chunks.append(end_index - start_index)
+                    cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
+                    cache_ids.append(j)
+                    prefill_masks.append(end_index < inputs_embeds_masked[j].shape[0])
+                    inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
+                    seen_tokens[j] = end_index - start_index
+
+            if len(inputs_embeds_chunks) == 0:
+                continue
+
+            inputs_embeds_concat = torch.concat(inputs_embeds_chunks, dim=0).unsqueeze(0)
+            inputs_embeds_numpy: np.ndarray = inputs_embeds_concat.type(torch.float32).cpu().numpy()
+
+            if inputs_embeds_numpy.ndim == 3:
+                inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+
+            batch_param = qbruntime.BatchParam(
+                sequence_lengths=sequence_lengths_chunks,
+                cache_sizes=cache_sizes_chunks,
+                cache_ids=cache_ids,
+                prefill_masks=prefill_masks,
+            )
+            result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_param)
+            assert result is not None, "mxq infer result is None!"
+
+            logits_chunks = cast(
+                torch.FloatTensor,
+                torch.tensor(result[0], dtype=torch.float32).reshape([len(cache_ids), 1, -1]),
+            )
+
+            for j, prefill_mask in enumerate(prefill_masks):
+                if prefill_mask is False:
+                    cache_id = cache_ids[j]
+                    logits_dict[cache_id] = logits_chunks[j, :, :].clone()
+
+            if past_key_values is not None:
+                past_key_values.update_seen_tokens(seen_tokens)
+
+        logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
+        return cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
 
     def decoder_forward(
         self,

@@ -31,6 +31,7 @@ class MobilintNPUBackend:
         self,
         mxq_path: str = "",
         dev_no: int = 0,
+        max_batch_size: int = 1,
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
@@ -43,6 +44,7 @@ class MobilintNPUBackend:
         self._commit_hash = commit_hash
         self.mxq_path = mxq_path
         self.dev_no = dev_no
+        self.max_batch_size = max(1, max_batch_size)
         self.core_mode = core_mode
 
         self._target_cores_serialized: List[str] = []
@@ -302,6 +304,7 @@ class MobilintNPUBackend:
         result = {
             f"{p}mxq_path": self.mxq_path,
             f"{p}dev_no": self.dev_no,
+            f"{p}max_batch_size": self.max_batch_size,
             f"{p}core_mode": self.core_mode,
         }
 
@@ -328,6 +331,7 @@ class MobilintNPUBackend:
             name_or_path=data.pop("name_or_path", ""),
             mxq_path=data.pop(f"{p}mxq_path", ""),
             dev_no=data.pop(f"{p}dev_no", 0),
+            max_batch_size=data.pop(f"{p}max_batch_size", 1),
             core_mode=data.pop(f"{p}core_mode", "single"),
             target_cores=data.pop(f"{p}target_cores", None),
             target_clusters=data.pop(f"{p}target_clusters", None),
