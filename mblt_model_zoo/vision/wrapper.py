@@ -299,7 +299,7 @@ class MXQ_Model:
         log_model_details(cached_file)
         self.model.launch(self.acc)
 
-        input_dtype = str(self.model.get_model_input_data_types()[0])
+        input_dtype = str(self.model.get_model_input_data_type())
         if input_dtype == "DataType.Uint8":
             self.uint8_input = True
         elif input_dtype == "DataType.Float32":
