@@ -290,7 +290,7 @@ class MXQ_Model:
                 )
             except Exception as e:
                 print(e)
-                print("Failed to download model from HuggingFace")
+                raise RuntimeError("Failed to download model from HuggingFace")
         else:
             raise ValueError("The model should be prepared on server or local path")
 
