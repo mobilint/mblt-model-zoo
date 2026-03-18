@@ -18,7 +18,7 @@ Outputs (created under `benchmark/transformers/results/text_generation/`):
 
 Common CLI options:
 
-- `--device` (default: `cpu`)
+- `--device` (default: `None`)
 - `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
 - `--revision` (e.g., `W8`)
 - `--all` (benchmark `W8` and `W4W8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)

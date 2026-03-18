@@ -69,7 +69,7 @@ def _parse_int_list_optional(spec: str | None) -> list[int] | None:
 def _build_pipeline(
     model_id: str,
     revision: str | None = None,
-    device: str = "cpu",
+    device: str | None = None,
     device_map: str | None = None,
     dtype: str | None = None,
     trust_remote_code: bool = True,
@@ -78,8 +78,9 @@ def _build_pipeline(
         "task": "text-generation",
         "model": model_id,
         "trust_remote_code": trust_remote_code,
-        "device": device,
     }
+    if device is not None:
+        kwargs["device"] = device
     if revision:
         kwargs["revision"] = revision
     if device_map:
@@ -427,8 +428,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     parser.add_argument(
         "--device",
-        default="cpu",
-        help='pipeline device (e.g., "cpu", "cuda:0")',
+        default=None,
+        help='pipeline device (default: None; e.g., "cpu", "cuda:0")',
     )
     parser.add_argument(
         "--device-map",
