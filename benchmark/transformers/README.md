@@ -55,18 +55,18 @@ When `--all` is used, results are saved with suffixes in both the output files a
 - `{model}-W8.json`, `{model}-W8.png`
 - `{model}-W4V8.json`, `{model}-W4V8.png`
 
-## Compare two result folders
+## Compare result folders
 
-You can compare two benchmark result folders and generate 6 charts:
+You can compare multiple benchmark result folders and generate 6 charts:
 
 ```bash
 python benchmark/transformers/plot_compare_benchmark_results.py \
-  <result_folder_a> <result_folder_b> \
+  <result_folder_1> <result_folder_2> [<result_folder_3> ...] \
   --output-dir benchmark/transformers/results/charts
 ```
 
 Expected per-model file format in each folder: `group_id__model_id.json`.
-The script ignores `group_id`, intersects model IDs across the two folders, then saves:
+The script ignores `group_id`, intersects model IDs across all folders, then saves:
 
 - `prefill_tps.png`
 - `decode_tps.png`

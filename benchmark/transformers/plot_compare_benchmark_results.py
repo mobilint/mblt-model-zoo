@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -85,20 +84,29 @@ def _collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
     return metrics
 
 
-def _unique_folder_labels(folder_a: Path, folder_b: Path) -> tuple[str, str]:
-    a = folder_a.name or str(folder_a)
-    b = folder_b.name or str(folder_b)
-    if a != b:
-        return a, b
-    return f"{a} (A)", f"{b} (B)"
+def _unique_folder_labels(folders: list[Path]) -> list[str]:
+    base_labels = [folder.name or str(folder) for folder in folders]
+    counts: dict[str, int] = {}
+    for label in base_labels:
+        counts[label] = counts.get(label, 0) + 1
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for idx, label in enumerate(base_labels):
+        if counts[label] == 1:
+            out.append(label)
+            continue
+        seen[label] = seen.get(label, 0) + 1
+        out.append(f"{label} [{seen[label]}/{counts[label]}]")
+    if len(set(out)) != len(out):
+        out = [f"{label}#{idx + 1}" for idx, label in enumerate(base_labels)]
+    return out
 
 
 def _plot_tps_chart(
     *,
     models: list[str],
-    folder_labels: tuple[str, str],
-    metrics_a: dict[str, ModelMetrics],
-    metrics_b: dict[str, ModelMetrics],
+    folder_labels: list[str],
+    metrics_by_folder: list[dict[str, ModelMetrics]],
     phase: str,
     output_path: Path,
 ) -> None:
@@ -107,14 +115,20 @@ def _plot_tps_chart(
 
     token_set: set[int] = set()
     for m in models:
-        token_set.update((metrics_a[m].prefill_tps if phase == "prefill" else metrics_a[m].decode_tps).keys())
-        token_set.update((metrics_b[m].prefill_tps if phase == "prefill" else metrics_b[m].decode_tps).keys())
+        for folder_metrics in metrics_by_folder:
+            token_set.update(
+                (
+                    folder_metrics[m].prefill_tps
+                    if phase == "prefill"
+                    else folder_metrics[m].decode_tps
+                ).keys()
+            )
     tokens = sorted(token_set)
 
     categories: list[tuple[int, int]] = []
-    for token in tokens:
-        categories.append((0, token))
-        categories.append((1, token))
+    for folder_idx in range(len(metrics_by_folder)):
+        for token in tokens:
+            categories.append((folder_idx, token))
     if not categories:
         print(f"Skipping {output_path.name}: no {phase} TPS data.")
         return
@@ -132,7 +146,7 @@ def _plot_tps_chart(
         x_vals = []
         y_vals = []
         for i, model in enumerate(models):
-            metric = metrics_a[model] if folder_idx == 0 else metrics_b[model]
+            metric = metrics_by_folder[folder_idx][model]
             series = metric.prefill_tps if phase == "prefill" else metric.decode_tps
             value = series.get(token)
             if value is None:
@@ -160,16 +174,17 @@ def _plot_tps_chart(
 def _plot_scalar_chart(
     *,
     models: list[str],
-    folder_labels: tuple[str, str],
-    metrics_a: dict[str, ModelMetrics],
-    metrics_b: dict[str, ModelMetrics],
+    folder_labels: list[str],
+    metrics_by_folder: list[dict[str, ModelMetrics]],
     title: str,
     x_label: str,
     output_path: Path,
     selector: str,
 ) -> None:
     y = np.arange(len(models), dtype=float)
-    bar_h = 0.36
+    group_height = 0.82
+    bar_h = group_height / max(len(metrics_by_folder), 1)
+    start = -group_height / 2 + bar_h / 2
 
     fig_h = max(5.0, 0.45 * len(models) + 2.0)
     fig, ax = plt.subplots(figsize=(14, fig_h))
@@ -177,12 +192,8 @@ def _plot_scalar_chart(
     def _get(metric: ModelMetrics) -> Optional[float]:
         return getattr(metric, selector)
 
-    for idx, (label, source, color) in enumerate(
-        [
-            (folder_labels[0], metrics_a, "#1f77b4"),
-            (folder_labels[1], metrics_b, "#ff7f0e"),
-        ]
-    ):
+    cmap = plt.get_cmap("tab10")
+    for idx, (label, source) in enumerate(zip(folder_labels, metrics_by_folder)):
         x_vals = []
         y_vals = []
         for i, model in enumerate(models):
@@ -190,9 +201,15 @@ def _plot_scalar_chart(
             if value is None:
                 continue
             x_vals.append(value)
-            y_vals.append(y[i] + (idx - 0.5) * bar_h)
+            y_vals.append(y[i] + start + idx * bar_h)
         if x_vals:
-            ax.barh(y_vals, x_vals, height=bar_h * 0.95, label=label, color=color)
+            ax.barh(
+                y_vals,
+                x_vals,
+                height=bar_h * 0.95,
+                label=label,
+                color=cmap(idx % 10),
+            )
 
     ax.set_yticks(y)
     ax.set_yticklabels(models)
@@ -210,11 +227,14 @@ def _plot_scalar_chart(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare two benchmark result folders and generate 6 model-wise bar charts."
+            "Compare N benchmark result folders and generate 6 model-wise bar charts."
         )
     )
-    parser.add_argument("folder_a", help="first benchmark result folder (relative/absolute)")
-    parser.add_argument("folder_b", help="second benchmark result folder (relative/absolute)")
+    parser.add_argument(
+        "folders",
+        nargs="+",
+        help="benchmark result folders (relative/absolute). Pass 2 or more.",
+    )
     parser.add_argument(
         "--output-dir",
         default=".",
@@ -222,52 +242,48 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    folder_a = Path(args.folder_a).expanduser().resolve()
-    folder_b = Path(args.folder_b).expanduser().resolve()
+    folders = [Path(folder).expanduser().resolve() for folder in args.folders]
     output_dir = Path(args.output_dir).expanduser().resolve()
 
-    if not folder_a.is_dir():
-        raise SystemExit(f"Not a directory: {folder_a}")
-    if not folder_b.is_dir():
-        raise SystemExit(f"Not a directory: {folder_b}")
+    if len(folders) < 2:
+        raise SystemExit("Please provide at least 2 folders.")
+    for folder in folders:
+        if not folder.is_dir():
+            raise SystemExit(f"Not a directory: {folder}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics_a = _collect_folder_metrics(folder_a)
-    metrics_b = _collect_folder_metrics(folder_b)
+    metrics_by_folder = [_collect_folder_metrics(folder) for folder in folders]
+    folder_labels = _unique_folder_labels(folders)
 
-    common_models = sorted(set(metrics_a.keys()) & set(metrics_b.keys()))
-    print(f"Folder A models: {len(metrics_a)}")
-    print(f"Folder B models: {len(metrics_b)}")
-    print(f"Common models: {len(common_models)}")
+    model_sets = [set(metrics.keys()) for metrics in metrics_by_folder]
+    common_models = sorted(set.intersection(*model_sets))
+    for label, folder, metrics in zip(folder_labels, folders, metrics_by_folder):
+        print(f"Folder {label}: {folder} -> {len(metrics)} models")
+    print(f"Common models across all folders: {len(common_models)}")
     for model in common_models:
         print(f" - {model}")
 
     if not common_models:
-        raise SystemExit("No common model_id found across the two folders.")
-
-    labels = _unique_folder_labels(folder_a, folder_b)
+        raise SystemExit("No common model_id found across all input folders.")
 
     _plot_tps_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         phase="prefill",
         output_path=output_dir / "prefill_tps.png",
     )
     _plot_tps_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         phase="decode",
         output_path=output_dir / "decode_tps.png",
     )
     _plot_scalar_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         title="Prefill Tokens/J",
         x_label="Tokens/J",
         output_path=output_dir / "prefill_tokens_per_j.png",
@@ -275,9 +291,8 @@ def main() -> int:
     )
     _plot_scalar_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         title="Decode Tokens/J",
         x_label="Tokens/J",
         output_path=output_dir / "decode_tokens_per_j.png",
@@ -285,9 +300,8 @@ def main() -> int:
     )
     _plot_scalar_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         title="Prefill J/Token",
         x_label="J/Token",
         output_path=output_dir / "prefill_j_per_token.png",
@@ -295,9 +309,8 @@ def main() -> int:
     )
     _plot_scalar_chart(
         models=common_models,
-        folder_labels=labels,
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
+        folder_labels=folder_labels,
+        metrics_by_folder=metrics_by_folder,
         title="Decode J/Token",
         x_label="J/Token",
         output_path=output_dir / "decode_j_per_token.png",
