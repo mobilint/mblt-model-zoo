@@ -26,6 +26,7 @@ Common CLI options:
 - `--fixed-decode` (default: `10`)
 - `--fixed-prefill` (default: `128`)
 - `--warmup` (default: `1`)
+- `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
 - `--skip-existing` (skip models with existing outputs)
 
 Example:

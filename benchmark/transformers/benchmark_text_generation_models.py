@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from dataclasses import asdict
-from typing import Iterable, Tuple
+from typing import Any, Iterable, Tuple
 
 from transformers import pipeline as hf_pipeline
 from tqdm import tqdm
@@ -78,6 +78,91 @@ def _build_pipeline(
             kwargs["torch_dtype"] = dtype
             return hf_pipeline(**kwargs)
     return hf_pipeline(**kwargs)
+
+
+def _normalize_repo_id(value: str) -> str:
+    text = value.strip()
+    if text.startswith("https://huggingface.co/"):
+        text = text[len("https://huggingface.co/") :]
+    return text.strip("/")
+
+
+def _extract_parent_model_id(info: Any) -> str | None:
+    card_data = getattr(info, "cardData", None)
+    if card_data is None:
+        card_data = getattr(info, "card_data", None)
+
+    payload: dict[str, Any] | None = None
+    if isinstance(card_data, dict):
+        payload = card_data
+    elif hasattr(card_data, "to_dict"):
+        try:
+            payload = card_data.to_dict()
+        except Exception:
+            payload = None
+    elif hasattr(card_data, "__dict__"):
+        payload = dict(card_data.__dict__)
+
+    if not payload:
+        return None
+
+    def _pick_candidate(raw: Any) -> str | None:
+        if isinstance(raw, str):
+            candidate = _normalize_repo_id(raw)
+            return candidate if "/" in candidate else None
+        if isinstance(raw, dict):
+            for key in ("model_id", "repo_id", "id", "name"):
+                value = raw.get(key)
+                if isinstance(value, str):
+                    candidate = _normalize_repo_id(value)
+                    if "/" in candidate:
+                        return candidate
+            return None
+        if isinstance(raw, list):
+            for item in raw:
+                picked = _pick_candidate(item)
+                if picked:
+                    return picked
+            return None
+        return None
+
+    for key in ("base_model", "base_models", "baseModel", "parent_model"):
+        candidate = _pick_candidate(payload.get(key))
+        if candidate:
+            return candidate
+
+    return None
+
+
+def _resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+    except Exception as e:
+        print(
+            "Failed to initialize Hugging Face Hub API for --original-models. "
+            f"Using original list_models output. Error: {e}"
+        )
+        return list(model_ids)
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for model_id in model_ids:
+        target_id = model_id
+        try:
+            info = api.model_info(model_id)
+            parent_id = _extract_parent_model_id(info)
+            if parent_id:
+                target_id = parent_id
+        except Exception as e:
+            print(f"Warning: failed to resolve parent model for {model_id}: {e}")
+
+        if target_id not in seen:
+            resolved.append(target_id)
+            seen.add(target_id)
+
+    return resolved
 
 
 def _load_result(path: str) -> BenchmarkResult:
@@ -221,6 +306,14 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         help="number of warmup runs before measured run",
     )
+    parser.add_argument(
+        "--original-models",
+        action="store_true",
+        help=(
+            "resolve each Mobilint model to its parent/base model from HF Hub and "
+            "benchmark the unique parent model ids"
+        ),
+    )
     args = parser.parse_args(argv)
 
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -230,6 +323,18 @@ def main(argv: list[str] | None = None) -> int:
     if not model_ids:
         print("No text-generation models found.")
         return 0
+    if args.original_models:
+        original_count = len(model_ids)
+        model_ids = _resolve_original_model_ids(model_ids)
+        print(
+            f"Using parent/original model ids: {len(model_ids)} unique models "
+            f"(from {original_count} listed models)."
+        )
+        if args.all or args.revision:
+            print(
+                "Note: --all/--revision are applied to resolved original model ids "
+                "(requested revisions may not exist)."
+            )
 
     results_dir = os.path.join(
         os.path.dirname(__file__),
