@@ -67,6 +67,9 @@ python benchmark/transformers/plot_compare_benchmark_results.py \
   --output-dir benchmark/transformers/results/charts
 ```
 
+If `--output-dir` is omitted, charts are saved under:
+`benchmark/transformers/results/compare/<dirname1_dirname2_...>/`
+
 Expected per-model file format in each folder: `group_id__model_id.json`.
 The script ignores `group_id`, intersects model IDs across all folders, then saves:
 

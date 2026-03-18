@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -100,6 +101,20 @@ def _unique_folder_labels(folders: list[Path]) -> list[str]:
     if len(set(out)) != len(out):
         out = [f"{label}#{idx + 1}" for idx, label in enumerate(base_labels)]
     return out
+
+
+def _sanitize_dirname(text: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")
+    return cleaned or "unnamed"
+
+
+def _default_output_dir(folders: list[Path]) -> Path:
+    base = Path(__file__).resolve().parent / "results" / "compare"
+    parts: list[str] = []
+    for folder in folders:
+        name = folder.name or str(folder)
+        parts.append(_sanitize_dirname(name))
+    return base / "_".join(parts)
 
 
 def _plot_tps_chart(
@@ -237,13 +252,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--output-dir",
-        default=".",
-        help="directory to save PNG charts (default: current directory)",
+        default=None,
+        help=(
+            "directory to save PNG charts (default: "
+            "benchmark/transformers/results/compare/<dir1_dir2_...>)"
+        ),
     )
     args = parser.parse_args()
 
     folders = [Path(folder).expanduser().resolve() for folder in args.folders]
-    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir = (
+        Path(args.output_dir).expanduser().resolve()
+        if args.output_dir
+        else _default_output_dir(folders)
+    )
 
     if len(folders) < 2:
         raise SystemExit("Please provide at least 2 folders.")
