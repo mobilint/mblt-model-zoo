@@ -14,6 +14,7 @@ Outputs (created under `benchmark/transformers/results/text_generation/`):
 
 - `{model}.json` and `{model}.png` for each model
 - `combined.png`, `combined.csv`, and `combined.md`
+- `combined_power.csv` and `combined_power.md` (when power metrics are available)
 
 Common CLI options:
 
@@ -27,6 +28,10 @@ Common CLI options:
 - `--fixed-prefill` (default: `128`)
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
+- `--power/--no-power` (default: `--power`)
+- `--power-device` (`auto`, `gpu`, `npu`)
+- `--power-interval` (default: `0.2`)
+- `--power-gpu-id` (e.g., `0` or `0,1`)
 - `--skip-existing` (skip models with existing outputs)
 
 Example:
