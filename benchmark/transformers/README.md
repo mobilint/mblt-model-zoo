@@ -25,6 +25,7 @@ Common CLI options:
 - `--decode-range` (e.g., `128:512:128`)
 - `--fixed-decode` (default: `10`)
 - `--fixed-prefill` (default: `128`)
+- `--warmup` (default: `1`)
 - `--skip-existing` (skip models with existing outputs)
 
 Example:

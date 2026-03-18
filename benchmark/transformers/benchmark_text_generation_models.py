@@ -41,6 +41,16 @@ def _parse_range_arg(raw: str) -> Tuple[int, int, int]:
     return start, end, step
 
 
+def _parse_positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("value must be an integer") from e
+    if value <= 0:
+        raise argparse.ArgumentTypeError("value must be > 0")
+    return value
+
+
 def _build_pipeline(
     model_id: str,
     revision: str | None = None,
@@ -205,6 +215,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip models with existing JSON+PNG outputs",
     )
+    parser.add_argument(
+        "--warmup",
+        type=_parse_positive_int,
+        default=1,
+        help="number of warmup runs before measured run",
+    )
     args = parser.parse_args(argv)
 
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -265,6 +281,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Skipping (failed to load model): {e}")
             continue
         measurer = TPSMeasurer(pipeline)
+        for _ in range(args.warmup):
+            measurer.measure(
+                num_prefill=args.fixed_prefill,
+                num_decode=args.fixed_decode,
+                trace_path=None,
+            )
         result = measurer.measure_full(
             prefill_range=args.prefill_range,
             decode_range=args.decode_range,
