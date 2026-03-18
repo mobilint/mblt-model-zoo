@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import os
 import time
@@ -94,6 +95,110 @@ def _build_pipeline(
             kwargs["torch_dtype"] = dtype
             return hf_pipeline(**kwargs)
     return hf_pipeline(**kwargs)
+
+
+def _is_cuda_device(device: str | None) -> bool:
+    return isinstance(device, str) and device.strip().lower().startswith("cuda")
+
+
+def _cuda_device_index(device: str | None) -> int | None:
+    if not _is_cuda_device(device):
+        return None
+    text = (device or "").strip().lower()
+    if ":" not in text:
+        return 0
+    try:
+        return int(text.split(":", 1)[1])
+    except ValueError:
+        return None
+
+
+def _is_cuda_oom_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "cuda out of memory" in msg
+        or ("out of memory" in msg and "cuda" in msg)
+        or "cublas_status_alloc_failed" in msg
+    )
+
+
+def _clear_cuda_memory(device: str | None) -> None:
+    try:
+        import torch
+    except Exception:
+        return
+    if not torch.cuda.is_available():
+        return
+    idx = _cuda_device_index(device)
+    try:
+        if idx is not None:
+            torch.cuda.set_device(idx)
+    except Exception:
+        pass
+    gc.collect()
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
+
+def _estimate_model_weight_bytes(model_id: str, revision: str | None) -> int | None:
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(model_id, revision=revision, files_metadata=True)
+    except Exception:
+        return None
+
+    siblings = getattr(info, "siblings", None) or []
+    total_bytes = 0
+    for sibling in siblings:
+        rfilename = getattr(sibling, "rfilename", "") or ""
+        name = rfilename.lower()
+        if any(ex in name for ex in ("optimizer", "training_args", "scheduler", "scaler")):
+            continue
+        if not name.endswith((".safetensors", ".bin", ".pt", ".pth")):
+            continue
+        size = getattr(sibling, "size", None)
+        if isinstance(size, int) and size > 0:
+            total_bytes += size
+    return total_bytes if total_bytes > 0 else None
+
+
+def _cuda_memory_info(device: str | None) -> tuple[int, int] | None:
+    try:
+        import torch
+    except Exception:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    idx = _cuda_device_index(device)
+    if idx is None:
+        return None
+    try:
+        free_b, total_b = torch.cuda.mem_get_info(idx)
+    except Exception:
+        return None
+    return int(free_b), int(total_b)
+
+
+def _format_gib(num_bytes: int | float | None) -> str:
+    if num_bytes is None:
+        return "n/a"
+    return f"{float(num_bytes) / (1024 ** 3):.2f} GiB"
+
+
+def _should_precheck_cuda(args: argparse.Namespace) -> bool:
+    if not args.cuda_precheck:
+        return False
+    if _is_cuda_device(args.device):
+        return True
+    # If only device_map is set (e.g. auto), target GPU topology is ambiguous.
+    return False
 
 
 def _normalize_repo_id(value: str) -> str:
@@ -524,6 +629,21 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="comma-separated GPU ids for power tracking (e.g., 0,1)",
     )
+    parser.add_argument(
+        "--cuda-precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "best-effort CUDA VRAM pre-check before loading each model "
+            "(default: on, disable via --no-cuda-precheck)"
+        ),
+    )
+    parser.add_argument(
+        "--cuda-precheck-margin",
+        type=float,
+        default=1.15,
+        help="required free VRAM factor versus estimated model weights (default: 1.15)",
+    )
     args = parser.parse_args(argv)
 
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -566,6 +686,9 @@ def main(argv: list[str] | None = None) -> int:
         total=len(targets),
         unit="model",
     ):
+        # Ensure pre-check sees memory state after releasing previous model.
+        if _is_cuda_device(args.device):
+            _clear_cuda_memory(args.device)
         print(f"=== {label} ===")
         revision = _select_revision(model_id, revision_candidates)
         if args.all and revision is None:
@@ -580,47 +703,84 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print("Skipping (results exist).")
             continue
+        if _should_precheck_cuda(args):
+            estimated = _estimate_model_weight_bytes(model_id, revision)
+            mem_info = _cuda_memory_info(args.device)
+            if estimated is not None and mem_info is not None:
+                free_b, _ = mem_info
+                required = int(float(estimated) * float(args.cuda_precheck_margin))
+                if free_b < required:
+                    print(
+                        "Skipping (pre-check VRAM insufficient): "
+                        f"free={_format_gib(free_b)} required~={_format_gib(required)} "
+                        f"estimated_weights={_format_gib(estimated)}"
+                    )
+                    _clear_cuda_memory(args.device)
+                    continue
+
+        pipeline = None
+        tracker = None
         try:
-            pipeline = _build_pipeline(
-                model_id,
-                revision=revision,
-                device=args.device,
-                device_map=args.device_map,
-                dtype=args.dtype,
-                trust_remote_code=args.trust_remote_code,
-            )
-        except Exception as e:
-            if args.all and _revision_exists(model_id, revision or "") is None:
-                print(f"Skipping (failed to load revision {revision}): {e}")
-            else:
-                print(f"Skipping (failed to load model): {e}")
-            continue
-        measurer = TPSMeasurer(pipeline)
-        tracker = _build_power_tracker(args, pipeline)
-        _print_power_status(args, tracker)
-        for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
-            measurer.measure(
-                num_prefill=args.fixed_prefill,
-                num_decode=args.fixed_decode,
-                trace_path=None,
-                show_progress=True,
-                progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
-            )
-        run_start_t = time.time()
-        if tracker is not None:
-            tracker.start()
-        try:
-            result = measurer.measure_full(
-                prefill_range=args.prefill_range,
-                decode_range=args.decode_range,
-                fixed_decode_len=args.fixed_decode,
-                fixed_prefill_len=args.fixed_prefill,
-                show_progress=True,
-                progress_prefix=label,
-            )
-        finally:
+            try:
+                pipeline = _build_pipeline(
+                    model_id,
+                    revision=revision,
+                    device=args.device,
+                    device_map=args.device_map,
+                    dtype=args.dtype,
+                    trust_remote_code=args.trust_remote_code,
+                )
+            except Exception as e:
+                if _is_cuda_oom_error(e):
+                    print(f"Skipping (CUDA OOM while loading model): {e}")
+                    _clear_cuda_memory(args.device)
+                    continue
+                if args.all and _revision_exists(model_id, revision or "") is None:
+                    print(f"Skipping (failed to load revision {revision}): {e}")
+                else:
+                    print(f"Skipping (failed to load model): {e}")
+                continue
+
+            measurer = TPSMeasurer(pipeline)
+            tracker = _build_power_tracker(args, pipeline)
+            _print_power_status(args, tracker)
+            for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
+                measurer.measure(
+                    num_prefill=args.fixed_prefill,
+                    num_decode=args.fixed_decode,
+                    trace_path=None,
+                    show_progress=True,
+                    progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
+                )
+            run_start_t = time.time()
             if tracker is not None:
-                tracker.stop()
+                tracker.start()
+            try:
+                result = measurer.measure_full(
+                    prefill_range=args.prefill_range,
+                    decode_range=args.decode_range,
+                    fixed_decode_len=args.fixed_decode,
+                    fixed_prefill_len=args.fixed_prefill,
+                    show_progress=True,
+                    progress_prefix=label,
+                )
+            finally:
+                if tracker is not None:
+                    tracker.stop()
+        except Exception as e:
+            if _is_cuda_oom_error(e):
+                print(f"Skipping (CUDA OOM during benchmark): {e}")
+                if pipeline is not None:
+                    del pipeline
+                _clear_cuda_memory(args.device)
+                continue
+            print(f"Skipping (benchmark failed): {e}")
+            if pipeline is not None:
+                del pipeline
+            if _is_cuda_device(args.device):
+                _clear_cuda_memory(args.device)
+            continue
+
         if result.prefill_sweep.avg_total_token_latency_values:
             avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
             avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
@@ -695,6 +855,8 @@ def main(argv: list[str] | None = None) -> int:
         measurer.plot_and_save(result, save_path=png_path)
 
         del pipeline
+        if _is_cuda_device(args.device):
+            _clear_cuda_memory(args.device)
 
     combined_results = []
     combined_labels = []

@@ -32,6 +32,8 @@ Common CLI options:
 - `--power-device` (`auto`, `gpu`, `npu`)
 - `--power-interval` (default: `0.2`)
 - `--power-gpu-id` (e.g., `0` or `0,1`)
+- `--cuda-precheck/--no-cuda-precheck` (best-effort VRAM pre-check before load; default: `--cuda-precheck`)
+- `--cuda-precheck-margin` (default: `1.15`)
 - `--skip-existing` (skip models with existing outputs)
 
 Example:
