@@ -597,11 +597,13 @@ def main(argv: list[str] | None = None) -> int:
         measurer = TPSMeasurer(pipeline)
         tracker = _build_power_tracker(args, pipeline)
         _print_power_status(args, tracker)
-        for _ in range(args.warmup):
+        for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
             measurer.measure(
                 num_prefill=args.fixed_prefill,
                 num_decode=args.fixed_decode,
                 trace_path=None,
+                show_progress=True,
+                progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
             )
         run_start_t = time.time()
         if tracker is not None:
@@ -612,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
                 decode_range=args.decode_range,
                 fixed_decode_len=args.fixed_decode,
                 fixed_prefill_len=args.fixed_prefill,
+                show_progress=True,
+                progress_prefix=label,
             )
         finally:
             if tracker is not None:

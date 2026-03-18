@@ -311,6 +311,8 @@ class TPSMeasurer:
         num_prefill=512,
         num_decode=128,
         trace_path: Union[str, None] = None,
+        show_progress: bool = False,
+        progress_desc: Union[str, None] = None,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -346,11 +348,21 @@ class TPSMeasurer:
             npu_prefill_time = 0.0
             npu_decode_time = 0.0
             has_npu_time = False
-            
+
+            token_pbar = None
+            if show_progress:
+                token_pbar = tqdm(
+                    total=num_decode + 1,
+                    desc=progress_desc or f"generate (prefill={num_prefill}, decode={num_decode})",
+                    leave=False,
+                )
+
             for _ in streamer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
                 decoded_tokens += 1
+                if token_pbar is not None:
+                    token_pbar.update(1)
                 npu_time = getattr(self.model, "npu_time", None)
                 if npu_time is not None:
                     has_npu_time = True
@@ -361,6 +373,8 @@ class TPSMeasurer:
                 
             t_end = time.perf_counter()
             thread.join()
+            if token_pbar is not None:
+                token_pbar.close()
             
             assert first_token_time is not None
 
@@ -409,19 +423,26 @@ class TPSMeasurer:
         fixed_prefill_len=128,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
+        progress_prefix: str = "",
     ) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
+            prefix = f"{progress_prefix} " if progress_prefix else ""
 
             # 1. Prefill Sweep
             p_start, p_end, p_step = prefill_range
             prefill_iter = range(p_start, p_end + 1, p_step)
             if show_progress:
-                prefill_iter = tqdm(prefill_iter, desc="prefill sweep", leave=False)
+                prefill_iter = tqdm(prefill_iter, desc=f"{prefix}prefill sweep", leave=False)
 
             for p_len in prefill_iter:
-                res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
+                res = self.measure(
+                    num_prefill=p_len,
+                    num_decode=fixed_decode_len,
+                    show_progress=show_progress,
+                    progress_desc=f"{prefix}prefill generate ({p_len},{fixed_decode_len})",
+                )
                 
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
@@ -449,7 +470,12 @@ class TPSMeasurer:
 
             targets = set(range(d_start, d_end + 1, d_step))
             pbar_decode = (
-                tqdm(total=len(targets), desc="decode sweep", leave=False)
+                tqdm(total=len(targets), desc=f"{prefix}decode sweep", leave=False)
+                if show_progress
+                else None
+            )
+            decode_token_pbar = (
+                tqdm(total=d_end, desc=f"{prefix}decode generate ({fixed_prefill_len},{d_end})", leave=False)
                 if show_progress
                 else None
             )
@@ -467,6 +493,8 @@ class TPSMeasurer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
                 decoded_tokens += 1
+                if decode_token_pbar is not None:
+                    decode_token_pbar.update(1)
                 if getattr(self.model, "npu_time", None) is not None:
                     if decoded_tokens == 1:
                         first_decode_seen = True
@@ -495,6 +523,8 @@ class TPSMeasurer:
                         pbar_decode.update(1)
 
             thread.join()
+            if decode_token_pbar is not None:
+                decode_token_pbar.close()
             if pbar_decode is not None:
                 pbar_decode.close()
 

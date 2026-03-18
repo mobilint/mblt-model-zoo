@@ -547,11 +547,13 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in range(args.warmup):
+    for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
             trace_path=None,
+            show_progress=True,
+            progress_desc=f"warmup generate {i + 1}/{args.warmup}",
         )
     runs = []
     for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
@@ -563,6 +565,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 num_prefill=args.prefill,
                 num_decode=args.decode,
                 trace_path=args.trace if i == 0 else None,
+                show_progress=True,
+                progress_desc=f"measure generate {i + 1}/{args.repeat}",
             )
         finally:
             if tracker is not None:
@@ -656,11 +660,13 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker = _build_power_tracker(args, pipeline)
     _print_power_status(args, tracker)
-    for _ in range(args.warmup):
+    for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.fixed_prefill,
             num_decode=args.fixed_decode,
             trace_path=None,
+            show_progress=True,
+            progress_desc=f"warmup generate {i + 1}/{args.warmup}",
         )
     runs = []
     run_avg_power: list[float] = []
@@ -678,7 +684,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
                     trace_path=args.trace if i == 0 else None,
-                    show_progress=False,
+                    show_progress=True,
+                    progress_prefix=f"run {i + 1}/{args.repeat}",
                 )
             )
         finally:
