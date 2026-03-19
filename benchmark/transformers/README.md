@@ -19,8 +19,11 @@ Outputs (created under `benchmark/transformers/results/text_generation/`):
   - `prefill_tps.png`, `decode_tps.png`
   - `prefill_latency_ms.png`, `decode_duration_ms.png`
   - `avg_power_w.png`, `total_energy_j.png`
-  - `prefill_tok_per_j_last.png`, `decode_tok_per_j_last.png`
-  - `prefill_j_per_tok_last.png`, `decode_j_per_tok_last.png`
+  - `avg_utilization_pct.png`, `p99_utilization_pct.png`
+  - `avg_memory_used_mb.png`, `p99_memory_used_mb.png`
+  - `avg_memory_used_pct.png`, `p99_memory_used_pct.png`
+  - `prefill_tokens_per_j.png`, `decode_tokens_per_j.png`
+  - `prefill_j_per_token.png`, `decode_j_per_token.png`
 
 Common CLI options:
 
@@ -65,7 +68,7 @@ When `--all` is used, results are saved with suffixes in both the output files a
 
 ## Compare result folders
 
-You can compare multiple benchmark result folders and generate 6 charts:
+You can compare multiple benchmark result folders and generate the same metric-wise chart set as benchmark output:
 
 ```bash
 python benchmark/transformers/plot_compare_benchmark_results.py \
@@ -74,15 +77,26 @@ python benchmark/transformers/plot_compare_benchmark_results.py \
 ```
 
 If `--output-dir` is omitted, charts are saved under:
-`benchmark/transformers/results/compare/<dirname1_dirname2_...>/`
+`benchmark/transformers/results/charts/<sanitized_folder1_..._sanitized_folderN>/`
 
-Expected per-model file format in each folder: `group_id__model_id.json`.
-The script ignores `group_id`, intersects model IDs across all folders, then saves:
+Expected per-model file format in each folder: `*.json` with top-level `"model"` and `"benchmark"` payload.
+For backward compatibility, `group_id__model_id.json` is still parsed.
+The script intersects model IDs across all folders, then saves:
 
 - `prefill_tps.png`
 - `decode_tps.png`
+- `prefill_latency_ms.png`
+- `decode_duration_ms.png`
+- `avg_power_w.png`
+- `total_energy_j.png`
 - `prefill_tokens_per_j.png`
 - `decode_tokens_per_j.png`
 - `prefill_j_per_token.png`
 - `decode_j_per_token.png`
+- `avg_utilization_pct.png`
+- `p99_utilization_pct.png`
+- `avg_memory_used_mb.png`
+- `p99_memory_used_mb.png`
+- `avg_memory_used_pct.png`
+- `p99_memory_used_pct.png`
 

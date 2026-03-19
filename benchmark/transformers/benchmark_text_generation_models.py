@@ -4,13 +4,13 @@ import json
 import os
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
 from transformers import pipeline as hf_pipeline
 from tqdm import tqdm
 
+from chart_utils import collect_folder_metrics, plot_scalar_chart, plot_token_chart
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
@@ -566,92 +566,6 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
         f.writelines(lines)
 
 
-def _plot_grouped_barh(
-    *,
-    models: list[str],
-    categories: list[str],
-    values: dict[tuple[str, str], float | None],
-    title: str,
-    x_label: str,
-    output_path: str,
-) -> None:
-    if not models or not categories:
-        return
-    y = np.arange(len(models), dtype=float)
-    group_height = 0.82
-    bar_h = group_height / max(len(categories), 1)
-    start = -group_height / 2 + bar_h / 2
-
-    fig_h = max(5.0, 0.42 * len(models) + 2.0)
-    fig, ax = plt.subplots(figsize=(16, fig_h))
-    cmap = plt.get_cmap("tab20")
-    for c_idx, category in enumerate(categories):
-        x_vals = []
-        y_vals = []
-        for m_idx, model in enumerate(models):
-            value = values.get((model, category))
-            if value is None:
-                continue
-            x_vals.append(float(value))
-            y_vals.append(y[m_idx] + start + c_idx * bar_h)
-        if x_vals:
-            ax.barh(
-                y_vals,
-                x_vals,
-                height=bar_h * 0.95,
-                label=category,
-                color=cmap(c_idx % 20),
-            )
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("model")
-    ax.set_title(title)
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8)
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=220)
-    plt.close(fig)
-
-
-def _plot_scalar_barh(
-    *,
-    models: list[str],
-    values: dict[str, float | None],
-    title: str,
-    x_label: str,
-    output_path: str,
-) -> None:
-    if not models:
-        return
-    x_vals = []
-    y_labels = []
-    for model in models:
-        val = values.get(model)
-        if val is None:
-            continue
-        x_vals.append(float(val))
-        y_labels.append(model)
-    if not x_vals:
-        return
-    y = np.arange(len(y_labels), dtype=float)
-    fig_h = max(5.0, 0.42 * len(y_labels) + 2.0)
-    fig, ax = plt.subplots(figsize=(12, fig_h))
-    ax.barh(y, x_vals, color="#2C7FB8")
-    ax.set_yticks(y)
-    ax.set_yticklabels(y_labels)
-    ax.invert_yaxis()
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("model")
-    ax.set_title(title)
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=220)
-    plt.close(fig)
-
-
 def _write_single_combined_markdown(
     path: str,
     tps_rows: Sequence[dict[str, Any]],
@@ -1093,6 +1007,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         payload: dict[str, Any] = {
+            "model": label,
             "benchmark": asdict(result),
             "device": device_payload,
         }
@@ -1105,7 +1020,6 @@ def main(argv: list[str] | None = None) -> int:
             _clear_cuda_memory(args.device)
 
     combined_results = []
-    combined_labels = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
     for _, _, label, base in targets:
@@ -1114,7 +1028,6 @@ def main(argv: list[str] | None = None) -> int:
             continue
         result = _load_result(json_path)
         combined_results.append(result)
-        combined_labels.append(label)
         combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
         device = _load_device(json_path)
         if device:
@@ -1150,126 +1063,161 @@ def main(argv: list[str] | None = None) -> int:
             device_rows=combined_device_rows,
         )
 
-        # TPS/Latency charts (grouped by token lengths; one file per metric)
-        prefill_tokens = sorted(
-            {
-                int(r["tokens"])
-                for r in combined_rows
-                if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)
-            }
-        )
-        decode_tokens = sorted(
-            {
-                int(r["tokens"])
-                for r in combined_rows
-                if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)
-            }
-        )
-        prefill_tps_values: dict[tuple[str, str], float | None] = {}
-        decode_tps_values: dict[tuple[str, str], float | None] = {}
-        prefill_latency_values: dict[tuple[str, str], float | None] = {}
-        decode_latency_values: dict[tuple[str, str], float | None] = {}
-        for row in combined_rows:
-            model = str(row["model"])
-            phase = str(row["phase"])
-            token = int(row["tokens"])
-            cat = f"token={token}"
-            tps = row.get("tps")
-            time_ms = row.get("time_ms")
-            if phase == "prefill":
-                if isinstance(tps, (int, float)):
-                    prefill_tps_values[(model, cat)] = float(tps)
-                if isinstance(time_ms, (int, float)):
-                    prefill_latency_values[(model, cat)] = float(time_ms)
-            elif phase == "decode":
-                if isinstance(tps, (int, float)):
-                    decode_tps_values[(model, cat)] = float(tps)
-                if isinstance(time_ms, (int, float)):
-                    decode_latency_values[(model, cat)] = float(time_ms)
+        folder_metrics = collect_folder_metrics(Path(results_dir))
+        if folder_metrics:
+            models = sorted(folder_metrics.keys())
+            labels = ["benchmark"]
+            metrics_by_folder = [folder_metrics]
 
-        _plot_grouped_barh(
-            models=combined_labels,
-            categories=[f"token={t}" for t in prefill_tokens],
-            values=prefill_tps_values,
-            title="Prefill TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=os.path.join(results_dir, "prefill_tps.png"),
-        )
-        _plot_grouped_barh(
-            models=combined_labels,
-            categories=[f"token={t}" for t in decode_tokens],
-            values=decode_tps_values,
-            title="Decode TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=os.path.join(results_dir, "decode_tps.png"),
-        )
-        _plot_grouped_barh(
-            models=combined_labels,
-            categories=[f"token={t}" for t in prefill_tokens],
-            values=prefill_latency_values,
-            title="Prefill Latency",
-            x_label="Latency (ms)",
-            output_path=os.path.join(results_dir, "prefill_latency_ms.png"),
-        )
-        _plot_grouped_barh(
-            models=combined_labels,
-            categories=[f"token={t}" for t in decode_tokens],
-            values=decode_latency_values,
-            title="Decode Duration",
-            x_label="Duration (ms)",
-            output_path=os.path.join(results_dir, "decode_duration_ms.png"),
-        )
+            plot_token_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                token_selector=lambda m: m.prefill_tps,
+                title="Prefill TPS",
+                x_label="TPS (tokens/sec)",
+                output_path=Path(results_dir) / "prefill_tps.png",
+            )
+            plot_token_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                token_selector=lambda m: m.decode_tps,
+                title="Decode TPS",
+                x_label="TPS (tokens/sec)",
+                output_path=Path(results_dir) / "decode_tps.png",
+            )
+            plot_token_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                token_selector=lambda m: m.prefill_latency_ms,
+                title="Prefill Latency",
+                x_label="Latency (ms)",
+                output_path=Path(results_dir) / "prefill_latency_ms.png",
+            )
+            plot_token_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                token_selector=lambda m: m.decode_duration_ms,
+                title="Decode Duration",
+                x_label="Duration (ms)",
+                output_path=Path(results_dir) / "decode_duration_ms.png",
+            )
+
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.avg_power_w,
+                title="Average Power",
+                x_label="Power (W)",
+                output_path=Path(results_dir) / "avg_power_w.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.total_energy_j,
+                title="Total Energy",
+                x_label="Energy (J)",
+                output_path=Path(results_dir) / "total_energy_j.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.prefill_tokens_per_j,
+                title="Prefill Tokens/J",
+                x_label="Tokens/J",
+                output_path=Path(results_dir) / "prefill_tokens_per_j.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.decode_tokens_per_j,
+                title="Decode Tokens/J",
+                x_label="Tokens/J",
+                output_path=Path(results_dir) / "decode_tokens_per_j.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.prefill_j_per_token,
+                title="Prefill J/Token",
+                x_label="J/Token",
+                output_path=Path(results_dir) / "prefill_j_per_token.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.decode_j_per_token,
+                title="Decode J/Token",
+                x_label="J/Token",
+                output_path=Path(results_dir) / "decode_j_per_token.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.avg_utilization_pct,
+                title="Average Utilization",
+                x_label="Utilization (%)",
+                output_path=Path(results_dir) / "avg_utilization_pct.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.p99_utilization_pct,
+                title="P99 Utilization",
+                x_label="Utilization (%)",
+                output_path=Path(results_dir) / "p99_utilization_pct.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.avg_memory_used_mb,
+                title="Average Memory Used",
+                x_label="Memory (MB)",
+                output_path=Path(results_dir) / "avg_memory_used_mb.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.p99_memory_used_mb,
+                title="P99 Memory Used",
+                x_label="Memory (MB)",
+                output_path=Path(results_dir) / "p99_memory_used_mb.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.avg_memory_used_pct,
+                title="Average Memory Used (%)",
+                x_label="Memory Usage (%)",
+                output_path=Path(results_dir) / "avg_memory_used_pct.png",
+            )
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=lambda m: m.p99_memory_used_pct,
+                title="P99 Memory Used (%)",
+                x_label="Memory Usage (%)",
+                output_path=Path(results_dir) / "p99_memory_used_pct.png",
+            )
 
         if combined_device_rows:
             device_csv = os.path.join(results_dir, "combined_device.csv")
             _write_device_combined_csv(device_csv, combined_device_rows)
-            device_map = {
-                str(r["model"]): r for r in combined_device_rows if isinstance(r.get("model"), str)
-            }
-            metric_specs = [
-                ("avg_power_w", "Average Power", "Power (W)", "avg_power_w.png"),
-                ("total_energy_j", "Total Energy", "Energy (J)", "total_energy_j.png"),
-                (
-                    "prefill_tok_per_j_last",
-                    "Prefill Tokens/J",
-                    "Tokens per Joule",
-                    "prefill_tok_per_j_last.png",
-                ),
-                (
-                    "decode_tok_per_j_last",
-                    "Decode Tokens/J",
-                    "Tokens per Joule",
-                    "decode_tok_per_j_last.png",
-                ),
-                (
-                    "prefill_j_per_tok_last",
-                    "Prefill J/Tokens",
-                    "Joules per Token",
-                    "prefill_j_per_tok_last.png",
-                ),
-                (
-                    "decode_j_per_tok_last",
-                    "Decode J/Tokens",
-                    "Joules per Token",
-                    "decode_j_per_tok_last.png",
-                ),
-            ]
-            for key, title, x_label, filename in metric_specs:
-                values = {
-                    model: (
-                        float(device_map[model][key])
-                        if model in device_map and isinstance(device_map[model].get(key), (int, float))
-                        else None
-                    )
-                    for model in combined_labels
-                }
-                _plot_scalar_barh(
-                    models=combined_labels,
-                    values=values,
-                    title=title,
-                    x_label=x_label,
-                    output_path=os.path.join(results_dir, filename),
-                )
 
     return 0
 
