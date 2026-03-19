@@ -180,7 +180,6 @@ class YOLOPostBase(PostBase):
 
     @abstractmethod
     def rearrange(self, x):
-        """Rearrange the output."""
         """
         Rearrange the raw output tensors into a structured format.
         Args:
