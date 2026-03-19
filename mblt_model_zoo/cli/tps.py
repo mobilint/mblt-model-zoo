@@ -432,8 +432,26 @@ def _enrich_single_run_device(
     p99_power = metric.get("p99_power_w")
     avg_util = metric.get("avg_utilization_pct")
     p99_util = metric.get("p99_utilization_pct")
+    avg_mem_used_mb = metric.get("avg_memory_used_mb")
+    p99_mem_used_mb = metric.get("p99_memory_used_mb")
+    total_mem_mb = metric.get("total_memory_mb")
+    avg_mem_used_pct = metric.get("avg_memory_used_pct")
+    p99_mem_used_pct = metric.get("p99_memory_used_pct")
     run.avg_utilization_pct = float(avg_util) if avg_util is not None else None
     run.p99_utilization_pct = float(p99_util) if p99_util is not None else None
+    run.avg_memory_used_mb = (
+        float(avg_mem_used_mb) if avg_mem_used_mb is not None else None
+    )
+    run.p99_memory_used_mb = (
+        float(p99_mem_used_mb) if p99_mem_used_mb is not None else None
+    )
+    run.total_memory_mb = float(total_mem_mb) if total_mem_mb is not None else None
+    run.avg_memory_used_pct = (
+        float(avg_mem_used_pct) if avg_mem_used_pct is not None else None
+    )
+    run.p99_memory_used_pct = (
+        float(p99_mem_used_pct) if p99_mem_used_pct is not None else None
+    )
     if avg_power is None:
         return
 
@@ -597,6 +615,19 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     p99_utilization_pct = [
         r.p99_utilization_pct for r in runs if r.p99_utilization_pct is not None
     ]
+    avg_memory_used_mb = [
+        r.avg_memory_used_mb for r in runs if r.avg_memory_used_mb is not None
+    ]
+    p99_memory_used_mb = [
+        r.p99_memory_used_mb for r in runs if r.p99_memory_used_mb is not None
+    ]
+    total_memory_mb = [r.total_memory_mb for r in runs if r.total_memory_mb is not None]
+    avg_memory_used_pct = [
+        r.avg_memory_used_pct for r in runs if r.avg_memory_used_pct is not None
+    ]
+    p99_memory_used_pct = [
+        r.p99_memory_used_pct for r in runs if r.p99_memory_used_pct is not None
+    ]
     total_energy_j = [r.total_energy_j for r in runs if r.total_energy_j is not None]
     prefill_tok_per_j = [r.prefill_tokens_per_j for r in runs if r.prefill_tokens_per_j is not None]
     decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
@@ -617,6 +648,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         _print_summary("p99_power", p99_power_w, "W")
         _print_summary("avg_utilization", avg_utilization_pct, "%")
         _print_summary("p99_utilization", p99_utilization_pct, "%")
+        _print_summary("avg_memory_used", avg_memory_used_mb, "MB")
+        _print_summary("p99_memory_used", p99_memory_used_mb, "MB")
+        _print_summary("total_memory", total_memory_mb, "MB")
+        _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
+        _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
         _print_summary("total_energy", total_energy_j, "J")
         _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
         _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
@@ -638,6 +674,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "p99_power_w": _summary(p99_power_w),
                 "avg_utilization_pct": _summary(avg_utilization_pct),
                 "p99_utilization_pct": _summary(p99_utilization_pct),
+                "avg_memory_used_mb": _summary(avg_memory_used_mb),
+                "p99_memory_used_mb": _summary(p99_memory_used_mb),
+                "total_memory_mb": _summary(total_memory_mb),
+                "avg_memory_used_pct": _summary(avg_memory_used_pct),
+                "p99_memory_used_pct": _summary(p99_memory_used_pct),
                 "total_energy_j": _summary(total_energy_j),
                 "prefill_tok_per_j": _summary(prefill_tok_per_j),
                 "decode_tok_per_j_dfi": _summary(decode_tok_per_j),
@@ -687,6 +728,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     run_p99_power: list[float] = []
     run_avg_utilization: list[float] = []
     run_p99_utilization: list[float] = []
+    run_avg_memory_used_mb: list[float] = []
+    run_p99_memory_used_mb: list[float] = []
+    run_total_memory_mb: list[float] = []
+    run_avg_memory_used_pct: list[float] = []
+    run_p99_memory_used_pct: list[float] = []
     run_total_energy: list[float] = []
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         run_start_t = time.time()
@@ -713,6 +759,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             p99_power = metric.get("p99_power_w")
             avg_utilization = metric.get("avg_utilization_pct")
             p99_utilization = metric.get("p99_utilization_pct")
+            avg_memory_used_mb = metric.get("avg_memory_used_mb")
+            p99_memory_used_mb = metric.get("p99_memory_used_mb")
+            total_memory_mb = metric.get("total_memory_mb")
+            avg_memory_used_pct = metric.get("avg_memory_used_pct")
+            p99_memory_used_pct = metric.get("p99_memory_used_pct")
             if avg_power is not None:
                 run_avg_power.append(float(avg_power))
             if p99_power is not None:
@@ -721,6 +772,16 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 run_avg_utilization.append(float(avg_utilization))
             if p99_utilization is not None:
                 run_p99_utilization.append(float(p99_utilization))
+            if avg_memory_used_mb is not None:
+                run_avg_memory_used_mb.append(float(avg_memory_used_mb))
+            if p99_memory_used_mb is not None:
+                run_p99_memory_used_mb.append(float(p99_memory_used_mb))
+            if total_memory_mb is not None:
+                run_total_memory_mb.append(float(total_memory_mb))
+            if avg_memory_used_pct is not None:
+                run_avg_memory_used_pct.append(float(avg_memory_used_pct))
+            if p99_memory_used_pct is not None:
+                run_p99_memory_used_pct.append(float(p99_memory_used_pct))
             elapsed = time.time() - run_start_t
             if avg_power is not None:
                 run_total_energy.append(float(avg_power) * elapsed)
@@ -755,6 +816,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         _print_summary("p99_power", run_p99_power, "W")
         _print_summary("avg_utilization", run_avg_utilization, "%")
         _print_summary("p99_utilization", run_p99_utilization, "%")
+        _print_summary("avg_memory_used", run_avg_memory_used_mb, "MB")
+        _print_summary("p99_memory_used", run_p99_memory_used_mb, "MB")
+        _print_summary("total_memory", run_total_memory_mb, "MB")
+        _print_summary("avg_memory_used_pct", run_avg_memory_used_pct, "%")
+        _print_summary("p99_memory_used_pct", run_p99_memory_used_pct, "%")
         _print_summary("total_energy", run_total_energy, "J")
         _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
         _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
@@ -774,6 +840,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 "p99_power_w": _summary(run_p99_power),
                 "avg_utilization_pct": _summary(run_avg_utilization),
                 "p99_utilization_pct": _summary(run_p99_utilization),
+                "avg_memory_used_mb": _summary(run_avg_memory_used_mb),
+                "p99_memory_used_mb": _summary(run_p99_memory_used_mb),
+                "total_memory_mb": _summary(run_total_memory_mb),
+                "avg_memory_used_pct": _summary(run_avg_memory_used_pct),
+                "p99_memory_used_pct": _summary(run_p99_memory_used_pct),
                 "total_energy_j": _summary(run_total_energy),
                 "prefill_tok_per_j_last": _summary(prefill_last_tpj),
                 "decode_tok_per_j_last_dfi": _summary(decode_last_tpj),
@@ -834,6 +905,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         vision_power_p99 = []
         vision_util_avg = []
         vision_util_p99 = []
+        vision_mem_used_avg_mb = []
+        vision_mem_used_p99_mb = []
+        vision_mem_total_mb = []
+        vision_mem_used_pct_avg = []
+        vision_mem_used_pct_p99 = []
         vision_energy_j = []
         vision_img_per_j = []
         vision_j_per_img = []
@@ -857,6 +933,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 p99_power = metric.get("p99_power_w")
                 avg_utilization = metric.get("avg_utilization_pct")
                 p99_utilization = metric.get("p99_utilization_pct")
+                avg_memory_used_mb = metric.get("avg_memory_used_mb")
+                p99_memory_used_mb = metric.get("p99_memory_used_mb")
+                total_memory_mb = metric.get("total_memory_mb")
+                avg_memory_used_pct = metric.get("avg_memory_used_pct")
+                p99_memory_used_pct = metric.get("p99_memory_used_pct")
                 if avg_power is not None:
                     avg_power_f = float(avg_power)
                     energy = avg_power_f * float(single[0])
@@ -870,6 +951,16 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     vision_util_avg.append(float(avg_utilization))
                 if p99_utilization is not None:
                     vision_util_p99.append(float(p99_utilization))
+                if avg_memory_used_mb is not None:
+                    vision_mem_used_avg_mb.append(float(avg_memory_used_mb))
+                if p99_memory_used_mb is not None:
+                    vision_mem_used_p99_mb.append(float(p99_memory_used_mb))
+                if total_memory_mb is not None:
+                    vision_mem_total_mb.append(float(total_memory_mb))
+                if avg_memory_used_pct is not None:
+                    vision_mem_used_pct_avg.append(float(avg_memory_used_pct))
+                if p99_memory_used_pct is not None:
+                    vision_mem_used_pct_p99.append(float(p99_memory_used_pct))
 
         vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
         vision_fps = [fps for _, fps in vision_runs]
@@ -883,6 +974,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             _print_summary("vision_p99_power", vision_power_p99, "W")
             _print_summary("vision_avg_util", vision_util_avg, "%")
             _print_summary("vision_p99_util", vision_util_p99, "%")
+            _print_summary("vision_avg_mem_used", vision_mem_used_avg_mb, "MB")
+            _print_summary("vision_p99_mem_used", vision_mem_used_p99_mb, "MB")
+            _print_summary("vision_total_mem", vision_mem_total_mb, "MB")
+            _print_summary("vision_avg_mem_used_pct", vision_mem_used_pct_avg, "%")
+            _print_summary("vision_p99_mem_used_pct", vision_mem_used_pct_p99, "%")
             _print_summary("vision_energy", vision_energy_j, "J")
             _print_summary("vision_img_per_j", vision_img_per_j, "img/J")
             _print_summary("vision_j_per_img", vision_j_per_img, "J/img")
@@ -909,6 +1005,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
                     "avg_utilization_pct": vision_util_avg[idx - 1] if idx - 1 < len(vision_util_avg) else None,
                     "p99_utilization_pct": vision_util_p99[idx - 1] if idx - 1 < len(vision_util_p99) else None,
+                    "avg_memory_used_mb": vision_mem_used_avg_mb[idx - 1] if idx - 1 < len(vision_mem_used_avg_mb) else None,
+                    "p99_memory_used_mb": vision_mem_used_p99_mb[idx - 1] if idx - 1 < len(vision_mem_used_p99_mb) else None,
+                    "total_memory_mb": vision_mem_total_mb[idx - 1] if idx - 1 < len(vision_mem_total_mb) else None,
+                    "avg_memory_used_pct": vision_mem_used_pct_avg[idx - 1] if idx - 1 < len(vision_mem_used_pct_avg) else None,
+                    "p99_memory_used_pct": vision_mem_used_pct_p99[idx - 1] if idx - 1 < len(vision_mem_used_pct_p99) else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "prefill_tok_per_j": None,
                     "decode_tok_per_j_dfi": None,
@@ -937,6 +1038,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "p99_power_w": _summary(vision_power_p99),
                     "avg_utilization_pct": _summary(vision_util_avg),
                     "p99_utilization_pct": _summary(vision_util_p99),
+                    "avg_memory_used_mb": _summary(vision_mem_used_avg_mb),
+                    "p99_memory_used_mb": _summary(vision_mem_used_p99_mb),
+                    "total_memory_mb": _summary(vision_mem_total_mb),
+                    "avg_memory_used_pct": _summary(vision_mem_used_pct_avg),
+                    "p99_memory_used_pct": _summary(vision_mem_used_pct_p99),
                     "energy_j": _summary(vision_energy_j),
                     "vision_img_per_j": _summary(vision_img_per_j),
                     "vision_j_per_img": _summary(vision_j_per_img),
@@ -995,6 +1101,19 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     llm_p99_utilization_pct = [
         r.p99_utilization_pct for r in llm_runs if r.p99_utilization_pct is not None
     ]
+    llm_avg_memory_used_mb = [
+        r.avg_memory_used_mb for r in llm_runs if r.avg_memory_used_mb is not None
+    ]
+    llm_p99_memory_used_mb = [
+        r.p99_memory_used_mb for r in llm_runs if r.p99_memory_used_mb is not None
+    ]
+    llm_total_memory_mb = [r.total_memory_mb for r in llm_runs if r.total_memory_mb is not None]
+    llm_avg_memory_used_pct = [
+        r.avg_memory_used_pct for r in llm_runs if r.avg_memory_used_pct is not None
+    ]
+    llm_p99_memory_used_pct = [
+        r.p99_memory_used_pct for r in llm_runs if r.p99_memory_used_pct is not None
+    ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if r.total_energy_j is not None]
     llm_prefill_tok_per_j = [r.prefill_tokens_per_j for r in llm_runs if r.prefill_tokens_per_j is not None]
     llm_decode_tok_per_j = [r.decode_tokens_per_j for r in llm_runs if r.decode_tokens_per_j is not None]
@@ -1015,6 +1134,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
         _print_summary("llm_avg_utilization", llm_avg_utilization_pct, "%")
         _print_summary("llm_p99_utilization", llm_p99_utilization_pct, "%")
+        _print_summary("llm_avg_mem_used", llm_avg_memory_used_mb, "MB")
+        _print_summary("llm_p99_mem_used", llm_p99_memory_used_mb, "MB")
+        _print_summary("llm_total_mem", llm_total_memory_mb, "MB")
+        _print_summary("llm_avg_mem_used_pct", llm_avg_memory_used_pct, "%")
+        _print_summary("llm_p99_mem_used_pct", llm_p99_memory_used_pct, "%")
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
         _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
         _print_summary("llm_decode_tok_per_j", llm_decode_tok_per_j, "tok/J")
@@ -1043,6 +1167,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "p99_power_w": run.p99_power_w,
                 "avg_utilization_pct": run.avg_utilization_pct,
                 "p99_utilization_pct": run.p99_utilization_pct,
+                "avg_memory_used_mb": run.avg_memory_used_mb,
+                "p99_memory_used_mb": run.p99_memory_used_mb,
+                "total_memory_mb": run.total_memory_mb,
+                "avg_memory_used_pct": run.avg_memory_used_pct,
+                "p99_memory_used_pct": run.p99_memory_used_pct,
                 "total_energy_j": run.total_energy_j,
                 "prefill_tok_per_j": run.prefill_tokens_per_j,
                 "decode_tok_per_j_dfi": run.decode_tokens_per_j,
@@ -1076,6 +1205,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                         "p99_power_w": _summary(llm_p99_power_w),
                         "avg_utilization_pct": _summary(llm_avg_utilization_pct),
                         "p99_utilization_pct": _summary(llm_p99_utilization_pct),
+                        "avg_memory_used_mb": _summary(llm_avg_memory_used_mb),
+                        "p99_memory_used_mb": _summary(llm_p99_memory_used_mb),
+                        "total_memory_mb": _summary(llm_total_memory_mb),
+                        "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
+                        "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
                         "total_energy_j": _summary(llm_total_energy_j),
                         "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
                         "decode_tok_per_j_dfi": _summary(llm_decode_tok_per_j),

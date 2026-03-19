@@ -326,6 +326,11 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         "p99_power_w",
         "avg_utilization_pct",
         "p99_utilization_pct",
+        "avg_memory_used_mb",
+        "p99_memory_used_mb",
+        "total_memory_mb",
+        "avg_memory_used_pct",
+        "p99_memory_used_pct",
         "total_energy_j",
         "prefill_tps_last",
         "decode_tps_last",
@@ -493,6 +498,11 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
                 "p99_power_w",
                 "avg_utilization_pct",
                 "p99_utilization_pct",
+                "avg_memory_used_mb",
+                "p99_memory_used_mb",
+                "total_memory_mb",
+                "avg_memory_used_pct",
+                "p99_memory_used_pct",
                 "total_energy_j",
                 "prefill_tps_last",
                 "decode_tps_last",
@@ -511,12 +521,12 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
     if not rows:
         return
     lines = [
-        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | total_energy_j | prefill_tps_last | decode_tps_last | prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | decode_j_per_tok_last |\n",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
+        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | avg_memory_used_mb | p99_memory_used_mb | total_memory_mb | avg_memory_used_pct | p99_memory_used_pct | total_energy_j | prefill_tps_last | decode_tps_last | prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | decode_j_per_tok_last |\n",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
     ]
     for row in rows:
         lines.append(
-            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | {p99_utilization_pct} | {total_energy_j} | {prefill_tps_last} | {decode_tps_last} | {prefill_tok_per_j_last} | {decode_tok_per_j_last} | {prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
+            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | {p99_utilization_pct} | {avg_memory_used_mb} | {p99_memory_used_mb} | {total_memory_mb} | {avg_memory_used_pct} | {p99_memory_used_pct} | {total_energy_j} | {prefill_tps_last} | {decode_tps_last} | {prefill_tok_per_j_last} | {decode_tok_per_j_last} | {prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
                 model=row["model"],
                 avg_power_w="" if row["avg_power_w"] is None else f"{row['avg_power_w']:.6f}",
                 p99_power_w="" if row["p99_power_w"] is None else f"{row['p99_power_w']:.6f}",
@@ -526,6 +536,21 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
                 p99_utilization_pct=""
                 if row["p99_utilization_pct"] is None
                 else f"{row['p99_utilization_pct']:.6f}",
+                avg_memory_used_mb=""
+                if row["avg_memory_used_mb"] is None
+                else f"{row['avg_memory_used_mb']:.6f}",
+                p99_memory_used_mb=""
+                if row["p99_memory_used_mb"] is None
+                else f"{row['p99_memory_used_mb']:.6f}",
+                total_memory_mb=""
+                if row["total_memory_mb"] is None
+                else f"{row['total_memory_mb']:.6f}",
+                avg_memory_used_pct=""
+                if row["avg_memory_used_pct"] is None
+                else f"{row['avg_memory_used_pct']:.6f}",
+                p99_memory_used_pct=""
+                if row["p99_memory_used_pct"] is None
+                else f"{row['p99_memory_used_pct']:.6f}",
                 total_energy_j="" if row["total_energy_j"] is None else f"{row['total_energy_j']:.6f}",
                 prefill_tps_last="" if row["prefill_tps_last"] is None else f"{row['prefill_tps_last']:.6f}",
                 decode_tps_last="" if row["decode_tps_last"] is None else f"{row['decode_tps_last']:.6f}",
@@ -814,6 +839,11 @@ def main(argv: list[str] | None = None) -> int:
             p99_power = metric.get("p99_power_w")
             avg_utilization = metric.get("avg_utilization_pct")
             p99_utilization = metric.get("p99_utilization_pct")
+            avg_memory_used_mb = metric.get("avg_memory_used_mb")
+            p99_memory_used_mb = metric.get("p99_memory_used_mb")
+            total_memory_mb = metric.get("total_memory_mb")
+            avg_memory_used_pct = metric.get("avg_memory_used_pct")
+            p99_memory_used_pct = metric.get("p99_memory_used_pct")
             if avg_power is not None:
                 avg_power = float(avg_power)
             if p99_power is not None:
@@ -822,6 +852,16 @@ def main(argv: list[str] | None = None) -> int:
                 avg_utilization = float(avg_utilization)
             if p99_utilization is not None:
                 p99_utilization = float(p99_utilization)
+            if avg_memory_used_mb is not None:
+                avg_memory_used_mb = float(avg_memory_used_mb)
+            if p99_memory_used_mb is not None:
+                p99_memory_used_mb = float(p99_memory_used_mb)
+            if total_memory_mb is not None:
+                total_memory_mb = float(total_memory_mb)
+            if avg_memory_used_pct is not None:
+                avg_memory_used_pct = float(avg_memory_used_pct)
+            if p99_memory_used_pct is not None:
+                p99_memory_used_pct = float(p99_memory_used_pct)
             elapsed = time.time() - run_start_t
             total_energy = avg_power * elapsed if avg_power is not None else None
             prefill_last = (
@@ -849,6 +889,11 @@ def main(argv: list[str] | None = None) -> int:
                 "p99_power_w": p99_power,
                 "avg_utilization_pct": avg_utilization,
                 "p99_utilization_pct": p99_utilization,
+                "avg_memory_used_mb": avg_memory_used_mb,
+                "p99_memory_used_mb": p99_memory_used_mb,
+                "total_memory_mb": total_memory_mb,
+                "avg_memory_used_pct": avg_memory_used_pct,
+                "p99_memory_used_pct": p99_memory_used_pct,
                 "total_energy_j": total_energy,
                 "prefill_tps_last": prefill_last,
                 "decode_tps_last": decode_last,
@@ -861,6 +906,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Power/Efficiency: "
                 f"avg_power={avg_power if avg_power is not None else 'n/a'}W "
                 f"avg_util={avg_utilization if avg_utilization is not None else 'n/a'}% "
+                f"avg_mem_used={avg_memory_used_mb if avg_memory_used_mb is not None else 'n/a'}MB "
                 f"prefill_tok_per_j(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
                 f"decode_tok_per_j(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
             )
@@ -898,6 +944,11 @@ def main(argv: list[str] | None = None) -> int:
                     "p99_power_w": device.get("p99_power_w"),
                     "avg_utilization_pct": device.get("avg_utilization_pct"),
                     "p99_utilization_pct": device.get("p99_utilization_pct"),
+                    "avg_memory_used_mb": device.get("avg_memory_used_mb"),
+                    "p99_memory_used_mb": device.get("p99_memory_used_mb"),
+                    "total_memory_mb": device.get("total_memory_mb"),
+                    "avg_memory_used_pct": device.get("avg_memory_used_pct"),
+                    "p99_memory_used_pct": device.get("p99_memory_used_pct"),
                     "total_energy_j": device.get("total_energy_j"),
                     "prefill_tps_last": device.get("prefill_tps_last"),
                     "decode_tps_last": device.get("decode_tps_last"),

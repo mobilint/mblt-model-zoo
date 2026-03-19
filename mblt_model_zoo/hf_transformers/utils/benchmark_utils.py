@@ -47,6 +47,11 @@ class SingleMeasurement:
     p99_power_w: Optional[float] = None
     avg_utilization_pct: Optional[float] = None
     p99_utilization_pct: Optional[float] = None
+    avg_memory_used_mb: Optional[float] = None
+    p99_memory_used_mb: Optional[float] = None
+    total_memory_mb: Optional[float] = None
+    avg_memory_used_pct: Optional[float] = None
+    p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
     prefill_tokens_per_j: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
