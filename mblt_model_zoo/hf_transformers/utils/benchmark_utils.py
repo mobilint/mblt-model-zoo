@@ -317,6 +317,7 @@ class TPSMeasurer:
         self,
         num_prefill=512,
         num_decode=128,
+        chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
@@ -341,6 +342,8 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if chunk_size is not None:
+                gen_kwargs["chunk_size"] = int(chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
 
@@ -428,6 +431,7 @@ class TPSMeasurer:
         decode_range: Tuple[int, int, int] = (128, 1024, 128),
         fixed_decode_len=10,
         fixed_prefill_len=128,
+        chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
@@ -447,6 +451,7 @@ class TPSMeasurer:
                 res = self.measure(
                     num_prefill=p_len,
                     num_decode=fixed_decode_len,
+                    chunk_size=chunk_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}prefill generate ({p_len},{fixed_decode_len})",
                 )
@@ -472,6 +477,8 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if chunk_size is not None:
+                gen_kwargs["chunk_size"] = int(chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
 

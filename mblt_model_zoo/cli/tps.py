@@ -68,6 +68,15 @@ def _parse_positive_int(spec: str) -> int:
     return value
 
 
+def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
+    if spec is None:
+        return None
+    text = str(spec).strip()
+    if not text:
+        return None
+    return _parse_positive_int(text)
+
+
 def _parse_int_list_optional(spec: Union[str, None]) -> Union[list[int], None]:
     if spec is None:
         return None
@@ -573,6 +582,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
+            chunk_size=args.chunk_size,
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
@@ -586,6 +596,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
             run = measurer.measure(
                 num_prefill=args.prefill,
                 num_decode=args.decode,
+                chunk_size=args.chunk_size,
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
@@ -719,6 +730,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         measurer.measure(
             num_prefill=args.fixed_prefill,
             num_decode=args.fixed_decode,
+            chunk_size=args.chunk_size,
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
@@ -745,6 +757,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     decode_range=args.decode_range,
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
+                    chunk_size=args.chunk_size,
                     trace_path=args.trace if i == 0 else None,
                     show_progress=True,
                     progress_prefix=f"run {i + 1}/{args.repeat}",
@@ -1308,6 +1321,12 @@ def add_tps_parser(
             "--trace",
             default=None,
             help="write qbruntime trace to the given JSON path (first run only)",
+        )
+        p.add_argument(
+            "--chunk-size",
+            type=_parse_positive_int_optional,
+            default=None,
+            help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
         )
         p.add_argument(
         "--device-metrics",

@@ -55,6 +55,13 @@ def _parse_positive_int(raw: str) -> int:
     return value
 
 
+def _parse_positive_int_optional(raw: str) -> int | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    return _parse_positive_int(text)
+
+
 def _parse_int_list_optional(spec: str | None) -> list[int] | None:
     if spec is None:
         return None
@@ -925,6 +932,12 @@ def main(argv: list[str] | None = None) -> int:
         help="fixed prefill length used during decode sweep",
     )
     parser.add_argument(
+        "--chunk-size",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="skip models with existing JSON+PNG outputs",
@@ -1096,6 +1109,7 @@ def main(argv: list[str] | None = None) -> int:
                 measurer.measure(
                     num_prefill=args.fixed_prefill,
                     num_decode=args.fixed_decode,
+                    chunk_size=args.chunk_size,
                     trace_path=None,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
@@ -1109,6 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
                     decode_range=args.decode_range,
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
+                    chunk_size=args.chunk_size,
                     show_progress=True,
                     progress_prefix=label,
                 )
