@@ -13,8 +13,14 @@ python benchmark/transformers/benchmark_text_generation_models.py
 Outputs (created under `benchmark/transformers/results/text_generation/`):
 
 - `{model}.json` and `{model}.png` for each model
-- `combined.png`, `combined.csv`, and `combined.md`
-- `combined_device.csv` and `combined_device.md` (when device metrics are available)
+- `combined.csv` and `combined.md`
+- `combined_device.csv` (when device metrics are available)
+- metric-wise charts:
+  - `prefill_tps.png`, `decode_tps.png`
+  - `prefill_latency_ms.png`, `decode_duration_ms.png`
+  - `avg_power_w.png`, `total_energy_j.png`
+  - `prefill_tok_per_j_last.png`, `decode_tok_per_j_last.png`
+  - `prefill_j_per_tok_last.png`, `decode_j_per_tok_last.png`
 
 Common CLI options:
 

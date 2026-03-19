@@ -6,6 +6,8 @@ import time
 from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple
 
+import matplotlib.pyplot as plt
+import numpy as np
 from transformers import pipeline as hf_pipeline
 from tqdm import tqdm
 
@@ -564,6 +566,185 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
         f.writelines(lines)
 
 
+def _plot_grouped_barh(
+    *,
+    models: list[str],
+    categories: list[str],
+    values: dict[tuple[str, str], float | None],
+    title: str,
+    x_label: str,
+    output_path: str,
+) -> None:
+    if not models or not categories:
+        return
+    y = np.arange(len(models), dtype=float)
+    group_height = 0.82
+    bar_h = group_height / max(len(categories), 1)
+    start = -group_height / 2 + bar_h / 2
+
+    fig_h = max(5.0, 0.42 * len(models) + 2.0)
+    fig, ax = plt.subplots(figsize=(16, fig_h))
+    cmap = plt.get_cmap("tab20")
+    for c_idx, category in enumerate(categories):
+        x_vals = []
+        y_vals = []
+        for m_idx, model in enumerate(models):
+            value = values.get((model, category))
+            if value is None:
+                continue
+            x_vals.append(float(value))
+            y_vals.append(y[m_idx] + start + c_idx * bar_h)
+        if x_vals:
+            ax.barh(
+                y_vals,
+                x_vals,
+                height=bar_h * 0.95,
+                label=category,
+                color=cmap(c_idx % 20),
+            )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("model")
+    ax.set_title(title)
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8)
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def _plot_scalar_barh(
+    *,
+    models: list[str],
+    values: dict[str, float | None],
+    title: str,
+    x_label: str,
+    output_path: str,
+) -> None:
+    if not models:
+        return
+    x_vals = []
+    y_labels = []
+    for model in models:
+        val = values.get(model)
+        if val is None:
+            continue
+        x_vals.append(float(val))
+        y_labels.append(model)
+    if not x_vals:
+        return
+    y = np.arange(len(y_labels), dtype=float)
+    fig_h = max(5.0, 0.42 * len(y_labels) + 2.0)
+    fig, ax = plt.subplots(figsize=(12, fig_h))
+    ax.barh(y, x_vals, color="#2C7FB8")
+    ax.set_yticks(y)
+    ax.set_yticklabels(y_labels)
+    ax.invert_yaxis()
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("model")
+    ax.set_title(title)
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def _write_single_combined_markdown(
+    path: str,
+    tps_rows: Sequence[dict[str, Any]],
+    device_rows: Sequence[dict[str, float | str | None]],
+) -> None:
+    if not tps_rows:
+        return
+    models = sorted({str(r["model"]) for r in tps_rows})
+    prefill_tokens = sorted(
+        {
+            int(r["tokens"])
+            for r in tps_rows
+            if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)
+        }
+    )
+    decode_tokens = sorted(
+        {
+            int(r["tokens"])
+            for r in tps_rows
+            if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)
+        }
+    )
+    tps_map: dict[tuple[str, str, int], float] = {}
+    time_map: dict[tuple[str, str, int], float] = {}
+    for row in tps_rows:
+        model = str(row["model"])
+        phase = str(row["phase"])
+        token = int(row["tokens"])
+        tps_val = row.get("tps")
+        time_ms_val = row.get("time_ms")
+        if isinstance(tps_val, (int, float)):
+            tps_map[(model, phase, token)] = float(tps_val)
+        if isinstance(time_ms_val, (int, float)):
+            time_map[(model, phase, token)] = float(time_ms_val)
+
+    device_map = {
+        str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)
+    }
+    device_cols = [
+        "avg_power_w",
+        "p99_power_w",
+        "avg_utilization_pct",
+        "p99_utilization_pct",
+        "avg_memory_used_mb",
+        "p99_memory_used_mb",
+        "total_memory_mb",
+        "avg_memory_used_pct",
+        "p99_memory_used_pct",
+        "total_energy_j",
+        "prefill_tps_last",
+        "decode_tps_last",
+        "prefill_tok_per_j_last",
+        "decode_tok_per_j_last",
+        "prefill_j_per_tok_last",
+        "decode_j_per_tok_last",
+    ]
+
+    headers = ["model"]
+    headers.extend([f"prefill_tps_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_tps_{t}" for t in decode_tokens])
+    headers.extend([f"prefill_latency_ms_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_duration_ms_{t}" for t in decode_tokens])
+    headers.extend(device_cols)
+
+    lines = [
+        "| " + " | ".join(headers) + " |\n",
+        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
+    ]
+    for model in models:
+        values: list[str] = [model]
+        for token in prefill_tokens:
+            v = tps_map.get((model, "prefill", token))
+            values.append("" if v is None else f"{v:.6f}")
+        for token in decode_tokens:
+            v = tps_map.get((model, "decode", token))
+            values.append("" if v is None else f"{v:.6f}")
+        for token in prefill_tokens:
+            v = time_map.get((model, "prefill", token))
+            values.append("" if v is None else f"{v:.6f}")
+        for token in decode_tokens:
+            v = time_map.get((model, "decode", token))
+            values.append("" if v is None else f"{v:.6f}")
+
+        drow = device_map.get(model, {})
+        for col in device_cols:
+            v = drow.get(col) if isinstance(drow, dict) else None
+            values.append("" if not isinstance(v, (int, float)) else f"{float(v):.6f}")
+        lines.append("| " + " | ".join(values) + " |\n")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     parser.add_argument(
@@ -960,21 +1141,135 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     if combined_results:
-        combined_path = os.path.join(results_dir, "combined.png")
-        TPSMeasurer.plot_and_save_results(
-            combined_results,
-            combined_labels,
-            save_path=combined_path,
-        )
         combined_csv = os.path.join(results_dir, "combined.csv")
         combined_md = os.path.join(results_dir, "combined.md")
         BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
-        BenchmarkResult.write_combined_markdown(combined_md, combined_rows)
+        _write_single_combined_markdown(
+            combined_md,
+            tps_rows=combined_rows,
+            device_rows=combined_device_rows,
+        )
+
+        # TPS/Latency charts (grouped by token lengths; one file per metric)
+        prefill_tokens = sorted(
+            {
+                int(r["tokens"])
+                for r in combined_rows
+                if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)
+            }
+        )
+        decode_tokens = sorted(
+            {
+                int(r["tokens"])
+                for r in combined_rows
+                if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)
+            }
+        )
+        prefill_tps_values: dict[tuple[str, str], float | None] = {}
+        decode_tps_values: dict[tuple[str, str], float | None] = {}
+        prefill_latency_values: dict[tuple[str, str], float | None] = {}
+        decode_latency_values: dict[tuple[str, str], float | None] = {}
+        for row in combined_rows:
+            model = str(row["model"])
+            phase = str(row["phase"])
+            token = int(row["tokens"])
+            cat = f"token={token}"
+            tps = row.get("tps")
+            time_ms = row.get("time_ms")
+            if phase == "prefill":
+                if isinstance(tps, (int, float)):
+                    prefill_tps_values[(model, cat)] = float(tps)
+                if isinstance(time_ms, (int, float)):
+                    prefill_latency_values[(model, cat)] = float(time_ms)
+            elif phase == "decode":
+                if isinstance(tps, (int, float)):
+                    decode_tps_values[(model, cat)] = float(tps)
+                if isinstance(time_ms, (int, float)):
+                    decode_latency_values[(model, cat)] = float(time_ms)
+
+        _plot_grouped_barh(
+            models=combined_labels,
+            categories=[f"token={t}" for t in prefill_tokens],
+            values=prefill_tps_values,
+            title="Prefill TPS",
+            x_label="TPS (tokens/sec)",
+            output_path=os.path.join(results_dir, "prefill_tps.png"),
+        )
+        _plot_grouped_barh(
+            models=combined_labels,
+            categories=[f"token={t}" for t in decode_tokens],
+            values=decode_tps_values,
+            title="Decode TPS",
+            x_label="TPS (tokens/sec)",
+            output_path=os.path.join(results_dir, "decode_tps.png"),
+        )
+        _plot_grouped_barh(
+            models=combined_labels,
+            categories=[f"token={t}" for t in prefill_tokens],
+            values=prefill_latency_values,
+            title="Prefill Latency",
+            x_label="Latency (ms)",
+            output_path=os.path.join(results_dir, "prefill_latency_ms.png"),
+        )
+        _plot_grouped_barh(
+            models=combined_labels,
+            categories=[f"token={t}" for t in decode_tokens],
+            values=decode_latency_values,
+            title="Decode Duration",
+            x_label="Duration (ms)",
+            output_path=os.path.join(results_dir, "decode_duration_ms.png"),
+        )
+
         if combined_device_rows:
             device_csv = os.path.join(results_dir, "combined_device.csv")
-            device_md = os.path.join(results_dir, "combined_device.md")
             _write_device_combined_csv(device_csv, combined_device_rows)
-            _write_device_combined_markdown(device_md, combined_device_rows)
+            device_map = {
+                str(r["model"]): r for r in combined_device_rows if isinstance(r.get("model"), str)
+            }
+            metric_specs = [
+                ("avg_power_w", "Average Power", "Power (W)", "avg_power_w.png"),
+                ("total_energy_j", "Total Energy", "Energy (J)", "total_energy_j.png"),
+                (
+                    "prefill_tok_per_j_last",
+                    "Prefill Tokens/J",
+                    "Tokens per Joule",
+                    "prefill_tok_per_j_last.png",
+                ),
+                (
+                    "decode_tok_per_j_last",
+                    "Decode Tokens/J",
+                    "Tokens per Joule",
+                    "decode_tok_per_j_last.png",
+                ),
+                (
+                    "prefill_j_per_tok_last",
+                    "Prefill J/Tokens",
+                    "Joules per Token",
+                    "prefill_j_per_tok_last.png",
+                ),
+                (
+                    "decode_j_per_tok_last",
+                    "Decode J/Tokens",
+                    "Joules per Token",
+                    "decode_j_per_tok_last.png",
+                ),
+            ]
+            for key, title, x_label, filename in metric_specs:
+                values = {
+                    model: (
+                        float(device_map[model][key])
+                        if model in device_map and isinstance(device_map[model].get(key), (int, float))
+                        else None
+                    )
+                    for model in combined_labels
+                }
+                _plot_scalar_barh(
+                    models=combined_labels,
+                    values=values,
+                    title=title,
+                    x_label=x_label,
+                    output_path=os.path.join(results_dir, filename),
+                )
 
     return 0
 
