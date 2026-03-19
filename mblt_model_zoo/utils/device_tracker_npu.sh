@@ -76,6 +76,11 @@ total_power_w="$(
     echo "$power_line" \
     | sed -E 's/^.*\|\s*([0-9]+(\.[0-9]+)?)W\s+([0-9]+(\.[0-9]+)?)W\s+\|.*$/\3/'
 )"
+npu_util_pct="$(
+    echo "$status_output" \
+    | awk '/\|[[:space:]]*[0-9]+(\.[0-9]+)?W[[:space:]]+[0-9]+(\.[0-9]+)?W[[:space:]]+\|/ {getline; print; exit}' \
+    | sed -nE 's/^.*\|\s*([0-9]+(\.[0-9]+)?)%\s+\|.*$/\1/p'
+)"
 timestamp="$(date +%s)"
 
 if [[ -z "$npu_power_w" || -z "$total_power_w" ]]; then
@@ -88,8 +93,17 @@ if [[ -z "$npu_power_w" || -z "$total_power_w" ]]; then
 fi
 
 if [[ "$JSON_MODE" == "true" ]]; then
-    printf '{"ok":true,"npu_power_w":%s,"total_power_w":%s,"timestamp":%s}\n' \
-        "$npu_power_w" "$total_power_w" "$timestamp"
+    if [[ -n "$npu_util_pct" ]]; then
+        printf '{"ok":true,"npu_power_w":%s,"total_power_w":%s,"npu_util_pct":%s,"timestamp":%s}\n' \
+            "$npu_power_w" "$total_power_w" "$npu_util_pct" "$timestamp"
+    else
+        printf '{"ok":true,"npu_power_w":%s,"total_power_w":%s,"timestamp":%s}\n' \
+            "$npu_power_w" "$total_power_w" "$timestamp"
+    fi
 else
-    printf '%s %s\n' "$npu_power_w" "$total_power_w"
+    if [[ -n "$npu_util_pct" ]]; then
+        printf '%s %s %s\n' "$npu_power_w" "$total_power_w" "$npu_util_pct"
+    else
+        printf '%s %s\n' "$npu_power_w" "$total_power_w"
+    fi
 fi

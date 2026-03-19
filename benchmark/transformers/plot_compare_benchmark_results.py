@@ -36,9 +36,9 @@ def _load_model_metrics(path: Path) -> ModelMetrics:
         payload = json.load(f)
 
     benchmark = payload.get("benchmark", payload)
-    power = payload.get("power", {})
-    if not isinstance(power, dict):
-        power = {}
+    device = payload.get("device", {})
+    if not isinstance(device, dict):
+        device = {}
 
     prefill = benchmark.get("prefill_sweep", {})
     decode = benchmark.get("decode_sweep", {})
@@ -63,10 +63,10 @@ def _load_model_metrics(path: Path) -> ModelMetrics:
     return ModelMetrics(
         prefill_tps=prefill_map,
         decode_tps=decode_map,
-        prefill_tokens_per_j=_as_float(power.get("prefill_tok_per_j_last")),
-        decode_tokens_per_j=_as_float(power.get("decode_tok_per_j_last")),
-        prefill_j_per_token=_as_float(power.get("prefill_j_per_tok_last")),
-        decode_j_per_token=_as_float(power.get("decode_j_per_tok_last")),
+        prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
+        decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+        prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
+        decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
     )
 
 
@@ -345,3 +345,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

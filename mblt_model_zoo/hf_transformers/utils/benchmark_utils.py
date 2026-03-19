@@ -45,6 +45,8 @@ class SingleMeasurement:
     npu_decode_time: Optional[float] = None
     avg_power_w: Optional[float] = None
     p99_power_w: Optional[float] = None
+    avg_utilization_pct: Optional[float] = None
+    p99_utilization_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
     prefill_tokens_per_j: Optional[float] = None
     prefill_j_per_token: Optional[float] = None

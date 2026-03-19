@@ -63,7 +63,7 @@ def _parse_int_list_optional(spec: str | None) -> list[int] | None:
     if not values:
         return None
     if any(v < 0 for v in values):
-        raise argparse.ArgumentTypeError("power-gpu-id values must be >= 0")
+        raise argparse.ArgumentTypeError("device-gpu-id values must be >= 0")
     return values
 
 
@@ -311,19 +311,21 @@ def _load_result(path: str) -> BenchmarkResult:
     )
 
 
-def _load_power(path: str) -> dict[str, float | None] | None:
+def _load_device(path: str) -> dict[str, float | None] | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception:
         return None
-    power = payload.get("power")
-    if not isinstance(power, dict):
+    device = payload.get("device")
+    if not isinstance(device, dict):
         return None
     out: dict[str, float | None] = {}
     for key in (
         "avg_power_w",
         "p99_power_w",
+        "avg_utilization_pct",
+        "p99_utilization_pct",
         "total_energy_j",
         "prefill_tps_last",
         "decode_tps_last",
@@ -332,7 +334,7 @@ def _load_power(path: str) -> dict[str, float | None] | None:
         "prefill_j_per_tok_last",
         "decode_j_per_tok_last",
     ):
-        value = power.get(key)
+        value = device.get(key)
         out[key] = float(value) if isinstance(value, (int, float)) else None
     return out
 
@@ -387,9 +389,9 @@ def _select_revision(
     return None
 
 
-def _infer_gpu_ids(device: str, power_gpu_id: Optional[list[int]]) -> Optional[int | list[int]]:
-    if power_gpu_id is not None:
-        return power_gpu_id[0] if len(power_gpu_id) == 1 else power_gpu_id
+def _infer_gpu_ids(device: str, device_gpu_id: Optional[list[int]]) -> Optional[int | list[int]]:
+    if device_gpu_id is not None:
+        return device_gpu_id[0] if len(device_gpu_id) == 1 else device_gpu_id
     text = (device or "").strip().lower()
     if text.startswith("cuda:"):
         try:
@@ -400,8 +402,8 @@ def _infer_gpu_ids(device: str, power_gpu_id: Optional[list[int]]) -> Optional[i
     return None
 
 
-def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
-    if not args.power:
+def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
+    if not args.device_metrics:
         return None
 
     def _has_npu_backend(obj: Any, depth: int = 0, seen: Optional[set[int]] = None) -> bool:
@@ -431,7 +433,7 @@ def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
     except Exception:
         is_mobilint_model = _has_npu_backend(getattr(pipeline, "model", None))
 
-    backend = args.power_device
+    backend = args.device_backend
     if backend == "auto":
         if is_mobilint_model:
             backend = "npu"
@@ -443,21 +445,21 @@ def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
         return None
 
     if backend == "npu":
-        from mblt_model_zoo.utils.power_tracker_npu import NPUPowerTracker
+        from mblt_model_zoo.utils.device_tracker_npu import NPUDeviceTracker
         try:
-            return NPUPowerTracker(interval=args.power_interval)
+            return NPUDeviceTracker(interval=args.device_interval)
         except Exception as e:
-            print(f"[power] failed to initialize NPU tracker: {e}")
+            print(f"[device] failed to initialize NPU tracker: {e}")
             return None
 
     if backend == "gpu":
-        from mblt_model_zoo.utils.power_tracker_gpu import GPUPowerTracker
+        from mblt_model_zoo.utils.device_tracker_gpu import GPUDeviceTracker
 
-        gpu_id = _infer_gpu_ids(args.device, args.power_gpu_id)
+        gpu_id = _infer_gpu_ids(args.device, args.device_gpu_id)
         try:
-            return GPUPowerTracker(interval=args.power_interval, gpu_id=gpu_id)
+            return GPUDeviceTracker(interval=args.device_interval, gpu_id=gpu_id)
         except Exception as e:
-            print(f"[power] failed to initialize GPU tracker: {e}")
+            print(f"[device] failed to initialize GPU tracker: {e}")
             return None
 
     return None
@@ -469,17 +471,17 @@ def _safe_div(a: float, b: float) -> float | None:
     return a / b
 
 
-def _print_power_status(args: argparse.Namespace, tracker: Any) -> None:
-    if not args.power:
-        print("[power] disabled by --no-power")
+def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
+    if not args.device_metrics:
+        print("[device] disabled by --no-device-metrics")
         return
     if tracker is None:
-        print("[power] enabled but no compatible tracker initialized (auto detection fallback)")
+        print("[device] enabled but no compatible tracker initialized (auto detection fallback)")
         return
-    print(f"[power] enabled with {tracker.__class__.__name__} (interval={args.power_interval}s)")
+    print(f"[device] enabled with {tracker.__class__.__name__} (interval={args.device_interval}s)")
 
 
-def _write_power_combined_csv(path: str, rows: Sequence[dict[str, float | str | None]]) -> None:
+def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str | None]]) -> None:
     import csv
 
     with open(path, "w", encoding="utf-8", newline="") as f:
@@ -489,6 +491,8 @@ def _write_power_combined_csv(path: str, rows: Sequence[dict[str, float | str | 
                 "model",
                 "avg_power_w",
                 "p99_power_w",
+                "avg_utilization_pct",
+                "p99_utilization_pct",
                 "total_energy_j",
                 "prefill_tps_last",
                 "decode_tps_last",
@@ -503,19 +507,25 @@ def _write_power_combined_csv(path: str, rows: Sequence[dict[str, float | str | 
             writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
 
 
-def _write_power_combined_markdown(path: str, rows: Sequence[dict[str, float | str | None]]) -> None:
+def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | str | None]]) -> None:
     if not rows:
         return
     lines = [
-        "| model | avg_power_w | p99_power_w | total_energy_j | prefill_tps_last | decode_tps_last | prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | decode_j_per_tok_last |\n",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
+        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | total_energy_j | prefill_tps_last | decode_tps_last | prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | decode_j_per_tok_last |\n",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
     ]
     for row in rows:
         lines.append(
-            "| {model} | {avg_power_w} | {p99_power_w} | {total_energy_j} | {prefill_tps_last} | {decode_tps_last} | {prefill_tok_per_j_last} | {decode_tok_per_j_last} | {prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
+            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | {p99_utilization_pct} | {total_energy_j} | {prefill_tps_last} | {decode_tps_last} | {prefill_tok_per_j_last} | {decode_tok_per_j_last} | {prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
                 model=row["model"],
                 avg_power_w="" if row["avg_power_w"] is None else f"{row['avg_power_w']:.6f}",
                 p99_power_w="" if row["p99_power_w"] is None else f"{row['p99_power_w']:.6f}",
+                avg_utilization_pct=""
+                if row["avg_utilization_pct"] is None
+                else f"{row['avg_utilization_pct']:.6f}",
+                p99_utilization_pct=""
+                if row["p99_utilization_pct"] is None
+                else f"{row['p99_utilization_pct']:.6f}",
                 total_energy_j="" if row["total_energy_j"] is None else f"{row['total_energy_j']:.6f}",
                 prefill_tps_last="" if row["prefill_tps_last"] is None else f"{row['prefill_tps_last']:.6f}",
                 decode_tps_last="" if row["decode_tps_last"] is None else f"{row['decode_tps_last']:.6f}",
@@ -606,28 +616,28 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--power",
+        "--device-metrics",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="enable power tracking (default: on, disable via --no-power)",
+        help="enable device metrics tracking (default: on, disable via --no-device-metrics)",
     )
     parser.add_argument(
-        "--power-device",
+        "--device-backend",
         choices=["auto", "gpu", "npu"],
         default="auto",
-        help="power backend selection (default: auto)",
+        help="device backend selection (default: auto)",
     )
     parser.add_argument(
-        "--power-interval",
+        "--device-interval",
         type=float,
         default=0.2,
-        help="power sampling interval in seconds",
+        help="device sampling interval in seconds",
     )
     parser.add_argument(
-        "--power-gpu-id",
+        "--device-gpu-id",
         type=_parse_int_list_optional,
         default=None,
-        help="comma-separated GPU ids for power tracking (e.g., 0,1)",
+        help="comma-separated GPU ids for device tracking (e.g., 0,1)",
     )
     parser.add_argument(
         "--cuda-precheck",
@@ -742,8 +752,8 @@ def main(argv: list[str] | None = None) -> int:
                 continue
 
             measurer = TPSMeasurer(pipeline)
-            tracker = _build_power_tracker(args, pipeline)
-            _print_power_status(args, tracker)
+            tracker = _build_device_tracker(args, pipeline)
+            _print_device_status(args, tracker)
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.fixed_prefill,
@@ -797,15 +807,21 @@ def main(argv: list[str] | None = None) -> int:
                 "Avg decode token latency (last): "
                 f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
             )
-        power_payload: dict[str, float | None] | None = None
+        device_payload: dict[str, float | None] | None = None
         if tracker is not None:
-            metric = tracker.get_power_metric()
+            metric = tracker.get_metric()
             avg_power = metric.get("avg_power_w")
             p99_power = metric.get("p99_power_w")
+            avg_utilization = metric.get("avg_utilization_pct")
+            p99_utilization = metric.get("p99_utilization_pct")
             if avg_power is not None:
                 avg_power = float(avg_power)
             if p99_power is not None:
                 p99_power = float(p99_power)
+            if avg_utilization is not None:
+                avg_utilization = float(avg_utilization)
+            if p99_utilization is not None:
+                p99_utilization = float(p99_utilization)
             elapsed = time.time() - run_start_t
             total_energy = avg_power * elapsed if avg_power is not None else None
             prefill_last = (
@@ -828,9 +844,11 @@ def main(argv: list[str] | None = None) -> int:
                 if decode_last is not None and avg_power is not None
                 else None
             )
-            power_payload = {
+            device_payload = {
                 "avg_power_w": avg_power,
                 "p99_power_w": p99_power,
+                "avg_utilization_pct": avg_utilization,
+                "p99_utilization_pct": p99_utilization,
                 "total_energy_j": total_energy,
                 "prefill_tps_last": prefill_last,
                 "decode_tps_last": decode_last,
@@ -842,13 +860,14 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "Power/Efficiency: "
                 f"avg_power={avg_power if avg_power is not None else 'n/a'}W "
+                f"avg_util={avg_utilization if avg_utilization is not None else 'n/a'}% "
                 f"prefill_tok_per_j(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
                 f"decode_tok_per_j(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
             )
 
         payload: dict[str, Any] = {
             "benchmark": asdict(result),
-            "power": power_payload,
+            "device": device_payload,
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -861,7 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     combined_results = []
     combined_labels = []
     combined_rows = []
-    combined_power_rows: list[dict[str, float | str | None]] = []
+    combined_device_rows: list[dict[str, float | str | None]] = []
     for _, _, label, base in targets:
         json_path = os.path.join(results_dir, f"{base}.json")
         if not os.path.isfile(json_path):
@@ -870,20 +889,22 @@ def main(argv: list[str] | None = None) -> int:
         combined_results.append(result)
         combined_labels.append(label)
         combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
-        power = _load_power(json_path)
-        if power:
-            combined_power_rows.append(
+        device = _load_device(json_path)
+        if device:
+            combined_device_rows.append(
                 {
                     "model": label,
-                    "avg_power_w": power.get("avg_power_w"),
-                    "p99_power_w": power.get("p99_power_w"),
-                    "total_energy_j": power.get("total_energy_j"),
-                    "prefill_tps_last": power.get("prefill_tps_last"),
-                    "decode_tps_last": power.get("decode_tps_last"),
-                    "prefill_tok_per_j_last": power.get("prefill_tok_per_j_last"),
-                    "decode_tok_per_j_last": power.get("decode_tok_per_j_last"),
-                    "prefill_j_per_tok_last": power.get("prefill_j_per_tok_last"),
-                    "decode_j_per_tok_last": power.get("decode_j_per_tok_last"),
+                    "avg_power_w": device.get("avg_power_w"),
+                    "p99_power_w": device.get("p99_power_w"),
+                    "avg_utilization_pct": device.get("avg_utilization_pct"),
+                    "p99_utilization_pct": device.get("p99_utilization_pct"),
+                    "total_energy_j": device.get("total_energy_j"),
+                    "prefill_tps_last": device.get("prefill_tps_last"),
+                    "decode_tps_last": device.get("decode_tps_last"),
+                    "prefill_tok_per_j_last": device.get("prefill_tok_per_j_last"),
+                    "decode_tok_per_j_last": device.get("decode_tok_per_j_last"),
+                    "prefill_j_per_tok_last": device.get("prefill_j_per_tok_last"),
+                    "decode_j_per_tok_last": device.get("decode_j_per_tok_last"),
                 }
             )
 
@@ -898,14 +919,16 @@ def main(argv: list[str] | None = None) -> int:
         combined_md = os.path.join(results_dir, "combined.md")
         BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
         BenchmarkResult.write_combined_markdown(combined_md, combined_rows)
-        if combined_power_rows:
-            power_csv = os.path.join(results_dir, "combined_power.csv")
-            power_md = os.path.join(results_dir, "combined_power.md")
-            _write_power_combined_csv(power_csv, combined_power_rows)
-            _write_power_combined_markdown(power_md, combined_power_rows)
+        if combined_device_rows:
+            device_csv = os.path.join(results_dir, "combined_device.csv")
+            device_md = os.path.join(results_dir, "combined_device.md")
+            _write_device_combined_csv(device_csv, combined_device_rows)
+            _write_device_combined_markdown(device_md, combined_device_rows)
 
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

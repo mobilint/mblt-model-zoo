@@ -10,29 +10,31 @@ import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_RUNNING
 
-from .power_tracker import BasePowerTracker
+from .device_tracker import BaseDeviceTracker
 
 
-class NPUPowerTracker(BasePowerTracker):
-    """Track NPU power by polling `mobilint-cli status`."""
+class NPUDeviceTracker(BaseDeviceTracker):
+    """Track NPU power and utilization by polling `mobilint-cli status`."""
 
     def __init__(self, interval: float = 0.5, status_cmd: Optional[str] = None):
         super().__init__(interval=interval)
         if platform.system() != "Linux":
-            raise RuntimeError("NPUPowerTracker currently supports Linux only")
-        script_path = os.path.join(os.path.dirname(__file__), "power_tracker_npu.sh")
+            raise RuntimeError("NPUDeviceTracker currently supports Linux only")
+        script_path = os.path.join(os.path.dirname(__file__), "device_tracker_npu.sh")
         self._status_cmd = (
             status_cmd
             if status_cmd is not None
             else f"bash {script_path} --sample-once --json"
         )
         self._scheduler: Optional[BackgroundScheduler] = None
-        self._job_id = "npu_power_track"
-        self._npu_power_glance = []
-        self._total_power_glance = []
-        self._power_trace = []
+        self._job_id = "npu_device_track"
+        self._npu_power_glance: list[float] = []
+        self._total_power_glance: list[float] = []
+        self._npu_util_glance: list[float] = []
+        self._power_trace: list[tuple[float, float]] = []
+        self._util_trace: list[tuple[float, float]] = []
 
-    def _fetch_power(self) -> Optional[tuple[float, float]]:
+    def _fetch_metrics(self) -> Optional[tuple[float, float, Optional[float]]]:
         try:
             result = subprocess.run(
                 shlex.split(self._status_cmd),
@@ -58,22 +60,26 @@ class NPUPowerTracker(BasePowerTracker):
 
         npu_power_w = float(payload["npu_power_w"])
         total_power_w = float(payload["total_power_w"])
-        return npu_power_w, total_power_w
+        npu_util_pct = payload.get("npu_util_pct")
+        if npu_util_pct is not None:
+            npu_util_pct = float(npu_util_pct)
+        return npu_power_w, total_power_w, npu_util_pct
 
-    def _func_for_sched(self):
-        power = self._fetch_power()
-        if power is None:
+    def _func_for_sched(self) -> None:
+        metrics = self._fetch_metrics()
+        if metrics is None:
             return
-        npu_power_w, total_power_w = power
+        npu_power_w, total_power_w, npu_util_pct = metrics
         ts = time.time()
         self._npu_power_glance.append(npu_power_w)
         self._total_power_glance.append(total_power_w)
-        # Use total board/system power as the primary trace for efficiency metrics.
         self._power_trace.append((ts, total_power_w))
+        if npu_util_pct is not None:
+            self._npu_util_glance.append(npu_util_pct)
+            self._util_trace.append((ts, npu_util_pct))
 
-    def start(self):
+    def start(self) -> None:
         self.reset()
-        # Capture one immediate sample so short phases still get power data.
         try:
             self._func_for_sched()
         except Exception:
@@ -92,8 +98,7 @@ class NPUPowerTracker(BasePowerTracker):
             id=self._job_id,
         )
 
-    def stop(self):
-        # Capture one final sample near phase end.
+    def stop(self) -> None:
         try:
             self._func_for_sched()
         except Exception:
@@ -104,11 +109,9 @@ class NPUPowerTracker(BasePowerTracker):
             finally:
                 self._scheduler = None
 
-    def get_power_metric(self) -> Dict[str, Optional[float]]:
+    def get_metric(self) -> Dict[str, Optional[float]]:
         npu_avg = (
-            float(np.mean(self._npu_power_glance))
-            if self._npu_power_glance
-            else None
+            float(np.mean(self._npu_power_glance)) if self._npu_power_glance else None
         )
         total_avg = (
             float(np.mean(self._total_power_glance))
@@ -125,25 +128,39 @@ class NPUPowerTracker(BasePowerTracker):
             if self._total_power_glance
             else None
         )
+        npu_util_avg = (
+            float(np.mean(self._npu_util_glance)) if self._npu_util_glance else None
+        )
+        npu_util_p99 = (
+            float(np.percentile(self._npu_util_glance, 99))
+            if self._npu_util_glance
+            else None
+        )
         return {
-            # Primary metrics now follow total power for fair board-level comparison.
             "avg_power_w": total_avg,
             "p99_power_w": total_p99,
             "avg_npu_power_w": npu_avg,
             "p99_npu_power_w": npu_p99,
             "avg_total_power_w": total_avg,
             "p99_total_power_w": total_p99,
+            "avg_npu_util_pct": npu_util_avg,
+            "p99_npu_util_pct": npu_util_p99,
+            # Generic names for cross-device consumers.
+            "avg_utilization_pct": npu_util_avg,
+            "p99_utilization_pct": npu_util_p99,
             "samples": len(self._power_trace),
+            "util_samples": len(self._util_trace),
         }
 
-    def get_power_trace(self):
+    def get_trace(self) -> list[tuple[float, float]]:
         return list(self._power_trace)
 
-    def reset(self):
+    def get_util_trace(self) -> list[tuple[float, float]]:
+        return list(self._util_trace)
+
+    def reset(self) -> None:
         self._npu_power_glance = []
         self._total_power_glance = []
+        self._npu_util_glance = []
         self._power_trace = []
-
-
-# Backward compatibility
-PowerTracker = NPUPowerTracker
+        self._util_trace = []

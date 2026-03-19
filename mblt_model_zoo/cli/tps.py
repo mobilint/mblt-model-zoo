@@ -78,7 +78,7 @@ def _parse_int_list_optional(spec: Union[str, None]) -> Union[list[int], None]:
     if not values:
         return None
     if any(v < 0 for v in values):
-        raise argparse.ArgumentTypeError("power-gpu-id values must be >= 0")
+        raise argparse.ArgumentTypeError("device-gpu-id values must be >= 0")
     return values
 
 
@@ -169,7 +169,7 @@ def _build_pipeline(
         if "nvmlInit_v2" in msg or "Can't initialize NVML" in msg:
             raise SystemExit(
                 "CUDA/NVML initialization failed while creating the pipeline.\n"
-                "This happens before power tracking starts and is a host GPU driver/runtime issue.\n"
+                "This happens before device tracking starts and is a host GPU driver/runtime issue.\n"
                 "Check: `nvidia-smi`, `python -c \"import torch; print(torch.cuda.is_available())\"`.\n"
                 "If running in container, verify NVIDIA runtime and libnvidia-ml visibility.\n"
                 "Temporary workaround for this run: set `PYTORCH_NO_CUDA_MEMORY_CACHING=1` and retry."
@@ -309,9 +309,9 @@ def _print_summary_footer() -> None:
     )
 
 
-def _infer_gpu_ids(device: str, power_gpu_id: Optional[list[int]]) -> Optional[Union[int, list[int]]]:
-    if power_gpu_id is not None:
-        return power_gpu_id[0] if len(power_gpu_id) == 1 else power_gpu_id
+def _infer_gpu_ids(device: str, device_gpu_id: Optional[list[int]]) -> Optional[Union[int, list[int]]]:
+    if device_gpu_id is not None:
+        return device_gpu_id[0] if len(device_gpu_id) == 1 else device_gpu_id
     text = (device or "").strip().lower()
     if text.startswith("cuda:"):
         try:
@@ -322,8 +322,8 @@ def _infer_gpu_ids(device: str, power_gpu_id: Optional[list[int]]) -> Optional[U
     return None
 
 
-def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
-    if not args.power:
+def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
+    if not args.device_metrics:
         return None
 
     def _has_npu_backend(obj: Any, depth: int = 0, seen: Optional[set[int]] = None) -> bool:
@@ -360,7 +360,7 @@ def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
     except Exception:
         is_mobilint_model = _has_npu_backend(getattr(pipeline, "model", None))
 
-    backend = args.power_device
+    backend = args.device_backend
     if backend == "auto":
         if is_mobilint_model:
             backend = "npu"
@@ -372,21 +372,21 @@ def _build_power_tracker(args: argparse.Namespace, pipeline: Any):
         return None
 
     if backend == "npu":
-        from mblt_model_zoo.utils.power_tracker_npu import NPUPowerTracker
+        from mblt_model_zoo.utils.device_tracker_npu import NPUDeviceTracker
         try:
-            return NPUPowerTracker(interval=args.power_interval)
+            return NPUDeviceTracker(interval=args.device_interval)
         except Exception as e:
-            print(f"[power] failed to initialize NPU tracker: {e}", file=sys.stderr)
+            print(f"[device] failed to initialize NPU tracker: {e}", file=sys.stderr)
             return None
 
     if backend == "gpu":
-        from mblt_model_zoo.utils.power_tracker_gpu import GPUPowerTracker
+        from mblt_model_zoo.utils.device_tracker_gpu import GPUDeviceTracker
 
-        gpu_id = _infer_gpu_ids(args.device, args.power_gpu_id)
+        gpu_id = _infer_gpu_ids(args.device, args.device_gpu_id)
         try:
-            return GPUPowerTracker(interval=args.power_interval, gpu_id=gpu_id)
+            return GPUDeviceTracker(interval=args.device_interval, gpu_id=gpu_id)
         except Exception as e:
-            print(f"[power] failed to initialize GPU tracker: {e}", file=sys.stderr)
+            print(f"[device] failed to initialize GPU tracker: {e}", file=sys.stderr)
             return None
 
     return None
@@ -406,14 +406,14 @@ def _avg_power_in_window(
     return default_power
 
 
-def _print_power_status(args: argparse.Namespace, tracker: Any) -> None:
-    if not args.power:
-        print("[power] disabled by --no-power")
+def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
+    if not args.device_metrics:
+        print("[device] disabled by --no-device-metrics")
         return
     if tracker is None:
-        print("[power] enabled but no compatible tracker initialized (auto detection fallback)")
+        print("[device] enabled but no compatible tracker initialized (auto detection fallback)")
         return
-    print(f"[power] enabled with {tracker.__class__.__name__} (interval={args.power_interval}s)")
+    print(f"[device] enabled with {tracker.__class__.__name__} (interval={args.device_interval}s)")
 
 
 def _safe_div(a: float, b: float) -> Optional[float]:
@@ -422,14 +422,18 @@ def _safe_div(a: float, b: float) -> Optional[float]:
     return a / b
 
 
-def _enrich_single_run_power(
+def _enrich_single_run_device(
     run: Any,
-    power_metric: dict[str, Any],
-    power_trace: Sequence[tuple[float, float]],
+    metric: dict[str, Any],
+    trace: Sequence[tuple[float, float]],
     run_start_t: float,
 ) -> None:
-    avg_power = power_metric.get("avg_power_w")
-    p99_power = power_metric.get("p99_power_w")
+    avg_power = metric.get("avg_power_w")
+    p99_power = metric.get("p99_power_w")
+    avg_util = metric.get("avg_utilization_pct")
+    p99_util = metric.get("p99_utilization_pct")
+    run.avg_utilization_pct = float(avg_util) if avg_util is not None else None
+    run.p99_utilization_pct = float(p99_util) if p99_util is not None else None
     if avg_power is None:
         return
 
@@ -438,8 +442,8 @@ def _enrich_single_run_power(
     decode_start = prefill_end
     decode_end = decode_start + run.decode_duration
 
-    prefill_avg_power = _avg_power_in_window(power_trace, prefill_start, prefill_end, avg_power)
-    decode_avg_power = _avg_power_in_window(power_trace, decode_start, decode_end, avg_power)
+    prefill_avg_power = _avg_power_in_window(trace, prefill_start, prefill_end, avg_power)
+    decode_avg_power = _avg_power_in_window(trace, decode_start, decode_end, avg_power)
 
     prefill_energy = (
         prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
@@ -545,8 +549,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker = _build_power_tracker(args, pipeline)
-    _print_power_status(args, tracker)
+    tracker = _build_device_tracker(args, pipeline)
+    _print_device_status(args, tracker)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.prefill,
@@ -572,10 +576,10 @@ def _cmd_measure(args: argparse.Namespace) -> int:
             if tracker is not None:
                 tracker.stop()
         if tracker is not None:
-            _enrich_single_run_power(
+            _enrich_single_run_device(
                 run=run,
-                power_metric=tracker.get_power_metric(),
-                power_trace=tracker.get_power_trace(),
+                metric=tracker.get_metric(),
+                trace=tracker.get_trace(),
                 run_start_t=run_start_t,
             )
         runs.append(run)
@@ -587,6 +591,12 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     total_ms = [r.total_time * 1000.0 for r in runs]
     avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
     p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
+    avg_utilization_pct = [
+        r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None
+    ]
+    p99_utilization_pct = [
+        r.p99_utilization_pct for r in runs if r.p99_utilization_pct is not None
+    ]
     total_energy_j = [r.total_energy_j for r in runs if r.total_energy_j is not None]
     prefill_tok_per_j = [r.prefill_tokens_per_j for r in runs if r.prefill_tokens_per_j is not None]
     decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
@@ -602,9 +612,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     _print_summary("ttft", ttft_ms, "ms")
     _print_summary("decode_duration", decode_ms, "ms")
     _print_summary("total", total_ms, "ms")
-    if args.power:
+    if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
+        _print_summary("avg_utilization", avg_utilization_pct, "%")
+        _print_summary("p99_utilization", p99_utilization_pct, "%")
         _print_summary("total_energy", total_energy_j, "J")
         _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
         _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
@@ -624,6 +636,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "total_ms": _summary(total_ms),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
+                "avg_utilization_pct": _summary(avg_utilization_pct),
+                "p99_utilization_pct": _summary(p99_utilization_pct),
                 "total_energy_j": _summary(total_energy_j),
                 "prefill_tok_per_j": _summary(prefill_tok_per_j),
                 "decode_tok_per_j_dfi": _summary(decode_tok_per_j),
@@ -658,8 +672,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker = _build_power_tracker(args, pipeline)
-    _print_power_status(args, tracker)
+    tracker = _build_device_tracker(args, pipeline)
+    _print_device_status(args, tracker)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.fixed_prefill,
@@ -671,6 +685,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     runs = []
     run_avg_power: list[float] = []
     run_p99_power: list[float] = []
+    run_avg_utilization: list[float] = []
+    run_p99_utilization: list[float] = []
     run_total_energy: list[float] = []
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         run_start_t = time.time()
@@ -692,13 +708,19 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             if tracker is not None:
                 tracker.stop()
         if tracker is not None:
-            metric = tracker.get_power_metric()
+            metric = tracker.get_metric()
             avg_power = metric.get("avg_power_w")
             p99_power = metric.get("p99_power_w")
+            avg_utilization = metric.get("avg_utilization_pct")
+            p99_utilization = metric.get("p99_utilization_pct")
             if avg_power is not None:
                 run_avg_power.append(float(avg_power))
             if p99_power is not None:
                 run_p99_power.append(float(p99_power))
+            if avg_utilization is not None:
+                run_avg_utilization.append(float(avg_utilization))
+            if p99_utilization is not None:
+                run_p99_utilization.append(float(p99_utilization))
             elapsed = time.time() - run_start_t
             if avg_power is not None:
                 run_total_energy.append(float(avg_power) * elapsed)
@@ -728,9 +750,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
     if decode_last:
         _print_summary("decode_tps(last_point)", decode_last, "tok/s")
-    if args.power:
+    if args.device_metrics:
         _print_summary("avg_power", run_avg_power, "W")
         _print_summary("p99_power", run_p99_power, "W")
+        _print_summary("avg_utilization", run_avg_utilization, "%")
+        _print_summary("p99_utilization", run_p99_utilization, "%")
         _print_summary("total_energy", run_total_energy, "J")
         _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
         _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
@@ -748,6 +772,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 "decode_tps_last": _summary(decode_last),
                 "avg_power_w": _summary(run_avg_power),
                 "p99_power_w": _summary(run_p99_power),
+                "avg_utilization_pct": _summary(run_avg_utilization),
+                "p99_utilization_pct": _summary(run_p99_utilization),
                 "total_energy_j": _summary(run_total_energy),
                 "prefill_tok_per_j_last": _summary(prefill_last_tpj),
                 "decode_tok_per_j_last_dfi": _summary(decode_last_tpj),
@@ -790,8 +816,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
 
     measurer = VLMTPSMeasurer(pipeline)
-    tracker = _build_power_tracker(args, pipeline)
-    _print_power_status(args, tracker)
+    tracker = _build_device_tracker(args, pipeline)
+    _print_device_status(args, tracker)
 
     resolution_payloads = []
     csv_rows: list[dict[str, Any]] = []
@@ -806,6 +832,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         vision_runs = []
         vision_power_avg = []
         vision_power_p99 = []
+        vision_util_avg = []
+        vision_util_p99 = []
         vision_energy_j = []
         vision_img_per_j = []
         vision_j_per_img = []
@@ -824,9 +852,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     tracker.stop()
             vision_runs.append(single)
             if tracker is not None:
-                metric = tracker.get_power_metric()
+                metric = tracker.get_metric()
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
+                avg_utilization = metric.get("avg_utilization_pct")
+                p99_utilization = metric.get("p99_utilization_pct")
                 if avg_power is not None:
                     avg_power_f = float(avg_power)
                     energy = avg_power_f * float(single[0])
@@ -836,6 +866,10 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     vision_j_per_img.append(energy)
                 if p99_power is not None:
                     vision_power_p99.append(float(p99_power))
+                if avg_utilization is not None:
+                    vision_util_avg.append(float(avg_utilization))
+                if p99_utilization is not None:
+                    vision_util_p99.append(float(p99_utilization))
 
         vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
         vision_fps = [fps for _, fps in vision_runs]
@@ -844,14 +878,16 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary_header()
         _print_summary("vision_encode", vision_ms, "ms")
         _print_summary("vision_fps", vision_fps, "fps")
-        if args.power:
+        if args.device_metrics:
             _print_summary("vision_avg_power", vision_power_avg, "W")
             _print_summary("vision_p99_power", vision_power_p99, "W")
+            _print_summary("vision_avg_util", vision_util_avg, "%")
+            _print_summary("vision_p99_util", vision_util_p99, "%")
             _print_summary("vision_energy", vision_energy_j, "J")
             _print_summary("vision_img_per_j", vision_img_per_j, "img/J")
             _print_summary("vision_j_per_img", vision_j_per_img, "J/img")
             if not vision_power_avg:
-                print("[power] warning: no vision power samples were collected for this resolution")
+                print("[device] warning: no vision device samples were collected for this resolution")
         _print_summary_footer()
 
         for idx, (latency, fps) in enumerate(vision_runs, start=1):
@@ -871,6 +907,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "llm_total_ms": None,
                     "avg_power_w": vision_power_avg[idx - 1] if idx - 1 < len(vision_power_avg) else None,
                     "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
+                    "avg_utilization_pct": vision_util_avg[idx - 1] if idx - 1 < len(vision_util_avg) else None,
+                    "p99_utilization_pct": vision_util_p99[idx - 1] if idx - 1 < len(vision_util_p99) else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "prefill_tok_per_j": None,
                     "decode_tok_per_j_dfi": None,
@@ -897,6 +935,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "vision_fps": _summary(vision_fps),
                     "avg_power_w": _summary(vision_power_avg),
                     "p99_power_w": _summary(vision_power_p99),
+                    "avg_utilization_pct": _summary(vision_util_avg),
+                    "p99_utilization_pct": _summary(vision_util_p99),
                     "energy_j": _summary(vision_energy_j),
                     "vision_img_per_j": _summary(vision_img_per_j),
                     "vision_j_per_img": _summary(vision_j_per_img),
@@ -934,10 +974,10 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             if tracker is not None:
                 tracker.stop()
         if tracker is not None:
-            _enrich_single_run_power(
+            _enrich_single_run_device(
                 run=run,
-                power_metric=tracker.get_power_metric(),
-                power_trace=tracker.get_power_trace(),
+                metric=tracker.get_metric(),
+                trace=tracker.get_trace(),
                 run_start_t=run_start_t,
             )
         llm_runs.append(run)
@@ -949,6 +989,12 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     llm_total_ms = [r.total_time * 1000.0 for r in llm_runs]
     llm_avg_power_w = [r.avg_power_w for r in llm_runs if r.avg_power_w is not None]
     llm_p99_power_w = [r.p99_power_w for r in llm_runs if r.p99_power_w is not None]
+    llm_avg_utilization_pct = [
+        r.avg_utilization_pct for r in llm_runs if r.avg_utilization_pct is not None
+    ]
+    llm_p99_utilization_pct = [
+        r.p99_utilization_pct for r in llm_runs if r.p99_utilization_pct is not None
+    ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if r.total_energy_j is not None]
     llm_prefill_tok_per_j = [r.prefill_tokens_per_j for r in llm_runs if r.prefill_tokens_per_j is not None]
     llm_decode_tok_per_j = [r.decode_tokens_per_j for r in llm_runs if r.decode_tokens_per_j is not None]
@@ -964,16 +1010,18 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     _print_summary("llm_ttft", llm_ttft_ms, "ms")
     _print_summary("llm_decode_duration", llm_decode_ms, "ms")
     _print_summary("llm_total", llm_total_ms, "ms")
-    if args.power:
+    if args.device_metrics:
         _print_summary("llm_avg_power", llm_avg_power_w, "W")
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
+        _print_summary("llm_avg_utilization", llm_avg_utilization_pct, "%")
+        _print_summary("llm_p99_utilization", llm_p99_utilization_pct, "%")
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
         _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
         _print_summary("llm_decode_tok_per_j", llm_decode_tok_per_j, "tok/J")
         _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
         _print_summary("llm_decode_j_per_tok", llm_decode_j_per_tok, "J/tok")
         if not llm_avg_power_w:
-            print("[power] warning: no llm power samples were collected")
+            print("[device] warning: no llm device samples were collected")
     _print_summary_footer()
 
     for idx, run in enumerate(llm_runs, start=1):
@@ -993,6 +1041,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "llm_total_ms": run.total_time * 1000.0,
                 "avg_power_w": run.avg_power_w,
                 "p99_power_w": run.p99_power_w,
+                "avg_utilization_pct": run.avg_utilization_pct,
+                "p99_utilization_pct": run.p99_utilization_pct,
                 "total_energy_j": run.total_energy_j,
                 "prefill_tok_per_j": run.prefill_tokens_per_j,
                 "decode_tok_per_j_dfi": run.decode_tokens_per_j,
@@ -1024,6 +1074,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                         "llm_total_ms": _summary(llm_total_ms),
                         "avg_power_w": _summary(llm_avg_power_w),
                         "p99_power_w": _summary(llm_p99_power_w),
+                        "avg_utilization_pct": _summary(llm_avg_utilization_pct),
+                        "p99_utilization_pct": _summary(llm_p99_utilization_pct),
                         "total_energy_j": _summary(llm_total_energy_j),
                         "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
                         "decode_tok_per_j_dfi": _summary(llm_decode_tok_per_j),
@@ -1124,28 +1176,28 @@ def add_tps_parser(
             help="write qbruntime trace to the given JSON path (first run only)",
         )
         p.add_argument(
-            "--power",
-            action=argparse.BooleanOptionalAction,
-            default=True,
-            help="enable power tracking (default: on, disable via --no-power)",
+        "--device-metrics",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="enable device metrics tracking (default: on, disable via --no-device-metrics)",
         )
         p.add_argument(
-            "--power-device",
-            choices=["auto", "gpu", "npu"],
-            default="auto",
-            help="power backend selection (default: auto)",
+        "--device-backend",
+        choices=["auto", "gpu", "npu"],
+        default="auto",
+        help="device backend selection (default: auto)",
         )
         p.add_argument(
-            "--power-interval",
-            type=float,
-            default=0.2,
-            help="power sampling interval in seconds",
+        "--device-interval",
+        type=float,
+        default=0.2,
+        help="device sampling interval in seconds",
         )
         p.add_argument(
-            "--power-gpu-id",
-            type=_parse_int_list_optional,
-            default=None,
-            help="comma-separated GPU ids for power tracking (e.g., 0,1)",
+        "--device-gpu-id",
+        type=_parse_int_list_optional,
+        default=None,
+        help="comma-separated GPU ids for device tracking (e.g., 0,1)",
         )
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
@@ -1224,3 +1276,4 @@ def add_tps_parser(
     p_vlm.add_argument("--json", default=None, help="write VLM results as JSON")
     p_vlm.add_argument("--csv", default=None, help="write VLM rows as CSV")
     p_vlm.set_defaults(_handler=_cmd_vlm_sweep)
+

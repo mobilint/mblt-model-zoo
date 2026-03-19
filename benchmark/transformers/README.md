@@ -14,7 +14,7 @@ Outputs (created under `benchmark/transformers/results/text_generation/`):
 
 - `{model}.json` and `{model}.png` for each model
 - `combined.png`, `combined.csv`, and `combined.md`
-- `combined_power.csv` and `combined_power.md` (when power metrics are available)
+- `combined_device.csv` and `combined_device.md` (when device metrics are available)
 
 Common CLI options:
 
@@ -28,10 +28,10 @@ Common CLI options:
 - `--fixed-prefill` (default: `128`)
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
-- `--power/--no-power` (default: `--power`)
-- `--power-device` (`auto`, `gpu`, `npu`)
-- `--power-interval` (default: `0.2`)
-- `--power-gpu-id` (e.g., `0` or `0,1`)
+- `--device-metrics/--no-device-metrics` (default: `--device-metrics`)
+- `--device-backend` (`auto`, `gpu`, `npu`)
+- `--device-interval` (default: `0.2`)
+- `--device-gpu-id` (e.g., `0` or `0,1`)
 - `--cuda-precheck/--no-cuda-precheck` (best-effort VRAM pre-check before load; default: `--cuda-precheck`)
 - `--cuda-precheck-margin` (default: `1.15`)
 - `--skip-existing` (skip models with existing outputs)
@@ -79,3 +79,4 @@ The script ignores `group_id`, intersects model IDs across all folders, then sav
 - `decode_tokens_per_j.png`
 - `prefill_j_per_token.png`
 - `decode_j_per_token.png`
+
