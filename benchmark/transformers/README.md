@@ -44,6 +44,7 @@ Common CLI options:
 - `--cuda-precheck/--no-cuda-precheck` (best-effort VRAM pre-check before load; default: `--cuda-precheck`)
 - `--cuda-precheck-margin` (default: `1.15`)
 - `--skip-existing` (skip models with existing outputs)
+- `--rebuild-charts` (skip benchmark run and rebuild `combined.csv`/`combined.md`/charts from existing JSON files)
 
 Example:
 

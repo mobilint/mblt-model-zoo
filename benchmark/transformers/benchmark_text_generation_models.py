@@ -659,6 +659,214 @@ def _write_single_combined_markdown(
         f.writelines(lines)
 
 
+def _rebuild_combined_outputs(
+    results_dir: str,
+    targets: Sequence[tuple[str, list[str | None], str, str]],
+) -> None:
+    combined_results = []
+    combined_rows = []
+    combined_device_rows: list[dict[str, float | str | None]] = []
+    for _, _, label, base in targets:
+        json_path = os.path.join(results_dir, f"{base}.json")
+        if not os.path.isfile(json_path):
+            continue
+        result = _load_result(json_path)
+        combined_results.append(result)
+        combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
+        device = _load_device(json_path)
+        if device:
+            combined_device_rows.append(
+                {
+                    "model": label,
+                    "avg_power_w": device.get("avg_power_w"),
+                    "p99_power_w": device.get("p99_power_w"),
+                    "avg_utilization_pct": device.get("avg_utilization_pct"),
+                    "p99_utilization_pct": device.get("p99_utilization_pct"),
+                    "avg_memory_used_mb": device.get("avg_memory_used_mb"),
+                    "p99_memory_used_mb": device.get("p99_memory_used_mb"),
+                    "total_memory_mb": device.get("total_memory_mb"),
+                    "avg_memory_used_pct": device.get("avg_memory_used_pct"),
+                    "p99_memory_used_pct": device.get("p99_memory_used_pct"),
+                    "total_energy_j": device.get("total_energy_j"),
+                    "prefill_tps_last": device.get("prefill_tps_last"),
+                    "decode_tps_last": device.get("decode_tps_last"),
+                    "prefill_tok_per_j_last": device.get("prefill_tok_per_j_last"),
+                    "decode_tok_per_j_last": device.get("decode_tok_per_j_last"),
+                    "prefill_j_per_tok_last": device.get("prefill_j_per_tok_last"),
+                    "decode_j_per_tok_last": device.get("decode_j_per_tok_last"),
+                }
+            )
+
+    if not combined_results:
+        print("No existing JSON results matched the current target set. Nothing to aggregate.")
+        return
+
+    combined_csv = os.path.join(results_dir, "combined.csv")
+    combined_md = os.path.join(results_dir, "combined.md")
+    BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
+    _write_single_combined_markdown(
+        combined_md,
+        tps_rows=combined_rows,
+        device_rows=combined_device_rows,
+    )
+
+    folder_metrics = collect_folder_metrics(Path(results_dir))
+    if folder_metrics:
+        models = sorted(folder_metrics.keys())
+        labels = ["benchmark"]
+        metrics_by_folder = [folder_metrics]
+
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.prefill_tps,
+            title="Prefill TPS",
+            x_label="TPS (tokens/sec)",
+            output_path=Path(results_dir) / "prefill_tps.png",
+        )
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.decode_tps,
+            title="Decode TPS",
+            x_label="TPS (tokens/sec)",
+            output_path=Path(results_dir) / "decode_tps.png",
+        )
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.prefill_latency_ms,
+            title="Prefill Latency",
+            x_label="Latency (ms)",
+            output_path=Path(results_dir) / "prefill_latency_ms.png",
+        )
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.decode_duration_ms,
+            title="Decode Duration",
+            x_label="Duration (ms)",
+            output_path=Path(results_dir) / "decode_duration_ms.png",
+        )
+
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_power_w,
+            title="Average Power",
+            x_label="Power (W)",
+            output_path=Path(results_dir) / "avg_power_w.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.total_energy_j,
+            title="Total Energy",
+            x_label="Energy (J)",
+            output_path=Path(results_dir) / "total_energy_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.prefill_tokens_per_j,
+            title="Prefill Tokens/J",
+            x_label="Tokens/J",
+            output_path=Path(results_dir) / "prefill_tokens_per_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.decode_tokens_per_j,
+            title="Decode Tokens/J",
+            x_label="Tokens/J",
+            output_path=Path(results_dir) / "decode_tokens_per_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.prefill_j_per_token,
+            title="Prefill J/Token",
+            x_label="J/Token",
+            output_path=Path(results_dir) / "prefill_j_per_token.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.decode_j_per_token,
+            title="Decode J/Token",
+            x_label="J/Token",
+            output_path=Path(results_dir) / "decode_j_per_token.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_utilization_pct,
+            title="Average Utilization",
+            x_label="Utilization (%)",
+            output_path=Path(results_dir) / "avg_utilization_pct.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_utilization_pct,
+            title="P99 Utilization",
+            x_label="Utilization (%)",
+            output_path=Path(results_dir) / "p99_utilization_pct.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_memory_used_mb,
+            title="Average Memory Used",
+            x_label="Memory (MB)",
+            output_path=Path(results_dir) / "avg_memory_used_mb.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_memory_used_mb,
+            title="P99 Memory Used",
+            x_label="Memory (MB)",
+            output_path=Path(results_dir) / "p99_memory_used_mb.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_memory_used_pct,
+            title="Average Memory Used (%)",
+            x_label="Memory Usage (%)",
+            output_path=Path(results_dir) / "avg_memory_used_pct.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_memory_used_pct,
+            title="P99 Memory Used (%)",
+            x_label="Memory Usage (%)",
+            output_path=Path(results_dir) / "p99_memory_used_pct.png",
+        )
+
+    if combined_device_rows:
+        device_csv = os.path.join(results_dir, "combined_device.csv")
+        _write_device_combined_csv(device_csv, combined_device_rows)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     parser.add_argument(
@@ -720,6 +928,11 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-existing",
         action="store_true",
         help="skip models with existing JSON+PNG outputs",
+    )
+    parser.add_argument(
+        "--rebuild-charts",
+        action="store_true",
+        help="skip benchmarking and rebuild combined CSV/MD/charts from existing JSON files",
     )
     parser.add_argument(
         "--warmup",
@@ -810,6 +1023,11 @@ def main(argv: list[str] | None = None) -> int:
             all_revisions=args.all,
         )
     )
+    if args.rebuild_charts:
+        print("Rebuilding combined outputs from existing JSON files only...")
+        _rebuild_combined_outputs(results_dir, targets)
+        return 0
+
     for model_id, revision_candidates, label, base in tqdm(
         targets,
         desc="Benchmarking models",
@@ -1019,205 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
 
-    combined_results = []
-    combined_rows = []
-    combined_device_rows: list[dict[str, float | str | None]] = []
-    for _, _, label, base in targets:
-        json_path = os.path.join(results_dir, f"{base}.json")
-        if not os.path.isfile(json_path):
-            continue
-        result = _load_result(json_path)
-        combined_results.append(result)
-        combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
-        device = _load_device(json_path)
-        if device:
-            combined_device_rows.append(
-                {
-                    "model": label,
-                    "avg_power_w": device.get("avg_power_w"),
-                    "p99_power_w": device.get("p99_power_w"),
-                    "avg_utilization_pct": device.get("avg_utilization_pct"),
-                    "p99_utilization_pct": device.get("p99_utilization_pct"),
-                    "avg_memory_used_mb": device.get("avg_memory_used_mb"),
-                    "p99_memory_used_mb": device.get("p99_memory_used_mb"),
-                    "total_memory_mb": device.get("total_memory_mb"),
-                    "avg_memory_used_pct": device.get("avg_memory_used_pct"),
-                    "p99_memory_used_pct": device.get("p99_memory_used_pct"),
-                    "total_energy_j": device.get("total_energy_j"),
-                    "prefill_tps_last": device.get("prefill_tps_last"),
-                    "decode_tps_last": device.get("decode_tps_last"),
-                    "prefill_tok_per_j_last": device.get("prefill_tok_per_j_last"),
-                    "decode_tok_per_j_last": device.get("decode_tok_per_j_last"),
-                    "prefill_j_per_tok_last": device.get("prefill_j_per_tok_last"),
-                    "decode_j_per_tok_last": device.get("decode_j_per_tok_last"),
-                }
-            )
-
-    if combined_results:
-        combined_csv = os.path.join(results_dir, "combined.csv")
-        combined_md = os.path.join(results_dir, "combined.md")
-        BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
-        _write_single_combined_markdown(
-            combined_md,
-            tps_rows=combined_rows,
-            device_rows=combined_device_rows,
-        )
-
-        folder_metrics = collect_folder_metrics(Path(results_dir))
-        if folder_metrics:
-            models = sorted(folder_metrics.keys())
-            labels = ["benchmark"]
-            metrics_by_folder = [folder_metrics]
-
-            plot_token_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                token_selector=lambda m: m.prefill_tps,
-                title="Prefill TPS",
-                x_label="TPS (tokens/sec)",
-                output_path=Path(results_dir) / "prefill_tps.png",
-            )
-            plot_token_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                token_selector=lambda m: m.decode_tps,
-                title="Decode TPS",
-                x_label="TPS (tokens/sec)",
-                output_path=Path(results_dir) / "decode_tps.png",
-            )
-            plot_token_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                token_selector=lambda m: m.prefill_latency_ms,
-                title="Prefill Latency",
-                x_label="Latency (ms)",
-                output_path=Path(results_dir) / "prefill_latency_ms.png",
-            )
-            plot_token_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                token_selector=lambda m: m.decode_duration_ms,
-                title="Decode Duration",
-                x_label="Duration (ms)",
-                output_path=Path(results_dir) / "decode_duration_ms.png",
-            )
-
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.avg_power_w,
-                title="Average Power",
-                x_label="Power (W)",
-                output_path=Path(results_dir) / "avg_power_w.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.total_energy_j,
-                title="Total Energy",
-                x_label="Energy (J)",
-                output_path=Path(results_dir) / "total_energy_j.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.prefill_tokens_per_j,
-                title="Prefill Tokens/J",
-                x_label="Tokens/J",
-                output_path=Path(results_dir) / "prefill_tokens_per_j.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.decode_tokens_per_j,
-                title="Decode Tokens/J",
-                x_label="Tokens/J",
-                output_path=Path(results_dir) / "decode_tokens_per_j.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.prefill_j_per_token,
-                title="Prefill J/Token",
-                x_label="J/Token",
-                output_path=Path(results_dir) / "prefill_j_per_token.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.decode_j_per_token,
-                title="Decode J/Token",
-                x_label="J/Token",
-                output_path=Path(results_dir) / "decode_j_per_token.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.avg_utilization_pct,
-                title="Average Utilization",
-                x_label="Utilization (%)",
-                output_path=Path(results_dir) / "avg_utilization_pct.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.p99_utilization_pct,
-                title="P99 Utilization",
-                x_label="Utilization (%)",
-                output_path=Path(results_dir) / "p99_utilization_pct.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.avg_memory_used_mb,
-                title="Average Memory Used",
-                x_label="Memory (MB)",
-                output_path=Path(results_dir) / "avg_memory_used_mb.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.p99_memory_used_mb,
-                title="P99 Memory Used",
-                x_label="Memory (MB)",
-                output_path=Path(results_dir) / "p99_memory_used_mb.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.avg_memory_used_pct,
-                title="Average Memory Used (%)",
-                x_label="Memory Usage (%)",
-                output_path=Path(results_dir) / "avg_memory_used_pct.png",
-            )
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=lambda m: m.p99_memory_used_pct,
-                title="P99 Memory Used (%)",
-                x_label="Memory Usage (%)",
-                output_path=Path(results_dir) / "p99_memory_used_pct.png",
-            )
-
-        if combined_device_rows:
-            device_csv = os.path.join(results_dir, "combined_device.csv")
-            _write_device_combined_csv(device_csv, combined_device_rows)
+    _rebuild_combined_outputs(results_dir, targets)
 
     return 0
 
