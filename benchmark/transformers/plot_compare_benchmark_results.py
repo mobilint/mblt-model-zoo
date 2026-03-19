@@ -11,6 +11,20 @@ from chart_utils import (
 )
 
 
+def _strip_group_id(model_id: str) -> str:
+    # Compare by model id only (ignore leading group_id__ prefix).
+    return model_id.split("__", 1)[1] if "__" in model_id else model_id
+
+
+def _normalize_folder_metrics(metrics: dict[str, object]) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+    for key, value in metrics.items():
+        norm_key = _strip_group_id(str(key))
+        if norm_key not in normalized:
+            normalized[norm_key] = value
+    return normalized
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare N benchmark result folders and generate model-wise bar charts."
@@ -44,7 +58,9 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics_by_folder = [collect_folder_metrics(folder) for folder in folders]
+    metrics_by_folder = [
+        _normalize_folder_metrics(collect_folder_metrics(folder)) for folder in folders
+    ]
     labels = folder_labels(folders)
     models = common_models(metrics_by_folder)
     for label, folder, metrics in zip(labels, folders, metrics_by_folder):
