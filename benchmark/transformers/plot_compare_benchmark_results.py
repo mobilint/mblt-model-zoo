@@ -2,10 +2,11 @@ import argparse
 from pathlib import Path
 
 from chart_utils import (
-    collect_folder_metrics,
+    ModelMetrics,
     common_models,
     default_charts_dir,
     folder_labels,
+    load_model_metrics,
     plot_scalar_chart,
     plot_token_chart,
 )
@@ -16,12 +17,31 @@ def _strip_group_id(model_id: str) -> str:
     return model_id.split("__", 1)[1] if "__" in model_id else model_id
 
 
-def _normalize_folder_metrics(metrics: dict[str, object]) -> dict[str, object]:
-    normalized: dict[str, object] = {}
-    for key, value in metrics.items():
-        norm_key = _strip_group_id(str(key))
+def _normalize_model_key(path: Path, loaded_model_id: str) -> str:
+    # Prefer file name normalization so compare behavior is stable even if JSON "model" differs.
+    stem = path.stem
+    if "__" in stem:
+        return _strip_group_id(stem)
+    key = _strip_group_id(loaded_model_id)
+    if "/" in key:
+        key = key.split("/", 1)[1]
+    return key
+
+
+def _collect_compare_metrics(folder: Path) -> dict[str, ModelMetrics]:
+    normalized: dict[str, ModelMetrics] = {}
+    for path in sorted(folder.glob("*.json")):
+        try:
+            loaded = load_model_metrics(path)
+        except Exception as e:
+            print(f"Warning: failed to parse {path}: {e}")
+            continue
+        if loaded is None:
+            continue
+        model_id, metric = loaded
+        norm_key = _normalize_model_key(path, model_id)
         if norm_key not in normalized:
-            normalized[norm_key] = value
+            normalized[norm_key] = metric
     return normalized
 
 
@@ -58,9 +78,7 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics_by_folder = [
-        _normalize_folder_metrics(collect_folder_metrics(folder)) for folder in folders
-    ]
+    metrics_by_folder = [_collect_compare_metrics(folder) for folder in folders]
     labels = folder_labels(folders)
     models = common_models(metrics_by_folder)
     for label, folder, metrics in zip(labels, folders, metrics_by_folder):
@@ -69,6 +87,9 @@ def main() -> int:
     for model in models:
         print(f" - {model}")
     if not models:
+        for label, metrics in zip(labels, metrics_by_folder):
+            sample = sorted(metrics.keys())[:10]
+            print(f"[debug] {label} normalized keys (up to 10): {sample}")
         raise SystemExit("No common model_id found across all input folders.")
 
     plot_token_chart(
