@@ -1,12 +1,23 @@
 import argparse
 import csv
-import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
-import matplotlib.pyplot as plt
-import numpy as np
+try:
+    from benchmark.common.chart_utils import (
+        default_charts_dir as _default_charts_dir_common,
+        plot_grouped_scalar_barh,
+        source_labels as _source_labels_common,
+    )
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from benchmark.common.chart_utils import (
+        default_charts_dir as _default_charts_dir_common,
+        plot_grouped_scalar_barh,
+        source_labels as _source_labels_common,
+    )
 
 
 @dataclass
@@ -18,37 +29,12 @@ class VisionMetrics:
     util_pct: Optional[float]
 
 
-def sanitize_text(text: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")
-    return cleaned or "unnamed"
-
-
-def folder_prefix(sources: list[Path]) -> str:
-    return "_".join(sanitize_text(path.stem or path.name) for path in sources)
-
-
 def default_charts_dir(script_dir: Path, sources: list[Path]) -> Path:
-    return script_dir / "results" / "charts" / folder_prefix(sources)
+    return _default_charts_dir_common(script_dir, sources, use_stem=True)
 
 
 def source_labels(sources: list[Path]) -> list[str]:
-    labels = [source.stem or source.name for source in sources]
-    counts: dict[str, int] = {}
-    for label in labels:
-        counts[label] = counts.get(label, 0) + 1
-
-    seen: dict[str, int] = {}
-    out: list[str] = []
-    for idx, label in enumerate(labels):
-        if counts[label] == 1:
-            out.append(label)
-            continue
-        seen[label] = seen.get(label, 0) + 1
-        out.append(f"{label} [{seen[label]}/{counts[label]}]")
-
-    if len(set(out)) != len(out):
-        out = [f"{label}#{idx + 1}" for idx, label in enumerate(labels)]
-    return out
+    return _source_labels_common(sources, use_stem=True)
 
 
 def _as_float(raw: str | None) -> Optional[float]:
@@ -120,58 +106,6 @@ def _resolve_csv_path(raw: str) -> Path:
     )
 
 
-def plot_scalar_chart(
-    *,
-    models: list[str],
-    source_labels_: list[str],
-    metrics_by_source: list[dict[str, VisionMetrics]],
-    scalar_selector: Callable[[VisionMetrics], Optional[float]],
-    title: str,
-    x_label: str,
-    output_path: Path,
-) -> None:
-    if not models:
-        return
-
-    y = np.arange(len(models), dtype=float)
-    group_height = 0.82
-    bar_h = group_height / max(len(metrics_by_source), 1)
-    start = -group_height / 2 + bar_h / 2
-    fig_h = max(5.0, 0.45 * len(models) + 2.0)
-    fig, ax = plt.subplots(figsize=(14, fig_h))
-    cmap = plt.get_cmap("tab10")
-
-    for idx, (label, source) in enumerate(zip(source_labels_, metrics_by_source)):
-        x_vals = []
-        y_vals = []
-        for i, model in enumerate(models):
-            value = scalar_selector(source[model])
-            if value is None:
-                continue
-            x_vals.append(float(value))
-            y_vals.append(y[i] + start + idx * bar_h)
-        if x_vals:
-            ax.barh(
-                y_vals,
-                x_vals,
-                height=bar_h * 0.95,
-                label=label,
-                color=cmap(idx % 10),
-            )
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("model")
-    ax.set_title(title)
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    ax.legend(loc="best")
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=220)
-    plt.close(fig)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -225,51 +159,28 @@ def main() -> int:
             print(f"[debug] {label} model keys (up to 10): {sample}")
         raise SystemExit("No common model found across all input CSV files.")
 
-    plot_scalar_chart(
-        models=models,
-        source_labels_=labels,
-        metrics_by_source=metrics_by_source,
-        scalar_selector=lambda m: m.mAP,
-        title="mAP",
-        x_label="mAP",
-        output_path=output_dir / "mAP.png",
-    )
-    plot_scalar_chart(
-        models=models,
-        source_labels_=labels,
-        metrics_by_source=metrics_by_source,
-        scalar_selector=lambda m: m.fps,
-        title="FPS",
-        x_label="FPS",
-        output_path=output_dir / "fps.png",
-    )
-    plot_scalar_chart(
-        models=models,
-        source_labels_=labels,
-        metrics_by_source=metrics_by_source,
-        scalar_selector=lambda m: m.power_w,
-        title="Power",
-        x_label="Power (W)",
-        output_path=output_dir / "power_w.png",
-    )
-    plot_scalar_chart(
-        models=models,
-        source_labels_=labels,
-        metrics_by_source=metrics_by_source,
-        scalar_selector=lambda m: m.fps_per_w,
-        title="FPS/W",
-        x_label="FPS/W",
-        output_path=output_dir / "fps_per_w.png",
-    )
-    plot_scalar_chart(
-        models=models,
-        source_labels_=labels,
-        metrics_by_source=metrics_by_source,
-        scalar_selector=lambda m: m.util_pct,
-        title="Utilization",
-        x_label="Utilization (%)",
-        output_path=output_dir / "util_pct.png",
-    )
+    plot_specs = [
+        ("mAP", "mAP", "mAP.png", lambda m: m.mAP),
+        ("FPS", "FPS", "fps.png", lambda m: m.fps),
+        ("Power", "Power (W)", "power_w.png", lambda m: m.power_w),
+        ("FPS/W", "FPS/W", "fps_per_w.png", lambda m: m.fps_per_w),
+        ("Utilization", "Utilization (%)", "util_pct.png", lambda m: m.util_pct),
+    ]
+    for title, x_label, file_name, selector in plot_specs:
+        grouped_values = [
+            {model: selector(source[model]) for model in models}
+            for source in metrics_by_source
+        ]
+        plot_grouped_scalar_barh(
+            models=models,
+            group_labels=labels,
+            grouped_values=grouped_values,
+            x_label=x_label,
+            y_label="model",
+            title=title,
+            output_path=output_dir / file_name,
+            fig_width=14.0,
+        )
 
     print(f"Saved charts to: {output_dir}")
     return 0

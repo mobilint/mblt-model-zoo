@@ -1,11 +1,29 @@
 import json
-import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+try:
+    from benchmark.common.chart_utils import (
+        default_charts_dir as _default_charts_dir_common,
+        plot_grouped_scalar_barh,
+        sanitize_text as _sanitize_text_common,
+        source_labels as _source_labels_common,
+        source_prefix as _source_prefix_common,
+    )
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from benchmark.common.chart_utils import (
+        default_charts_dir as _default_charts_dir_common,
+        plot_grouped_scalar_barh,
+        sanitize_text as _sanitize_text_common,
+        source_labels as _source_labels_common,
+        source_prefix as _source_prefix_common,
+    )
 
 
 @dataclass
@@ -29,38 +47,19 @@ class ModelMetrics:
 
 
 def sanitize_text(text: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")
-    return cleaned or "unnamed"
+    return _sanitize_text_common(text)
 
 
 def folder_prefix(folders: list[Path]) -> str:
-    parts: list[str] = []
-    for folder in folders:
-        raw = folder.name or str(folder)
-        parts.append(sanitize_text(raw))
-    return "_".join(parts)
+    return _source_prefix_common(folders, use_stem=False)
 
 
 def default_charts_dir(script_dir: Path, folders: list[Path]) -> Path:
-    return script_dir / "results" / "charts" / folder_prefix(folders)
+    return _default_charts_dir_common(script_dir, folders, use_stem=False)
 
 
 def folder_labels(folders: list[Path]) -> list[str]:
-    labels = [folder.name or str(folder) for folder in folders]
-    counts: dict[str, int] = {}
-    for label in labels:
-        counts[label] = counts.get(label, 0) + 1
-    seen: dict[str, int] = {}
-    out: list[str] = []
-    for idx, label in enumerate(labels):
-        if counts[label] == 1:
-            out.append(label)
-            continue
-        seen[label] = seen.get(label, 0) + 1
-        out.append(f"{label} [{seen[label]}/{counts[label]}]")
-    if len(set(out)) != len(out):
-        out = [f"{label}#{idx + 1}" for idx, label in enumerate(labels)]
-    return out
+    return _source_labels_common(folders, use_stem=False)
 
 
 def _extract_model_id(path: Path, payload: dict) -> Optional[str]:
@@ -232,40 +231,17 @@ def plot_scalar_chart(
     x_label: str,
     output_path: Path,
 ) -> None:
-    if not models:
-        return
-    y = np.arange(len(models), dtype=float)
-    group_height = 0.82
-    bar_h = group_height / max(len(metrics_by_folder), 1)
-    start = -group_height / 2 + bar_h / 2
-    fig_h = max(5.0, 0.45 * len(models) + 2.0)
-    fig, ax = plt.subplots(figsize=(14, fig_h))
-    cmap = plt.get_cmap("tab10")
-    for idx, (label, source) in enumerate(zip(folder_labels, metrics_by_folder)):
-        x_vals = []
-        y_vals = []
-        for i, model in enumerate(models):
-            value = scalar_selector(source[model])
-            if value is None:
-                continue
-            x_vals.append(float(value))
-            y_vals.append(y[i] + start + idx * bar_h)
-        if x_vals:
-            ax.barh(
-                y_vals,
-                x_vals,
-                height=bar_h * 0.95,
-                label=label,
-                color=cmap(idx % 10),
-            )
-    ax.set_yticks(y)
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("model_id")
-    ax.set_title(title)
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    ax.legend(loc="best")
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=220)
-    plt.close(fig)
+    grouped_values = [
+        {model: scalar_selector(source[model]) for model in models}
+        for source in metrics_by_folder
+    ]
+    plot_grouped_scalar_barh(
+        models=models,
+        group_labels=folder_labels,
+        grouped_values=grouped_values,
+        x_label=x_label,
+        y_label="model_id",
+        title=title,
+        output_path=output_path,
+        fig_width=14.0,
+    )
