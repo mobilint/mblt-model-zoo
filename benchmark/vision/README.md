@@ -170,3 +170,20 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 ### Run the WiderFace Benchmark
 
 Pending
+
+## Compare Vision Benchmark Results
+
+You can compare multiple vision benchmark CSV files and generate model-wise charts:
+
+```bash
+python plot_compare_benchmark_results.py \
+  ./results/results_a4000.csv \
+  ./results/results_a5000.csv \
+  ./results/results_mla100.csv
+```
+
+Output charts are saved under:
+
+```text
+./results/charts/<input1_input2_...>/
+```
