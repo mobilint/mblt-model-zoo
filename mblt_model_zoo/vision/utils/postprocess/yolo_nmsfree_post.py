@@ -57,21 +57,10 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         """
         x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
-        def process_conversion(x):
-            x = x.squeeze(0)
-            if self.n_extra == 0:
-                ic = torch.amax(x[..., -self.nc :], dim=-1) > self.conf_thres
-            else:
-                ic = (
-                    torch.amax(x[..., -self.nc - self.n_extra : -self.n_extra], dim=-1)
-                    > self.conf_thres
-                )
-            pre_topk = x[ic]  # (*, 84)
-            return dual_topk(
-                pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres
-            )
-
-        return [process_conversion(xi) for xi in x_list]
+        return [
+            dual_topk(xi.squeeze(0), self.nc, self.n_extra, conf_thres=self.conf_thres)
+            for xi in x_list
+        ]
 
     def process_box_cls(self, box_cls):
         """

@@ -147,6 +147,12 @@ def dual_topk(
     Returns:
         torch.Tensor: Filtered detections of shape (*, 6 + n_extra).
     """
+    if n_extra == 0:
+        ic = torch.amax(pre_topk[..., -nc:], dim=-1) > conf_thres
+    else:
+        ic = torch.amax(pre_topk[..., -nc - n_extra : -n_extra], dim=-1) > conf_thres
+    pre_topk = pre_topk[ic]  # (*, 84)
+
     if pre_topk.shape[0] == 0:
         return torch.zeros(
             (0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device
