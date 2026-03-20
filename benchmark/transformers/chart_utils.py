@@ -1,5 +1,5 @@
 import json
-import sys
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,14 +16,17 @@ try:
         source_prefix as _source_prefix_common,
     )
 except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from benchmark.common.chart_utils import (
-        default_charts_dir as _default_charts_dir_common,
-        plot_grouped_scalar_barh,
-        sanitize_text as _sanitize_text_common,
-        source_labels as _source_labels_common,
-        source_prefix as _source_prefix_common,
-    )
+    _common_path = Path(__file__).resolve().parents[1] / "common" / "chart_utils.py"
+    _spec = importlib.util.spec_from_file_location("benchmark_common_chart_utils", _common_path)
+    if _spec is None or _spec.loader is None:
+        raise
+    _common_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_common_mod)
+    _default_charts_dir_common = _common_mod.default_charts_dir
+    plot_grouped_scalar_barh = _common_mod.plot_grouped_scalar_barh
+    _sanitize_text_common = _common_mod.sanitize_text
+    _source_labels_common = _common_mod.source_labels
+    _source_prefix_common = _common_mod.source_prefix
 
 
 @dataclass
