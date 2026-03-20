@@ -746,8 +746,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--chunk-candidates",
         type=_parse_int_csv,
-        default=_parse_int_csv("16,32,64,128,256,512"),
-        help="comma-separated chunk sizes to test (default: 16,32,64,128,256,512)",
+        default=_parse_int_csv("128,256,512,1024,2048"),
+        help="comma-separated chunk sizes to test (default: 128,256,512,1024,2048)",
     )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--device-map", type=str, default=None)
