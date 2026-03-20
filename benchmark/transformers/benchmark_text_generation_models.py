@@ -85,6 +85,7 @@ def _build_pipeline(
     dtype: str | None = None,
     trust_remote_code: bool = True,
     core_mode: str | None = None,
+    mxq_path: str | None = None,
 ):
     kwargs = {
         "task": "text-generation",
@@ -97,14 +98,18 @@ def _build_pipeline(
         kwargs["revision"] = revision
     if device_map:
         kwargs["device_map"] = device_map
+    model_kwargs: dict[str, Any] = {}
     if core_mode:
-        model_kwargs: dict[str, Any] = {"core_mode": core_mode}
+        model_kwargs["core_mode"] = core_mode
         if core_mode == "single":
             model_kwargs["target_cores"] = ["0:0"]
         elif core_mode == "global4":
             model_kwargs["target_clusters"] = [0]
         elif core_mode == "global8":
             model_kwargs["target_clusters"] = [0, 1]
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+    if model_kwargs:
         kwargs["model_kwargs"] = model_kwargs
     if dtype:
         kwargs["dtype"] = dtype
@@ -427,12 +432,12 @@ def _iter_targets(
     *,
     revision: str | None,
     all_revisions: bool,
-) -> Iterable[tuple[str, list[str | None], str, str]]:
+) -> Iterable[tuple[str, list[str | None], str, str, str | None]]:
     if not all_revisions:
         for model_id in model_ids:
             label = model_id
             base = _safe_filename(model_id)
-            yield model_id, [revision], label, base
+            yield model_id, [revision], label, base, None
         return
 
     revision_map = [
@@ -443,7 +448,65 @@ def _iter_targets(
         for revs, suffix in revision_map:
             label = f"{model_id}{suffix}"
             base = f"{_safe_filename(model_id)}{suffix}"
-            yield model_id, revs, label, base
+            yield model_id, revs, label, base, None
+
+
+def _resolve_model_id_from_mxq_name(
+    model_part: str,
+    available_model_ids: Sequence[str],
+) -> str | None:
+    if model_part in available_model_ids:
+        return model_part
+    model_part_slash = model_part.replace("__", "/")
+    if model_part_slash in available_model_ids:
+        return model_part_slash
+
+    # Fallback: match by repo basename (e.g. Qwen2.5-1.5B-Instruct).
+    basename_matches = [
+        m for m in available_model_ids if m.split("/", 1)[-1] == model_part
+    ]
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+    basename_matches_slash = [
+        m for m in available_model_ids if m.split("/", 1)[-1] == model_part_slash
+    ]
+    if len(basename_matches_slash) == 1:
+        return basename_matches_slash[0]
+    return None
+
+
+def _iter_targets_from_mxq_dir(
+    *,
+    mxq_dir: Path,
+    available_model_ids: Sequence[str],
+) -> list[tuple[str, list[str | None], str, str, str | None]]:
+    out: list[tuple[str, list[str | None], str, str, str | None]] = []
+    seen_bases: set[str] = set()
+    for path in sorted(mxq_dir.glob("*.mxq")):
+        stem = path.stem
+        if "-" not in stem:
+            print(f"Skipping mxq (name format mismatch): {path.name}")
+            continue
+        model_part, rev_part = stem.rsplit("-", 1)
+        revision = rev_part.upper()
+        if revision not in ("W8", "W4V8"):
+            print(f"Skipping mxq (unsupported revision suffix): {path.name}")
+            continue
+        resolved_model_id = _resolve_model_id_from_mxq_name(model_part, available_model_ids)
+        if not resolved_model_id:
+            print(
+                f"Skipping mxq (cannot resolve model_id from filename): {path.name} "
+                f"(expected <model_id>-<W8|W4V8>.mxq)"
+            )
+            continue
+        label = f"{resolved_model_id}-{revision}"
+        base = f"{_safe_filename(resolved_model_id)}-{revision}"
+        if base in seen_bases:
+            print(f"Skipping mxq (duplicate target key): {path.name}")
+            continue
+        seen_bases.add(base)
+        out.append((resolved_model_id, [revision], label, base, str(path)))
+    return out
 
 
 def _select_revision(
@@ -726,12 +789,12 @@ def _write_single_combined_markdown(
 
 def _rebuild_combined_outputs(
     results_dir: str,
-    targets: Sequence[tuple[str, list[str | None], str, str]],
+    targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
 ) -> None:
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    for _, _, label, base in targets:
+    for _, _, label, base, _ in targets:
         json_path = os.path.join(results_dir, f"{base}.json")
         if not os.path.isfile(json_path):
             continue
@@ -966,6 +1029,14 @@ def main(argv: list[str] | None = None) -> int:
         help="benchmark W8 and W4W8 revisions only (skip main)",
     )
     parser.add_argument(
+        "--mxq-dir",
+        default=None,
+        help=(
+            "directory containing local mxq files. "
+            "When set, only files matching <model_id>-<W8|W4V8>.mxq are benchmarked."
+        ),
+    )
+    parser.add_argument(
         "--prefill-range",
         type=_parse_range_arg,
         default=(128, 512, 128),
@@ -1081,22 +1152,10 @@ def main(argv: list[str] | None = None) -> int:
     chunk_lookup = _load_chunk_size_lookup_csv(lookup_path)
 
     available = list_models(tasks="text-generation")
-    model_ids = available.get("text-generation", [])
-    if not model_ids:
+    available_model_ids = available.get("text-generation", [])
+    if not available_model_ids:
         print("No text-generation models found.")
         return 0
-    if args.original_models:
-        original_count = len(model_ids)
-        model_ids = _resolve_original_model_ids(model_ids)
-        print(
-            f"Using parent/original model ids: {len(model_ids)} unique models "
-            f"(from {original_count} listed models)."
-        )
-        if args.all or args.revision:
-            print(
-                "Note: --all/--revision are applied to resolved original model ids "
-                "(requested revisions may not exist)."
-            )
 
     results_dir = os.path.join(
         os.path.dirname(__file__),
@@ -1105,19 +1164,52 @@ def main(argv: list[str] | None = None) -> int:
     )
     os.makedirs(results_dir, exist_ok=True)
 
-    targets = list(
-        _iter_targets(
-            model_ids,
-            revision=args.revision,
-            all_revisions=args.all,
+    if args.mxq_dir:
+        mxq_dir = Path(args.mxq_dir).expanduser().resolve()
+        if not mxq_dir.is_dir():
+            raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        if args.original_models or args.all or args.revision:
+            print(
+                "Note: --mxq-dir is set, so --original-models/--all/--revision are ignored "
+                "(revision is taken from mxq filename suffix)."
+            )
+        targets = _iter_targets_from_mxq_dir(
+            mxq_dir=mxq_dir,
+            available_model_ids=available_model_ids,
         )
-    )
+        if not targets:
+            raise SystemExit(
+                "No valid mxq targets found. Expected files named "
+                "<model_id>-<W8|W4V8>.mxq in --mxq-dir."
+            )
+        print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
+    else:
+        model_ids = available_model_ids
+        if args.original_models:
+            original_count = len(model_ids)
+            model_ids = _resolve_original_model_ids(model_ids)
+            print(
+                f"Using parent/original model ids: {len(model_ids)} unique models "
+                f"(from {original_count} listed models)."
+            )
+            if args.all or args.revision:
+                print(
+                    "Note: --all/--revision are applied to resolved original model ids "
+                    "(requested revisions may not exist)."
+                )
+        targets = list(
+            _iter_targets(
+                model_ids,
+                revision=args.revision,
+                all_revisions=args.all,
+            )
+        )
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
         _rebuild_combined_outputs(results_dir, targets)
         return 0
 
-    for model_id, revision_candidates, label, base in tqdm(
+    for model_id, revision_candidates, label, base, mxq_path in tqdm(
         targets,
         desc="Benchmarking models",
         total=len(targets),
@@ -1127,8 +1219,13 @@ def main(argv: list[str] | None = None) -> int:
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         print(f"=== {label} ===")
-        revision = _select_revision(model_id, revision_candidates)
-        if args.all and revision is None:
+        if mxq_path:
+            print(f"Using local mxq: {mxq_path}")
+        if mxq_path:
+            revision = revision_candidates[0] if revision_candidates else None
+        else:
+            revision = _select_revision(model_id, revision_candidates)
+        if args.all and not args.mxq_dir and revision is None:
             print("Skipping (missing revisions).")
             continue
         json_path = os.path.join(results_dir, f"{base}.json")
@@ -1167,13 +1264,14 @@ def main(argv: list[str] | None = None) -> int:
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
                     core_mode=args.core_mode,
+                    mxq_path=mxq_path,
                 )
             except Exception as e:
                 if _is_cuda_oom_error(e):
                     print(f"Skipping (CUDA OOM while loading model): {e}")
                     _clear_cuda_memory(args.device)
                     continue
-                if args.all and _revision_exists(model_id, revision or "") is None:
+                if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
                     print(f"Skipping (failed to load revision {revision}): {e}")
                 else:
                     print(f"Skipping (failed to load model): {e}")
@@ -1358,5 +1456,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
