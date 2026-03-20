@@ -31,6 +31,7 @@ Common CLI options:
 - `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
 - `--revision` (e.g., `W8`)
 - `--all` (benchmark `W8` and `W4W8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
+- `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--prefill-range` (e.g., `128:512:128`)
 - `--decode-range` (e.g., `128:512:128`)
 - `--fixed-decode` (default: `10`)
@@ -71,6 +72,20 @@ When `--all` is used, results are saved with suffixes in both the output files a
 
 - `{model}-W8.json`, `{model}-W8.png`
 - `{model}-W4V8.json`, `{model}-W4V8.png`
+
+Example (`--mxq-dir`):
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py \
+  --mxq-dir ./local_mxq \
+  --core-mode global8 \
+  --skip-existing
+```
+
+Notes for `--mxq-dir`:
+- Only files matching `<model_id>-<W8|W4V8>.mxq` are used.
+- `<model_id>` can be full repo id (e.g. `mobilint/Qwen2.5-1.5B-Instruct`) or basename when uniquely resolvable.
+- `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
 
 ## Compare result folders
 
