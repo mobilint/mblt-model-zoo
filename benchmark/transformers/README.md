@@ -101,3 +101,47 @@ The script intersects model IDs across all folders, then saves:
 - `avg_memory_used_pct.png`
 - `p99_memory_used_pct.png`
 
+## Search best prefill chunk size
+
+`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** with fixed `prefill_length=2048` (configurable), while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
+
+Important behavior:
+- Core mode is fixed at model creation time, so the script recreates the model instance for each core mode.
+- Input targets come from `--mxq-dir` and filename pattern: `<model_id_without_group_id>-<W8|W4V8>.mxq`.
+- If filename format is invalid, model base is not found in HF text-generation model list, or mapping is ambiguous, that mxq file is skipped with warning.
+- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `128,256,512,1024,2048`).
+- For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `16,32,64,128,256,512`).
+- Candidates where `chunk_size > prefill_length` are skipped automatically.
+- Each `(prefill_length, chunk_size)` pair is measured with repeats and median prefill TPS.
+- Runtime progress is shown with `tqdm` (overall pair progress, warmup, and per-pair search eval progress), plus search-stage logs.
+- Time guard: chunks are tested in ascending order; if a chunk exceeds `--time-guard-sec` (default: `300s`), larger chunks are skipped for that prefill length.
+
+Outputs (default: `benchmark/transformers/results/prefill_chunk_search/`):
+- `records/*.json`: per model/core-mode detailed search history
+- `all_measurements.csv`: all measured rows with `prefill_length`, `chunk_size`, TPS, wall time, and failure flags
+- `best_chunks.csv`: best chunk per `(model, core_mode, prefill_length)`
+- `summary.json`: run summary including skipped mxq files
+- `skipped_mxq_files.csv`: skipped mxq file list and reasons
+- `failed_pairs.csv`: pair-level runtime failures (if any)
+- mode/prefill 2D charts:
+  - `prefill_tps_single_prefill128_W8.png` (and `W4V8`, other prefill lengths)
+  - `prefill_tps_global4_prefill128_W8.png` (and `W4V8`, other prefill lengths)
+  - `prefill_tps_global8_prefill128_W8.png` (and `W4V8`, other prefill lengths)
+  - each chart is revision-separated, and each line is `model_id@revision`
+- best-chunk charts (by prefill length):
+  - `best_chunk_single_W8.png` (and `W4V8`)
+  - `best_chunk_global4_W8.png` (and `W4V8`)
+  - `best_chunk_global8_W8.png` (and `W4V8`)
+
+Example:
+
+```bash
+python benchmark/transformers/search_prefill_chunk_size.py \
+  --mxq-dir . \
+  --prefill-lengths 128,256,512,1024,2048 \
+  --chunk-candidates 16,32,64,128,256,512 \
+  --time-guard-sec 300 \
+  --repeat 3 \
+  --skip-existing
+```
+
