@@ -1073,6 +1073,8 @@ def main(argv: list[str] | None = None) -> int:
         help="required free VRAM factor versus estimated model weights (default: 1.15)",
     )
     args = parser.parse_args(argv)
+    print(f"[runtime] cwd={os.getcwd()}")
+    print(f"[runtime] script={Path(__file__).resolve()}")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     lookup_path = args.chunk_size_lookup_csv
