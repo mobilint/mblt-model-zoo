@@ -1,4 +1,5 @@
 import argparse
+import csv
 import gc
 import json
 import os
@@ -83,6 +84,7 @@ def _build_pipeline(
     device_map: str | None = None,
     dtype: str | None = None,
     trust_remote_code: bool = True,
+    core_mode: str | None = None,
 ):
     kwargs = {
         "task": "text-generation",
@@ -95,6 +97,15 @@ def _build_pipeline(
         kwargs["revision"] = revision
     if device_map:
         kwargs["device_map"] = device_map
+    if core_mode:
+        model_kwargs: dict[str, Any] = {"core_mode": core_mode}
+        if core_mode == "single":
+            model_kwargs["target_cores"] = ["0:0"]
+        elif core_mode == "global4":
+            model_kwargs["target_clusters"] = [0]
+        elif core_mode == "global8":
+            model_kwargs["target_clusters"] = [0, 1]
+        kwargs["model_kwargs"] = model_kwargs
     if dtype:
         kwargs["dtype"] = dtype
         try:
@@ -208,6 +219,53 @@ def _should_precheck_cuda(args: argparse.Namespace) -> bool:
         return True
     # If only device_map is set (e.g. auto), target GPU topology is ambiguous.
     return False
+
+
+def _load_chunk_size_lookup_csv(path: str | None) -> dict[tuple[str, str, str], int]:
+    if not path:
+        return {}
+    csv_path = Path(path)
+    if not csv_path.is_file():
+        print(f"Warning: chunk-size lookup CSV not found: {csv_path}")
+        return {}
+    out: dict[tuple[str, str, str], int] = {}
+    try:
+        with csv_path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                model = str(row.get("model_id", "")).strip()
+                revision = str(row.get("revision", "")).strip()
+                core_mode = str(row.get("core_mode", "")).strip()
+                raw_chunk = row.get("best_chunk_size")
+                if not model or not revision or not core_mode:
+                    continue
+                try:
+                    chunk = int(float(str(raw_chunk)))
+                except Exception:
+                    continue
+                if chunk <= 0:
+                    continue
+                out[(model, revision, core_mode)] = chunk
+    except Exception as e:
+        print(f"Warning: failed to load chunk-size lookup CSV: {e}")
+        return {}
+    print(f"Loaded chunk-size lookup entries: {len(out)} from {csv_path}")
+    return out
+
+
+def _resolve_lookup_chunk_size(
+    lookup: dict[tuple[str, str, str], int],
+    *,
+    model_id: str,
+    revision: str | None,
+    core_mode: str | None,
+) -> int | None:
+    if not lookup:
+        return None
+    if core_mode is None:
+        return None
+    rev = "" if revision is None else str(revision)
+    return lookup.get((model_id, rev, core_mode))
 
 
 def _normalize_repo_id(value: str) -> str:
@@ -938,6 +996,20 @@ def main(argv: list[str] | None = None) -> int:
         help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
     )
     parser.add_argument(
+        "--core-mode",
+        choices=["single", "global4", "global8"],
+        default="global8",
+        help="core mode passed to model_kwargs (default: global8)",
+    )
+    parser.add_argument(
+        "--chunk-size-lookup-csv",
+        default="prefill_chunk_size.csv",
+        help=(
+            "CSV path for per-model chunk_size lookup. "
+            "Expected columns: model_id,revision,core_mode,best_chunk_size"
+        ),
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="skip models with existing JSON+PNG outputs",
@@ -1003,6 +1075,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     os.environ.setdefault("MPLBACKEND", "Agg")
+    lookup_path = args.chunk_size_lookup_csv
+    if lookup_path and not os.path.isabs(lookup_path):
+        lookup_path = os.path.join(os.path.dirname(__file__), lookup_path)
+    chunk_lookup = _load_chunk_size_lookup_csv(lookup_path)
 
     available = list_models(tasks="text-generation")
     model_ids = available.get("text-generation", [])
@@ -1090,6 +1166,7 @@ def main(argv: list[str] | None = None) -> int:
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
+                    core_mode=args.core_mode,
                 )
             except Exception as e:
                 if _is_cuda_oom_error(e):
@@ -1105,11 +1182,33 @@ def main(argv: list[str] | None = None) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker = _build_device_tracker(args, pipeline)
             _print_device_status(args, tracker)
+            lookup_chunk = _resolve_lookup_chunk_size(
+                chunk_lookup,
+                model_id=model_id,
+                revision=revision,
+                core_mode=args.core_mode,
+            )
+            resolved_chunk_size = args.chunk_size
+            if resolved_chunk_size is None and lookup_chunk is not None:
+                resolved_chunk_size = lookup_chunk
+                print(
+                    f"Using chunk-size lookup: model={model_id} revision={revision} "
+                    f"core_mode={args.core_mode} chunk_size={resolved_chunk_size}"
+                )
+            elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
+                print(
+                    f"Warning: no chunk-size lookup match for model={model_id} "
+                    f"revision={revision} core_mode={args.core_mode}; using chunk_size=None"
+                )
+            elif args.chunk_size is not None and lookup_chunk is not None:
+                print(
+                    f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}"
+                )
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.fixed_prefill,
                     num_decode=args.fixed_decode,
-                    chunk_size=args.chunk_size,
+                    chunk_size=resolved_chunk_size,
                     trace_path=None,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
@@ -1123,7 +1222,7 @@ def main(argv: list[str] | None = None) -> int:
                     decode_range=args.decode_range,
                     fixed_decode_len=args.fixed_decode,
                     fixed_prefill_len=args.fixed_prefill,
-                    chunk_size=args.chunk_size,
+                    chunk_size=resolved_chunk_size,
                     show_progress=True,
                     progress_prefix=label,
                 )
