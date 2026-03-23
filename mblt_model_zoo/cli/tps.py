@@ -12,6 +12,8 @@ from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser
 
+DEVICE_TRACKER_INTERVAL_SEC = 1.0
+
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
     text = spec.strip()
@@ -383,7 +385,7 @@ def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
     if backend == "npu":
         from mblt_model_zoo.utils.device_tracker_npu import NPUDeviceTracker
         try:
-            return NPUDeviceTracker(interval=args.device_interval)
+            return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC)
         except Exception as e:
             print(f"[device] failed to initialize NPU tracker: {e}", file=sys.stderr)
             return None
@@ -393,7 +395,7 @@ def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
 
         gpu_id = _infer_gpu_ids(args.device, args.device_gpu_id)
         try:
-            return GPUDeviceTracker(interval=args.device_interval, gpu_id=gpu_id)
+            return GPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC, gpu_id=gpu_id)
         except Exception as e:
             print(f"[device] failed to initialize GPU tracker: {e}", file=sys.stderr)
             return None
@@ -401,18 +403,62 @@ def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
     return None
 
 
-def _avg_power_in_window(
-    trace: Sequence[tuple[float, float]],
-    start_t: float,
-    end_t: float,
-    default_power: Optional[float],
+def _build_phase_trackers(args: argparse.Namespace, pipeline: Any) -> tuple[Any, Any]:
+    if not args.device_metrics:
+        return None, None
+    return _build_device_tracker(args, pipeline), _build_device_tracker(args, pipeline)
+
+
+def _stop_tracker_safe(tracker: Any) -> None:
+    if tracker is None:
+        return
+    try:
+        tracker.stop()
+    except Exception:
+        pass
+
+
+def _extract_device_metric(tracker: Any) -> dict[str, Optional[float]]:
+    metric = tracker.get_metric()
+    out: dict[str, Optional[float]] = {}
+    for key in (
+        "avg_power_w",
+        "p99_power_w",
+        "avg_utilization_pct",
+        "p99_utilization_pct",
+        "avg_memory_used_mb",
+        "p99_memory_used_mb",
+        "total_memory_mb",
+        "avg_memory_used_pct",
+        "p99_memory_used_pct",
+    ):
+        val = metric.get(key)
+        out[key] = float(val) if isinstance(val, (int, float)) else None
+    return out
+
+
+def _weighted_two(
+    a: Optional[float],
+    a_weight: float,
+    b: Optional[float],
+    b_weight: float,
 ) -> Optional[float]:
-    if end_t <= start_t:
-        return default_power
-    vals = [p for ts, p in trace if start_t <= ts <= end_t]
-    if vals:
-        return float(sum(vals) / len(vals))
-    return default_power
+    values = []
+    weights = []
+    if a is not None and a_weight > 0:
+        values.append(float(a))
+        weights.append(float(a_weight))
+    if b is not None and b_weight > 0:
+        values.append(float(b))
+        weights.append(float(b_weight))
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    total_w = weights[0] + weights[1]
+    if total_w <= 0:
+        return None
+    return (values[0] * weights[0] + values[1] * weights[1]) / total_w
 
 
 def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
@@ -422,7 +468,7 @@ def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
     if tracker is None:
         print("[device] enabled but no compatible tracker initialized (auto detection fallback)")
         return
-    print(f"[device] enabled with {tracker.__class__.__name__} (interval={args.device_interval}s)")
+    print(f"[device] enabled with {tracker.__class__.__name__} (interval={DEVICE_TRACKER_INTERVAL_SEC}s fixed)")
 
 
 def _safe_div(a: float, b: float) -> Optional[float]:
@@ -433,44 +479,69 @@ def _safe_div(a: float, b: float) -> Optional[float]:
 
 def _enrich_single_run_device(
     run: Any,
-    metric: dict[str, Any],
-    trace: Sequence[tuple[float, float]],
-    run_start_t: float,
+    prefill_metric: dict[str, Optional[float]],
+    decode_metric: dict[str, Optional[float]],
 ) -> None:
-    avg_power = metric.get("avg_power_w")
-    p99_power = metric.get("p99_power_w")
-    avg_util = metric.get("avg_utilization_pct")
-    p99_util = metric.get("p99_utilization_pct")
-    avg_mem_used_mb = metric.get("avg_memory_used_mb")
-    p99_mem_used_mb = metric.get("p99_memory_used_mb")
-    total_mem_mb = metric.get("total_memory_mb")
-    avg_mem_used_pct = metric.get("avg_memory_used_pct")
-    p99_mem_used_pct = metric.get("p99_memory_used_pct")
-    run.avg_utilization_pct = float(avg_util) if avg_util is not None else None
-    run.p99_utilization_pct = float(p99_util) if p99_util is not None else None
-    run.avg_memory_used_mb = (
-        float(avg_mem_used_mb) if avg_mem_used_mb is not None else None
+    prefill_avg_power = prefill_metric.get("avg_power_w")
+    decode_avg_power = decode_metric.get("avg_power_w")
+    run.prefill_avg_power_w = prefill_avg_power
+    run.prefill_p99_power_w = prefill_metric.get("p99_power_w")
+    run.decode_avg_power_w = decode_avg_power
+    run.decode_p99_power_w = decode_metric.get("p99_power_w")
+    run.prefill_avg_utilization_pct = prefill_metric.get("avg_utilization_pct")
+    run.prefill_p99_utilization_pct = prefill_metric.get("p99_utilization_pct")
+    run.decode_avg_utilization_pct = decode_metric.get("avg_utilization_pct")
+    run.decode_p99_utilization_pct = decode_metric.get("p99_utilization_pct")
+    run.prefill_avg_memory_used_mb = prefill_metric.get("avg_memory_used_mb")
+    run.prefill_p99_memory_used_mb = prefill_metric.get("p99_memory_used_mb")
+    run.decode_avg_memory_used_mb = decode_metric.get("avg_memory_used_mb")
+    run.decode_p99_memory_used_mb = decode_metric.get("p99_memory_used_mb")
+    run.prefill_avg_memory_used_pct = prefill_metric.get("avg_memory_used_pct")
+    run.prefill_p99_memory_used_pct = prefill_metric.get("p99_memory_used_pct")
+    run.decode_avg_memory_used_pct = decode_metric.get("avg_memory_used_pct")
+    run.decode_p99_memory_used_pct = decode_metric.get("p99_memory_used_pct")
+
+    prefill_t = float(run.prefill_latency)
+    decode_t = float(run.decode_duration)
+    run.avg_power_w = _weighted_two(prefill_avg_power, prefill_t, decode_avg_power, decode_t)
+    p_p99 = prefill_metric.get("p99_power_w")
+    d_p99 = decode_metric.get("p99_power_w")
+    run.p99_power_w = max([v for v in (p_p99, d_p99) if v is not None], default=None)
+    run.avg_utilization_pct = _weighted_two(
+        prefill_metric.get("avg_utilization_pct"),
+        prefill_t,
+        decode_metric.get("avg_utilization_pct"),
+        decode_t,
     )
-    run.p99_memory_used_mb = (
-        float(p99_mem_used_mb) if p99_mem_used_mb is not None else None
+    p_u_p99 = prefill_metric.get("p99_utilization_pct")
+    d_u_p99 = decode_metric.get("p99_utilization_pct")
+    run.p99_utilization_pct = max([v for v in (p_u_p99, d_u_p99) if v is not None], default=None)
+    run.avg_memory_used_mb = _weighted_two(
+        prefill_metric.get("avg_memory_used_mb"),
+        prefill_t,
+        decode_metric.get("avg_memory_used_mb"),
+        decode_t,
     )
-    run.total_memory_mb = float(total_mem_mb) if total_mem_mb is not None else None
-    run.avg_memory_used_pct = (
-        float(avg_mem_used_pct) if avg_mem_used_pct is not None else None
+    p_m_p99 = prefill_metric.get("p99_memory_used_mb")
+    d_m_p99 = decode_metric.get("p99_memory_used_mb")
+    run.p99_memory_used_mb = max([v for v in (p_m_p99, d_m_p99) if v is not None], default=None)
+    run.avg_memory_used_pct = _weighted_two(
+        prefill_metric.get("avg_memory_used_pct"),
+        prefill_t,
+        decode_metric.get("avg_memory_used_pct"),
+        decode_t,
     )
-    run.p99_memory_used_pct = (
-        float(p99_mem_used_pct) if p99_mem_used_pct is not None else None
+    p_mp_p99 = prefill_metric.get("p99_memory_used_pct")
+    d_mp_p99 = decode_metric.get("p99_memory_used_pct")
+    run.p99_memory_used_pct = max([v for v in (p_mp_p99, d_mp_p99) if v is not None], default=None)
+    run.total_memory_mb = max(
+        [v for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb")) if v is not None],
+        default=None,
     )
+
+    avg_power = run.avg_power_w
     if avg_power is None:
         return
-
-    prefill_start = run_start_t
-    prefill_end = run_start_t + run.prefill_latency
-    decode_start = prefill_end
-    decode_end = decode_start + run.decode_duration
-
-    prefill_avg_power = _avg_power_in_window(trace, prefill_start, prefill_end, avg_power)
-    decode_avg_power = _avg_power_in_window(trace, decode_start, decode_end, avg_power)
 
     prefill_energy = (
         prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
@@ -576,8 +647,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker = _build_device_tracker(args, pipeline)
-    _print_device_status(args, tracker)
+    tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
+    _print_device_status(args, tracker_prefill)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.prefill,
@@ -589,9 +660,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         )
     runs = []
     for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
-        run_start_t = time.time()
-        if tracker is not None:
-            tracker.start()
+        prefill_metric: dict[str, Optional[float]] = {}
+        decode_metric: dict[str, Optional[float]] = {}
         try:
             run = measurer.measure(
                 num_prefill=args.prefill,
@@ -600,16 +670,21 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
+                on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
+                on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
+                on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
+                on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
             )
         finally:
-            if tracker is not None:
-                tracker.stop()
-        if tracker is not None:
+            _stop_tracker_safe(tracker_prefill)
+            _stop_tracker_safe(tracker_decode)
+        if tracker_prefill is not None and tracker_decode is not None:
+            prefill_metric = _extract_device_metric(tracker_prefill)
+            decode_metric = _extract_device_metric(tracker_decode)
             _enrich_single_run_device(
                 run=run,
-                metric=tracker.get_metric(),
-                trace=tracker.get_trace(),
-                run_start_t=run_start_t,
+                prefill_metric=prefill_metric,
+                decode_metric=decode_metric,
             )
         runs.append(run)
 
@@ -639,6 +714,46 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     p99_memory_used_pct = [
         r.p99_memory_used_pct for r in runs if r.p99_memory_used_pct is not None
     ]
+    prefill_avg_power_w = [r.prefill_avg_power_w for r in runs if r.prefill_avg_power_w is not None]
+    prefill_p99_power_w = [r.prefill_p99_power_w for r in runs if r.prefill_p99_power_w is not None]
+    decode_avg_power_w = [r.decode_avg_power_w for r in runs if r.decode_avg_power_w is not None]
+    decode_p99_power_w = [r.decode_p99_power_w for r in runs if r.decode_p99_power_w is not None]
+    prefill_avg_utilization_pct = [
+        r.prefill_avg_utilization_pct for r in runs if r.prefill_avg_utilization_pct is not None
+    ]
+    prefill_p99_utilization_pct = [
+        r.prefill_p99_utilization_pct for r in runs if r.prefill_p99_utilization_pct is not None
+    ]
+    decode_avg_utilization_pct = [
+        r.decode_avg_utilization_pct for r in runs if r.decode_avg_utilization_pct is not None
+    ]
+    decode_p99_utilization_pct = [
+        r.decode_p99_utilization_pct for r in runs if r.decode_p99_utilization_pct is not None
+    ]
+    prefill_avg_memory_used_mb = [
+        r.prefill_avg_memory_used_mb for r in runs if r.prefill_avg_memory_used_mb is not None
+    ]
+    prefill_p99_memory_used_mb = [
+        r.prefill_p99_memory_used_mb for r in runs if r.prefill_p99_memory_used_mb is not None
+    ]
+    decode_avg_memory_used_mb = [
+        r.decode_avg_memory_used_mb for r in runs if r.decode_avg_memory_used_mb is not None
+    ]
+    decode_p99_memory_used_mb = [
+        r.decode_p99_memory_used_mb for r in runs if r.decode_p99_memory_used_mb is not None
+    ]
+    prefill_avg_memory_used_pct = [
+        r.prefill_avg_memory_used_pct for r in runs if r.prefill_avg_memory_used_pct is not None
+    ]
+    prefill_p99_memory_used_pct = [
+        r.prefill_p99_memory_used_pct for r in runs if r.prefill_p99_memory_used_pct is not None
+    ]
+    decode_avg_memory_used_pct = [
+        r.decode_avg_memory_used_pct for r in runs if r.decode_avg_memory_used_pct is not None
+    ]
+    decode_p99_memory_used_pct = [
+        r.decode_p99_memory_used_pct for r in runs if r.decode_p99_memory_used_pct is not None
+    ]
     total_energy_j = [r.total_energy_j for r in runs if r.total_energy_j is not None]
     prefill_tok_per_j = [r.prefill_tokens_per_j for r in runs if r.prefill_tokens_per_j is not None]
     decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
@@ -657,13 +772,29 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
+        _print_summary("prefill_avg_power", prefill_avg_power_w, "W")
+        _print_summary("prefill_p99_power", prefill_p99_power_w, "W")
+        _print_summary("decode_avg_power", decode_avg_power_w, "W")
+        _print_summary("decode_p99_power", decode_p99_power_w, "W")
         _print_summary("avg_utilization", avg_utilization_pct, "%")
         _print_summary("p99_utilization", p99_utilization_pct, "%")
+        _print_summary("prefill_avg_util", prefill_avg_utilization_pct, "%")
+        _print_summary("prefill_p99_util", prefill_p99_utilization_pct, "%")
+        _print_summary("decode_avg_util", decode_avg_utilization_pct, "%")
+        _print_summary("decode_p99_util", decode_p99_utilization_pct, "%")
         _print_summary("avg_memory_used", avg_memory_used_mb, "MB")
         _print_summary("p99_memory_used", p99_memory_used_mb, "MB")
+        _print_summary("prefill_avg_mem_used", prefill_avg_memory_used_mb, "MB")
+        _print_summary("prefill_p99_mem_used", prefill_p99_memory_used_mb, "MB")
+        _print_summary("decode_avg_mem_used", decode_avg_memory_used_mb, "MB")
+        _print_summary("decode_p99_mem_used", decode_p99_memory_used_mb, "MB")
         _print_summary("total_memory", total_memory_mb, "MB")
         _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
         _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
+        _print_summary("prefill_avg_mem_used_pct", prefill_avg_memory_used_pct, "%")
+        _print_summary("prefill_p99_mem_used_pct", prefill_p99_memory_used_pct, "%")
+        _print_summary("decode_avg_mem_used_pct", decode_avg_memory_used_pct, "%")
+        _print_summary("decode_p99_mem_used_pct", decode_p99_memory_used_pct, "%")
         _print_summary("total_energy", total_energy_j, "J")
         _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
         _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
@@ -683,13 +814,29 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "total_ms": _summary(total_ms),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
+                "prefill_avg_power_w": _summary(prefill_avg_power_w),
+                "prefill_p99_power_w": _summary(prefill_p99_power_w),
+                "decode_avg_power_w": _summary(decode_avg_power_w),
+                "decode_p99_power_w": _summary(decode_p99_power_w),
                 "avg_utilization_pct": _summary(avg_utilization_pct),
                 "p99_utilization_pct": _summary(p99_utilization_pct),
+                "prefill_avg_utilization_pct": _summary(prefill_avg_utilization_pct),
+                "prefill_p99_utilization_pct": _summary(prefill_p99_utilization_pct),
+                "decode_avg_utilization_pct": _summary(decode_avg_utilization_pct),
+                "decode_p99_utilization_pct": _summary(decode_p99_utilization_pct),
                 "avg_memory_used_mb": _summary(avg_memory_used_mb),
                 "p99_memory_used_mb": _summary(p99_memory_used_mb),
+                "prefill_avg_memory_used_mb": _summary(prefill_avg_memory_used_mb),
+                "prefill_p99_memory_used_mb": _summary(prefill_p99_memory_used_mb),
+                "decode_avg_memory_used_mb": _summary(decode_avg_memory_used_mb),
+                "decode_p99_memory_used_mb": _summary(decode_p99_memory_used_mb),
                 "total_memory_mb": _summary(total_memory_mb),
                 "avg_memory_used_pct": _summary(avg_memory_used_pct),
                 "p99_memory_used_pct": _summary(p99_memory_used_pct),
+                "prefill_avg_memory_used_pct": _summary(prefill_avg_memory_used_pct),
+                "prefill_p99_memory_used_pct": _summary(prefill_p99_memory_used_pct),
+                "decode_avg_memory_used_pct": _summary(decode_avg_memory_used_pct),
+                "decode_p99_memory_used_pct": _summary(decode_p99_memory_used_pct),
                 "total_energy_j": _summary(total_energy_j),
                 "prefill_tok_per_j": _summary(prefill_tok_per_j),
                 "decode_tok_per_j_dfi": _summary(decode_tok_per_j),
@@ -724,8 +871,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker = _build_device_tracker(args, pipeline)
-    _print_device_status(args, tracker)
+    tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
+    _print_device_status(args, tracker_prefill)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.fixed_prefill,
@@ -746,10 +893,26 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     run_avg_memory_used_pct: list[float] = []
     run_p99_memory_used_pct: list[float] = []
     run_total_energy: list[float] = []
+    run_prefill_avg_power: list[float] = []
+    run_prefill_p99_power: list[float] = []
+    run_decode_avg_power: list[float] = []
+    run_decode_p99_power: list[float] = []
+    run_prefill_avg_util: list[float] = []
+    run_prefill_p99_util: list[float] = []
+    run_decode_avg_util: list[float] = []
+    run_decode_p99_util: list[float] = []
+    run_prefill_avg_mem_used_mb: list[float] = []
+    run_prefill_p99_mem_used_mb: list[float] = []
+    run_decode_avg_mem_used_mb: list[float] = []
+    run_decode_p99_mem_used_mb: list[float] = []
+    run_prefill_avg_mem_used_pct: list[float] = []
+    run_prefill_p99_mem_used_pct: list[float] = []
+    run_decode_avg_mem_used_pct: list[float] = []
+    run_decode_p99_mem_used_pct: list[float] = []
+    run_phase_device: list[dict[str, dict[str, Optional[float]]]] = []
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
-        run_start_t = time.time()
-        if tracker is not None:
-            tracker.start()
+        prefill_metric: dict[str, Optional[float]] = {}
+        decode_metric: dict[str, Optional[float]] = {}
         try:
             runs.append(
                 measurer.measure_full(
@@ -761,43 +924,132 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     trace_path=args.trace if i == 0 else None,
                     show_progress=True,
                     progress_prefix=f"run {i + 1}/{args.repeat}",
+                    on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
+                    on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
+                    on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
+                    on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
                 )
             )
         finally:
-            if tracker is not None:
-                tracker.stop()
-        if tracker is not None:
-            metric = tracker.get_metric()
-            avg_power = metric.get("avg_power_w")
-            p99_power = metric.get("p99_power_w")
-            avg_utilization = metric.get("avg_utilization_pct")
-            p99_utilization = metric.get("p99_utilization_pct")
-            avg_memory_used_mb = metric.get("avg_memory_used_mb")
-            p99_memory_used_mb = metric.get("p99_memory_used_mb")
-            total_memory_mb = metric.get("total_memory_mb")
-            avg_memory_used_pct = metric.get("avg_memory_used_pct")
-            p99_memory_used_pct = metric.get("p99_memory_used_pct")
+            _stop_tracker_safe(tracker_prefill)
+            _stop_tracker_safe(tracker_decode)
+        if tracker_prefill is not None and tracker_decode is not None:
+            prefill_metric = _extract_device_metric(tracker_prefill)
+            decode_metric = _extract_device_metric(tracker_decode)
+            run_phase_device.append({"prefill": prefill_metric, "decode": decode_metric})
+            prefill_dur = float(getattr(runs[-1], "prefill_phase_duration_s", 0.0) or 0.0)
+            decode_dur = float(getattr(runs[-1], "decode_phase_duration_s", 0.0) or 0.0)
+            avg_power = _weighted_two(
+                prefill_metric.get("avg_power_w"),
+                prefill_dur,
+                decode_metric.get("avg_power_w"),
+                decode_dur,
+            )
             if avg_power is not None:
-                run_avg_power.append(float(avg_power))
+                run_avg_power.append(avg_power)
+                total_energy = avg_power * (prefill_dur + decode_dur)
+                run_total_energy.append(total_energy)
+            p99_power = max(
+                [v for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w")) if v is not None],
+                default=None,
+            )
             if p99_power is not None:
                 run_p99_power.append(float(p99_power))
-            if avg_utilization is not None:
-                run_avg_utilization.append(float(avg_utilization))
-            if p99_utilization is not None:
-                run_p99_utilization.append(float(p99_utilization))
-            if avg_memory_used_mb is not None:
-                run_avg_memory_used_mb.append(float(avg_memory_used_mb))
-            if p99_memory_used_mb is not None:
-                run_p99_memory_used_mb.append(float(p99_memory_used_mb))
+            avg_util = _weighted_two(
+                prefill_metric.get("avg_utilization_pct"),
+                prefill_dur,
+                decode_metric.get("avg_utilization_pct"),
+                decode_dur,
+            )
+            if avg_util is not None:
+                run_avg_utilization.append(float(avg_util))
+            p99_util = max(
+                [
+                    v
+                    for v in (
+                        prefill_metric.get("p99_utilization_pct"),
+                        decode_metric.get("p99_utilization_pct"),
+                    )
+                    if v is not None
+                ],
+                default=None,
+            )
+            if p99_util is not None:
+                run_p99_utilization.append(float(p99_util))
+            avg_mem_used_mb = _weighted_two(
+                prefill_metric.get("avg_memory_used_mb"),
+                prefill_dur,
+                decode_metric.get("avg_memory_used_mb"),
+                decode_dur,
+            )
+            if avg_mem_used_mb is not None:
+                run_avg_memory_used_mb.append(float(avg_mem_used_mb))
+            p99_mem_used_mb = max(
+                [
+                    v
+                    for v in (
+                        prefill_metric.get("p99_memory_used_mb"),
+                        decode_metric.get("p99_memory_used_mb"),
+                    )
+                    if v is not None
+                ],
+                default=None,
+            )
+            if p99_mem_used_mb is not None:
+                run_p99_memory_used_mb.append(float(p99_mem_used_mb))
+            total_memory_mb = max(
+                [v for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb")) if v is not None],
+                default=None,
+            )
             if total_memory_mb is not None:
                 run_total_memory_mb.append(float(total_memory_mb))
-            if avg_memory_used_pct is not None:
-                run_avg_memory_used_pct.append(float(avg_memory_used_pct))
-            if p99_memory_used_pct is not None:
-                run_p99_memory_used_pct.append(float(p99_memory_used_pct))
-            elapsed = time.time() - run_start_t
-            if avg_power is not None:
-                run_total_energy.append(float(avg_power) * elapsed)
+            avg_mem_used_pct = _weighted_two(
+                prefill_metric.get("avg_memory_used_pct"),
+                prefill_dur,
+                decode_metric.get("avg_memory_used_pct"),
+                decode_dur,
+            )
+            if avg_mem_used_pct is not None:
+                run_avg_memory_used_pct.append(float(avg_mem_used_pct))
+            p99_mem_used_pct = max(
+                [
+                    v
+                    for v in (
+                        prefill_metric.get("p99_memory_used_pct"),
+                        decode_metric.get("p99_memory_used_pct"),
+                    )
+                    if v is not None
+                ],
+                default=None,
+            )
+            if p99_mem_used_pct is not None:
+                run_p99_memory_used_pct.append(float(p99_mem_used_pct))
+            for dst, key in (
+                (run_prefill_avg_power, "avg_power_w"),
+                (run_prefill_p99_power, "p99_power_w"),
+                (run_prefill_avg_util, "avg_utilization_pct"),
+                (run_prefill_p99_util, "p99_utilization_pct"),
+                (run_prefill_avg_mem_used_mb, "avg_memory_used_mb"),
+                (run_prefill_p99_mem_used_mb, "p99_memory_used_mb"),
+                (run_prefill_avg_mem_used_pct, "avg_memory_used_pct"),
+                (run_prefill_p99_mem_used_pct, "p99_memory_used_pct"),
+            ):
+                v = prefill_metric.get(key)
+                if isinstance(v, (int, float)):
+                    dst.append(float(v))
+            for dst, key in (
+                (run_decode_avg_power, "avg_power_w"),
+                (run_decode_p99_power, "p99_power_w"),
+                (run_decode_avg_util, "avg_utilization_pct"),
+                (run_decode_p99_util, "p99_utilization_pct"),
+                (run_decode_avg_mem_used_mb, "avg_memory_used_mb"),
+                (run_decode_p99_mem_used_mb, "p99_memory_used_mb"),
+                (run_decode_avg_mem_used_pct, "avg_memory_used_pct"),
+                (run_decode_p99_mem_used_pct, "p99_memory_used_pct"),
+            ):
+                v = decode_metric.get(key)
+                if isinstance(v, (int, float)):
+                    dst.append(float(v))
 
     result = _aggregate_sweep_results(runs)
 
@@ -808,13 +1060,23 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     prefill_last_jpt: list[float] = []
     decode_last_jpt: list[float] = []
     for i, p_tps in enumerate(prefill_last):
-        if i < len(run_avg_power) and run_avg_power[i] > 0:
-            tpj = p_tps / run_avg_power[i]
+        phase_power = None
+        if i < len(run_phase_device):
+            v = run_phase_device[i].get("prefill", {}).get("avg_power_w")
+            if isinstance(v, (int, float)):
+                phase_power = float(v)
+        if phase_power is not None and phase_power > 0:
+            tpj = p_tps / phase_power
             prefill_last_tpj.append(tpj)
             prefill_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
     for i, d_tps in enumerate(decode_last):
-        if i < len(run_avg_power) and run_avg_power[i] > 0:
-            tpj = d_tps / run_avg_power[i]
+        phase_power = None
+        if i < len(run_phase_device):
+            v = run_phase_device[i].get("decode", {}).get("avg_power_w")
+            if isinstance(v, (int, float)):
+                phase_power = float(v)
+        if phase_power is not None and phase_power > 0:
+            tpj = d_tps / phase_power
             decode_last_tpj.append(tpj)
             decode_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
     print(f"warmup: {args.warmup}")
@@ -827,13 +1089,29 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     if args.device_metrics:
         _print_summary("avg_power", run_avg_power, "W")
         _print_summary("p99_power", run_p99_power, "W")
+        _print_summary("prefill_avg_power", run_prefill_avg_power, "W")
+        _print_summary("prefill_p99_power", run_prefill_p99_power, "W")
+        _print_summary("decode_avg_power", run_decode_avg_power, "W")
+        _print_summary("decode_p99_power", run_decode_p99_power, "W")
         _print_summary("avg_utilization", run_avg_utilization, "%")
         _print_summary("p99_utilization", run_p99_utilization, "%")
+        _print_summary("prefill_avg_util", run_prefill_avg_util, "%")
+        _print_summary("prefill_p99_util", run_prefill_p99_util, "%")
+        _print_summary("decode_avg_util", run_decode_avg_util, "%")
+        _print_summary("decode_p99_util", run_decode_p99_util, "%")
         _print_summary("avg_memory_used", run_avg_memory_used_mb, "MB")
         _print_summary("p99_memory_used", run_p99_memory_used_mb, "MB")
+        _print_summary("prefill_avg_mem_used", run_prefill_avg_mem_used_mb, "MB")
+        _print_summary("prefill_p99_mem_used", run_prefill_p99_mem_used_mb, "MB")
+        _print_summary("decode_avg_mem_used", run_decode_avg_mem_used_mb, "MB")
+        _print_summary("decode_p99_mem_used", run_decode_p99_mem_used_mb, "MB")
         _print_summary("total_memory", run_total_memory_mb, "MB")
         _print_summary("avg_memory_used_pct", run_avg_memory_used_pct, "%")
         _print_summary("p99_memory_used_pct", run_p99_memory_used_pct, "%")
+        _print_summary("prefill_avg_mem_used_pct", run_prefill_avg_mem_used_pct, "%")
+        _print_summary("prefill_p99_mem_used_pct", run_prefill_p99_mem_used_pct, "%")
+        _print_summary("decode_avg_mem_used_pct", run_decode_avg_mem_used_pct, "%")
+        _print_summary("decode_p99_mem_used_pct", run_decode_p99_mem_used_pct, "%")
         _print_summary("total_energy", run_total_energy, "J")
         _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
         _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
@@ -853,17 +1131,34 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 "p99_power_w": _summary(run_p99_power),
                 "avg_utilization_pct": _summary(run_avg_utilization),
                 "p99_utilization_pct": _summary(run_p99_utilization),
+                "prefill_avg_power_w": _summary(run_prefill_avg_power),
+                "prefill_p99_power_w": _summary(run_prefill_p99_power),
+                "decode_avg_power_w": _summary(run_decode_avg_power),
+                "decode_p99_power_w": _summary(run_decode_p99_power),
+                "prefill_avg_utilization_pct": _summary(run_prefill_avg_util),
+                "prefill_p99_utilization_pct": _summary(run_prefill_p99_util),
+                "decode_avg_utilization_pct": _summary(run_decode_avg_util),
+                "decode_p99_utilization_pct": _summary(run_decode_p99_util),
                 "avg_memory_used_mb": _summary(run_avg_memory_used_mb),
                 "p99_memory_used_mb": _summary(run_p99_memory_used_mb),
+                "prefill_avg_memory_used_mb": _summary(run_prefill_avg_mem_used_mb),
+                "prefill_p99_memory_used_mb": _summary(run_prefill_p99_mem_used_mb),
+                "decode_avg_memory_used_mb": _summary(run_decode_avg_mem_used_mb),
+                "decode_p99_memory_used_mb": _summary(run_decode_p99_mem_used_mb),
                 "total_memory_mb": _summary(run_total_memory_mb),
                 "avg_memory_used_pct": _summary(run_avg_memory_used_pct),
                 "p99_memory_used_pct": _summary(run_p99_memory_used_pct),
+                "prefill_avg_memory_used_pct": _summary(run_prefill_avg_mem_used_pct),
+                "prefill_p99_memory_used_pct": _summary(run_prefill_p99_mem_used_pct),
+                "decode_avg_memory_used_pct": _summary(run_decode_avg_mem_used_pct),
+                "decode_p99_memory_used_pct": _summary(run_decode_p99_mem_used_pct),
                 "total_energy_j": _summary(run_total_energy),
                 "prefill_tok_per_j_last": _summary(prefill_last_tpj),
                 "decode_tok_per_j_last_dfi": _summary(decode_last_tpj),
                 "prefill_j_per_tok_last": _summary(prefill_last_jpt),
                 "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
+            "device_runs": run_phase_device,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -1078,7 +1373,6 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         )
     llm_runs = []
     for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
-        run_start_t = time.time()
         if tracker is not None:
             tracker.start()
         try:
@@ -1093,11 +1387,11 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             if tracker is not None:
                 tracker.stop()
         if tracker is not None:
+            metric = _extract_device_metric(tracker)
             _enrich_single_run_device(
                 run=run,
-                metric=tracker.get_metric(),
-                trace=tracker.get_trace(),
-                run_start_t=run_start_t,
+                prefill_metric=metric,
+                decode_metric=metric,
             )
         llm_runs.append(run)
 
@@ -1339,12 +1633,6 @@ def add_tps_parser(
         choices=["auto", "gpu", "npu"],
         default="auto",
         help="device backend selection (default: auto)",
-        )
-        p.add_argument(
-        "--device-interval",
-        type=float,
-        default=0.2,
-        help="device sampling interval in seconds",
         )
         p.add_argument(
         "--device-gpu-id",

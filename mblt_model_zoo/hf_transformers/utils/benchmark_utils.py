@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -45,13 +45,29 @@ class SingleMeasurement:
     npu_decode_time: Optional[float] = None
     avg_power_w: Optional[float] = None
     p99_power_w: Optional[float] = None
+    prefill_avg_power_w: Optional[float] = None
+    prefill_p99_power_w: Optional[float] = None
+    decode_avg_power_w: Optional[float] = None
+    decode_p99_power_w: Optional[float] = None
     avg_utilization_pct: Optional[float] = None
     p99_utilization_pct: Optional[float] = None
+    prefill_avg_utilization_pct: Optional[float] = None
+    prefill_p99_utilization_pct: Optional[float] = None
+    decode_avg_utilization_pct: Optional[float] = None
+    decode_p99_utilization_pct: Optional[float] = None
     avg_memory_used_mb: Optional[float] = None
     p99_memory_used_mb: Optional[float] = None
+    prefill_avg_memory_used_mb: Optional[float] = None
+    prefill_p99_memory_used_mb: Optional[float] = None
+    decode_avg_memory_used_mb: Optional[float] = None
+    decode_p99_memory_used_mb: Optional[float] = None
     total_memory_mb: Optional[float] = None
     avg_memory_used_pct: Optional[float] = None
     p99_memory_used_pct: Optional[float] = None
+    prefill_avg_memory_used_pct: Optional[float] = None
+    prefill_p99_memory_used_pct: Optional[float] = None
+    decode_avg_memory_used_pct: Optional[float] = None
+    decode_p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
     prefill_tokens_per_j: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
@@ -72,6 +88,8 @@ class SweepData:
 class BenchmarkResult:
     prefill_sweep: SweepData = field(default_factory=SweepData)
     decode_sweep: SweepData = field(default_factory=SweepData)
+    prefill_phase_duration_s: Optional[float] = None
+    decode_phase_duration_s: Optional[float] = None
 
     @staticmethod
     def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
@@ -321,6 +339,10 @@ class TPSMeasurer:
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -351,6 +373,8 @@ class TPSMeasurer:
             thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
             
             t_start = time.perf_counter()
+            if on_prefill_start is not None:
+                on_prefill_start()
             thread.start()
             
             first_token_time = None
@@ -370,6 +394,10 @@ class TPSMeasurer:
             for _ in streamer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
+                    if on_prefill_end is not None:
+                        on_prefill_end()
+                    if on_decode_start is not None:
+                        on_decode_start()
                 decoded_tokens += 1
                 if token_pbar is not None:
                     token_pbar.update(1)
@@ -383,6 +411,8 @@ class TPSMeasurer:
                 
             t_end = time.perf_counter()
             thread.join()
+            if on_decode_end is not None:
+                on_decode_end()
             if token_pbar is not None:
                 token_pbar.close()
             
@@ -435,11 +465,18 @@ class TPSMeasurer:
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
     ) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
             prefix = f"{progress_prefix} " if progress_prefix else ""
+            t_prefill_start = time.perf_counter()
+            if on_prefill_start is not None:
+                on_prefill_start()
 
             # 1. Prefill Sweep
             p_start, p_end, p_step = prefill_range
@@ -461,8 +498,15 @@ class TPSMeasurer:
                 full_result.prefill_sweep.time_values.append(res.prefill_latency)
                 full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
                 full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
+            t_prefill_end = time.perf_counter()
+            if on_prefill_end is not None:
+                on_prefill_end()
+            full_result.prefill_phase_duration_s = max(0.0, t_prefill_end - t_prefill_start)
                 
             # 2. Decode Sweep
+            t_decode_start = time.perf_counter()
+            if on_decode_start is not None:
+                on_decode_start()
             d_start, d_end, d_step = decode_range
             input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
             input_ids = input_ids.to(self.device)
@@ -541,6 +585,10 @@ class TPSMeasurer:
                 decode_token_pbar.close()
             if pbar_decode is not None:
                 pbar_decode.close()
+            t_decode_end = time.perf_counter()
+            if on_decode_end is not None:
+                on_decode_end()
+            full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
 
             assert first_token_time is not None
 
