@@ -556,7 +556,6 @@ def _enrich_single_run_device(
     total_tokens = run.num_prefill + run.num_decode
 
     run.avg_power_w = float(avg_power)
-    run.p99_power_w = float(p99_power) if p99_power is not None else None
     run.total_energy_j = total_energy
     run.prefill_tokens_per_j = (
         _safe_div(float(run.num_prefill), prefill_energy)
