@@ -99,18 +99,26 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py
 Common options:
 - `--model` (benchmark a single model id)
 - `--revision`, `--all` (W8/W4V8 sweep)
+- `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--image-resolutions` (default: `224,384,512,768`)
 - `--llm-resolution`, `--decode`, `--prompt`
 - `--repeat`, `--warmup`
+- `--original-models` (resolve listed Mobilint models to parent/base model IDs)
 - `--device`, `--device-map`, `--dtype`, `--trust-remote-code`
 - `--device-metrics/--no-device-metrics`, `--device-backend`, `--device-gpu-id`
+- `--cuda-precheck/--no-cuda-precheck`, `--cuda-precheck-margin`
 - `--skip-existing`, `--rebuild-charts`, `--results-dir`
 
 Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
 - `{model}.json`: per-model full benchmark payload
 - `{model}.csv`: per-run raw rows (`vision`/`llm`)
+- `{model}.png`: per-model summary chart
+- `combined.csv`: model-wise integrated summary (LLM + vision)
+- `combined.md`: markdown summary table
+- `combined_device.csv`: model-wise device summary
 - `combined_llm.csv`: model-wise LLM summary
-- `combined_llm_decode_tps_mean.png`: model-wise decode TPS chart
+- `combined_vision.csv`: per-model/resolution vision summary
+- charts: `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`, `vision_encode_ms.png`, `vision_fps.png`
 
 Example:
 
@@ -129,7 +137,8 @@ You can compare multiple benchmark result folders and generate the same metric-w
 ```bash
 python benchmark/transformers/plot_compare_benchmark_results.py \
   <result_folder_1> <result_folder_2> [<result_folder_3> ...] \
-  --output-dir benchmark/transformers/results/charts
+  --output-dir benchmark/transformers/results/charts \
+  --task text-generation
 ```
 
 If `--output-dir` is omitted, charts are saved under:
@@ -149,6 +158,31 @@ The script intersects model IDs across all folders, then saves:
 - `decode_tokens_per_j.png`
 - `prefill_j_per_token.png`
 - `decode_j_per_token.png`
+- `avg_utilization_pct.png`
+- `p99_utilization_pct.png`
+- `avg_memory_used_mb.png`
+- `p99_memory_used_mb.png`
+- `avg_memory_used_pct.png`
+- `p99_memory_used_pct.png`
+
+For VLM (`image-text-to-text`) benchmark outputs, set `--task image-text-to-text`:
+
+```bash
+python benchmark/transformers/plot_compare_benchmark_results.py \
+  <result_folder_1> <result_folder_2> [<result_folder_3> ...] \
+  --task image-text-to-text
+```
+
+VLM compare mode saves:
+- `llm_prefill_tps.png`
+- `llm_decode_tps.png`
+- `llm_ttft_ms.png`
+- `llm_decode_duration_ms.png`
+- `vision_encode_ms.png`
+- `vision_fps.png`
+- `vision_img_per_j.png`
+- `avg_power_w.png`
+- `total_energy_j.png`
 - `avg_utilization_pct.png`
 - `p99_utilization_pct.png`
 - `avg_memory_used_mb.png`
