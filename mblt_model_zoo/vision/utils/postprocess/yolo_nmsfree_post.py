@@ -13,27 +13,21 @@ from .yolo_anchorless_post import YOLOAnchorlessPost
 class YOLONMSFreePost(YOLOAnchorlessPost):
     """Postprocessing for YOLO NMS-free models."""
 
-    def __call__(self, x, conf_thres: float, iou_thres: float) -> List[torch.Tensor]:
-        """Executes YOLO postprocessing for NMS-free models.
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Preprocesses inputs for NMS-free models.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
-            conf_thres (float): Confidence threshold.
-            iou_thres (float): IoU threshold.
+            x (List[torch.Tensor]): Raw model outputs.
 
         Returns:
-            List[torch.Tensor]: List of detections per image.
+            tuple: (processed_detections, None).
         """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
         if len(x) == 2:
             x = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), None
         else:
             x = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return x
+            return self.decode(x), None
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.

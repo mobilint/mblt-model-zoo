@@ -8,6 +8,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from ..datasets import get_coco_inv
+
 
 # --- Box Conversion Utilities ---
 def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
@@ -414,3 +416,235 @@ def scale_masks(
         masks[None], shape, mode="bilinear", align_corners=False
     )  # 1NHW
     return masks[0]
+
+
+def to_string(counts: list[int]) -> str:
+    """Converts the RLE object into a compact string representation.
+
+    Each count is delta-encoded and variable-length encoded as a string.
+
+    Args:
+        counts (list[int]): List of RLE counts.
+
+    Returns:
+        str: Compact string representation of the RLE object.
+    """
+    result = []
+
+    for i, x in enumerate(counts):
+        x = int(x)
+
+        # Apply delta encoding for all counts after the second entry
+        if i > 2:
+            x -= int(counts[i - 2])
+
+        # Variable-length encode the value
+        while True:
+            c = x & 0x1F  # Take 5 bits
+            x >>= 5
+
+            # If the sign bit (0x10) is set, continue if x != -1;
+            # otherwise, continue if x != 0
+            more = (x != -1) if (c & 0x10) else (x != 0)
+            if more:
+                c |= 0x20  # Set continuation bit
+            c += 48  # Shift to ASCII
+            result.append(chr(c))
+            if not more:
+                break
+
+    return "".join(result)
+
+
+def multi_encode(pixels: torch.Tensor) -> list[int]:
+    """Convert multiple binary masks using Run-Length Encoding (RLE).
+
+    Args:
+        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask
+            with shape [N, H*W].
+
+    Returns:
+        list[list[int]]: A list of RLE counts for each mask.
+    """
+    transitions = pixels[:, 1:] != pixels[:, :-1]
+    row_idx, col_idx = torch.where(transitions)
+    col_idx = col_idx + 1
+
+    # Compute run lengths
+    counts = []
+    for i, pixel_row in enumerate(pixels):
+        positions = col_idx[row_idx == i]
+        if len(positions):
+            count = torch.diff(positions).tolist()
+            count.insert(0, positions[0].item())
+            count.append(len(pixel_row) - positions[-1].item())
+        else:
+            count = [len(pixel_row)]
+
+    return counts
+
+
+def nmsout2eval(nms_outs, img1_shape, img0_shapes):
+    """Converts NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (List[np.array or torch.Tensor] or torch.Tensor): The output of the NMS
+            operation of shape (n, 6), where n is the number of objects.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+    """
+
+    if not isinstance(nms_outs, list):
+        nms_outs = [nms_outs]
+    labels_list = []
+    boxes_list = []
+    scores_list = []
+    for nms_out, img0_shape in zip(nms_outs, img0_shapes):
+        boxes = nms_out[:, :4]
+        scores = nms_out[:, 4]
+        labels = nms_out[:, 5]
+        boxes = scale_boxes(
+            img1_shape, boxes, img0_shape
+        )  # scale boxes to original image size
+        boxes[:, 2:] = boxes[:, 2:] - boxes[:, :2]  # xyxy to xywh with corner xy
+
+        boxes = boxes.tolist()
+        scores = scores.tolist()
+        labels = labels.tolist()
+        labels = [get_coco_inv(int(l)) for l in labels]
+
+        labels_list.append(labels)
+        boxes_list.append(boxes)
+        scores_list.append(scores)
+
+    return labels_list, boxes_list, scores_list
+
+
+def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
+    """Converts segmentation NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - extra (list[list]): The encoded segmentation masks for each image.
+    """
+    if not isinstance(nms_outs[0], (list, tuple)):
+        nms_outs = [nms_outs]
+
+    det_results = []
+    seg_results = []
+    for nms_out in nms_outs:
+        det_results.append(nms_out[0])
+        seg_results.append(nms_out[1])
+
+    labels_list, boxes_list, scores_list = nmsout2eval(
+        det_results, img1_shape, img0_shapes
+    )
+
+    seg_results = [
+        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]))
+        for seg_result, img0_shape in zip(seg_results, img0_shapes)
+    ]
+
+    def mask_encode(seg_result):
+        extra = []
+        h, w = seg_result.shape[1:3]
+        seg_result = (
+            seg_result.permute(0, 2, 1)
+            .contiguous()
+            .view(seg_result.shape[0], h * w)
+            .byte()
+        )
+        counts = multi_encode(seg_result)
+        for c in counts:
+            extra.append({"size": [h, w], "counts": to_string(c)})
+        return extra
+
+    extra_list = [mask_encode(seg_result) for seg_result in seg_results]
+    return labels_list, boxes_list, scores_list, extra_list
+
+
+def nmsout2eval_pose(nms_outs, img1_shape, img0_shapes):
+    """Converts pose estimation NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - keypoints (list[list]): The scaled keypoints for each image.
+    """
+    if not isinstance(nms_outs, list):
+        nms_outs = [nms_outs]
+    labels_list, boxes_list, scores_list = nmsout2eval(
+        nms_outs, img1_shape, img0_shapes
+    )
+    extra = [
+        scale_coords(img1_shape, nms_out[:, 6:].reshape(-1, 17, 3), img0_shape).reshape(
+            -1, 51
+        )
+        for nms_out, img0_shape in zip(nms_outs, img0_shapes)
+    ]
+    return labels_list, boxes_list, scores_list, extra
+
+
+class YOLOSegPostMixin:
+    """Mixin class for YOLO segmentation postprocessing."""
+
+    def nmsout2eval(
+        self,
+        nms_out: list,
+        img1_shape: tuple,
+        img0_shape: list[tuple],
+    ) -> tuple:
+        """Converts NMS output to evaluation format for segmentation.
+
+        Args:
+            nms_out: NMS output (detections and prototypes).
+            img1_shape: Resized image shape.
+            img0_shape: List of original image shapes.
+
+        Returns:
+            Tuple of (labels_list, boxes_list, scores_list, extra_list).
+        """
+        return nmsout2eval_seg(nms_out, img1_shape, img0_shape)
+
+
+class YOLOPosePostMixin:
+    """Mixin class for YOLO pose estimation postprocessing."""
+
+    def nmsout2eval(
+        self,
+        nms_out: list,
+        img1_shape: tuple,
+        img0_shape: list[tuple],
+    ) -> tuple:
+        """Converts NMS output to evaluation format for pose estimation.
+
+        Args:
+            nms_out: NMS output (detections with keypoints).
+            img1_shape: Resized image shape.
+            img0_shape: List of original image shapes.
+
+        Returns:
+            Tuple of (labels_list, boxes_list, scores_list, extra_list).
+        """
+        return nmsout2eval_pose(nms_out, img1_shape, img0_shape)

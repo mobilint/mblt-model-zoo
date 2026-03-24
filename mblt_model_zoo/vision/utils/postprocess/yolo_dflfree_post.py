@@ -3,33 +3,27 @@ from typing import List
 import torch
 
 from .base import YOLOPostBase
-from .common import dist2bbox, dual_topk
+from .common import YOLOPosePostMixin, YOLOSegPostMixin, dist2bbox, dual_topk
 
 
 class YOLODFLFreePost(YOLOPostBase):
     """Postprocessing for YOLO DFL-free models."""
 
-    def __call__(self, x, conf_thres: float, iou_thres: float) -> List[torch.Tensor]:
-        """Executes YOLO postprocessing for DFL-free models.
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Preprocesses inputs for DFL-free models.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
-            conf_thres (float): Confidence threshold.
-            iou_thres (float): IoU threshold.
+            x (List[torch.Tensor]): Raw model outputs.
 
         Returns:
-            List[torch.Tensor]: List of detections per image.
+            tuple: (processed_detections, None).
         """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
         if len(x) == 2:
             x = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), None
         else:
             x = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return x
+            return self.decode(x), None
 
     def conversion(self, x: List[torch.Tensor]) -> torch.Tensor:
         """Converts raw model output tensors into a single concatenated tensor.
@@ -159,28 +153,24 @@ class YOLODFLFreePost(YOLOPostBase):
         return x
 
 
-class YOLODFLFreeSegPost(YOLODFLFreePost):
+class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
     """Postprocessing for YOLO NMS-free segmentation models."""
 
-    def __call__(self, x, conf_thres, iou_thres):
-        """Execute YOLO segmentation postprocessing.
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Preprocesses intermediate inputs into (boxes, proto) format.
+
         Args:
-            x: Input tensor or list of tensors.
-            conf_thres (float, optional): Confidence threshold.
-            iou_thres (float, optional): IoU threshold.
+            x (List[torch.Tensor]): Raw model output tensors.
+
         Returns:
-            list: Postprocessed results with masks.
+            tuple: (decoded_detections, prototype_masks).
         """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
         if len(x) == 4:
             x, proto_outs = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), proto_outs
         else:
             x, proto_outs = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return self.masking(x, proto_outs)
+            return self.decode(x), proto_outs
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.
@@ -244,28 +234,24 @@ class YOLODFLFreeSegPost(YOLODFLFreePost):
         return y, proto
 
 
-class YOLODFLFreePosePost(YOLODFLFreePost):
+class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
     """Postprocessing for YOLO NMS-free pose estimation models."""
 
-    def __call__(self, x, conf_thres, iou_thres):
-        """Execute YOLO postprocessing.
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Preprocesses inputs for pose estimation.
+
         Args:
-            x: Input tensor or list of tensors.
-            conf_thres (float, optional): Confidence threshold.
-            iou_thres (float, optional): IoU threshold.
+            x (List[torch.Tensor]): Raw model outputs.
+
         Returns:
-            list: Postprocessed results.
+            tuple: (processed_detections, None).
         """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
         if len(x) == 3:
             x = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), None
         else:
             x = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return x
+            return self.decode(x), None
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.

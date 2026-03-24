@@ -51,8 +51,8 @@ class MBLT_Engine:
         if self.model.uint8_input:
             self.pre_cfg.pop("Normalize", None)
 
-        self._preprocess = build_preprocess(self.pre_cfg)
-        self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
+        self.preprocessor = build_preprocess(self.pre_cfg)
+        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg)
         self.device = torch.device("cpu")
 
     @staticmethod
@@ -121,7 +121,7 @@ class MBLT_Engine:
         Returns:
                 Preprocessed data.
         """
-        return self._preprocess(x, **kwargs)
+        return self.preprocessor(x, **kwargs)
 
     def postprocess(
         self,
@@ -137,7 +137,7 @@ class MBLT_Engine:
         Returns:
                 Postprocessed results.
         """
-        pre_result = self._postprocess(x, **kwargs)
+        pre_result = self.postprocessor(x, **kwargs)
         return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
 
     def to(
@@ -152,8 +152,8 @@ class MBLT_Engine:
         Raises:
                 TypeError: If device type is unexpected.
         """
-        self._preprocess.to(device)
-        self._postprocess.to(device)
+        self.preprocessor.to(device)
+        self.postprocessor.to(device)
 
         if isinstance(device, str):
             self.device = torch.device(device)

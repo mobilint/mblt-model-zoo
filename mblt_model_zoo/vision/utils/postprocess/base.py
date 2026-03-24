@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from ..types import ListTensorLike, TensorLike
-from .common import process_mask_upsample
+from .common import nmsout2eval, process_mask_upsample
 
 
 class PostBase(ABC):
@@ -96,14 +96,49 @@ class YOLOPostBase(PostBase):
         """
         self.set_threshold(conf_thres, iou_thres)
         x = self.check_input(x)
+
+        x, proto_outs = self._pre_process(x)
+
+        x = self.nms(x)
+
+        if proto_outs is not None:
+            return self.masking(x, proto_outs)
+        return x
+
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Protected method to preprocess inputs into (predictions, prototypes).
+
+        Args:
+            x: List of input tensors.
+
+        Returns:
+            Tuple of (predictions, prototypes). Prototypes may be None.
+        """
         if len(x) == 1:
             x = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), None
         else:
             x = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return x
+            return self.decode(x), None
+
+    def nmsout2eval(
+        self,
+        nms_out: Union[torch.Tensor, List[torch.Tensor]],
+        img1_shape: tuple,
+        img0_shape: List[tuple],
+    ) -> tuple:
+        """Converts NMS output to evaluation format (labels, boxes, scores).
+
+        Args:
+            nms_out: NMS output (tensor or list of tensors).
+            img1_shape: Resized image shape (height, width).
+            img0_shape: Original image shape(s).
+
+        Returns:
+            Tuple of (labels_list, boxes_list, scores_list).
+        """
+
+        return nmsout2eval(nms_out, img1_shape, img0_shape)
 
     def make_anchors(self, offset=0.5):
         """
