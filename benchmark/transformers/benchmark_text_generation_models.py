@@ -162,6 +162,22 @@ def _clear_cuda_memory(device: str | None) -> None:
         pass
 
 
+def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
+    if pipeline_obj is not None:
+        try:
+            model_obj = getattr(pipeline_obj, "model", None)
+            if model_obj is not None and hasattr(model_obj, "dispose"):
+                model_obj.dispose()
+            elif hasattr(pipeline_obj, "dispose"):
+                pipeline_obj.dispose()
+        except Exception:
+            pass
+        del pipeline_obj
+    gc.collect()
+    if _is_cuda_device(device):
+        _clear_cuda_memory(device)
+
+
 def _estimate_model_weight_bytes(model_id: str, revision: str | None) -> int | None:
     try:
         from huggingface_hub import HfApi
@@ -1223,15 +1239,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:
             if _is_cuda_oom_error(e):
                 print(f"Skipping (CUDA OOM during benchmark): {e}")
-                if pipeline is not None:
-                    del pipeline
-                _clear_cuda_memory(args.device)
+                _release_pipeline(pipeline, args.device)
                 continue
             print(f"Skipping (benchmark failed): {e}")
-            if pipeline is not None:
-                del pipeline
-            if _is_cuda_device(args.device):
-                _clear_cuda_memory(args.device)
+            _release_pipeline(pipeline, args.device)
             continue
 
         if result.prefill_sweep.avg_total_token_latency_values:
@@ -1414,9 +1425,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
-        del pipeline
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        _release_pipeline(pipeline, args.device)
 
     _rebuild_combined_outputs(results_dir, targets)
 

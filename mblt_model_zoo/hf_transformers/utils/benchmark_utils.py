@@ -370,7 +370,19 @@ class TPSMeasurer:
                 gen_kwargs["count_npu_time"] = True
 
             # 3. Execution
-            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+            thread_error: list[Exception] = []
+
+            def _run_generate():
+                try:
+                    self.model.generate(**gen_kwargs)
+                except Exception as e:
+                    thread_error.append(e)
+                    try:
+                        streamer.end()
+                    except Exception:
+                        pass
+
+            thread = Thread(target=_run_generate)
             
             t_start = time.perf_counter()
             if on_prefill_start is not None:
@@ -391,32 +403,40 @@ class TPSMeasurer:
                     leave=False,
                 )
 
-            for _ in streamer:
-                if first_token_time is None:
-                    first_token_time = time.perf_counter()
-                    if on_prefill_end is not None:
-                        on_prefill_end()
-                    if on_decode_start is not None:
-                        on_decode_start()
-                decoded_tokens += 1
-                if token_pbar is not None:
-                    token_pbar.update(1)
-                npu_time = getattr(self.model, "npu_time", None)
-                if npu_time is not None:
-                    has_npu_time = True
-                    if decoded_tokens == 1:
-                        npu_prefill_time += npu_time
-                    else:
-                        npu_decode_time += npu_time
-                
+            stream_error: Exception | None = None
+            try:
+                for _ in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter()
+                        if on_prefill_end is not None:
+                            on_prefill_end()
+                        if on_decode_start is not None:
+                            on_decode_start()
+                    decoded_tokens += 1
+                    if token_pbar is not None:
+                        token_pbar.update(1)
+                    npu_time = getattr(self.model, "npu_time", None)
+                    if npu_time is not None:
+                        has_npu_time = True
+                        if decoded_tokens == 1:
+                            npu_prefill_time += npu_time
+                        else:
+                            npu_decode_time += npu_time
+            except Exception as e:
+                stream_error = e
             t_end = time.perf_counter()
             thread.join()
+            if thread_error:
+                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
+            if stream_error is not None:
+                raise stream_error
             if on_decode_end is not None:
                 on_decode_end()
             if token_pbar is not None:
                 token_pbar.close()
             
-            assert first_token_time is not None
+            if first_token_time is None:
+                raise RuntimeError("Generation ended before the first token.")
 
             # 4. Calculation
             prefill_latency = first_token_time - t_start
@@ -542,45 +562,65 @@ class TPSMeasurer:
             npu_decode_tokens = 0
             first_decode_seen = False
 
-            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+            thread_error: list[Exception] = []
+
+            def _run_generate():
+                try:
+                    self.model.generate(**gen_kwargs)
+                except Exception as e:
+                    thread_error.append(e)
+                    try:
+                        streamer.end()
+                    except Exception:
+                        pass
+
+            thread = Thread(target=_run_generate)
             thread.start()
 
             first_token_time = None
             decoded_tokens = 0
-            for _ in streamer:
-                if first_token_time is None:
-                    first_token_time = time.perf_counter()
-                decoded_tokens += 1
-                if decode_token_pbar is not None:
-                    decode_token_pbar.update(1)
-                if getattr(self.model, "npu_time", None) is not None:
-                    if decoded_tokens == 1:
-                        first_decode_seen = True
-                    else:
-                        npu_decode_time += self.model.npu_time
-                        npu_decode_tokens += 1
-                if decoded_tokens in targets:
-                    t_hit = time.perf_counter()
-                    decode_duration = t_hit - first_token_time
-                    decode_count = decoded_tokens - 1
-                    decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
-                    avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
-                    avg_npu_token_latency = (
-                        npu_decode_time / npu_decode_tokens
-                        if npu_decode_tokens > 0
-                        else None
-                    )
+            stream_error: Exception | None = None
+            try:
+                for _ in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter()
+                    decoded_tokens += 1
+                    if decode_token_pbar is not None:
+                        decode_token_pbar.update(1)
+                    if getattr(self.model, "npu_time", None) is not None:
+                        if decoded_tokens == 1:
+                            first_decode_seen = True
+                        else:
+                            npu_decode_time += self.model.npu_time
+                            npu_decode_tokens += 1
+                    if decoded_tokens in targets:
+                        t_hit = time.perf_counter()
+                        decode_duration = t_hit - first_token_time
+                        decode_count = decoded_tokens - 1
+                        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+                        avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
+                        avg_npu_token_latency = (
+                            npu_decode_time / npu_decode_tokens
+                            if npu_decode_tokens > 0
+                            else None
+                        )
 
-                    full_result.decode_sweep.x_values.append(decoded_tokens)
-                    full_result.decode_sweep.tps_values.append(decode_tps)
-                    full_result.decode_sweep.time_values.append(decode_duration)
-                    full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
-                    full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
+                        full_result.decode_sweep.x_values.append(decoded_tokens)
+                        full_result.decode_sweep.tps_values.append(decode_tps)
+                        full_result.decode_sweep.time_values.append(decode_duration)
+                        full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
+                        full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
 
-                    if pbar_decode is not None:
-                        pbar_decode.update(1)
+                        if pbar_decode is not None:
+                            pbar_decode.update(1)
+            except Exception as e:
+                stream_error = e
 
             thread.join()
+            if thread_error:
+                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
+            if stream_error is not None:
+                raise stream_error
             if decode_token_pbar is not None:
                 decode_token_pbar.close()
             if pbar_decode is not None:
@@ -590,7 +630,8 @@ class TPSMeasurer:
                 on_decode_end()
             full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
 
-            assert first_token_time is not None
+            if first_token_time is None:
+                raise RuntimeError("Generation ended before the first token.")
 
             return full_result
         finally:

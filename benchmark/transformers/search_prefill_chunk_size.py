@@ -193,6 +193,14 @@ def _build_pipeline(
 
 def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
     if pipeline_obj is not None:
+        try:
+            model_obj = getattr(pipeline_obj, "model", None)
+            if model_obj is not None and hasattr(model_obj, "dispose"):
+                model_obj.dispose()
+            elif hasattr(pipeline_obj, "dispose"):
+                pipeline_obj.dispose()
+        except Exception:
+            pass
         del pipeline_obj
     gc.collect()
     if _is_cuda_device(device):

@@ -86,6 +86,42 @@ Notes for `--mxq-dir`:
 - `<model_id>` can be full repo id (e.g. `mobilint/Qwen2.5-1.5B-Instruct`) or basename when uniquely resolvable.
 - `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
 
+## Benchmark image-text-to-text models
+
+`benchmark/transformers/benchmark_image_text_to_text_models.py` benchmarks VLM models for:
+- vision stage: encode latency / FPS across `--image-resolutions`
+- llm stage: prefill/decode TPS at one reference resolution (`--llm-resolution`, default: first resolution)
+
+```bash
+python benchmark/transformers/benchmark_image_text_to_text_models.py
+```
+
+Common options:
+- `--model` (benchmark a single model id)
+- `--revision`, `--all` (W8/W4V8 sweep)
+- `--image-resolutions` (default: `224,384,512,768`)
+- `--llm-resolution`, `--decode`, `--prompt`
+- `--repeat`, `--warmup`
+- `--device`, `--device-map`, `--dtype`, `--trust-remote-code`
+- `--device-metrics/--no-device-metrics`, `--device-backend`, `--device-gpu-id`
+- `--skip-existing`, `--rebuild-charts`, `--results-dir`
+
+Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
+- `{model}.json`: per-model full benchmark payload
+- `{model}.csv`: per-run raw rows (`vision`/`llm`)
+- `combined_llm.csv`: model-wise LLM summary
+- `combined_llm_decode_tps_mean.png`: model-wise decode TPS chart
+
+Example:
+
+```bash
+python benchmark/transformers/benchmark_image_text_to_text_models.py \
+  --image-resolutions 224,384,512 \
+  --decode 128 \
+  --repeat 5 \
+  --skip-existing
+```
+
 ## Compare result folders
 
 You can compare multiple benchmark result folders and generate the same metric-wise chart set as benchmark output:
