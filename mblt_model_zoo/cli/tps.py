@@ -9,11 +9,19 @@ import time
 from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_device_tracking_args as _add_device_tracking_args,
+    build_device_tracker as _build_device_tracker_common,
+    build_phase_trackers as _build_phase_trackers_common,
+    extract_device_metric as _extract_device_metric_common,
+    parse_positive_int as _parse_positive_int_common,
+    parse_positive_int_optional as _parse_positive_int_optional_common,
+    print_device_status as _print_device_status_common,
+    stop_tracker_safe as _stop_tracker_safe_common,
+    weighted_two as _weighted_two_common,
+)
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser
-
-DEVICE_TRACKER_INTERVAL_SEC = 1.0
-
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
     text = spec.strip()
@@ -61,36 +69,11 @@ def _parse_int_list(spec: str) -> list[int]:
 
 
 def _parse_positive_int(spec: str) -> int:
-    try:
-        value = int(spec)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError("expected integer") from e
-    if value <= 0:
-        raise argparse.ArgumentTypeError("must be > 0")
-    return value
+    return _parse_positive_int_common(spec)
 
 
 def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
-    if spec is None:
-        return None
-    text = str(spec).strip()
-    if not text:
-        return None
-    return _parse_positive_int(text)
-
-
-def _parse_int_list_optional(spec: Union[str, None]) -> Union[list[int], None]:
-    if spec is None:
-        return None
-    text = spec.strip()
-    if not text:
-        return None
-    values = [int(x.strip()) for x in text.split(",") if x.strip()]
-    if not values:
-        return None
-    if any(v < 0 for v in values):
-        raise argparse.ArgumentTypeError("device-gpu-id values must be >= 0")
-    return values
+    return _parse_positive_int_optional_common(spec)
 
 
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
@@ -320,121 +303,20 @@ def _print_summary_footer() -> None:
     )
 
 
-def _infer_gpu_ids(device: str, device_gpu_id: Optional[list[int]]) -> Optional[Union[int, list[int]]]:
-    if device_gpu_id is not None:
-        return device_gpu_id[0] if len(device_gpu_id) == 1 else device_gpu_id
-    text = (device or "").strip().lower()
-    if text.startswith("cuda:"):
-        try:
-            gpu_id = int(text.split(":", 1)[1])
-            return gpu_id
-        except ValueError:
-            return None
-    return None
-
-
 def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
-    if not args.device_metrics:
-        return None
-
-    def _has_npu_backend(obj: Any, depth: int = 0, seen: Optional[set[int]] = None) -> bool:
-        if obj is None:
-            return False
-        if seen is None:
-            seen = set()
-        oid = id(obj)
-        if oid in seen:
-            return False
-        seen.add(oid)
-        if hasattr(obj, "npu_backend"):
-            return True
-        if depth >= 2:
-            return False
-        for name in (
-            "model",
-            "language_model",
-            "vision_model",
-            "text_model",
-            "encoder",
-            "decoder",
-        ):
-            child = getattr(obj, name, None)
-            if child is not None and _has_npu_backend(child, depth + 1, seen):
-                return True
-        return False
-
-    is_mobilint_model = False
-    try:
-        from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
-
-        is_mobilint_model = isinstance(pipeline.model, MobilintModelMixin) or _has_npu_backend(pipeline.model)
-    except Exception:
-        is_mobilint_model = _has_npu_backend(getattr(pipeline, "model", None))
-
-    backend = args.device_backend
-    if backend == "auto":
-        if is_mobilint_model:
-            backend = "npu"
-        else:
-            device_text = (args.device or "").strip().lower()
-            backend = "gpu" if device_text.startswith("cuda") else "none"
-
-    if backend == "none":
-        return None
-
-    if backend == "npu":
-        from mblt_model_zoo.utils.device_tracker_npu import NPUDeviceTracker
-        try:
-            return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC)
-        except Exception as e:
-            print(f"[device] failed to initialize NPU tracker: {e}", file=sys.stderr)
-            return None
-
-    if backend == "gpu":
-        from mblt_model_zoo.utils.device_tracker_gpu import GPUDeviceTracker
-
-        gpu_id = _infer_gpu_ids(args.device, args.device_gpu_id)
-        try:
-            return GPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC, gpu_id=gpu_id)
-        except Exception as e:
-            print(f"[device] failed to initialize GPU tracker: {e}", file=sys.stderr)
-            return None
-
-    return None
+    return _build_device_tracker_common(args, pipeline)
 
 
 def _build_phase_trackers(args: argparse.Namespace, pipeline: Any) -> tuple[Any, Any]:
-    if not args.device_metrics:
-        return None, None
-    return _build_device_tracker(args, pipeline), _build_device_tracker(args, pipeline)
+    return _build_phase_trackers_common(args, pipeline)
 
 
 def _stop_tracker_safe(tracker: Any) -> None:
-    if tracker is None:
-        return
-    try:
-        tracker.stop()
-    except Exception:
-        pass
+    _stop_tracker_safe_common(tracker)
 
 
 def _extract_device_metric(tracker: Any) -> dict[str, Optional[float]]:
-    metric = tracker.get_metric()
-    out: dict[str, Optional[float]] = {}
-    for key in (
-        "avg_power_w",
-        "p99_power_w",
-        "avg_utilization_pct",
-        "p99_utilization_pct",
-        "avg_memory_used_mb",
-        "p99_memory_used_mb",
-        "total_memory_mb",
-        "avg_memory_used_pct",
-        "p99_memory_used_pct",
-    ):
-        val = metric.get(key)
-        out[key] = float(val) if isinstance(val, (int, float)) else None
-    return out
+    return _extract_device_metric_common(tracker)
 
 
 def _weighted_two(
@@ -443,32 +325,11 @@ def _weighted_two(
     b: Optional[float],
     b_weight: float,
 ) -> Optional[float]:
-    values = []
-    weights = []
-    if a is not None and a_weight > 0:
-        values.append(float(a))
-        weights.append(float(a_weight))
-    if b is not None and b_weight > 0:
-        values.append(float(b))
-        weights.append(float(b_weight))
-    if not values:
-        return None
-    if len(values) == 1:
-        return values[0]
-    total_w = weights[0] + weights[1]
-    if total_w <= 0:
-        return None
-    return (values[0] * weights[0] + values[1] * weights[1]) / total_w
+    return _weighted_two_common(a, a_weight, b, b_weight)
 
 
 def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
-    if not args.device_metrics:
-        print("[device] disabled by --no-device-metrics")
-        return
-    if tracker is None:
-        print("[device] enabled but no compatible tracker initialized (auto detection fallback)")
-        return
-    print(f"[device] enabled with {tracker.__class__.__name__} (interval={DEVICE_TRACKER_INTERVAL_SEC}s fixed)")
+    _print_device_status_common(args, tracker)
 
 
 def _safe_div(a: float, b: float) -> Optional[float]:
@@ -1621,24 +1482,7 @@ def add_tps_parser(
             default=None,
             help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
         )
-        p.add_argument(
-        "--device-metrics",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="enable device metrics tracking (default: on, disable via --no-device-metrics)",
-        )
-        p.add_argument(
-        "--device-backend",
-        choices=["none", "auto", "gpu", "npu"],
-        default="none",
-        help="device backend selection (default: none)",
-        )
-        p.add_argument(
-        "--device-gpu-id",
-        type=_parse_int_list_optional,
-        default=None,
-        help="comma-separated GPU ids for device tracking (e.g., 0,1)",
-        )
+        _add_device_tracking_args(p)
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
