@@ -838,7 +838,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "decode_p99_memory_used_pct": _summary(decode_p99_memory_used_pct),
                 "total_energy_j": _summary(total_energy_j),
                 "prefill_tok_per_j": _summary(prefill_tok_per_j),
-                "decode_tok_per_j_dfi": _summary(decode_tok_per_j),
+                "decode_tok_per_j": _summary(decode_tok_per_j),
                 "prefill_j_per_tok": _summary(prefill_j_per_tok),
                 "decode_j_per_tok": _summary(decode_j_per_tok),
             },
@@ -1153,7 +1153,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 "decode_p99_memory_used_pct": _summary(run_decode_p99_mem_used_pct),
                 "total_energy_j": _summary(run_total_energy),
                 "prefill_tok_per_j_last": _summary(prefill_last_tpj),
-                "decode_tok_per_j_last_dfi": _summary(decode_last_tpj),
+                "decode_tok_per_j_last": _summary(decode_last_tpj),
                 "prefill_j_per_tok_last": _summary(prefill_last_jpt),
                 "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
@@ -1319,7 +1319,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "p99_memory_used_pct": vision_mem_used_pct_p99[idx - 1] if idx - 1 < len(vision_mem_used_pct_p99) else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "prefill_tok_per_j": None,
-                    "decode_tok_per_j_dfi": None,
+                    "decode_tok_per_j": None,
                     "prefill_j_per_tok": None,
                     "decode_j_per_tok": None,
                     "vision_img_per_j": vision_img_per_j[idx - 1] if idx - 1 < len(vision_img_per_j) else None,
@@ -1480,7 +1480,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "p99_memory_used_pct": run.p99_memory_used_pct,
                 "total_energy_j": run.total_energy_j,
                 "prefill_tok_per_j": run.prefill_tokens_per_j,
-                "decode_tok_per_j_dfi": run.decode_tokens_per_j,
+                "decode_tok_per_j": run.decode_tokens_per_j,
                 "prefill_j_per_tok": run.prefill_j_per_token,
                 "decode_j_per_tok": run.decode_j_per_token,
                 "vision_img_per_j": None,
@@ -1518,7 +1518,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                         "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
                         "total_energy_j": _summary(llm_total_energy_j),
                         "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
-                        "decode_tok_per_j_dfi": _summary(llm_decode_tok_per_j),
+                        "decode_tok_per_j": _summary(llm_decode_tok_per_j),
                         "prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
                         "decode_j_per_tok": _summary(llm_decode_j_per_tok),
                     },
@@ -1629,9 +1629,9 @@ def add_tps_parser(
         )
         p.add_argument(
         "--device-backend",
-        choices=["auto", "gpu", "npu"],
-        default="auto",
-        help="device backend selection (default: auto)",
+        choices=["none", "auto", "gpu", "npu"],
+        default="none",
+        help="device backend selection (default: none)",
         )
         p.add_argument(
         "--device-gpu-id",
@@ -1642,9 +1642,9 @@ def add_tps_parser(
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
-    p_measure.add_argument("--prefill", type=int, default=512, help="input token count")
+    p_measure.add_argument("--prefill", type=_parse_positive_int, default=512, help="input token count")
     p_measure.add_argument(
-        "--decode", type=int, default=128, help="new tokens to generate"
+        "--decode", type=_parse_positive_int, default=128, help="new tokens to generate"
     )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
@@ -1665,13 +1665,13 @@ def add_tps_parser(
     )
     p_sweep.add_argument(
         "--fixed-decode",
-        type=int,
+        type=_parse_positive_int,
         default=10,
         help="fixed decode length for prefill sweep",
     )
     p_sweep.add_argument(
         "--fixed-prefill",
-        type=int,
+        type=_parse_positive_int,
         default=128,
         help="fixed prefill length for decode sweep",
     )
@@ -1698,13 +1698,13 @@ def add_tps_parser(
     )
     p_vlm.add_argument(
         "--decode",
-        type=int,
+        type=_parse_positive_int,
         default=128,
         help="decode tokens for LLM phase",
     )
     p_vlm.add_argument(
         "--llm-resolution",
-        type=int,
+        type=_parse_positive_int_optional,
         default=None,
         help="reference resolution used for LLM-only benchmark (default: first image resolution)",
     )

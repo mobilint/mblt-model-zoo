@@ -1086,7 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="benchmark W8 and W4W8 revisions only (skip main)",
+        help="benchmark W8 and W4V8 revisions only (skip main)",
     )
     parser.add_argument(
         "--mxq-dir",
@@ -1110,13 +1110,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--fixed-decode",
-        type=int,
+        type=_parse_positive_int,
         default=10,
         help="fixed decode length used during prefill sweep",
     )
     parser.add_argument(
         "--fixed-prefill",
-        type=int,
+        type=_parse_positive_int,
         default=128,
         help="fixed prefill length used during decode sweep",
     )
@@ -1172,9 +1172,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--device-backend",
-        choices=["auto", "gpu", "npu"],
-        default="auto",
-        help="device backend selection (default: auto)",
+        choices=["none", "auto", "gpu", "npu"],
+        default="none",
+        help="device backend selection (default: none)",
     )
     parser.add_argument(
         "--device-gpu-id",

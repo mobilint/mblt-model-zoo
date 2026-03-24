@@ -30,7 +30,7 @@ Common CLI options:
 - `--device` (default: `None`)
 - `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
 - `--revision` (e.g., `W8`)
-- `--all` (benchmark `W8` and `W4W8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
+- `--all` (benchmark `W8` and `W4V8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--prefill-range` (e.g., `128:512:128`)
 - `--decode-range` (e.g., `128:512:128`)
@@ -42,8 +42,7 @@ Common CLI options:
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
 - `--device-metrics/--no-device-metrics` (default: `--device-metrics`)
-- `--device-backend` (`auto`, `gpu`, `npu`)
-- `--device-interval` (default: `0.2`)
+- `--device-backend` (`none`, `auto`, `gpu`, `npu`; default: `none`)
 - `--device-gpu-id` (e.g., `0` or `0,1`)
 - `--cuda-precheck/--no-cuda-precheck` (best-effort VRAM pre-check before load; default: `--cuda-precheck`)
 - `--cuda-precheck-margin` (default: `1.15`)
@@ -130,7 +129,7 @@ Important behavior:
 - Input targets come from `--mxq-dir` and filename pattern: `<model_id_without_group_id>-<W8|W4V8>.mxq`.
 - If filename format is invalid, model base is not found in HF text-generation model list, or mapping is ambiguous, that mxq file is skipped with warning.
 - The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `128,256,512,1024,2048`).
-- For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `16,32,64,128,256,512`).
+- For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `128,256,512,1024,2048`).
 - Candidates where `chunk_size > prefill_length` are skipped automatically.
 - Each `(prefill_length, chunk_size)` pair is measured with repeats and median prefill TPS.
 - Runtime progress is shown with `tqdm` (overall pair progress, warmup, and per-pair search eval progress), plus search-stage logs.
@@ -159,7 +158,7 @@ Example:
 python benchmark/transformers/search_prefill_chunk_size.py \
   --mxq-dir . \
   --prefill-lengths 128,256,512,1024,2048 \
-  --chunk-candidates 16,32,64,128,256,512 \
+  --chunk-candidates 128,256,512,1024,2048 \
   --time-guard-sec 300 \
   --repeat 3 \
   --skip-existing

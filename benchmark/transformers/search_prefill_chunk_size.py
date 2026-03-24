@@ -158,7 +158,6 @@ def _build_pipeline(
     dtype: str | None,
     trust_remote_code: bool,
     mxq_path: str | None,
-    embedding_weight: str | None,
 ) -> Any:
     kwargs: dict[str, Any] = {
         "task": "text-generation",
@@ -181,8 +180,6 @@ def _build_pipeline(
         model_kwargs["target_clusters"] = [0, 1]
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
-    if embedding_weight:
-        model_kwargs["embedding_weight"] = embedding_weight
     kwargs["model_kwargs"] = model_kwargs
 
     if dtype:
@@ -752,7 +749,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--device-map", type=str, default=None)
     parser.add_argument("--dtype", type=str, default=None)
-    parser.add_argument("--embedding-weight", type=str, default=None, help="override embedding_weight in model_kwargs")
     parser.add_argument("--trust-remote-code", dest="trust_remote_code", action="store_true", default=True)
     parser.add_argument("--no-trust-remote-code", dest="trust_remote_code", action="store_false")
     parser.add_argument("--skip-existing", action="store_true", help="reuse existing record JSON for model/core-mode pairs")
@@ -894,7 +890,6 @@ def main(argv: list[str] | None = None) -> int:
                         dtype=args.dtype,
                         trust_remote_code=args.trust_remote_code,
                         mxq_path=mxq_path,
-                        embedding_weight=args.embedding_weight,
                     )
                     measurer = TPSMeasurer(pipeline_obj)
                     warmup_runs = max(0, int(args.warmup))

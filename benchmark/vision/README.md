@@ -56,18 +56,18 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 You can run the ImageNetbenchmark with the following command:
 
 ```bash
-python benchmark_imagenet.py --local_path {path to local mxq(optional)}\
---model_type {model type(optional)}\
---infer_mode {single, multi, global, global4, global8(optional). Default is global}\
+python benchmark_imagenet.py --local-path {path to local mxq(optional)}\
+--model-type {model type(optional)}\
+--infer-mode {single, multi, global4, global8(optional). Default is global8}\
 --product {aries, regulus(optional). Default is aries}\
---batch_size {batch size(optional). Default is 1}\
---data_path {path to the ImageNet data(optional). Default is ~/.mblt_model_zoo/datasets/imagenet}
+--batch-size {batch size(optional). Default is 1}\
+--data-path {path to the ImageNet data(optional). Default is ~/.mblt_model_zoo/datasets/imagenet}
 ```
 
 Example:
 
 ```bash
-python benchmark_imagenet.py --local_path ./resnet50_IMAGENET1K_V1.mxq --model_type IMAGENET1K_V1 --infer_mode multi --product aries --batch_size 8 --data_path ~/.mblt_model_zoo/datasets/imagenet
+python benchmark_imagenet.py --local-path ./resnet50_IMAGENET1K_V1.mxq --model-type IMAGENET1K_V1 --infer-mode multi --product aries --batch-size 8 --data-path ~/.mblt_model_zoo/datasets/imagenet
 ```
 
 ## Benchmark with COCO Dataset
@@ -112,20 +112,20 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 You can run the COCO benchmark with the following command:
 
 ```bash
-python benchmark_coco.py --local_path {path to local mxq(optional)}\
---model_type {model type(optional)}\
---infer_mode {single, multi, global, global4, global8(optional). Default is global}\
+python benchmark_coco.py --local-path {path to local mxq(optional)}\
+--model-type {model type(optional)}\
+--infer-mode {single, multi, global4, global8(optional). Default is global8}\
 --product {aries, regulus(optional). Default is aries}\
---batch_size {batch size(optional). Default is 1}\
---data_path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco}
---conf_thres {confidence threshold for object detection(optional). Default is 0.001}\
---iou_thres {IOU threshold for object detection(optional). Default is 0.7}
+--batch-size {batch size(optional). Default is 1}\
+--data-path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco}
+--conf-thres {confidence threshold for object detection(optional). Default is 0.001}\
+--iou-thres {IOU threshold for object detection(optional). Default is 0.7}
 ```
 
 Example:
 
 ```bash
-python benchmark_coco.py --infer_mode single --product aries --batch_size 8 --data_path ~/.mblt_model_zoo/datasets/coco --conf_thres 0.001 --iou_thres 0.7
+python benchmark_coco.py --infer-mode single --product aries --batch-size 8 --data-path ~/.mblt_model_zoo/datasets/coco --conf-thres 0.001 --iou-thres 0.7
 ```
 
 ## Benchmark with WiderFace Dataset
