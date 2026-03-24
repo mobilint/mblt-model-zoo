@@ -49,6 +49,10 @@ Common CLI options:
 - `--skip-existing` (skip models with existing outputs)
 - `--rebuild-charts` (skip benchmark run and rebuild `combined.csv`/`combined.md`/charts from existing JSON files)
 
+Device auto-selection rule when `--device` is omitted:
+- `--original-models` set: `--device` is auto-set to `cuda:0` and `--device-backend` to `auto`.
+- `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
+
 Example:
 
 ```bash
@@ -108,6 +112,10 @@ Common options:
 - `--device-metrics/--no-device-metrics`, `--device-backend`, `--device-gpu-id`
 - `--cuda-precheck/--no-cuda-precheck`, `--cuda-precheck-margin`
 - `--skip-existing`, `--rebuild-charts`, `--results-dir`
+
+Device auto-selection rule when `--device` is omitted:
+- `--original-models` set: `--device` is auto-set to `cuda:0` and `--device-backend` to `auto`.
+- `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
 
 Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
 - `{model}.json`: per-model full benchmark payload

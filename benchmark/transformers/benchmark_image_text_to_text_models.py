@@ -5,6 +5,7 @@ import csv
 import gc
 import json
 import os
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -649,6 +650,14 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+
+    def _flag_present(flag: str) -> bool:
+        return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
+
+    device_explicit = _flag_present("--device")
+    device_backend_explicit = _flag_present("--device-backend")
+
     parser = argparse.ArgumentParser(description="Benchmark image-text-to-text models.")
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     _add_device_tracking_args(parser)
@@ -705,6 +714,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rebuild-charts", action="store_true", help="skip benchmark run and rebuild combined outputs")
     parser.add_argument("--results-dir", default=None, help="output directory (default: benchmark/transformers/results/image_text_to_text)")
     args = parser.parse_args(argv)
+
+    if not device_explicit and args.device is None:
+        args.device = "cuda:0" if args.original_models else "cpu"
+        print(
+            f"Auto-set --device={args.device} "
+            f"(reason: {'--original-models enabled' if args.original_models else '--original-models disabled'})"
+        )
+    if not device_backend_explicit:
+        args.device_backend = "auto" if args.original_models else "npu"
+        print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     script_dir = Path(__file__).resolve().parent

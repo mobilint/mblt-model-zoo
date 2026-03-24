@@ -3,6 +3,7 @@ import csv
 import gc
 import json
 import os
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -946,6 +947,14 @@ def _rebuild_combined_outputs(
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+
+    def _flag_present(flag: str) -> bool:
+        return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
+
+    device_explicit = _flag_present("--device")
+    device_backend_explicit = _flag_present("--device-backend")
+
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument(
@@ -1051,6 +1060,16 @@ def main(argv: list[str] | None = None) -> int:
         help="required free VRAM factor versus estimated model weights (default: 1.15)",
     )
     args = parser.parse_args(argv)
+
+    if not device_explicit and args.device is None:
+        args.device = "cuda:0" if args.original_models else "cpu"
+        print(
+            f"Auto-set --device={args.device} "
+            f"(reason: {'--original-models enabled' if args.original_models else '--original-models disabled'})"
+        )
+    if not device_backend_explicit:
+        args.device_backend = "auto" if args.original_models else "npu"
+        print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     lookup_path = args.chunk_size_lookup_csv
