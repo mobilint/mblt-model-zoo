@@ -18,6 +18,10 @@ from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
 from mblt_model_zoo.hf_transformers.utils import list_models
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_pipeline_device_args as _add_pipeline_device_args,
+    parse_positive_int as _parse_positive_int_common,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
 
@@ -86,13 +90,7 @@ def _discover_targets_from_mxq_dir(
 
 
 def _parse_positive_int(raw: str) -> int:
-    try:
-        value = int(raw)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError("value must be an integer") from e
-    if value <= 0:
-        raise argparse.ArgumentTypeError("value must be > 0")
-    return value
+    return _parse_positive_int_common(raw)
 
 
 def _parse_core_modes(raw: str) -> list[str]:
@@ -737,7 +735,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="comma-separated prefill lengths (default: 128,256,512,1024,2048)",
     )
     parser.add_argument("--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement")
-    parser.add_argument("--warmup", type=int, default=1, help="warmup runs per model/core mode")
+    parser.add_argument("--warmup", type=_parse_positive_int, default=1, help="warmup runs per model/core mode")
     parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="repeat count per chunk size")
     parser.add_argument("--time-guard-sec", type=float, default=300.0, help="if a single run takes longer than this, larger chunks are skipped (default: 300s)")
     parser.add_argument(
@@ -746,11 +744,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_parse_int_csv("128,256,512,1024,2048"),
         help="comma-separated chunk sizes to test (default: 128,256,512,1024,2048)",
     )
-    parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--device-map", type=str, default=None)
-    parser.add_argument("--dtype", type=str, default=None)
-    parser.add_argument("--trust-remote-code", dest="trust_remote_code", action="store_true", default=True)
-    parser.add_argument("--no-trust-remote-code", dest="trust_remote_code", action="store_false")
+    _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--skip-existing", action="store_true", help="reuse existing record JSON for model/core-mode pairs")
     parser.add_argument(
         "--rebuild-charts",

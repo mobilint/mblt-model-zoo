@@ -86,6 +86,41 @@ def add_device_tracking_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_pipeline_device_args(
+    parser: argparse.ArgumentParser,
+    *,
+    device_default: str | None = None,
+    trust_remote_code_default: bool = True,
+) -> None:
+    parser.add_argument(
+        "--device",
+        default=device_default,
+        help='pipeline device (default: None; e.g., "cpu", "cuda:0")',
+    )
+    parser.add_argument(
+        "--device-map",
+        default=None,
+        help='pipeline device_map (e.g., "auto")',
+    )
+    parser.add_argument(
+        "--dtype",
+        default=None,
+        help='dtype for pipeline (e.g., "float16", "bfloat16")',
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        dest="trust_remote_code",
+        action="store_true",
+        default=trust_remote_code_default,
+        help="whether to trust remote code when loading from HF",
+    )
+    parser.add_argument(
+        "--no-trust-remote-code",
+        dest="trust_remote_code",
+        action="store_false",
+    )
+
+
 def build_device_tracker(args: argparse.Namespace, pipeline: Any):
     if not args.device_metrics:
         return None
