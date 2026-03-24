@@ -31,6 +31,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     TPSMeasurer,
 )
 
+DEFAULT_FALLBACK_CHUNK_SIZE = 128
+
 
 def _safe_filename(model_id: str) -> str:
     return model_id.replace("/", "__")
@@ -1182,9 +1184,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"core_mode={args.core_mode} chunk_size={resolved_chunk_size}"
                 )
             elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
+                resolved_chunk_size = DEFAULT_FALLBACK_CHUNK_SIZE
                 print(
                     f"Warning: no chunk-size lookup match for model={model_id} "
-                    f"revision={revision} core_mode={args.core_mode}; using chunk_size=None"
+                    f"revision={revision} core_mode={args.core_mode}; "
+                    f"using fallback chunk_size={resolved_chunk_size}"
                 )
             elif args.chunk_size is not None and lookup_chunk is not None:
                 print(
