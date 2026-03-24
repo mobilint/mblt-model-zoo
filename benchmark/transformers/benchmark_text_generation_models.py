@@ -15,6 +15,7 @@ from chart_utils import collect_folder_metrics, plot_scalar_chart, plot_token_ch
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
+    add_pipeline_device_args as _add_pipeline_device_args,
     build_device_tracker as _build_device_tracker_common,
     build_phase_trackers as _build_phase_trackers_common,
     extract_device_metric as _extract_device_metric_common,
@@ -928,27 +929,7 @@ def _rebuild_combined_outputs(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
-    parser.add_argument(
-        "--device",
-        default=None,
-        help='pipeline device (default: None; e.g., "cpu", "cuda:0")',
-    )
-    parser.add_argument(
-        "--device-map",
-        default=None,
-        help='pipeline device_map (e.g., "auto")',
-    )
-    parser.add_argument(
-        "--dtype",
-        default=None,
-        help='dtype for pipeline (e.g., "float16", "bfloat16")',
-    )
-    parser.add_argument(
-        "--trust-remote-code",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="whether to trust remote code when loading from HF",
-    )
+    _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument(
         "--revision",
         default=None,
