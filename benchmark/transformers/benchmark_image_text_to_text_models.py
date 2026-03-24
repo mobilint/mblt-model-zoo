@@ -210,7 +210,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     all_vision_j_per_img: list[float] = []
 
     for resolution in args.image_resolutions:
-        for _ in range(args.warmup):
+        for _ in tqdm(
+            range(args.warmup),
+            desc=f"{label} vision@{resolution} warmup",
+            leave=False,
+        ):
             measurer.measure_vision(image_resolution=resolution, repeat=1, prompt=args.prompt, show_progress=False)
         runs = []
         power_vals: list[float] = []
@@ -224,7 +228,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         energy_vals: list[float] = []
         img_per_j_vals: list[float] = []
         j_per_img_vals: list[float] = []
-        for _ in range(args.repeat):
+        for _ in tqdm(
+            range(args.repeat),
+            desc=f"{label} vision@{resolution} runs",
+            leave=False,
+        ):
             if tracker is not None:
                 tracker.start()
             try:
@@ -330,7 +338,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             )
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
-    for _ in range(args.warmup):
+    for _ in tqdm(
+        range(args.warmup),
+        desc=f"{label} llm@{llm_resolution} warmup",
+        leave=False,
+    ):
         measurer.measure_llm(image_resolution=llm_resolution, num_decode=args.decode, repeat=1, prompt=args.prompt, show_progress=False)
 
     llm_runs = []
@@ -347,7 +359,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_decode_tok_per_j: list[float] = []
     llm_prefill_j_per_tok: list[float] = []
     llm_decode_j_per_tok: list[float] = []
-    for _ in range(args.repeat):
+    for _ in tqdm(
+        range(args.repeat),
+        desc=f"{label} llm@{llm_resolution} runs",
+        leave=False,
+    ):
         if tracker is not None:
             tracker.start()
         try:
