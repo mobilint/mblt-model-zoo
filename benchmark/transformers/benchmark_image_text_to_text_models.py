@@ -207,6 +207,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     all_vision_p99_memory_used_pct: list[float] = []
     all_vision_total_energy_j: list[float] = []
     all_vision_img_per_j: list[float] = []
+    all_vision_j_per_img: list[float] = []
 
     for resolution in args.image_resolutions:
         for _ in range(args.warmup):
@@ -222,6 +223,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         p99_mem_pct_vals: list[float] = []
         energy_vals: list[float] = []
         img_per_j_vals: list[float] = []
+        j_per_img_vals: list[float] = []
         for _ in range(args.repeat):
             if tracker is not None:
                 tracker.start()
@@ -244,6 +246,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     power_vals.append(float(avg_power))
                     energy = float(avg_power) * float(run[0])
                     energy_vals.append(energy)
+                    j_per_img_vals.append(energy)
                     tpj = _safe_div(1.0, energy)
                     if tpj is not None:
                         img_per_j_vals.append(tpj)
@@ -275,6 +278,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         all_vision_p99_memory_used_pct.extend(p99_mem_pct_vals)
         all_vision_total_energy_j.extend(energy_vals)
         all_vision_img_per_j.extend(img_per_j_vals)
+        all_vision_j_per_img.extend(j_per_img_vals)
         vision_results.append(
             {
                 "image_resolution": resolution,
@@ -292,6 +296,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_memory_used_pct": _summary(p99_mem_pct_vals),
                     "total_energy_j": _summary(energy_vals),
                     "vision_img_per_j": _summary(img_per_j_vals),
+                    "vision_j_per_img": _summary(j_per_img_vals),
                 },
             }
         )
@@ -320,6 +325,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "prefill_j_per_tok": None,
                     "decode_j_per_tok": None,
                     "vision_img_per_j": img_per_j_vals[idx - 1] if idx - 1 < len(img_per_j_vals) else None,
+                    "vision_j_per_img": j_per_img_vals[idx - 1] if idx - 1 < len(j_per_img_vals) else None,
                 }
             )
 
@@ -437,6 +443,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "p99_memory_used_pct": _summary(all_vision_p99_memory_used_pct),
                 "total_energy_j": _summary(all_vision_total_energy_j),
                 "vision_img_per_j": _summary(all_vision_img_per_j),
+                "vision_j_per_img": _summary(all_vision_j_per_img),
             },
             "llm_results": {
                 "runs": [asdict(r) for r in llm_runs],
@@ -481,6 +488,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             "vision_avg_power_w": _mean(all_vision_avg_power_w),
             "vision_p99_power_w": max(all_vision_p99_power_w) if all_vision_p99_power_w else None,
             "vision_img_per_j": _mean(all_vision_img_per_j),
+            "vision_j_per_img": _mean(all_vision_j_per_img),
         },
     }
     return payload, csv_rows
@@ -521,9 +529,14 @@ def _rebuild_combined(results_dir: Path) -> None:
                 "llm_ttft_ms_mean": summ.get("llm_ttft_ms", {}).get("mean"),
                 "llm_decode_duration_ms_mean": summ.get("llm_decode_duration_ms", {}).get("mean"),
                 "llm_total_ms_mean": summ.get("llm_total_ms", {}).get("mean"),
+                "llm_prefill_tok_per_j_mean": summ.get("prefill_tok_per_j", {}).get("mean"),
+                "llm_decode_tok_per_j_mean": summ.get("decode_tok_per_j", {}).get("mean"),
+                "llm_prefill_j_per_tok_mean": summ.get("prefill_j_per_tok", {}).get("mean"),
+                "llm_decode_j_per_tok_mean": summ.get("decode_j_per_tok", {}).get("mean"),
                 "vision_encode_ms_mean": vision_summ.get("vision_encode_ms", {}).get("mean"),
                 "vision_fps_mean": vision_summ.get("vision_fps", {}).get("mean"),
                 "vision_img_per_j_mean": vision_summ.get("vision_img_per_j", {}).get("mean"),
+                "vision_j_per_img_mean": vision_summ.get("vision_j_per_img", {}).get("mean"),
             }
         )
         device = payload.get("device")
@@ -540,6 +553,7 @@ def _rebuild_combined(results_dir: Path) -> None:
                     "vision_encode_ms_mean": s.get("vision_encode_ms", {}).get("mean"),
                     "vision_fps_mean": s.get("vision_fps", {}).get("mean"),
                     "vision_img_per_j_mean": s.get("vision_img_per_j", {}).get("mean"),
+                    "vision_j_per_img_mean": s.get("vision_j_per_img", {}).get("mean"),
                 }
             )
     _write_csv(results_dir / "combined.csv", llm_rows)
@@ -561,6 +575,12 @@ def _rebuild_combined(results_dir: Path) -> None:
     ttft = [float(r.get("llm_ttft_ms_mean") or 0.0) for r in llm_rows]
     vision_encode = [float(r.get("vision_encode_ms_mean") or 0.0) for r in llm_rows]
     vision_fps = [float(r.get("vision_fps_mean") or 0.0) for r in llm_rows]
+    llm_prefill_tpj = [float(r.get("llm_prefill_tok_per_j_mean") or 0.0) for r in llm_rows]
+    llm_decode_tpj = [float(r.get("llm_decode_tok_per_j_mean") or 0.0) for r in llm_rows]
+    llm_prefill_jpt = [float(r.get("llm_prefill_j_per_tok_mean") or 0.0) for r in llm_rows]
+    llm_decode_jpt = [float(r.get("llm_decode_j_per_tok_mean") or 0.0) for r in llm_rows]
+    vision_img_per_j = [float(r.get("vision_img_per_j_mean") or 0.0) for r in llm_rows]
+    vision_j_per_img = [float(r.get("vision_j_per_img_mean") or 0.0) for r in llm_rows]
     fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
     y = range(len(models))
     ax.barh(list(y), decode)
@@ -616,6 +636,72 @@ def _rebuild_combined(results_dir: Path) -> None:
     ax.grid(axis="x", linestyle="--", alpha=0.3)
     plt.tight_layout()
     fig.savefig(results_dir / "vision_fps.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), llm_prefill_tpj)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("tok/J")
+    ax.set_title("LLM Prefill Tokens/J (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "llm_prefill_tokens_per_j.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), llm_decode_tpj)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("tok/J")
+    ax.set_title("LLM Decode Tokens/J (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "llm_decode_tokens_per_j.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), llm_prefill_jpt)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("J/tok")
+    ax.set_title("LLM Prefill J/Token (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "llm_prefill_j_per_token.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), llm_decode_jpt)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("J/tok")
+    ax.set_title("LLM Decode J/Token (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "llm_decode_j_per_token.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), vision_img_per_j)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("img/J")
+    ax.set_title("Vision Img/J (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "vision_img_per_j.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), vision_j_per_img)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("J/img")
+    ax.set_title("Vision J/Img (mean)")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "vision_j_per_img.png", dpi=220)
     plt.close(fig)
 
 

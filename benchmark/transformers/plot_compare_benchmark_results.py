@@ -58,6 +58,11 @@ class VLMCompareMetrics:
     vision_encode_ms: Optional[float]
     vision_fps: Optional[float]
     vision_img_per_j: Optional[float]
+    vision_j_per_img: Optional[float]
+    llm_prefill_tok_per_j: Optional[float]
+    llm_decode_tok_per_j: Optional[float]
+    llm_prefill_j_per_tok: Optional[float]
+    llm_decode_j_per_tok: Optional[float]
     avg_power_w: Optional[float]
     total_energy_j: Optional[float]
     avg_utilization_pct: Optional[float]
@@ -115,6 +120,31 @@ def _load_vlm_model_metrics(path: Path) -> Optional[tuple[str, VLMCompareMetrics
         vision_img_per_j=_as_float(
             vision_summary.get("vision_img_per_j", {}).get("mean")
             if isinstance(vision_summary.get("vision_img_per_j"), dict)
+            else None
+        ),
+        vision_j_per_img=_as_float(
+            vision_summary.get("vision_j_per_img", {}).get("mean")
+            if isinstance(vision_summary.get("vision_j_per_img"), dict)
+            else None
+        ),
+        llm_prefill_tok_per_j=_as_float(
+            llm_summary.get("prefill_tok_per_j", {}).get("mean")
+            if isinstance(llm_summary.get("prefill_tok_per_j"), dict)
+            else None
+        ),
+        llm_decode_tok_per_j=_as_float(
+            llm_summary.get("decode_tok_per_j", {}).get("mean")
+            if isinstance(llm_summary.get("decode_tok_per_j"), dict)
+            else None
+        ),
+        llm_prefill_j_per_tok=_as_float(
+            llm_summary.get("prefill_j_per_tok", {}).get("mean")
+            if isinstance(llm_summary.get("prefill_j_per_tok"), dict)
+            else None
+        ),
+        llm_decode_j_per_tok=_as_float(
+            llm_summary.get("decode_j_per_tok", {}).get("mean")
+            if isinstance(llm_summary.get("decode_j_per_tok"), dict)
             else None
         ),
         avg_power_w=_as_float(device.get("avg_power_w")),
@@ -409,6 +439,51 @@ def main() -> int:
             title="Vision Img/J",
             x_label="img/J",
             output_path=output_dir / "vision_img_per_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.vision_j_per_img,
+            title="Vision J/Img",
+            x_label="J/img",
+            output_path=output_dir / "vision_j_per_img.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.llm_prefill_tok_per_j,
+            title="LLM Prefill Tokens/J",
+            x_label="tok/J",
+            output_path=output_dir / "llm_prefill_tokens_per_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.llm_decode_tok_per_j,
+            title="LLM Decode Tokens/J",
+            x_label="tok/J",
+            output_path=output_dir / "llm_decode_tokens_per_j.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.llm_prefill_j_per_tok,
+            title="LLM Prefill J/Token",
+            x_label="J/tok",
+            output_path=output_dir / "llm_prefill_j_per_token.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.llm_decode_j_per_tok,
+            title="LLM Decode J/Token",
+            x_label="J/tok",
+            output_path=output_dir / "llm_decode_j_per_token.png",
         )
         plot_scalar_chart(
             models=models,

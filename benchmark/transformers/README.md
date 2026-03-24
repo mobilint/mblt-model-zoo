@@ -127,6 +127,7 @@ Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
 - `combined_llm.csv`: model-wise LLM summary
 - `combined_vision.csv`: per-model/resolution vision summary
 - charts: `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`, `vision_encode_ms.png`, `vision_fps.png`
+- efficiency charts: `llm_prefill_tokens_per_j.png`, `llm_decode_tokens_per_j.png`, `llm_prefill_j_per_token.png`, `llm_decode_j_per_token.png`, `vision_img_per_j.png`, `vision_j_per_img.png`
 
 Example:
 
@@ -189,6 +190,11 @@ VLM compare mode saves:
 - `vision_encode_ms.png`
 - `vision_fps.png`
 - `vision_img_per_j.png`
+- `vision_j_per_img.png`
+- `llm_prefill_tokens_per_j.png`
+- `llm_decode_tokens_per_j.png`
+- `llm_prefill_j_per_token.png`
+- `llm_decode_j_per_token.png`
 - `avg_power_w.png`
 - `total_energy_j.png`
 - `avg_utilization_pct.png`
