@@ -6,6 +6,7 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
 MODEL_PATHS = (
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
     "mobilint/EXAONE-Deep-2.4B",
+    "mobilint/EXAONE-Deep-7.8B",
     "mobilint/EXAONE-3.5-2.4B-Instruct",
     "mobilint/EXAONE-3.5-7.8B-Instruct",
     "mobilint/EXAONE-4.0-1.2B",

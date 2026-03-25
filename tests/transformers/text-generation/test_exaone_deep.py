@@ -1,7 +1,10 @@
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-MODEL_PATHS = ("mobilint/EXAONE-Deep-2.4B",)
+MODEL_PATHS = (
+    "mobilint/EXAONE-Deep-2.4B",
+    "mobilint/EXAONE-Deep-7.8B",
+)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
