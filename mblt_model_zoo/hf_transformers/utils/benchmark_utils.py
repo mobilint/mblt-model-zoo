@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -45,6 +45,29 @@ class SingleMeasurement:
     npu_decode_time: Optional[float] = None
     avg_power_w: Optional[float] = None
     p99_power_w: Optional[float] = None
+    prefill_avg_power_w: Optional[float] = None
+    prefill_p99_power_w: Optional[float] = None
+    decode_avg_power_w: Optional[float] = None
+    decode_p99_power_w: Optional[float] = None
+    avg_utilization_pct: Optional[float] = None
+    p99_utilization_pct: Optional[float] = None
+    prefill_avg_utilization_pct: Optional[float] = None
+    prefill_p99_utilization_pct: Optional[float] = None
+    decode_avg_utilization_pct: Optional[float] = None
+    decode_p99_utilization_pct: Optional[float] = None
+    avg_memory_used_mb: Optional[float] = None
+    p99_memory_used_mb: Optional[float] = None
+    prefill_avg_memory_used_mb: Optional[float] = None
+    prefill_p99_memory_used_mb: Optional[float] = None
+    decode_avg_memory_used_mb: Optional[float] = None
+    decode_p99_memory_used_mb: Optional[float] = None
+    total_memory_mb: Optional[float] = None
+    avg_memory_used_pct: Optional[float] = None
+    p99_memory_used_pct: Optional[float] = None
+    prefill_avg_memory_used_pct: Optional[float] = None
+    prefill_p99_memory_used_pct: Optional[float] = None
+    decode_avg_memory_used_pct: Optional[float] = None
+    decode_p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
     prefill_tokens_per_j: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
@@ -65,6 +88,8 @@ class SweepData:
 class BenchmarkResult:
     prefill_sweep: SweepData = field(default_factory=SweepData)
     decode_sweep: SweepData = field(default_factory=SweepData)
+    prefill_phase_duration_s: Optional[float] = None
+    decode_phase_duration_s: Optional[float] = None
 
     @staticmethod
     def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
@@ -310,7 +335,14 @@ class TPSMeasurer:
         self,
         num_prefill=512,
         num_decode=128,
+        chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
+        show_progress: bool = False,
+        progress_desc: Union[str, None] = None,
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -332,13 +364,29 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if chunk_size is not None:
+                gen_kwargs["chunk_size"] = int(chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
 
             # 3. Execution
-            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+            thread_error: list[Exception] = []
+
+            def _run_generate():
+                try:
+                    self.model.generate(**gen_kwargs)
+                except Exception as e:
+                    thread_error.append(e)
+                    try:
+                        streamer.end()
+                    except Exception:
+                        pass
+
+            thread = Thread(target=_run_generate)
             
             t_start = time.perf_counter()
+            if on_prefill_start is not None:
+                on_prefill_start()
             thread.start()
             
             first_token_time = None
@@ -346,23 +394,49 @@ class TPSMeasurer:
             npu_prefill_time = 0.0
             npu_decode_time = 0.0
             has_npu_time = False
-            
-            for _ in streamer:
-                if first_token_time is None:
-                    first_token_time = time.perf_counter()
-                decoded_tokens += 1
-                npu_time = getattr(self.model, "npu_time", None)
-                if npu_time is not None:
-                    has_npu_time = True
-                    if decoded_tokens == 1:
-                        npu_prefill_time += npu_time
-                    else:
-                        npu_decode_time += npu_time
-                
+
+            token_pbar = None
+            if show_progress:
+                token_pbar = tqdm(
+                    total=num_decode + 1,
+                    desc=progress_desc or f"generate (prefill={num_prefill}, decode={num_decode})",
+                    leave=False,
+                )
+
+            stream_error: Exception | None = None
+            try:
+                for _ in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter()
+                        if on_prefill_end is not None:
+                            on_prefill_end()
+                        if on_decode_start is not None:
+                            on_decode_start()
+                    decoded_tokens += 1
+                    if token_pbar is not None:
+                        token_pbar.update(1)
+                    npu_time = getattr(self.model, "npu_time", None)
+                    if npu_time is not None:
+                        has_npu_time = True
+                        if decoded_tokens == 1:
+                            npu_prefill_time += npu_time
+                        else:
+                            npu_decode_time += npu_time
+            except Exception as e:
+                stream_error = e
             t_end = time.perf_counter()
             thread.join()
+            if thread_error:
+                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
+            if stream_error is not None:
+                raise stream_error
+            if on_decode_end is not None:
+                on_decode_end()
+            if token_pbar is not None:
+                token_pbar.close()
             
-            assert first_token_time is not None
+            if first_token_time is None:
+                raise RuntimeError("Generation ended before the first token.")
 
             # 4. Calculation
             prefill_latency = first_token_time - t_start
@@ -407,29 +481,52 @@ class TPSMeasurer:
         decode_range: Tuple[int, int, int] = (128, 1024, 128),
         fixed_decode_len=10,
         fixed_prefill_len=128,
+        chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
+        progress_prefix: str = "",
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
     ) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
+            prefix = f"{progress_prefix} " if progress_prefix else ""
+            t_prefill_start = time.perf_counter()
+            if on_prefill_start is not None:
+                on_prefill_start()
 
             # 1. Prefill Sweep
             p_start, p_end, p_step = prefill_range
             prefill_iter = range(p_start, p_end + 1, p_step)
             if show_progress:
-                prefill_iter = tqdm(prefill_iter, desc="prefill sweep", leave=False)
+                prefill_iter = tqdm(prefill_iter, desc=f"{prefix}prefill sweep", leave=False)
 
             for p_len in prefill_iter:
-                res = self.measure(num_prefill=p_len, num_decode=fixed_decode_len)
+                res = self.measure(
+                    num_prefill=p_len,
+                    num_decode=fixed_decode_len,
+                    chunk_size=chunk_size,
+                    show_progress=show_progress,
+                    progress_desc=f"{prefix}prefill generate ({p_len},{fixed_decode_len})",
+                )
                 
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
                 full_result.prefill_sweep.time_values.append(res.prefill_latency)
                 full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
                 full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
+            t_prefill_end = time.perf_counter()
+            if on_prefill_end is not None:
+                on_prefill_end()
+            full_result.prefill_phase_duration_s = max(0.0, t_prefill_end - t_prefill_start)
                 
             # 2. Decode Sweep
+            t_decode_start = time.perf_counter()
+            if on_decode_start is not None:
+                on_decode_start()
             d_start, d_end, d_step = decode_range
             input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
             input_ids = input_ids.to(self.device)
@@ -444,12 +541,19 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if chunk_size is not None:
+                gen_kwargs["chunk_size"] = int(chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
 
             targets = set(range(d_start, d_end + 1, d_step))
             pbar_decode = (
-                tqdm(total=len(targets), desc="decode sweep", leave=False)
+                tqdm(total=len(targets), desc=f"{prefix}decode sweep", leave=False)
+                if show_progress
+                else None
+            )
+            decode_token_pbar = (
+                tqdm(total=d_end, desc=f"{prefix}decode generate ({fixed_prefill_len},{d_end})", leave=False)
                 if show_progress
                 else None
             )
@@ -458,47 +562,76 @@ class TPSMeasurer:
             npu_decode_tokens = 0
             first_decode_seen = False
 
-            thread = Thread(target=self.model.generate, kwargs=gen_kwargs)
+            thread_error: list[Exception] = []
+
+            def _run_generate():
+                try:
+                    self.model.generate(**gen_kwargs)
+                except Exception as e:
+                    thread_error.append(e)
+                    try:
+                        streamer.end()
+                    except Exception:
+                        pass
+
+            thread = Thread(target=_run_generate)
             thread.start()
 
             first_token_time = None
             decoded_tokens = 0
-            for _ in streamer:
-                if first_token_time is None:
-                    first_token_time = time.perf_counter()
-                decoded_tokens += 1
-                if getattr(self.model, "npu_time", None) is not None:
-                    if decoded_tokens == 1:
-                        first_decode_seen = True
-                    else:
-                        npu_decode_time += self.model.npu_time
-                        npu_decode_tokens += 1
-                if decoded_tokens in targets:
-                    t_hit = time.perf_counter()
-                    decode_duration = t_hit - first_token_time
-                    decode_count = decoded_tokens - 1
-                    decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
-                    avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
-                    avg_npu_token_latency = (
-                        npu_decode_time / npu_decode_tokens
-                        if npu_decode_tokens > 0
-                        else None
-                    )
+            stream_error: Exception | None = None
+            try:
+                for _ in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter()
+                    decoded_tokens += 1
+                    if decode_token_pbar is not None:
+                        decode_token_pbar.update(1)
+                    if getattr(self.model, "npu_time", None) is not None:
+                        if decoded_tokens == 1:
+                            first_decode_seen = True
+                        else:
+                            npu_decode_time += self.model.npu_time
+                            npu_decode_tokens += 1
+                    if decoded_tokens in targets:
+                        t_hit = time.perf_counter()
+                        decode_duration = t_hit - first_token_time
+                        decode_count = decoded_tokens - 1
+                        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
+                        avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
+                        avg_npu_token_latency = (
+                            npu_decode_time / npu_decode_tokens
+                            if npu_decode_tokens > 0
+                            else None
+                        )
 
-                    full_result.decode_sweep.x_values.append(decoded_tokens)
-                    full_result.decode_sweep.tps_values.append(decode_tps)
-                    full_result.decode_sweep.time_values.append(decode_duration)
-                    full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
-                    full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
+                        full_result.decode_sweep.x_values.append(decoded_tokens)
+                        full_result.decode_sweep.tps_values.append(decode_tps)
+                        full_result.decode_sweep.time_values.append(decode_duration)
+                        full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
+                        full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
 
-                    if pbar_decode is not None:
-                        pbar_decode.update(1)
+                        if pbar_decode is not None:
+                            pbar_decode.update(1)
+            except Exception as e:
+                stream_error = e
 
             thread.join()
+            if thread_error:
+                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
+            if stream_error is not None:
+                raise stream_error
+            if decode_token_pbar is not None:
+                decode_token_pbar.close()
             if pbar_decode is not None:
                 pbar_decode.close()
+            t_decode_end = time.perf_counter()
+            if on_decode_end is not None:
+                on_decode_end()
+            full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
 
-            assert first_token_time is not None
+            if first_token_time is None:
+                raise RuntimeError("Generation ended before the first token.")
 
             return full_result
         finally:

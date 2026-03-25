@@ -29,7 +29,7 @@
 *__pycache__*
 .venv
 .vscode/
-benchmark/transformers/results/
+benchmark/**/results/
 build/
 dist/
 tmp/

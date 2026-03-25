@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple
 
 
-class BasePowerTracker(ABC):
-    """Abstract base class for power trackers."""
+class BaseDeviceTracker(ABC):
+    """Abstract base class for device trackers."""
 
     def __init__(self, interval: float):
         if interval <= 0:
@@ -12,18 +12,18 @@ class BasePowerTracker(ABC):
 
     @abstractmethod
     def start(self) -> None:
-        """Start tracking power consumption."""
+        """Start tracking device metrics."""
 
     @abstractmethod
     def stop(self) -> None:
-        """Stop tracking power consumption."""
+        """Stop tracking device metrics."""
 
     @abstractmethod
-    def get_power_metric(self) -> Dict:
-        """Return summarized power metric."""
+    def get_metric(self) -> Dict:
+        """Return summarized device metrics."""
 
     @abstractmethod
-    def get_power_trace(self) -> List[Tuple[float, float]]:
+    def get_trace(self) -> List[Tuple[float, float]]:
         """Return sampled power trace as (timestamp, power_watt) pairs."""
 
     @abstractmethod
