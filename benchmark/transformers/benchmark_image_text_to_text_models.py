@@ -20,14 +20,13 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    append_core_mode_suffix as _append_core_mode_suffix_common,
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    iter_core_modes as _iter_core_modes_common,
     parse_positive_int as _parse_positive_int,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -61,7 +60,6 @@ except Exception:
         _resolve_original_model_ids,
         _should_precheck_cuda,
     )
-
 
 def _safe_filename(text: str) -> str:
     return text.replace("/", "__")
@@ -152,7 +150,13 @@ def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
         _clear_cuda_memory(device)
 
 
-def _build_pipeline(args: argparse.Namespace, model_id: str, revision: str | None, mxq_path: str | None):
+def _build_pipeline(
+    args: argparse.Namespace,
+    model_id: str,
+    revision: str | None,
+    mxq_path: str | None,
+    core_mode: str | None,
+):
     kwargs: dict[str, Any] = {
         "task": "image-text-to-text",
         "model": model_id,
@@ -167,14 +171,7 @@ def _build_pipeline(args: argparse.Namespace, model_id: str, revision: str | Non
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
-    if args.core_mode:
-        model_kwargs["core_mode"] = args.core_mode
-        if args.core_mode == "single":
-            model_kwargs["target_cores"] = ["0:0"]
-        elif args.core_mode == "global4":
-            model_kwargs["target_clusters"] = [0]
-        elif args.core_mode == "global8":
-            model_kwargs["target_clusters"] = [0, 1]
+    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -813,9 +810,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--core-mode",
-        choices=["single", "multi", "global4", "global8"],
-        default=None,
-        help="core mode passed to model_kwargs",
+        choices=["single", "multi", "global4", "global8", "all"],
+        default="global8",
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
     parser.add_argument(
         "--image-resolutions",
@@ -917,7 +914,20 @@ def main(argv: list[str] | None = None) -> int:
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
             targets.append((model_id, revision, label, base, args.mxq_path))
 
-    for model_id, revision, label, base, target_mxq_path in tqdm(targets, desc="Benchmarking VLM models", unit="model"):
+    core_modes = _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None]] = []
+    for model_id, revision, label, base, target_mxq_path in targets:
+        for core_mode in core_modes:
+            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
+            run_targets.append(
+                (model_id, revision, mode_label, mode_base, target_mxq_path, core_mode)
+            )
+
+    for model_id, revision, label, base, target_mxq_path, core_mode in tqdm(
+        run_targets,
+        desc="Benchmarking VLM models",
+        unit="model-mode",
+    ):
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         json_path = results_dir / f"{base}.json"
@@ -942,7 +952,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path)
+            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
             payload, rows = _run_model(args, label, pipeline)
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)

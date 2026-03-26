@@ -6,6 +6,7 @@ from typing import Any, Optional
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
 DEFAULT_DEVICE_BACKEND = "none"
+CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
 DEVICE_METRIC_KEYS = (
     "avg_power_w",
     "p99_power_w",
@@ -50,6 +51,40 @@ def parse_int_list_optional(spec: str | None) -> list[int] | None:
     if any(v < 0 for v in values):
         raise argparse.ArgumentTypeError("device-gpu-id values must be >= 0")
     return values
+
+
+def iter_core_modes(core_mode: str | None) -> list[str | None]:
+    if core_mode == "all":
+        return list(CORE_MODE_SWEEP_VALUES)
+    return [core_mode]
+
+
+def append_core_mode_suffix(
+    label: str,
+    base: str,
+    core_mode: str | None,
+) -> tuple[str, str]:
+    if not core_mode:
+        return label, base
+    suffix = f"-{core_mode}"
+    return f"{label}{suffix}", f"{base}{suffix}"
+
+
+def apply_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    core_mode: str | None,
+) -> dict[str, Any]:
+    if not core_mode:
+        return model_kwargs
+
+    model_kwargs["core_mode"] = core_mode
+    if core_mode == "single":
+        model_kwargs["target_cores"] = ["0:0"]
+    elif core_mode == "global4":
+        model_kwargs["target_clusters"] = [0]
+    elif core_mode == "global8":
+        model_kwargs["target_clusters"] = [0, 1]
+    return model_kwargs
 
 
 def infer_gpu_ids(device: str | None, device_gpu_id: Optional[list[int]]) -> Optional[int | list[int]]:

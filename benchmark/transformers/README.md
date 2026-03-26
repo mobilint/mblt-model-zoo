@@ -12,7 +12,7 @@ python benchmark/transformers/benchmark_text_generation_models.py
 
 Outputs (created under `benchmark/transformers/results/text_generation/`):
 
-- `{model}.json` and `{model}.png` for each model
+- `{model}[-{revision}]-{core_mode}.json` and `{model}[-{revision}]-{core_mode}.png` for each model
 - `combined.csv` and `combined.md`
 - `combined_device.csv` (when device metrics are available)
 - metric-wise charts:
@@ -37,7 +37,7 @@ Common CLI options:
 - `--fixed-decode` (default: `10`)
 - `--fixed-prefill` (default: `128`)
 - `--chunk-size` (optional fixed chunk size)
-- `--core-mode` (`single`, `global4`, `global8`, default: `global8`) for fixed-core benchmarking
+- `--core-mode` (`single`, `global4`, `global8`, `all`; default: `global8`) for fixed-core benchmarking
 - `--chunk-size-lookup-csv` (default: script-relative `prefill_chunk_size.csv`; columns: `model_id,revision,core_mode,best_chunk_size`)
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
@@ -71,10 +71,12 @@ Example (`--all`):
 python benchmark/transformers/benchmark_text_generation_models.py --all --skip-existing
 ```
 
-When `--all` is used, results are saved with suffixes in both the output files and table labels, for example:
+When `--all` or an explicit `--core-mode` is used, results are saved with suffixes in both the output files and table labels. When `--core-mode all` is used, each revision is benchmarked three times (`single`, `global4`, `global8`) against the same model or local `.mxq` file. For example:
 
-- `{model}-W8.json`, `{model}-W8.png`
-- `{model}-W4V8.json`, `{model}-W4V8.png`
+- `{model}-W8-single.json`, `{model}-W8-single.png`
+- `{model}-W8-global4.json`, `{model}-W8-global4.png`
+- `{model}-W8-global8.json`, `{model}-W8-global8.png`
+- `{model}-W4V8-single.json`, `{model}-W4V8-single.png`
 
 Example (`--mxq-dir`):
 
@@ -89,6 +91,7 @@ Notes for `--mxq-dir`:
 - Only files matching `<model_id>-<W8|W4V8>.mxq` are used.
 - `<model_id>` can be full repo id (e.g. `mobilint/Qwen2.5-1.5B-Instruct`) or basename when uniquely resolvable.
 - `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
+- A single local `.mxq` target is reused across every selected core mode. With `--core-mode all`, the script runs `single`, `global4`, and `global8` for each discovered `.mxq`.
 
 ## Benchmark image-text-to-text models
 
@@ -104,6 +107,7 @@ Common options:
 - `--model` (benchmark a single model id)
 - `--revision`, `--all` (W8/W4V8 sweep)
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
+- `--core-mode` (`single`, `multi`, `global4`, `global8`, `all`; default: `global8`)
 - `--image-resolutions` (default: `224,384,512,768`)
 - `--llm-resolution`, `--decode`, `--prompt`
 - `--repeat`, `--warmup`
@@ -118,9 +122,9 @@ Device auto-selection rule when `--device` is omitted:
 - `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
 
 Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
-- `{model}.json`: per-model full benchmark payload
-- `{model}.csv`: per-run raw rows (`vision`/`llm`)
-- `{model}.png`: per-model summary chart
+- `{model}[-{revision}]-{core_mode}.json`: per-model full benchmark payload
+- `{model}[-{revision}]-{core_mode}.csv`: per-run raw rows (`vision`/`llm`)
+- `{model}[-{revision}]-{core_mode}.png`: per-model summary chart
 - `combined.csv`: model-wise integrated summary (LLM + vision)
 - `combined.md`: markdown summary table
 - `combined_device.csv`: model-wise device summary
@@ -133,11 +137,14 @@ Example:
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py \
+  --core-mode global8 \
   --image-resolutions 224,384,512 \
   --decode 128 \
   --repeat 5 \
   --skip-existing
 ```
+
+When `--core-mode all` is used, each target model or discovered local `.mxq` is benchmarked three times with `single`, `global4`, and `global8`, and the output filenames include the core-mode suffix.
 
 ## Compare result folders
 
@@ -247,4 +254,3 @@ python benchmark/transformers/search_prefill_chunk_size.py \
   --repeat 3 \
   --skip-existing
 ```
-

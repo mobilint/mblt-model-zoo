@@ -19,8 +19,8 @@ from transformers import pipeline as hf_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+    CORE_MODE_SWEEP_VALUES as _CORE_MODE_SWEEP_VALUES_COMMON,
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -93,7 +93,7 @@ def _parse_core_modes(raw: str) -> list[str]:
     modes = [x.strip() for x in raw.split(",") if x.strip()]
     if not modes:
         raise argparse.ArgumentTypeError("at least one core mode is required")
-    allowed = {"single", "global4", "global8"}
+    allowed = set(_CORE_MODE_SWEEP_VALUES_COMMON)
     invalid = [m for m in modes if m not in allowed]
     if invalid:
         raise argparse.ArgumentTypeError(f"unsupported core mode(s): {invalid}. allowed={sorted(allowed)}")
@@ -163,13 +163,8 @@ def _build_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
 
-    model_kwargs: dict[str, Any] = {"core_mode": core_mode}
-    if core_mode == "single":
-        model_kwargs["target_cores"] = ["0:0"]
-    elif core_mode == "global4":
-        model_kwargs["target_clusters"] = [0]
-    elif core_mode == "global8":
-        model_kwargs["target_clusters"] = [0, 1]
+    model_kwargs: dict[str, Any] = {}
+    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     kwargs["model_kwargs"] = model_kwargs

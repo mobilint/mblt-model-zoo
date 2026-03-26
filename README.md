@@ -118,6 +118,10 @@ Currently, these optional functions are only available on environment equipped w
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 
+For the `transformers` extra, the repository also includes:
+- functional test instructions in [tests/transformers/TEST.md](tests/transformers/TEST.md)
+- benchmark script usage in [benchmark/transformers/README.md](benchmark/transformers/README.md)
+
 > Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
 
 ## Verbose Option

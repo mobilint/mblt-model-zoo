@@ -101,7 +101,6 @@ from transformers import TextStreamer, pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
-processor = AutoProcessor.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
 processor = AutoProcessor.from_pretrained(
     model_name,
     use_fast=True,
@@ -186,7 +185,8 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
   - `global4`: global scheduling across 4 cores (use `target_clusters`)
   - `global8`: global scheduling across all cores (requires all clusters)
 
-  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
+  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while others may only support the default stored in the model config.
+  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it.
 
 - `target_cores` (`list[str]`)
 
@@ -338,6 +338,16 @@ Note:
 - Some models/backends may enforce a fixed effective input size at runtime.
 
 For TPS benchmark commands, you can use keyword parameters explained in [Keyword Parameters](#keyword-parameters).
+
+## Tests And Benchmark Scripts
+
+- Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
+  - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
+  - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
+- Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
+  - Text-generation and VLM benchmarks default to `--core-mode global8`.
+  - Passing `--core-mode all` benchmarks `single`, `global4`, and `global8`, and result filenames include the core-mode suffix.
+  - When `--mxq-dir` is used, a single discovered `.mxq` target is reused across every selected core mode.
 
 ## Model List
 

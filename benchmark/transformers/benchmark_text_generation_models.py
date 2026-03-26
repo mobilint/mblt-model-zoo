@@ -18,8 +18,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    append_core_mode_suffix as _append_core_mode_suffix_common,
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -27,8 +27,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    iter_core_modes as _iter_core_modes_common,
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -104,14 +103,7 @@ def _build_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    if core_mode:
-        model_kwargs["core_mode"] = core_mode
-        if core_mode == "single":
-            model_kwargs["target_cores"] = ["0:0"]
-        elif core_mode == "global4":
-            model_kwargs["target_clusters"] = [0]
-        elif core_mode == "global8":
-            model_kwargs["target_clusters"] = [0, 1]
+    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -1007,9 +999,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--core-mode",
-        choices=["single", "global4", "global8"],
+        choices=["single", "global4", "global8", "all"],
         default="global8",
-        help="core mode passed to model_kwargs (default: global8)",
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
     parser.add_argument(
         "--chunk-size-lookup-csv",
@@ -1124,16 +1116,31 @@ def main(argv: list[str] | None = None) -> int:
                 all_revisions=args.all,
             )
         )
+    core_modes = _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str]] = []
+    for model_id, revision_candidates, label, base, mxq_path in targets:
+        for core_mode in core_modes:
+            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
+            run_targets.append(
+                (model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode)
+            )
+
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
-        _rebuild_combined_outputs(results_dir, targets)
+        _rebuild_combined_outputs(
+            results_dir,
+            [
+                (model_id, revision_candidates, label, base, mxq_path)
+                for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+            ],
+        )
         return 0
 
-    for model_id, revision_candidates, label, base, mxq_path in tqdm(
-        targets,
+    for model_id, revision_candidates, label, base, mxq_path, core_mode in tqdm(
+        run_targets,
         desc="Benchmarking models",
-        total=len(targets),
-        unit="model",
+        total=len(run_targets),
+        unit="model-mode",
     ):
         # Ensure pre-check sees memory state after releasing previous model.
         if _is_cuda_device(args.device):
@@ -1178,7 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
-                    core_mode=args.core_mode,
+                    core_mode=core_mode,
                     mxq_path=mxq_path,
                 )
             except Exception as e:
@@ -1199,20 +1206,20 @@ def main(argv: list[str] | None = None) -> int:
                 chunk_lookup,
                 model_id=model_id,
                 revision=revision,
-                core_mode=args.core_mode,
+                core_mode=core_mode,
             )
             resolved_chunk_size = args.chunk_size
             if resolved_chunk_size is None and lookup_chunk is not None:
                 resolved_chunk_size = lookup_chunk
                 print(
                     f"Using chunk-size lookup: model={model_id} revision={revision} "
-                    f"core_mode={args.core_mode} chunk_size={resolved_chunk_size}"
+                    f"core_mode={core_mode} chunk_size={resolved_chunk_size}"
                 )
             elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
                 resolved_chunk_size = DEFAULT_FALLBACK_CHUNK_SIZE
                 print(
                     f"Warning: no chunk-size lookup match for model={model_id} "
-                    f"revision={revision} core_mode={args.core_mode}; "
+                    f"revision={revision} core_mode={core_mode}; "
                     f"using fallback chunk_size={resolved_chunk_size}"
                 )
             elif args.chunk_size is not None and lookup_chunk is not None:
@@ -1416,7 +1423,13 @@ def main(argv: list[str] | None = None) -> int:
 
         _release_pipeline(pipeline, args.device)
 
-    _rebuild_combined_outputs(results_dir, targets)
+    _rebuild_combined_outputs(
+        results_dir,
+        [
+            (model_id, revision_candidates, label, base, mxq_path)
+            for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+        ],
+    )
 
     return 0
 
