@@ -119,6 +119,7 @@ exclude = [
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["PLC0414"]
 
 [tool.ruff.format]
 quote-style = "double"

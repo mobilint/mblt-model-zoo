@@ -91,14 +91,14 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | ShuffleNet_V2_X1_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_0.html) | |
 | ShuffleNet_V2_X1_5 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_5.html) | |
 | ShuffleNet_V2_X2_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x2_0.html) | |
-| VGG11 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11.html) | |
-| VGG11_BN | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11_bn.html) | |
-| VGG13 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13.html) | |
-| VGG13_BN | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13_bn.html) | |
-| VGG16 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16.html) | |
-| VGG16_BN | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) | |
-| VGG19 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) | |
-| VGG19_BN | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) | |
+| VGG11 | (224,224,3) | 68.770 | 68.974 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11.html) | |
+| VGG11_BN | (224,224,3) | 70.062 | 70.328 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11_bn.html) | |
+| VGG13 | (224,224,3) | 69.738 | 69.888 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13.html) | |
+| VGG13_BN | (224,224,3) | 71.398 | 71.564 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13_bn.html) | |
+| VGG16 | (224,224,3) | 71.504 | 71.616 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16.html) | |
+| VGG16_BN | (224,224,3) | 73.296 | 73.406 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) | |
+| VGG19 | (224,224,3) | 72.246 | 72.386 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) | |
+| VGG19_BN | (224,224,3) | 74.056 | 74.170 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) | |
 | ViT_Tiny_Patch16_224 | (224,224,3) | 75.414 | 75.456 | 2.66 | 5.72 | [Link](https://huggingface.co/timm/vit_tiny_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
 | ViT_Tiny_Patch16_384 | (384,384,3) | 78.376 | 78.470 | 10.37 | 5.79 | [Link](https://huggingface.co/timm/vit_tiny_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
 | ViT_Small_Patch16_224 | (224,224,3) | 81.434 | 81.412 | 9.50 | 22.05 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
