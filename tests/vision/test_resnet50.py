@@ -52,9 +52,7 @@ def run_inference(
 def test_resnet50(resnet50):
     """Test ResNet50 inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "volcano.jpg")
-    save_path = os.path.join(
-        TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}"
-    )
+    save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}")
 
     run_inference(resnet50, image_path, save_path)
 
@@ -109,9 +107,7 @@ if __name__ == "__main__":
         product=args.product,
     )
     if args.save_path is None:
-        args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}"
-        )
+        args.save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}")
 
     try:
         run_inference(model, args.input_path, args.save_path)

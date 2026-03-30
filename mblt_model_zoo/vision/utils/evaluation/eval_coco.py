@@ -9,8 +9,7 @@ import torch
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
-from ..datasets import CustomCocodata, get_coco_inv, get_coco_loader
-from ..postprocess.common import scale_boxes, scale_coords, scale_masks
+from ..datasets import CustomCocodata, get_coco_loader
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
@@ -87,9 +86,7 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
     return counts
 
 
-def format_coco_results(
-    task, nms_outs, input_shape, org_shape, idx, dataset_ids, postprocess
-):
+def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids, postprocess):
     """Format the results for COCO evaluation.
     Args:
         task (str): The task to evaluate.
@@ -104,9 +101,7 @@ def format_coco_results(
     """
     results = []
     if task == "object_detection":
-        labels_list, boxes_list, scores_list = postprocess.nmsout2eval(
-            nms_outs.output, input_shape, org_shape
-        )
+        labels_list, boxes_list, scores_list = postprocess.nmsout2eval(nms_outs.output, input_shape, org_shape)
         for i, labels, boxes, scores in zip(idx, labels_list, boxes_list, scores_list):
             results.extend(
                 [
@@ -123,9 +118,7 @@ def format_coco_results(
         labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
             nms_outs.output, input_shape, org_shape
         )
-        for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
-        ):
+        for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
                 [
                     {
@@ -142,9 +135,7 @@ def format_coco_results(
         labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
             nms_outs.output, input_shape, org_shape
         )
-        for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
-        ):
+        for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
                 [
                     {
@@ -159,8 +150,7 @@ def format_coco_results(
             )
     else:
         raise NotImplementedError(
-            f"Only object detection, instance segmentation, and "
-            f"pose estimation are supported, but we got {task}"
+            f"Only object detection, instance segmentation, and pose estimation are supported, but we got {task}"
         )
     return results
 
@@ -210,9 +200,7 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
         out_npu = model(input_npu)
         inference_time += time() - tic
 
-        nms_outs = model.postprocess(
-            out_npu, conf_thres=conf_thres, iou_thres=iou_thres
-        )
+        nms_outs = model.postprocess(out_npu, conf_thres=conf_thres, iou_thres=iou_thres)
         infer_post_time += time() - tic
         results.extend(
             format_coco_results(
@@ -259,17 +247,11 @@ def evaluate_predictions_on_coco(coco_gt, coco_results: dict, task: str):
         coco_dt = COCO()
 
     if task.lower() == "object_detection":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "bbox", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "bbox", print_function=logger.info)
     elif task.lower() == "instance_segmentation":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "segm", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "segm", print_function=logger.info)
     elif task.lower() == "pose_estimation":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "keypoints", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "keypoints", print_function=logger.info)
     else:
         raise NotImplementedError(f"Task {task} is not supported")
 

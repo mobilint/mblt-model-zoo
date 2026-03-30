@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import Any, List, Union
 
 import numpy as np
 import torch
@@ -17,11 +17,13 @@ class PostBase(ABC):
         self.device = torch.device("cpu")
 
     @abstractmethod
-    def __call__(self, x: Union[TensorLike, ListTensorLike]):
+    def __call__(self, x: Union[TensorLike, ListTensorLike], *args: Any, **kwargs: Any) -> Any:
         """Executes postprocessing on the model output.
 
         Args:
             x (Union[TensorLike, ListTensorLike]): Input tensor or list of tensors from the model.
+            *args (Any): Additional positional arguments depending on the specific task.
+            **kwargs (Any): Additional keyword arguments depending on the specific task.
 
         Returns:
             Any: Postprocessed results, format depends on the specific task.
@@ -61,9 +63,9 @@ class YOLOPostBase(PostBase):
         elif isinstance(img_size, list):
             assert len(img_size) == 2, "img_size should be a list of two integers"
             self.imh, self.imw = img_size
-        self.nc = post_cfg.get("nc")
+        self.nc: int = post_cfg.get("nc")
         assert self.nc is not None, "nc should be provided in post_cfg"
-        self.anchors = post_cfg.get("anchors", None)  # anchor coordinates
+        self.anchors: Union[list, torch.Tensor] = post_cfg.get("anchors", None)  # anchor coordinates
         if self.anchors is None:
             self.nl = post_cfg.get("nl")
             assert self.nl is not None, "nl should be provided in post_cfg"
@@ -76,12 +78,10 @@ class YOLOPostBase(PostBase):
             assert isinstance(self.anchors, list), "anchors should be a list"
             self.nl = len(self.anchors)
             self.na = len(self.anchors[0]) // 2
-        self.n_extra = post_cfg.get("n_extra", 0)
-        self.task = post_cfg.get("task")
+        self.n_extra: int = post_cfg.get("n_extra", 0)
+        self.task: str = post_cfg.get("task")
 
-    def __call__(
-        self, x: Union[TensorLike, ListTensorLike], conf_thres: float, iou_thres: float
-    ):
+    def __call__(self, x: Union[TensorLike, ListTensorLike], conf_thres: float, iou_thres: float):
         """Executes YOLO postprocessing.
 
         Includes rearranging, decoding, and NMS.
@@ -123,9 +123,9 @@ class YOLOPostBase(PostBase):
 
     def nmsout2eval(
         self,
-        nms_out: Union[torch.Tensor, List[torch.Tensor]],
+        nms_out: Any,
         img1_shape: tuple,
-        img0_shape: List[tuple],
+        img0_shape: Union[tuple, List[tuple]],
     ) -> tuple:
         """Converts NMS output to evaluation format (labels, boxes, scores).
 
@@ -135,7 +135,9 @@ class YOLOPostBase(PostBase):
             img0_shape: Original image shape(s).
 
         Returns:
-            Tuple of (labels_list, boxes_list, scores_list).
+            Tuple: task-specific results.
+                - Detection: (labels_list, boxes_list, scores_list)
+                - Segmentation/Pose: (labels_list, boxes_list, scores_list, extra_list)
         """
 
         return nmsout2eval(nms_out, img1_shape, img0_shape)
@@ -156,9 +158,7 @@ class YOLOPostBase(PostBase):
             sx = torch.arange(nx, dtype=torch.float32, device=self.device) + offset
             yv, xv = torch.meshgrid(sy, sx, indexing="ij")
             anchor_points.append(torch.stack((xv, yv), -1).reshape(-1, 2))
-            stride_tensor.append(
-                torch.full((ny * nx, 1), strd, dtype=torch.float32, device=self.device)
-            )
+            stride_tensor.append(torch.full((ny * nx, 1), strd, dtype=torch.float32, device=self.device))
         self.anchors = torch.cat(anchor_points, dim=0).permute(1, 0)
         self.stride = torch.cat(stride_tensor, dim=0).permute(1, 0)
 
@@ -168,9 +168,9 @@ class YOLOPostBase(PostBase):
             conf_thres (float, optional): Confidence threshold.
             iou_thres (float, optional): IoU threshold.
         """
-        assert (
-            conf_thres is not None and iou_thres is not None
-        ), "conf_thres and iou_thres should be provided in yolo_postprocess "
+        assert conf_thres is not None and iou_thres is not None, (
+            "conf_thres and iou_thres should be provided in yolo_postprocess "
+        )
         assert 0 < conf_thres < 1, "conf_thres should be in (0, 1)"
         assert 0 < iou_thres < 1, "iou_thres should be in (0, 1)"
         self.conf_thres = conf_thres
@@ -241,9 +241,7 @@ class YOLOPostBase(PostBase):
         Returns:
             torch.Tensor: Converted tensor.
         """
-        assert (
-            len(x) == 1
-        ), f"Assume return is a single output, but got {len(x)} outputs"
+        assert len(x) == 1, f"Assume return is a single output, but got {len(x)} outputs"
         return x[0]
 
     @abstractmethod
@@ -274,19 +272,9 @@ class YOLOPostBase(PostBase):
         """
         masks = []
         for pred, proto in zip(x, proto_outs):
-            proto = proto.permute(
-                2, 0, 1
-            )  # [mask_h, mask_w, mask_dim] -> [mask_dim, mask_h, mask_w]
+            proto = proto.permute(2, 0, 1)  # [mask_h, mask_w, mask_dim] -> [mask_dim, mask_h, mask_w]
             if len(pred) == 0:
-                masks.append(
-                    torch.zeros(
-                        (0, self.imh, self.imw), dtype=torch.float32, device=self.device
-                    )
-                )
+                masks.append(torch.zeros((0, self.imh, self.imw), dtype=torch.float32, device=self.device))
                 continue
-            masks.append(
-                process_mask_upsample(
-                    proto, pred[:, 6:], pred[:, :4], [self.imh, self.imw]
-                )
-            )
+            masks.append(process_mask_upsample(proto, pred[:, 6:], pred[:, :4], [self.imh, self.imw]))
         return [[xi, mask] for xi, mask in zip(x, masks)]

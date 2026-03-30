@@ -38,9 +38,7 @@ class Normalize(PreOps):
         """
         super().__init__()
 
-        assert (
-            style.lower() in STYLE_LIST
-        ), f"Got unexpected style={style}. The style must be one of {STYLE_LIST}."
+        assert style.lower() in STYLE_LIST, f"Got unexpected style={style}. The style must be one of {STYLE_LIST}."
 
         self.style = style.lower()
         mean, std = STYLE_PARAMS[self.style]

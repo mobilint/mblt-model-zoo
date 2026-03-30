@@ -31,9 +31,7 @@ def _parse_target_clusters(value: Optional[str]) -> Optional[List[int]]:
     return clusters
 
 
-def _collect_npu_kwargs(
-    config: pytest.Config, prefix: str
-) -> tuple[dict[str, Any], bool]:
+def _collect_npu_kwargs(config: pytest.Config, prefix: str) -> tuple[dict[str, Any], bool]:
     opt_prefix = f"--{prefix}-" if prefix else "--"
     mxq_path = config.getoption(f"{opt_prefix}mxq-path")
     dev_no = config.getoption(f"{opt_prefix}dev-no")
@@ -76,11 +74,7 @@ class NpuParams:
 
     def warn_unused(self, used_prefixes: set[str]) -> None:
         for prefix, provided in self._provided.items():
-            if (
-                provided
-                and prefix not in used_prefixes
-                and prefix not in _WARNED_UNUSED_PREFIXES
-            ):
+            if provided and prefix not in used_prefixes and prefix not in _WARNED_UNUSED_PREFIXES:
                 _WARNED_UNUSED_PREFIXES.add(prefix)
                 warnings.warn(
                     f"Provided {prefix} NPU backend options will be ignored for this model.",

@@ -4,26 +4,43 @@ import gc
 import json
 import os
 import sys
-import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence, Tuple
-
-from transformers import pipeline as hf_pipeline
-from tqdm import tqdm
+from typing import Any, Iterable, Sequence, Tuple
 
 from chart_utils import collect_folder_metrics, plot_scalar_chart, plot_token_chart
+from tqdm import tqdm
+from transformers import pipeline as hf_pipeline
+
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_phase_trackers as _build_phase_trackers_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int_optional as _parse_positive_int_optional_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -42,14 +59,10 @@ def _safe_filename(model_id: str) -> str:
 def _parse_range_arg(raw: str) -> Tuple[int, int, int]:
     sep = ":" if ":" in raw else ("," if "," in raw else None)
     if sep is None:
-        raise argparse.ArgumentTypeError(
-            "expected format 'start:end:step' or 'start,end,step'"
-        )
+        raise argparse.ArgumentTypeError("expected format 'start:end:step' or 'start,end,step'")
     parts = [p.strip() for p in raw.split(sep)]
     if len(parts) != 3:
-        raise argparse.ArgumentTypeError(
-            "expected exactly 3 integers: 'start:end:step' or 'start,end,step'"
-        )
+        raise argparse.ArgumentTypeError("expected exactly 3 integers: 'start:end:step' or 'start,end,step'")
     try:
         start, end, step = (int(p) for p in parts)
     except ValueError as e:
@@ -133,9 +146,7 @@ def _cuda_device_index(device: str | None) -> int | None:
 def _is_cuda_oom_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return (
-        "cuda out of memory" in msg
-        or ("out of memory" in msg and "cuda" in msg)
-        or "cublas_status_alloc_failed" in msg
+        "cuda out of memory" in msg or ("out of memory" in msg and "cuda" in msg) or "cublas_status_alloc_failed" in msg
     )
 
 
@@ -222,7 +233,7 @@ def _cuda_memory_info(device: str | None) -> tuple[int, int] | None:
 def _format_gib(num_bytes: int | float | None) -> str:
     if num_bytes is None:
         return "n/a"
-    return f"{float(num_bytes) / (1024 ** 3):.2f} GiB"
+    return f"{float(num_bytes) / (1024**3):.2f} GiB"
 
 
 def _should_precheck_cuda(args: argparse.Namespace) -> bool:
@@ -470,14 +481,10 @@ def _resolve_model_id_from_mxq_name(
         return model_part_slash
 
     # Fallback: match by repo basename (e.g. Qwen2.5-1.5B-Instruct).
-    basename_matches = [
-        m for m in available_model_ids if m.split("/", 1)[-1] == model_part
-    ]
+    basename_matches = [m for m in available_model_ids if m.split("/", 1)[-1] == model_part]
     if len(basename_matches) == 1:
         return basename_matches[0]
-    basename_matches_slash = [
-        m for m in available_model_ids if m.split("/", 1)[-1] == model_part_slash
-    ]
+    basename_matches_slash = [m for m in available_model_ids if m.split("/", 1)[-1] == model_part_slash]
     if len(basename_matches_slash) == 1:
         return basename_matches_slash[0]
     return None
@@ -503,8 +510,7 @@ def _iter_targets_from_mxq_dir(
         resolved_model_id = _resolve_model_id_from_mxq_name(model_part, available_model_ids)
         if not resolved_model_id:
             print(
-                f"Skipping mxq (cannot resolve model_id from filename): {path.name} "
-                f"(expected <model_id>-<W8|W4V8>.mxq)"
+                f"Skipping mxq (cannot resolve model_id from filename): {path.name} (expected <model_id>-<W8|W4V8>.mxq)"
             )
             continue
         label = f"{resolved_model_id}-{revision}"
@@ -602,43 +608,47 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
     if not rows:
         return
     lines = [
-        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | avg_memory_used_mb | p99_memory_used_mb | total_memory_mb | avg_memory_used_pct | p99_memory_used_pct | total_energy_j | prefill_tps_last | decode_tps_last | prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | decode_j_per_tok_last |\n",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
+        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | "
+        "avg_memory_used_mb | p99_memory_used_mb | total_memory_mb | avg_memory_used_pct | "
+        "p99_memory_used_pct | total_energy_j | prefill_tps_last | decode_tps_last | "
+        "prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | "
+        "decode_j_per_tok_last |\n",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: | ---: | ---: | ---: |\n",
     ]
     for row in rows:
         lines.append(
-            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | {p99_utilization_pct} | {avg_memory_used_mb} | {p99_memory_used_mb} | {total_memory_mb} | {avg_memory_used_pct} | {p99_memory_used_pct} | {total_energy_j} | {prefill_tps_last} | {decode_tps_last} | {prefill_tok_per_j_last} | {decode_tok_per_j_last} | {prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
+            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | "
+            "{p99_utilization_pct} | {avg_memory_used_mb} | {p99_memory_used_mb} | "
+            "{total_memory_mb} | {avg_memory_used_pct} | {p99_memory_used_pct} | "
+            "{total_energy_j} | {prefill_tps_last} | {decode_tps_last} | "
+            "{prefill_tok_per_j_last} | {decode_tok_per_j_last} | "
+            "{prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
                 model=row["model"],
                 avg_power_w="" if row["avg_power_w"] is None else f"{row['avg_power_w']:.6f}",
                 p99_power_w="" if row["p99_power_w"] is None else f"{row['p99_power_w']:.6f}",
-                avg_utilization_pct=""
-                if row["avg_utilization_pct"] is None
-                else f"{row['avg_utilization_pct']:.6f}",
-                p99_utilization_pct=""
-                if row["p99_utilization_pct"] is None
-                else f"{row['p99_utilization_pct']:.6f}",
-                avg_memory_used_mb=""
-                if row["avg_memory_used_mb"] is None
-                else f"{row['avg_memory_used_mb']:.6f}",
-                p99_memory_used_mb=""
-                if row["p99_memory_used_mb"] is None
-                else f"{row['p99_memory_used_mb']:.6f}",
-                total_memory_mb=""
-                if row["total_memory_mb"] is None
-                else f"{row['total_memory_mb']:.6f}",
-                avg_memory_used_pct=""
-                if row["avg_memory_used_pct"] is None
-                else f"{row['avg_memory_used_pct']:.6f}",
-                p99_memory_used_pct=""
-                if row["p99_memory_used_pct"] is None
-                else f"{row['p99_memory_used_pct']:.6f}",
+                avg_utilization_pct="" if row["avg_utilization_pct"] is None else f"{row['avg_utilization_pct']:.6f}",
+                p99_utilization_pct="" if row["p99_utilization_pct"] is None else f"{row['p99_utilization_pct']:.6f}",
+                avg_memory_used_mb="" if row["avg_memory_used_mb"] is None else f"{row['avg_memory_used_mb']:.6f}",
+                p99_memory_used_mb="" if row["p99_memory_used_mb"] is None else f"{row['p99_memory_used_mb']:.6f}",
+                total_memory_mb="" if row["total_memory_mb"] is None else f"{row['total_memory_mb']:.6f}",
+                avg_memory_used_pct="" if row["avg_memory_used_pct"] is None else f"{row['avg_memory_used_pct']:.6f}",
+                p99_memory_used_pct="" if row["p99_memory_used_pct"] is None else f"{row['p99_memory_used_pct']:.6f}",
                 total_energy_j="" if row["total_energy_j"] is None else f"{row['total_energy_j']:.6f}",
                 prefill_tps_last="" if row["prefill_tps_last"] is None else f"{row['prefill_tps_last']:.6f}",
                 decode_tps_last="" if row["decode_tps_last"] is None else f"{row['decode_tps_last']:.6f}",
-                prefill_tok_per_j_last="" if row["prefill_tok_per_j_last"] is None else f"{row['prefill_tok_per_j_last']:.6f}",
-                decode_tok_per_j_last="" if row["decode_tok_per_j_last"] is None else f"{row['decode_tok_per_j_last']:.6f}",
-                prefill_j_per_tok_last="" if row["prefill_j_per_tok_last"] is None else f"{row['prefill_j_per_tok_last']:.6f}",
-                decode_j_per_tok_last="" if row["decode_j_per_tok_last"] is None else f"{row['decode_j_per_tok_last']:.6f}",
+                prefill_tok_per_j_last=""
+                if row["prefill_tok_per_j_last"] is None
+                else f"{row['prefill_tok_per_j_last']:.6f}",
+                decode_tok_per_j_last=""
+                if row["decode_tok_per_j_last"] is None
+                else f"{row['decode_tok_per_j_last']:.6f}",
+                prefill_j_per_tok_last=""
+                if row["prefill_j_per_tok_last"] is None
+                else f"{row['prefill_j_per_tok_last']:.6f}",
+                decode_j_per_tok_last=""
+                if row["decode_j_per_tok_last"] is None
+                else f"{row['decode_j_per_tok_last']:.6f}",
             )
         )
     with open(path, "w", encoding="utf-8") as f:
@@ -654,18 +664,10 @@ def _write_single_combined_markdown(
         return
     models = sorted({str(r["model"]) for r in tps_rows})
     prefill_tokens = sorted(
-        {
-            int(r["tokens"])
-            for r in tps_rows
-            if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)
-        }
+        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)}
     )
     decode_tokens = sorted(
-        {
-            int(r["tokens"])
-            for r in tps_rows
-            if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)
-        }
+        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)}
     )
     tps_map: dict[tuple[str, str, int], float] = {}
     time_map: dict[tuple[str, str, int], float] = {}
@@ -680,9 +682,7 @@ def _write_single_combined_markdown(
         if isinstance(time_ms_val, (int, float)):
             time_map[(model, phase, token)] = float(time_ms_val)
 
-    device_map = {
-        str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)
-    }
+    device_map = {str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)}
     device_cols = [
         "avg_power_w",
         "p99_power_w",
@@ -1015,8 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
         "--chunk-size-lookup-csv",
         default="prefill_chunk_size.csv",
         help=(
-            "CSV path for per-model chunk_size lookup. "
-            "Expected columns: model_id,revision,core_mode,best_chunk_size"
+            "CSV path for per-model chunk_size lookup. Expected columns: model_id,revision,core_mode,best_chunk_size"
         ),
     )
     parser.add_argument(
@@ -1039,8 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
         "--original-models",
         action="store_true",
         help=(
-            "resolve each Mobilint model to its parent/base model from HF Hub and "
-            "benchmark the unique parent model ids"
+            "resolve each Mobilint model to its parent/base model from HF Hub and benchmark the unique parent model ids"
         ),
     )
     _add_device_tracking_args(parser)
@@ -1049,8 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "best-effort CUDA VRAM pre-check before loading each model "
-            "(default: on, disable via --no-cuda-precheck)"
+            "best-effort CUDA VRAM pre-check before loading each model (default: on, disable via --no-cuda-precheck)"
         ),
     )
     parser.add_argument(
@@ -1104,10 +1101,7 @@ def main(argv: list[str] | None = None) -> int:
             available_model_ids=available_model_ids,
         )
         if not targets:
-            raise SystemExit(
-                "No valid mxq targets found. Expected files named "
-                "<model_id>-<W8|W4V8>.mxq in --mxq-dir."
-            )
+            raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
         model_ids = available_model_ids
@@ -1156,11 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         json_path = os.path.join(results_dir, f"{base}.json")
         png_path = os.path.join(results_dir, f"{base}.png")
-        if (
-            args.skip_existing
-            and os.path.isfile(json_path)
-            and os.path.isfile(png_path)
-        ):
+        if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
         if _should_precheck_cuda(args):
@@ -1226,9 +1216,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"using fallback chunk_size={resolved_chunk_size}"
                 )
             elif args.chunk_size is not None and lookup_chunk is not None:
-                print(
-                    f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}"
-                )
+                print(f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}")
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.fixed_prefill,
@@ -1268,18 +1256,12 @@ def main(argv: list[str] | None = None) -> int:
             avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
             avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
             avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
-            print(
-                "Avg prefill token latency (last): "
-                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
-            )
+            print(f"Avg prefill token latency (last): total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}")
         if result.decode_sweep.avg_total_token_latency_values:
             avg_total = result.decode_sweep.avg_total_token_latency_values[-1]
             avg_npu = result.decode_sweep.avg_npu_token_latency_values[-1]
             avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
-            print(
-                "Avg decode token latency (last): "
-                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}"
-            )
+            print(f"Avg decode token latency (last): total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}")
         device_payload: dict[str, float | None] | None = None
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
@@ -1288,16 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
             decode_phase_duration_s = float(getattr(result, "decode_phase_duration_s", 0.0) or 0.0)
             prefill_avg_power = prefill_metric.get("avg_power_w")
             decode_avg_power = decode_metric.get("avg_power_w")
-            prefill_energy = (
-                prefill_avg_power * prefill_phase_duration_s
-                if prefill_avg_power is not None
-                else None
-            )
-            decode_energy = (
-                decode_avg_power * decode_phase_duration_s
-                if decode_avg_power is not None
-                else None
-            )
+            prefill_energy = prefill_avg_power * prefill_phase_duration_s if prefill_avg_power is not None else None
+            decode_energy = decode_avg_power * decode_phase_duration_s if decode_avg_power is not None else None
             total_energy = None
             if prefill_energy is not None and decode_energy is not None:
                 total_energy = prefill_energy + decode_energy
@@ -1346,7 +1320,11 @@ def main(argv: list[str] | None = None) -> int:
                 default=None,
             )
             total_memory_mb = max(
-                [v for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb")) if v is not None],
+                [
+                    v
+                    for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb"))
+                    if v is not None
+                ],
                 default=None,
             )
             avg_memory_used_pct = _weighted_two(
@@ -1366,16 +1344,8 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 default=None,
             )
-            prefill_last = (
-                float(result.prefill_sweep.tps_values[-1])
-                if result.prefill_sweep.tps_values
-                else None
-            )
-            decode_last = (
-                float(result.decode_sweep.tps_values[-1])
-                if result.decode_sweep.tps_values
-                else None
-            )
+            prefill_last = float(result.prefill_sweep.tps_values[-1]) if result.prefill_sweep.tps_values else None
+            decode_last = float(result.decode_sweep.tps_values[-1]) if result.decode_sweep.tps_values else None
             prefill_tpj = (
                 _safe_div(prefill_last, prefill_avg_power)
                 if prefill_last is not None and prefill_avg_power is not None

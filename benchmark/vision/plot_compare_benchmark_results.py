@@ -8,7 +8,11 @@ from typing import Optional
 try:
     from benchmark.common.chart_utils import (
         default_charts_dir as _default_charts_dir_common,
+    )
+    from benchmark.common.chart_utils import (
         plot_grouped_scalar_barh,
+    )
+    from benchmark.common.chart_utils import (
         source_labels as _source_labels_common,
     )
 except ModuleNotFoundError:
@@ -103,17 +107,12 @@ def _resolve_csv_path(raw: str) -> Path:
         return csv_files[0]
     if not csv_files:
         raise ValueError(f"No CSV found in directory: {path}")
-    raise ValueError(
-        f"Multiple CSV files found in directory: {path}. "
-        "Please pass explicit CSV file paths."
-    )
+    raise ValueError(f"Multiple CSV files found in directory: {path}. Please pass explicit CSV file paths.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "Compare N vision benchmark CSV files and generate model-wise bar charts."
-        )
+        description=("Compare N vision benchmark CSV files and generate model-wise bar charts.")
     )
     parser.add_argument(
         "inputs",
@@ -123,10 +122,7 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help=(
-            "directory to save PNG charts "
-            "(default: benchmark/vision/results/charts/<input1_input2_...>)"
-        ),
+        help=("directory to save PNG charts (default: benchmark/vision/results/charts/<input1_input2_...>)"),
     )
     args = parser.parse_args()
 
@@ -140,9 +136,7 @@ def main() -> int:
 
     script_dir = Path(__file__).resolve().parent
     output_dir = (
-        Path(args.output_dir).expanduser().resolve()
-        if args.output_dir
-        else default_charts_dir(script_dir, sources)
+        Path(args.output_dir).expanduser().resolve() if args.output_dir else default_charts_dir(script_dir, sources)
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -170,10 +164,7 @@ def main() -> int:
         ("Utilization", "Utilization (%)", "util_pct.png", lambda m: m.util_pct),
     ]
     for title, x_label, file_name, selector in plot_specs:
-        grouped_values = [
-            {model: selector(source[model]) for model in models}
-            for source in metrics_by_source
-        ]
+        grouped_values = [{model: selector(source[model]) for model in models} for source in metrics_by_source]
         plot_grouped_scalar_barh(
             models=models,
             group_labels=labels,

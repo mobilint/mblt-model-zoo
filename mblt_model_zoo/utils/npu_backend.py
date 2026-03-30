@@ -65,9 +65,7 @@ class MobilintNPUBackend:
         # 3. If none of above, download mxq file from hub
         else:
             name_or_path = (
-                self.name_or_path
-                if self.name_or_path.startswith("mobilint/")
-                else "mobilint/" + self.name_or_path
+                self.name_or_path if self.name_or_path.startswith("mobilint/") else "mobilint/" + self.name_or_path
             )
             revision = (
                 getattr(self, "revision", None)
@@ -202,10 +200,8 @@ class MobilintNPUBackend:
             return basename
         if mxq_path in files:
             return mxq_path
-        
-        raise ValueError(
-            f"Cannot find {mxq_path} file from HuggingFace repo: f{repo_id}"
-        )
+
+        raise ValueError(f"Cannot find {mxq_path} file from HuggingFace repo: f{repo_id}")
 
     def create(self):
         self.acc = Accelerator(self.dev_no)
@@ -221,10 +217,7 @@ class MobilintNPUBackend:
             assert len(self.target_clusters) == 2, "global8 must contain every cores!"
             mc.set_global8_core_mode()
         else:
-            raise ValueError(
-                "core_mode must be single, multi, global4 or global8! value: "
-                + self.core_mode
-            )
+            raise ValueError("core_mode must be single, multi, global4 or global8! value: " + self.core_mode)
 
         model_path = self.check_model_path(self.mxq_path)
         self.mxq_model = Model(model_path, mc)
@@ -317,9 +310,7 @@ class MobilintNPUBackend:
         p = prefix
         if f"{p}target_cores" in data.keys() and f"{p}target_clusters" in data.keys():
             logger.warning(f"{p}target_cores and {p}target_clusters are both set!")
-            logger.warning(
-                f"If {p}core_mode is `single`, only {p}target_cores will be used."
-            )
+            logger.warning(f"If {p}core_mode is `single`, only {p}target_cores will be used.")
             logger.warning(
                 f"If {p}core_mode is `multi`, `global4`, or `global8`, only {p}target_clusters will be used."
             )

@@ -23,9 +23,10 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
         AssertionError: If the number of XML files and images do not match.
     """
 
-    assert len(os.listdir(xml_dir + "/val")) == len(
-        os.listdir(image_dir)
-    ), f"Number of XML and image files do not match: {len(os.listdir(xml_dir+'/val'))} != {len(os.listdir(image_dir))}"
+    assert len(os.listdir(xml_dir + "/val")) == len(os.listdir(image_dir)), (
+        f"Number of XML and image files do not match: "
+        f"{len(os.listdir(xml_dir + '/val'))} != {len(os.listdir(image_dir))}"
+    )
 
     # validate the XML files
     pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Validating XML files")
@@ -35,15 +36,14 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
         root = xml_tree.getroot()
 
         if len(root.findall("object")) < 1:
-            raise ValueError(
-                f"XML file {xml_file} has no object, but expected at least 1"
-            )
+            raise ValueError(f"XML file {xml_file} has no object, but expected at least 1")
 
         # check whether the object names in the XML files are the same
         object_names = [obj.find("name").text for obj in root.findall("object")]
         if len(set(object_names)) != 1:
             raise ValueError(
-                f"Object names in XML file {xml_file} are not the same. It has {len(set(object_names))} different object names."
+                f"Object names in XML file {xml_file} are not the same. "
+                f"It has {len(set(object_names))} different object names."
             )
 
     pbar.close()
@@ -58,9 +58,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
         image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
         assert os.path.exists(image_path), f"Image file not found: {image_path}"
 
-        os.makedirs(
-            os.path.join(output_dir, object_name), exist_ok=True
-        )  # create the directory for the object
+        os.makedirs(os.path.join(output_dir, object_name), exist_ok=True)  # create the directory for the object
         shutil.copy(
             image_path,
             os.path.join(output_dir, object_name, os.path.basename(image_path)),
@@ -73,9 +71,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
     for object_name in pbar:
         num_images = len(os.listdir(os.path.join(output_dir, object_name)))
         if num_images != 50:
-            raise ValueError(
-                f"Object {object_name} has {num_images} images, but expected 50"
-            )
+            raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
     pbar.close()
     print("Each category has 50 images")
     print("ImageNet dataset constructed successfully")
@@ -97,12 +93,8 @@ def organize_imagenet(
     if image_dir.endswith(".tar") and xml_dir.endswith(".tgz"):
         with TemporaryDirectory() as temp_dir:
             print("Unpacking image and XML files to temporary directory...")
-            shutil.unpack_archive(
-                image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val")
-            )
-            shutil.unpack_archive(
-                xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3")
-            )
+            shutil.unpack_archive(image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
+            shutil.unpack_archive(xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
             print("Unpacking completed")
             construct_imagenet(
                 os.path.join(temp_dir, "ILSVRC2012_img_val"),
@@ -121,9 +113,7 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str):
         annotation_dir (str): Directory containing COCO annotations.
         output_dir (str): Directory where the organized dataset will be stored.
     """
-    print(
-        f"Constructing COCO dataset from {image_dir} and {annotation_dir} to {output_dir}"
-    )
+    print(f"Constructing COCO dataset from {image_dir} and {annotation_dir} to {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     shutil.copytree(
         image_dir, os.path.join(output_dir, "val2017"), dirs_exist_ok=True
@@ -155,9 +145,7 @@ def organize_coco(
         with TemporaryDirectory() as temp_dir:
             print("Unpacking image and annotation files to temporary directory...")
             shutil.unpack_archive(image_dir, temp_dir)
-            shutil.unpack_archive(
-                annotation_dir, os.path.join(temp_dir, "annotations_trainval2017")
-            )
+            shutil.unpack_archive(annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
             print("Unpacking completed")
             construct_coco(
                 os.path.join(temp_dir, "val2017"),
@@ -177,9 +165,7 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str):
         annotation_dir (str): Directory containing WiderFace annotations.
         output_dir (str): Directory where the organized dataset will be stored.
     """
-    print(
-        f"Constructing WiderFace dataset from {image_dir} and {annotation_dir} to {output_dir}"
-    )
+    print(f"Constructing WiderFace dataset from {image_dir} and {annotation_dir} to {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     shutil.copytree(
         os.path.join(image_dir, "images"),

@@ -17,9 +17,20 @@ Basic usage:
     >>> results = engine.preprocess("image.jpg")
 """
 
-from ._api import list_models, list_tasks
-from .face_detection import *
-from .image_classification import *
-from .instance_segmentation import *
-from .object_detection import *
-from .pose_estimation import *
+from . import face_detection as face_detection
+from . import image_classification as image_classification
+from . import instance_segmentation as instance_segmentation
+from . import object_detection as object_detection
+from . import pose_estimation as pose_estimation
+from ._api import list_models as list_models
+from ._api import list_tasks as list_tasks
+
+__all__ = [
+    "list_models",
+    "list_tasks",
+    "face_detection",
+    "image_classification",
+    "instance_segmentation",
+    "object_detection",
+    "pose_estimation",
+]

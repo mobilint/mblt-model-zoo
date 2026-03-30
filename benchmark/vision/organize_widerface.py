@@ -12,9 +12,7 @@ from mblt_model_zoo.vision.utils.datasets import organize_widerface
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize WiderFace dataset")
-    parser.add_argument(
-        "--image-dir", type=str, required=True, help="Path to the image zip file"
-    )
+    parser.add_argument("--image-dir", type=str, required=True, help="Path to the image zip file")
     parser.add_argument(
         "--annotation-dir",
         type=str,

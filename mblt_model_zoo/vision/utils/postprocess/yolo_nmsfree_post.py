@@ -51,10 +51,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         """
         x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
-        return [
-            dual_topk(xi.squeeze(0), self.nc, self.n_extra, conf_thres=self.conf_thres)
-            for xi in x_list
-        ]
+        return [dual_topk(xi.squeeze(0), self.nc, self.n_extra, conf_thres=self.conf_thres) for xi in x_list]
 
     def process_box_cls(self, box_cls):
         """
@@ -68,9 +65,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
             return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
-        box, scores = torch.split(
-            box_cls[None], [self.reg_max * 4, self.nc], dim=1
-        )  # (1, 64, *), (1, 80, *)
+        box, scores = torch.split(box_cls[None], [self.reg_max * 4, self.nc], dim=1)  # (1, 64, *), (1, 80, *)
         dbox = (
             dist2bbox(
                 self.dfl(box),
@@ -80,9 +75,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
             )
             * self.stride[:, ic]
         )
-        pre_topk = (
-            torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)
-        )  # (*, 84)
+        pre_topk = torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
         return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
 
     def nms(

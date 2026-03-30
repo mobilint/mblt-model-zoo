@@ -29,9 +29,7 @@ def default_charts_dir(
 
 
 def source_labels(sources: list[Path], *, use_stem: bool) -> list[str]:
-    labels = [
-        ((source.stem if use_stem else source.name) or str(source)) for source in sources
-    ]
+    labels = [((source.stem if use_stem else source.name) or str(source)) for source in sources]
     counts: dict[str, int] = {}
     for label in labels:
         counts[label] = counts.get(label, 0) + 1

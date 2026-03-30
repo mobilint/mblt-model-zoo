@@ -47,8 +47,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
         self.driver_version = pynvml.nvmlSystemGetDriverVersion()
         self.cuda_version = pynvml.nvmlSystemGetCudaDriverVersion()
         self.device_name = {
-            gpu: pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(gpu))
-            for gpu in self._gpu_id
+            gpu: pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(gpu)) for gpu in self._gpu_id
         }
 
     def gpu_num(self) -> int:
@@ -64,9 +63,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
     def gpu_utilization(self) -> list[tuple[float, float]]:
         utilization = []
         for i in self._gpu_id:
-            util = pynvml.nvmlDeviceGetUtilizationRates(
-                pynvml.nvmlDeviceGetHandleByIndex(i)
-            )
+            util = pynvml.nvmlDeviceGetUtilizationRates(pynvml.nvmlDeviceGetHandleByIndex(i))
             utilization.append((float(util.gpu), float(util.memory)))
         return utilization
 
@@ -112,11 +109,7 @@ class GPUDeviceTracker(BaseDeviceTracker):
         self._gpu_util_trace.append((ts, total_gpu_util_pct / divisor))
         self._mem_util_trace.append((ts, total_mem_util_pct / divisor))
         self._mem_used_trace.append((ts, total_mem_used_mb))
-        total_mem_used_pct = (
-            total_mem_used_mb / total_mem_capacity_mb * 100.0
-            if total_mem_capacity_mb > 0
-            else 0.0
-        )
+        total_mem_used_pct = total_mem_used_mb / total_mem_capacity_mb * 100.0 if total_mem_capacity_mb > 0 else 0.0
         self._mem_used_pct_trace.append((ts, total_mem_used_pct))
 
     def start(self) -> None:
@@ -158,34 +151,16 @@ class GPUDeviceTracker(BaseDeviceTracker):
             mem_used_pct_samples = self._mem_used_pct_glance[gpu]
             gpu_stats[gpu] = {
                 "avg_power_w": float(np.mean(power_samples)) if power_samples else None,
-                "p99_power_w": float(np.percentile(power_samples, 99))
-                if power_samples
-                else None,
-                "avg_gpu_util_pct": float(np.mean(gpu_util_samples))
-                if gpu_util_samples
-                else None,
-                "p99_gpu_util_pct": float(np.percentile(gpu_util_samples, 99))
-                if gpu_util_samples
-                else None,
-                "avg_mem_util_pct": float(np.mean(mem_util_samples))
-                if mem_util_samples
-                else None,
-                "p99_mem_util_pct": float(np.percentile(mem_util_samples, 99))
-                if mem_util_samples
-                else None,
-                "avg_memory_used_mb": float(np.mean(mem_used_samples))
-                if mem_used_samples
-                else None,
-                "p99_memory_used_mb": float(np.percentile(mem_used_samples, 99))
-                if mem_used_samples
-                else None,
+                "p99_power_w": float(np.percentile(power_samples, 99)) if power_samples else None,
+                "avg_gpu_util_pct": float(np.mean(gpu_util_samples)) if gpu_util_samples else None,
+                "p99_gpu_util_pct": float(np.percentile(gpu_util_samples, 99)) if gpu_util_samples else None,
+                "avg_mem_util_pct": float(np.mean(mem_util_samples)) if mem_util_samples else None,
+                "p99_mem_util_pct": float(np.percentile(mem_util_samples, 99)) if mem_util_samples else None,
+                "avg_memory_used_mb": float(np.mean(mem_used_samples)) if mem_used_samples else None,
+                "p99_memory_used_mb": float(np.percentile(mem_used_samples, 99)) if mem_used_samples else None,
                 "total_memory_mb": self._mem_total_mb.get(gpu),
-                "avg_memory_used_pct": float(np.mean(mem_used_pct_samples))
-                if mem_used_pct_samples
-                else None,
-                "p99_memory_used_pct": float(np.percentile(mem_used_pct_samples, 99))
-                if mem_used_pct_samples
-                else None,
+                "avg_memory_used_pct": float(np.mean(mem_used_pct_samples)) if mem_used_pct_samples else None,
+                "p99_memory_used_pct": float(np.percentile(mem_used_pct_samples, 99)) if mem_used_pct_samples else None,
             }
 
         total_power_samples = [p for _, p in self._power_trace]
@@ -194,42 +169,22 @@ class GPUDeviceTracker(BaseDeviceTracker):
         total_mem_used_samples = [m for _, m in self._mem_used_trace]
         total_mem_used_pct_samples = [m for _, m in self._mem_used_pct_trace]
         total_mem_capacity_mb = float(sum(self._mem_total_mb.values())) if self._mem_total_mb else None
-        avg_gpu_util = (
-            float(np.mean(total_gpu_util_samples)) if total_gpu_util_samples else None
-        )
-        p99_gpu_util = (
-            float(np.percentile(total_gpu_util_samples, 99))
-            if total_gpu_util_samples
-            else None
-        )
+        avg_gpu_util = float(np.mean(total_gpu_util_samples)) if total_gpu_util_samples else None
+        p99_gpu_util = float(np.percentile(total_gpu_util_samples, 99)) if total_gpu_util_samples else None
         return {
-            "avg_power_w": float(np.mean(total_power_samples))
-            if total_power_samples
-            else None,
-            "p99_power_w": float(np.percentile(total_power_samples, 99))
-            if total_power_samples
-            else None,
+            "avg_power_w": float(np.mean(total_power_samples)) if total_power_samples else None,
+            "p99_power_w": float(np.percentile(total_power_samples, 99)) if total_power_samples else None,
             "avg_gpu_util_pct": avg_gpu_util,
             "p99_gpu_util_pct": p99_gpu_util,
-            "avg_mem_util_pct": float(np.mean(total_mem_util_samples))
-            if total_mem_util_samples
-            else None,
-            "p99_mem_util_pct": float(np.percentile(total_mem_util_samples, 99))
-            if total_mem_util_samples
-            else None,
+            "avg_mem_util_pct": float(np.mean(total_mem_util_samples)) if total_mem_util_samples else None,
+            "p99_mem_util_pct": float(np.percentile(total_mem_util_samples, 99)) if total_mem_util_samples else None,
             # Generic names for cross-device consumers.
             "avg_utilization_pct": avg_gpu_util,
             "p99_utilization_pct": p99_gpu_util,
-            "avg_memory_used_mb": float(np.mean(total_mem_used_samples))
-            if total_mem_used_samples
-            else None,
-            "p99_memory_used_mb": float(np.percentile(total_mem_used_samples, 99))
-            if total_mem_used_samples
-            else None,
+            "avg_memory_used_mb": float(np.mean(total_mem_used_samples)) if total_mem_used_samples else None,
+            "p99_memory_used_mb": float(np.percentile(total_mem_used_samples, 99)) if total_mem_used_samples else None,
             "total_memory_mb": total_mem_capacity_mb,
-            "avg_memory_used_pct": float(np.mean(total_mem_used_pct_samples))
-            if total_mem_used_pct_samples
-            else None,
+            "avg_memory_used_pct": float(np.mean(total_mem_used_pct_samples)) if total_mem_used_pct_samples else None,
             "p99_memory_used_pct": float(np.percentile(total_mem_used_pct_samples, 99))
             if total_mem_used_pct_samples
             else None,

@@ -37,7 +37,7 @@ def test_cohere2(pipe):
 
     messages = [{"role": "user", "content": "Hello, how are you?"}]
 
-    outputs = pipe(
+    pipe(
         messages,
         max_length=512,
     )

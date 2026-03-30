@@ -26,9 +26,7 @@ def pipe(request, revision, npu_params):
 def test_whisper(pipe):
     pipe.generation_config.max_new_tokens = None
 
-    ds = load_dataset(
-        "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation"
-    )
+    ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
 
     for i in range(5):
         sample = ds[i]["audio"]  # type: ignore

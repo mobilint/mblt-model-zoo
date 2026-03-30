@@ -5,7 +5,7 @@ Type definitions for MBLT vision models.
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List, Union
+from typing import List, Union
 
 import numpy as np
 import torch

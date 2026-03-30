@@ -98,15 +98,29 @@ def _load_vlm_model_metrics(path: Path) -> Optional[tuple[str, VLMCompareMetrics
     if not isinstance(device, dict):
         device = {}
     return model_id, VLMCompareMetrics(
-        llm_prefill_tps=_as_float(llm_summary.get("llm_prefill_tps", {}).get("mean") if isinstance(llm_summary.get("llm_prefill_tps"), dict) else None),
-        llm_decode_tps=_as_float(llm_summary.get("llm_decode_tps", {}).get("mean") if isinstance(llm_summary.get("llm_decode_tps"), dict) else None),
-        llm_ttft_ms=_as_float(llm_summary.get("llm_ttft_ms", {}).get("mean") if isinstance(llm_summary.get("llm_ttft_ms"), dict) else None),
+        llm_prefill_tps=_as_float(
+            llm_summary.get("llm_prefill_tps", {}).get("mean")
+            if isinstance(llm_summary.get("llm_prefill_tps"), dict)
+            else None
+        ),
+        llm_decode_tps=_as_float(
+            llm_summary.get("llm_decode_tps", {}).get("mean")
+            if isinstance(llm_summary.get("llm_decode_tps"), dict)
+            else None
+        ),
+        llm_ttft_ms=_as_float(
+            llm_summary.get("llm_ttft_ms", {}).get("mean") if isinstance(llm_summary.get("llm_ttft_ms"), dict) else None
+        ),
         llm_decode_duration_ms=_as_float(
             llm_summary.get("llm_decode_duration_ms", {}).get("mean")
             if isinstance(llm_summary.get("llm_decode_duration_ms"), dict)
             else None
         ),
-        llm_total_ms=_as_float(llm_summary.get("llm_total_ms", {}).get("mean") if isinstance(llm_summary.get("llm_total_ms"), dict) else None),
+        llm_total_ms=_as_float(
+            llm_summary.get("llm_total_ms", {}).get("mean")
+            if isinstance(llm_summary.get("llm_total_ms"), dict)
+            else None
+        ),
         vision_encode_ms=_as_float(
             vision_summary.get("vision_encode_ms", {}).get("mean")
             if isinstance(vision_summary.get("vision_encode_ms"), dict)
@@ -187,10 +201,7 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help=(
-            "directory to save PNG charts "
-            "(default: benchmark/transformers/results/charts/<folder1_folder2_...>)"
-        ),
+        help=("directory to save PNG charts (default: benchmark/transformers/results/charts/<folder1_folder2_...>)"),
     )
     parser.add_argument(
         "--task",

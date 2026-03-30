@@ -10,7 +10,7 @@
 - **Line Length**: Max 120 characters.
 - **Multi-line Formatting**: Defer to Black's default styling for multi-line function or class definitions (closing parenthesis matches the indentation of the opening line).
 
-**Example (Black Style):**
+**Example (Ruff/Black Style):**
 
 ```python
 def very_long_function_name(
@@ -33,13 +33,13 @@ def very_long_function_name(
 
 ### 4. Imports & Tools
 
-- **Imports**: Group imports (stdlib, third-party, local) and follow `isort` rules.
-- **Formatter**: Use **Black** (configured for 120 chars and compatible with these rules).
-
+- **Imports**: Group imports (stdlib, third-party, local) and follow `ruff` rules (isort compatible).
+- **Formatter**: Use **Ruff** (configured for 120 chars and compatible with these rules).
 
 ---
 
 ## Comment Style Guide
+
 
 **Paths**: `**/*.py`
 

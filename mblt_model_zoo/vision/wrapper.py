@@ -75,9 +75,9 @@ class MBLT_Engine:
         Returns:
                 A tuple of (model_cfg, pre_cfg, post_cfg) dictionaries.
         """
-        assert (
-            model_type in model_info_set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
+        assert model_type in model_info_set.__dict__.keys(), (
+            f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
+        )
 
         # Use copy() to avoid modifying the original ModelInfo in-place
         model_cfg = model_info_set.__dict__[model_type].value.model_cfg.copy()
@@ -255,29 +255,21 @@ class MXQ_Model:
             if self.infer_mode == "single":
                 pass  # default is single with all cores
             elif self.infer_mode == "multi":
-                mc.set_multi_core_mode(
-                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
-                )
+                mc.set_multi_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
             elif self.infer_mode == "global4":
-                mc.set_global4_core_mode(
-                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
-                )
+                mc.set_global4_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
             elif self.infer_mode == "global8":
                 mc.set_global8_core_mode()
             else:
                 raise ValueError("Inappropriate inference mode")
         elif self.product == "regulus":
-            assert (
-                self.infer_mode == "single"
-            ), "Only single core mode is available on REGULUS"
+            assert self.infer_mode == "single", "Only single core mode is available on REGULUS"
         else:
             raise ValueError("Inappropriate product")
 
         # -----------------Model Preparation-----------------------
         if local_path is not None:
-            assert os.path.isfile(
-                local_path
-            ), "The model should be prepared on local path"
+            assert os.path.isfile(local_path), "The model should be prepared on local path"
             cached_file = local_path
         elif repo_id is not None and filename is not None:
             try:

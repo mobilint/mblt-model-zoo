@@ -41,25 +41,15 @@ def bbox_overlaps(boxes, query_boxes):
     query_boxes = query_boxes[None, :, :]  # (1, K, 4)
 
     # Intersection
-    iw = (
-        np.minimum(boxes[..., 2], query_boxes[..., 2])
-        - np.maximum(boxes[..., 0], query_boxes[..., 0])
-        + 1
-    )
-    ih = (
-        np.minimum(boxes[..., 3], query_boxes[..., 3])
-        - np.maximum(boxes[..., 1], query_boxes[..., 1])
-        + 1
-    )
+    iw = np.minimum(boxes[..., 2], query_boxes[..., 2]) - np.maximum(boxes[..., 0], query_boxes[..., 0]) + 1
+    ih = np.minimum(boxes[..., 3], query_boxes[..., 3]) - np.maximum(boxes[..., 1], query_boxes[..., 1]) + 1
     iw = np.maximum(iw, 0)
     ih = np.maximum(ih, 0)
     inter = iw * ih  # (N, K)
 
     # Areas
     box_area = (boxes[..., 2] - boxes[..., 0] + 1) * (boxes[..., 3] - boxes[..., 1] + 1)
-    query_area = (query_boxes[..., 2] - query_boxes[..., 0] + 1) * (
-        query_boxes[..., 3] - query_boxes[..., 1] + 1
-    )
+    query_area = (query_boxes[..., 2] - query_boxes[..., 0] + 1) * (query_boxes[..., 3] - query_boxes[..., 1] + 1)
 
     # Union
     union = box_area + query_area - inter
@@ -287,13 +277,9 @@ def evaluation(pred, gt_path, iou_thresh=0.5):
                 ignore = np.zeros(gt_boxes.shape[0])
                 if len(keep_index) != 0:
                     ignore[keep_index - 1] = 1
-                pred_recall, proposal_list = image_eval(
-                    pred_info, gt_boxes, ignore, iou_thresh
-                )
+                pred_recall, proposal_list = image_eval(pred_info, gt_boxes, ignore, iou_thresh)
 
-                _img_pr_info = img_pr_info(
-                    thresh_num, pred_info, proposal_list, pred_recall
-                )
+                _img_pr_info = img_pr_info(thresh_num, pred_info, proposal_list, pred_recall)
                 pr_curve += _img_pr_info
         pr_curve = dataset_pr_info(thresh_num, pr_curve, count_face)
         propose = pr_curve[:, 0]

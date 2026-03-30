@@ -75,19 +75,19 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | RegNet_Y_16GF | (224,224,3) | 82.464 | 82.862 | 31.95 | 83.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html) | IMAGENET1K_V2 |
 | RegNet_Y_32GF | (224,224,3) | 80.696 | 80.834 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V1 |
 | RegNet_Y_32GF | (224,224,3) | 82.892 | 83.362 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V2 |
-| ResNet18 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
-| ResNet34 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
-| ResNet50 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
-| ResNet50 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
-| ResNet101 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
-| ResNet101 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V2 |
-| ResNet152 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V1 |
-| ResNet152 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V2 |
-| ResNeXt50_32X4D | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V1 |
-| ResNeXt50_32X4D | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V2 |
-| ResNeXt101_32X8D | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V1 |
-| ResNeXt101_32X8D | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V2 |
-| ResNeXt101_64X4D | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_64x4d.html) | |
+| ResNet18 | (224,224,3) | 69.570 | 69.778 | 3.64 | 11.68 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
+| ResNet34 | (224,224,3) | 73.156 | 73.304 | 7.35 | 21.79 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
+| ResNet50 | (224,224,3) | 75.976 | 76.116 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
+| ResNet50 | (224,224,3) | 80.598 | 80.852 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
+| ResNet101 | (224,224,3) | 77.148 | 77.350 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
+| ResNet101 | (224,224,3) | 81.516 | 81.914 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V2 |
+| ResNet152 | (224,224,3) | 78.064 | 78.306 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V1 |
+| ResNet152 | (224,224,3) | 82.014 | 82.272 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V2 |
+| ResNeXt50_32X4D | (224,224,3) | 77.552 | 77.634 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V1 |
+| ResNeXt50_32X4D | (224,224,3) | 80.858 | 81.212 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V2 |
+| ResNeXt101_32X8D | (224,224,3) | 79.186 | 79.290 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V1 |
+| ResNeXt101_32X8D | (224,224,3) | 82.616 | 82.784 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V2 |
+| ResNeXt101_64X4D | (224,224,3) | 82.994 | 83.234 | 31.06 | 83.35 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_64x4d.html) | |
 | ShuffleNet_V2_X1_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_0.html) | |
 | ShuffleNet_V2_X1_5 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_5.html) | |
 | ShuffleNet_V2_X2_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x2_0.html) | |

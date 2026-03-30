@@ -1,5 +1,5 @@
 import pytest
-from transformers import AutoProcessor, AutoTokenizer, TextStreamer, pipeline
+from transformers import AutoProcessor, TextStreamer, pipeline
 
 MODEL_PATHS = ("mobilint/Qwen2-VL-2B-Instruct",)
 

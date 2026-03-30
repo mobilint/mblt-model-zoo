@@ -24,9 +24,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
         super().__init__(pre_cfg, post_cfg)
         self.reg_max = post_cfg.get("reg_max", 0)  # DFL channels
         self.no = self.nc + self.reg_max * 4  # number of outputs per anchor (144)
-        self.dfl_weight = torch.arange(
-            self.reg_max, dtype=torch.float32, device=self.device
-        ).reshape(1, -1, 1, 1)
+        self.dfl_weight = torch.arange(self.reg_max, dtype=torch.float32, device=self.device).reshape(1, -1, 1, 1)
 
     def rearrange(
         self,
@@ -50,22 +48,15 @@ class YOLOAnchorlessPost(YOLOPostBase):
             else:
                 raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
             if xi.shape[-1] == self.reg_max * 4:
-                y_det.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
             elif xi.shape[-1] == self.nc:
-                y_cls.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 80, 80, 80), (b, 80, 40, 40), ...
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 80, 80, 80), (b, 80, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
         # sort as box, scores
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        y = [
-            torch.cat((yi_det, yi_cls), dim=1).flatten(2)
-            for (yi_det, yi_cls) in zip(y_det, y_cls)
-        ]
+        y = [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for (yi_det, yi_cls) in zip(y_det, y_cls)]
         return y
 
     def decode(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
@@ -91,15 +82,10 @@ class YOLOAnchorlessPost(YOLOPostBase):
         if self.n_extra == 0:
             ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
         else:
-            ic = (
-                torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0)
-                > self.inv_conf_thres
-            )
+            ic = torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0) > self.inv_conf_thres
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 4 + self.nc + self.n_extra), dtype=torch.float32
-            )  # (0, 84)
+            return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32)  # (0, 84)
         box, scores, extra = torch.split(
             box_cls[None], [self.reg_max * 4, self.nc, self.n_extra], dim=1
         )  # (1, 64, *), (1, 80, *), (1, 32, *)
@@ -112,9 +98,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
             )
             * self.stride[:, ic]
         )
-        return (
-            torch.cat([dbox, scores.sigmoid(), extra], dim=1).squeeze(0).transpose(0, 1)
-        )
+        return torch.cat([dbox, scores.sigmoid(), extra], dim=1).squeeze(0).transpose(0, 1)
 
     def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Filters out low-confidence detections from a single concatenated output tensor.
@@ -125,19 +109,14 @@ class YOLOAnchorlessPost(YOLOPostBase):
         Returns:
             List[torch.Tensor]: Filtered detections for each image in the batch.
         """
-        x_list = torch.split(
-            x.squeeze(1), 1, dim=0
-        )  # [(1, 8400, 84), (1, 8400, 84), ...]
+        x_list = torch.split(x.squeeze(1), 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
         def process_conversion(x):
             x = x.squeeze(0)  # (8400, 84)
             if self.n_extra == 0:
                 ic = torch.amax(x[:, -self.nc :], dim=1) > self.conf_thres
             else:
-                ic = (
-                    torch.amax(x[:, -self.nc - self.n_extra : -self.n_extra], dim=1)
-                    > self.conf_thres
-                )
+                ic = torch.amax(x[:, -self.nc - self.n_extra : -self.n_extra], dim=1) > self.conf_thres
             x = x[ic]
             if x.numel() == 0:
                 return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32)
@@ -169,23 +148,13 @@ class YOLOAnchorlessPost(YOLOPostBase):
         output = []
         for xi in x:
             if xi.numel() == 0:
-                output.append(
-                    torch.zeros(
-                        (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
-                    )
-                )
+                output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device))
                 continue
             box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
             i, j = (score > self.conf_thres).nonzero(as_tuple=False).T
-            xi = torch.cat(
-                [box[i], xi[i, j + 4, None], j[:, None].float(), extra[i]], 1
-            ).to(self.device)
+            xi = torch.cat([box[i], xi[i, j + 4, None], j[:, None].float(), extra[i]], 1).to(self.device)
             if xi.numel() == 0:
-                output.append(
-                    torch.zeros(
-                        (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
-                    )
-                )
+                output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device))
                 continue
             xi = xi[torch.argsort(xi[:, 4], descending=True)[:max_nms]]
             # NMS
@@ -247,16 +216,12 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         Returns:
             tuple: (detections, prototypes)
         """
-        if (self.nc + self.n_extra + 4) in x[0].shape[1:] and self.n_extra in x[
-            1
-        ].shape[1:]:
+        if (self.nc + self.n_extra + 4) in x[0].shape[1:] and self.n_extra in x[1].shape[1:]:
             return (
                 x[0],
                 x[1],
             )
-        if (self.nc + self.n_extra + 4) in x[1].shape[1:] and self.n_extra in x[
-            0
-        ].shape[1:]:
+        if (self.nc + self.n_extra + 4) in x[1].shape[1:] and self.n_extra in x[0].shape[1:]:
             return (
                 x[1],
                 x[0],
@@ -276,17 +241,11 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         y_ext = []
         for xi in x:
             if xi.shape[-1] == self.n_extra:
-                y_ext.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 32, 160, 160), (b, 32, 80, 80), ...
+                y_ext.append(xi.permute(0, 3, 1, 2))  # (b, 32, 160, 160), (b, 32, 80, 80), ...
             elif xi.shape[-1] == self.reg_max * 4:
-                y_det.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
             elif xi.shape[-1] == self.nc:
-                y_cls.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 80, 80, 80), (b, 80, 40, 40), ...
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 80, 80, 80), (b, 80, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
         # sort as box, scores
@@ -294,9 +253,7 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         proto = y_ext.pop(0).permute(0, 2, 3, 1)
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        assert (
-            len(y_cls) == len(y_det) == len(y_ext)
-        ), "output arguments are not in a proper form"
+        assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
         y = [
             torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
             for (yi_det, yi_cls, yi_ext) in zip(y_det, y_cls, y_ext)
@@ -327,30 +284,20 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
             else:
                 raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
             if xi.shape[-1] == self.reg_max * 4:
-                y_det.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
+                y_det.append(xi.permute(0, 3, 1, 2))  # (b, 64, 80, 80), (b, 64 ,40, 40), ...
             elif xi.shape[-1] == self.nc:
-                y_cls.append(
-                    xi.permute(0, 3, 1, 2)
-                )  # (b, 1, 80, 80), (b, 1, 40, 40), ...
+                y_cls.append(xi.permute(0, 3, 1, 2))  # (b, 1, 80, 80), (b, 1, 40, 40), ...
             elif xi.shape[-1] == self.n_extra:
-                y_kpt.append(
-                    xi.permute(0, 3, 1, 2).flatten(2)
-                )  # (b, 51, 80, 80), (b, 1, 40, 40), ...
+                y_kpt.append(xi.permute(0, 3, 1, 2).flatten(2))  # (b, 51, 80, 80), (b, 1, 40, 40), ...
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
         # sort as box, scores
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        y_kpt = sorted(
-            y_kpt, key=lambda x: x.numel(), reverse=True
-        )  # (b, 51, 6400), (b, 51, 1600), (b, 51, 400)
+        y_kpt = sorted(y_kpt, key=lambda x: x.numel(), reverse=True)  # (b, 51, 6400), (b, 51, 1600), (b, 51, 400)
         y_tmp = [
             torch.cat((yi_det, yi_cls), dim=1).flatten(2)
-            for (yi_det, yi_cls) in zip(
-                y_det, y_cls
-            )  # (b, 65, 6400), (b, 65, 1600), (b, 65, 400)
+            for (yi_det, yi_cls) in zip(y_det, y_cls)  # (b, 65, 6400), (b, 65, 1600), (b, 65, 400)
         ]
         y = [
             torch.cat((yi_tmp, yi_kpt), dim=1) for (yi_tmp, yi_kpt) in zip(y_tmp, y_kpt)
@@ -365,15 +312,10 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
         Returns:
             torch.Tensor: Decoded boxes, scores, and keypoints.
         """
-        ic = (
-            torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0)
-            > self.inv_conf_thres
-        )
+        ic = torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0) > self.inv_conf_thres
         box_cls = box_cls[:, ic]  # (116, *)
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 4 + self.nc + self.n_extra), dtype=torch.float32
-            )  # (0, 56)
+            return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32)  # (0, 56)
         box, scores, keypoints = torch.split(
             box_cls[None], [self.reg_max * 4, self.nc, self.n_extra], dim=1
         )  # (1, 64, *), (1, 1, *), (1, 51, *)
@@ -387,17 +329,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
             * self.stride[:, ic]
         )
         keypoints = keypoints.view(1, 17, 3, -1)
-        key_coord, key_conf = torch.split(
-            keypoints, [2, 1], dim=2
-        )  # (1, 17, 2, 8400), (1, 17, 1, 8400)
-        key_coord = (key_coord * 2 + self.anchors[:, ic] - 0.5) * self.stride[
-            :, ic
-        ]  # (1, 17, 2, *)
-        keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(
-            1, self.n_extra, -1
-        )  # (1, 51, *)
-        return (
-            torch.cat([dbox, scores.sigmoid(), keypoints], dim=1)
-            .squeeze(0)
-            .transpose(0, 1)
-        )  # (*, 56)
+        key_coord, key_conf = torch.split(keypoints, [2, 1], dim=2)  # (1, 17, 2, 8400), (1, 17, 1, 8400)
+        key_coord = (key_coord * 2 + self.anchors[:, ic] - 0.5) * self.stride[:, ic]  # (1, 17, 2, *)
+        keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(1, self.n_extra, -1)  # (1, 51, *)
+        return torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).squeeze(0).transpose(0, 1)  # (*, 56)

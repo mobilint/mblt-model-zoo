@@ -70,16 +70,12 @@ class Results:
             source_img = np.array(source_img)
             source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
         elif isinstance(source_path, np.ndarray):
-            source_img = np.array(
-                source_path
-            )  # assume imread or video read is made in BGR format
-            assert (
-                source_img.shape[2] == 3
-            ), f"Got unexpected shape for source_img={source_img.shape}."
+            source_img = np.array(source_path)  # assume imread or video read is made in BGR format
+            assert source_img.shape[2] == 3, f"Got unexpected shape for source_img={source_img.shape}."
         else:  # str image path
-            assert os.path.exists(source_path) and os.path.isfile(
-                source_path
-            ), f"File {source_path} does not exist or is not a file."
+            assert os.path.exists(source_path) and os.path.isfile(source_path), (
+                f"File {source_path} does not exist or is not a file."
+            )
             source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
         return source_img
 
@@ -96,18 +92,13 @@ class Results:
         self.mask = None
         if self.task.lower() == "image_classification":
             self.acc = output
-        elif (
-            self.task.lower() == "object_detection"
-            or self.task.lower() == "pose_estimation"
-        ):
+        elif self.task.lower() == "object_detection" or self.task.lower() == "pose_estimation":
             self.box_cls = output[0]
         elif self.task.lower() == "instance_segmentation":
             self.box_cls = output[0][0]
             self.mask = output[0][1]
         else:
-            raise NotImplementedError(
-                f"Task {self.task} is not supported for plotting results."
-            )
+            raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
         self.output = output  # store raw output
 
     def plot(
@@ -144,9 +135,7 @@ class Results:
         elif self.task.lower() == "pose_estimation":
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
         else:
-            raise NotImplementedError(
-                f"Task {self.task} is not supported for plotting results."
-            )
+            raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
 
     def _plot_image_classification(
         self,
@@ -165,8 +154,8 @@ class Results:
         labels = [get_imagenet_label(i) for i in topk_indices]
         comments = []
         for i in range(topk):
-            comments.append(f"{labels[i]}: {topk_probs[i]*100:.2f}%")
-            print(f"Label: {labels[i]}, Probability: {topk_probs[i]*100:.2f}%")
+            comments.append(f"{labels[i]}: {topk_probs[i] * 100:.2f}%")
+            print(f"Label: {labels[i]}, Probability: {topk_probs[i] * 100:.2f}%")
         if source_path is not None and save_path is not None:
             comments = "\n".join(comments)
             img = self._read_image(source_path)
@@ -205,9 +194,9 @@ class Results:
         save_path: str = None,
         **kwargs,
     ):
-        assert self.box_cls.shape[1] == 6 + self.post_cfg.get(
-            "n_extra", 0
-        ), f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
+        assert self.box_cls.shape[1] == 6 + self.post_cfg.get("n_extra", 0), (
+            f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
+        )
         img = self._read_image(source_path)
         self.labels = self.box_cls[:, 5].to(torch.int64)
         self.scores = self.box_cls[:, 4]
@@ -220,7 +209,7 @@ class Results:
         for box, score, label in zip(self.boxes, self.scores, self.labels):
             img = cv2.putText(
                 img,
-                f"{get_coco_label(label)} {int(100*score)}%",
+                f"{get_coco_label(label)} {int(100 * score)}%",
                 (int(box[0]), int(box[1]) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -271,8 +260,7 @@ class Results:
         for i, label in enumerate(self.labels):
             overlay = np.maximum(
                 overlay,
-                masks[:, :, i][:, :, np.newaxis]
-                * np.array(get_coco_det_palette(label)).reshape(1, 1, 3),
+                masks[:, :, i][:, :, np.newaxis] * np.array(get_coco_det_palette(label)).reshape(1, 1, 3),
             )
         total_mask = overlay.max(axis=2, keepdims=True)
         inv_mask = 1 - ALPHA * total_mask / 255
@@ -310,8 +298,8 @@ class Results:
             for j, sk in enumerate(get_coco_pose_skeleton()):
                 pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
                 pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
-                conf1 = kpt[sk[0] - 1, 2]
-                conf2 = kpt[sk[1] - 1, 2]
+                # conf1 = kpt[sk[0] - 1, 2]
+                # conf2 = kpt[sk[1] - 1, 2]
                 # if conf1 < self.conf_thres or conf2 < self.conf_thres:
                 #    continue
                 cv2.line(

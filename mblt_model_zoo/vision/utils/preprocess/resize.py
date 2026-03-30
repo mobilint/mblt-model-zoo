@@ -45,9 +45,7 @@ class Resize(PreOps):
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(
-        self, x: Union[TensorLike, Image.Image]
-    ) -> Union[torch.Tensor, Image.Image]:
+    def __call__(self, x: Union[TensorLike, Image.Image]) -> Union[torch.Tensor, Image.Image]:
         """Resizes the input image.
 
         Args:
@@ -69,16 +67,12 @@ class Resize(PreOps):
             new_h, new_w = self._compute_resized_output_size(img_h, img_w)
             if [img_h, img_w] == [new_h, new_w]:
                 return x
-            x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(
-                x, [torch.float32, torch.float64]
-            )
+            x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(x, [torch.float32, torch.float64])
             x = F.interpolate(
                 x[None],
                 size=(new_h, new_w),
                 mode=self.interpolation,
-                align_corners=(
-                    False if self.interpolation in ["bilinear", "bicubic"] else None
-                ),
+                align_corners=(False if self.interpolation in ["bilinear", "bicubic"] else None),
                 antialias=self.interpolation in ["bilinear", "bicubic"],
             )
             x = self._cast_squeeze_out(x, need_cast, need_squeeze, out_dtype)

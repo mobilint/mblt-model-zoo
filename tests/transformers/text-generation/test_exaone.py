@@ -50,7 +50,7 @@ def test_exaone(pipe):
         {"role": "user", "content": prompt},
     ]
 
-    outputs = pipe(
+    pipe(
         messages,
         max_length=512,
     )

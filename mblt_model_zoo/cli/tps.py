@@ -5,52 +5,59 @@ import csv
 import json
 import os
 import sys
-import time
 from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    add_device_tracking_args as _add_device_tracking_args,
-    build_device_tracker as _build_device_tracker_common,
-    build_phase_trackers as _build_phase_trackers_common,
-    extract_device_metric as _extract_device_metric_common,
-    parse_positive_int as _parse_positive_int_common,
-    parse_positive_int_optional as _parse_positive_int_optional_common,
-    print_device_status as _print_device_status_common,
-    stop_tracker_safe as _stop_tracker_safe_common,
-    weighted_two as _weighted_two_common,
-)
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser
+
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_device_tracking_args as _add_device_tracking_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    build_device_tracker as _build_device_tracker_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    build_phase_trackers as _build_phase_trackers_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    extract_device_metric as _extract_device_metric_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    parse_positive_int as _parse_positive_int_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    parse_positive_int_optional as _parse_positive_int_optional_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    print_device_status as _print_device_status_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    stop_tracker_safe as _stop_tracker_safe_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    weighted_two as _weighted_two_common,
+)
+
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
     text = spec.strip()
     sep = ":" if ":" in text else ("," if "," in text else None)
     if sep is None:
-        raise argparse.ArgumentTypeError(
-            f"invalid range '{spec}': expected 'start:end:step' or 'start,end,step'"
-        )
+        raise argparse.ArgumentTypeError(f"invalid range '{spec}': expected 'start:end:step' or 'start,end,step'")
     parts = [p.strip() for p in text.split(sep)]
     if len(parts) != 3:
-        raise argparse.ArgumentTypeError(
-            f"invalid range '{spec}': expected 3 integers (start, end, step)"
-        )
+        raise argparse.ArgumentTypeError(f"invalid range '{spec}': expected 3 integers (start, end, step)")
     try:
         start, end, step = (int(p) for p in parts)
     except ValueError as e:
-        raise argparse.ArgumentTypeError(
-            f"invalid range '{spec}': start/end/step must be integers"
-        ) from e
+        raise argparse.ArgumentTypeError(f"invalid range '{spec}': start/end/step must be integers") from e
     if step <= 0:
         raise argparse.ArgumentTypeError(f"invalid range '{spec}': step must be > 0")
     if start <= 0 or end <= 0:
-        raise argparse.ArgumentTypeError(
-            f"invalid range '{spec}': start/end must be > 0"
-        )
+        raise argparse.ArgumentTypeError(f"invalid range '{spec}': start/end must be > 0")
     if start > end:
-        raise argparse.ArgumentTypeError(
-            f"invalid range '{spec}': start must be <= end"
-        )
+        raise argparse.ArgumentTypeError(f"invalid range '{spec}': start must be <= end")
     return start, end, step
 
 
@@ -164,7 +171,7 @@ def _build_pipeline(
             raise SystemExit(
                 "CUDA/NVML initialization failed while creating the pipeline.\n"
                 "This happens before device tracking starts and is a host GPU driver/runtime issue.\n"
-                "Check: `nvidia-smi`, `python -c \"import torch; print(torch.cuda.is_available())\"`.\n"
+                'Check: `nvidia-smi`, `python -c "import torch; print(torch.cuda.is_available())"`.\n'
                 "If running in container, verify NVIDIA runtime and libnvidia-ml visibility.\n"
                 "Temporary workaround for this run: set `PYTORCH_NO_CUDA_MEMORY_CACHING=1` and retry."
             ) from exc
@@ -404,12 +411,8 @@ def _enrich_single_run_device(
     if avg_power is None:
         return
 
-    prefill_energy = (
-        prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
-    )
-    decode_energy = (
-        decode_avg_power * run.decode_duration if decode_avg_power is not None else None
-    )
+    prefill_energy = prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
+    decode_energy = decode_avg_power * run.decode_duration if decode_avg_power is not None else None
     total_energy = None
     if prefill_energy is not None and decode_energy is not None:
         total_energy = prefill_energy + decode_energy
@@ -418,33 +421,19 @@ def _enrich_single_run_device(
 
     run.avg_power_w = float(avg_power)
     run.total_energy_j = total_energy
-    run.prefill_tokens_per_j = (
-        _safe_div(float(run.num_prefill), prefill_energy)
-        if prefill_energy is not None
-        else None
-    )
+    run.prefill_tokens_per_j = _safe_div(float(run.num_prefill), prefill_energy) if prefill_energy is not None else None
     run.prefill_j_per_token = (
         _safe_div(prefill_energy, float(run.num_prefill))
         if prefill_energy is not None and run.num_prefill > 0
         else None
     )
-    run.decode_tokens_per_j = (
-        _safe_div(float(run.num_decode), decode_energy)
-        if decode_energy is not None
-        else None
-    )
+    run.decode_tokens_per_j = _safe_div(float(run.num_decode), decode_energy) if decode_energy is not None else None
     run.decode_j_per_token = (
-        _safe_div(decode_energy, float(run.num_decode))
-        if decode_energy is not None and run.num_decode > 0
-        else None
+        _safe_div(decode_energy, float(run.num_decode)) if decode_energy is not None and run.num_decode > 0 else None
     )
-    run.total_tokens_per_j = (
-        _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
-    )
+    run.total_tokens_per_j = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
     run.total_j_per_token = (
-        _safe_div(total_energy, float(total_tokens))
-        if total_energy is not None and total_tokens > 0
-        else None
+        _safe_div(total_energy, float(total_tokens)) if total_energy is not None and total_tokens > 0 else None
     )
 
 
@@ -555,25 +544,13 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     total_ms = [r.total_time * 1000.0 for r in runs]
     avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
     p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
-    avg_utilization_pct = [
-        r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None
-    ]
-    p99_utilization_pct = [
-        r.p99_utilization_pct for r in runs if r.p99_utilization_pct is not None
-    ]
-    avg_memory_used_mb = [
-        r.avg_memory_used_mb for r in runs if r.avg_memory_used_mb is not None
-    ]
-    p99_memory_used_mb = [
-        r.p99_memory_used_mb for r in runs if r.p99_memory_used_mb is not None
-    ]
+    avg_utilization_pct = [r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None]
+    p99_utilization_pct = [r.p99_utilization_pct for r in runs if r.p99_utilization_pct is not None]
+    avg_memory_used_mb = [r.avg_memory_used_mb for r in runs if r.avg_memory_used_mb is not None]
+    p99_memory_used_mb = [r.p99_memory_used_mb for r in runs if r.p99_memory_used_mb is not None]
     total_memory_mb = [r.total_memory_mb for r in runs if r.total_memory_mb is not None]
-    avg_memory_used_pct = [
-        r.avg_memory_used_pct for r in runs if r.avg_memory_used_pct is not None
-    ]
-    p99_memory_used_pct = [
-        r.p99_memory_used_pct for r in runs if r.p99_memory_used_pct is not None
-    ]
+    avg_memory_used_pct = [r.avg_memory_used_pct for r in runs if r.avg_memory_used_pct is not None]
+    p99_memory_used_pct = [r.p99_memory_used_pct for r in runs if r.p99_memory_used_pct is not None]
     prefill_avg_power_w = [r.prefill_avg_power_w for r in runs if r.prefill_avg_power_w is not None]
     prefill_p99_power_w = [r.prefill_p99_power_w for r in runs if r.prefill_p99_power_w is not None]
     decode_avg_power_w = [r.decode_avg_power_w for r in runs if r.decode_avg_power_w is not None]
@@ -596,12 +573,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     prefill_p99_memory_used_mb = [
         r.prefill_p99_memory_used_mb for r in runs if r.prefill_p99_memory_used_mb is not None
     ]
-    decode_avg_memory_used_mb = [
-        r.decode_avg_memory_used_mb for r in runs if r.decode_avg_memory_used_mb is not None
-    ]
-    decode_p99_memory_used_mb = [
-        r.decode_p99_memory_used_mb for r in runs if r.decode_p99_memory_used_mb is not None
-    ]
+    decode_avg_memory_used_mb = [r.decode_avg_memory_used_mb for r in runs if r.decode_avg_memory_used_mb is not None]
+    decode_p99_memory_used_mb = [r.decode_p99_memory_used_mb for r in runs if r.decode_p99_memory_used_mb is not None]
     prefill_avg_memory_used_pct = [
         r.prefill_avg_memory_used_pct for r in runs if r.prefill_avg_memory_used_pct is not None
     ]
@@ -858,7 +831,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             if p99_mem_used_mb is not None:
                 run_p99_memory_used_mb.append(float(p99_mem_used_mb))
             total_memory_mb = max(
-                [v for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb")) if v is not None],
+                [
+                    v
+                    for v in (prefill_metric.get("total_memory_mb"), decode_metric.get("total_memory_mb"))
+                    if v is not None
+                ],
                 default=None,
             )
             if total_memory_mb is not None:
@@ -1173,11 +1150,19 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
                     "avg_utilization_pct": vision_util_avg[idx - 1] if idx - 1 < len(vision_util_avg) else None,
                     "p99_utilization_pct": vision_util_p99[idx - 1] if idx - 1 < len(vision_util_p99) else None,
-                    "avg_memory_used_mb": vision_mem_used_avg_mb[idx - 1] if idx - 1 < len(vision_mem_used_avg_mb) else None,
-                    "p99_memory_used_mb": vision_mem_used_p99_mb[idx - 1] if idx - 1 < len(vision_mem_used_p99_mb) else None,
+                    "avg_memory_used_mb": vision_mem_used_avg_mb[idx - 1]
+                    if idx - 1 < len(vision_mem_used_avg_mb)
+                    else None,
+                    "p99_memory_used_mb": vision_mem_used_p99_mb[idx - 1]
+                    if idx - 1 < len(vision_mem_used_p99_mb)
+                    else None,
                     "total_memory_mb": vision_mem_total_mb[idx - 1] if idx - 1 < len(vision_mem_total_mb) else None,
-                    "avg_memory_used_pct": vision_mem_used_pct_avg[idx - 1] if idx - 1 < len(vision_mem_used_pct_avg) else None,
-                    "p99_memory_used_pct": vision_mem_used_pct_p99[idx - 1] if idx - 1 < len(vision_mem_used_pct_p99) else None,
+                    "avg_memory_used_pct": vision_mem_used_pct_avg[idx - 1]
+                    if idx - 1 < len(vision_mem_used_pct_avg)
+                    else None,
+                    "p99_memory_used_pct": vision_mem_used_pct_p99[idx - 1]
+                    if idx - 1 < len(vision_mem_used_pct_p99)
+                    else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "prefill_tok_per_j": None,
                     "decode_tok_per_j": None,
@@ -1218,11 +1203,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             }
         )
 
-    llm_resolution = (
-        args.llm_resolution
-        if args.llm_resolution is not None
-        else args.image_resolutions[0]
-    )
+    llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
     for _ in range(args.warmup):
         measurer.measure_llm(
             image_resolution=llm_resolution,
@@ -1262,34 +1243,20 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     llm_total_ms = [r.total_time * 1000.0 for r in llm_runs]
     llm_avg_power_w = [r.avg_power_w for r in llm_runs if r.avg_power_w is not None]
     llm_p99_power_w = [r.p99_power_w for r in llm_runs if r.p99_power_w is not None]
-    llm_avg_utilization_pct = [
-        r.avg_utilization_pct for r in llm_runs if r.avg_utilization_pct is not None
-    ]
-    llm_p99_utilization_pct = [
-        r.p99_utilization_pct for r in llm_runs if r.p99_utilization_pct is not None
-    ]
-    llm_avg_memory_used_mb = [
-        r.avg_memory_used_mb for r in llm_runs if r.avg_memory_used_mb is not None
-    ]
-    llm_p99_memory_used_mb = [
-        r.p99_memory_used_mb for r in llm_runs if r.p99_memory_used_mb is not None
-    ]
+    llm_avg_utilization_pct = [r.avg_utilization_pct for r in llm_runs if r.avg_utilization_pct is not None]
+    llm_p99_utilization_pct = [r.p99_utilization_pct for r in llm_runs if r.p99_utilization_pct is not None]
+    llm_avg_memory_used_mb = [r.avg_memory_used_mb for r in llm_runs if r.avg_memory_used_mb is not None]
+    llm_p99_memory_used_mb = [r.p99_memory_used_mb for r in llm_runs if r.p99_memory_used_mb is not None]
     llm_total_memory_mb = [r.total_memory_mb for r in llm_runs if r.total_memory_mb is not None]
-    llm_avg_memory_used_pct = [
-        r.avg_memory_used_pct for r in llm_runs if r.avg_memory_used_pct is not None
-    ]
-    llm_p99_memory_used_pct = [
-        r.p99_memory_used_pct for r in llm_runs if r.p99_memory_used_pct is not None
-    ]
+    llm_avg_memory_used_pct = [r.avg_memory_used_pct for r in llm_runs if r.avg_memory_used_pct is not None]
+    llm_p99_memory_used_pct = [r.p99_memory_used_pct for r in llm_runs if r.p99_memory_used_pct is not None]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if r.total_energy_j is not None]
     llm_prefill_tok_per_j = [r.prefill_tokens_per_j for r in llm_runs if r.prefill_tokens_per_j is not None]
     llm_decode_tok_per_j = [r.decode_tokens_per_j for r in llm_runs if r.decode_tokens_per_j is not None]
     llm_prefill_j_per_tok = [r.prefill_j_per_token for r in llm_runs if r.prefill_j_per_token is not None]
     llm_decode_j_per_tok = [r.decode_j_per_token for r in llm_runs if r.decode_j_per_token is not None]
 
-    print(
-        f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}"
-    )
+    print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}")
     _print_summary_header()
     _print_summary("llm_prefill_tps", llm_prefill_tps, "tok/s")
     _print_summary("llm_decode_tps", llm_decode_tps, "tok/s")
@@ -1402,9 +1369,7 @@ def add_tps_parser(
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
-        p.add_argument(
-            "--task", default="text-generation", help="transformers pipeline task"
-        )
+        p.add_argument("--task", default="text-generation", help="transformers pipeline task")
         p.add_argument(
             "--model",
             required=True,
@@ -1415,9 +1380,7 @@ def add_tps_parser(
             default=None,
             help="tokenizer id or local path (defaults to model)",
         )
-        p.add_argument(
-            "--device", default="cpu", help="device for pipeline (e.g., cpu, cuda:0)"
-        )
+        p.add_argument("--device", default="cpu", help="device for pipeline (e.g., cpu, cuda:0)")
         p.add_argument(
             "--revision",
             default=None,
@@ -1450,21 +1413,15 @@ def add_tps_parser(
             default=None,
             help='Target clusters (e.g., "0;1")',
         )
-        p.add_argument(
-            "--device-map", default=None, help="transformers device_map (optional)"
-        )
-        p.add_argument(
-            "--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)"
-        )
+        p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
+        p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")
         p.add_argument(
             "--trust-remote-code",
             action=argparse.BooleanOptionalAction,
             default=True,
             help="pass trust_remote_code to transformers",
         )
-        p.add_argument(
-            "--repeat", type=_parse_positive_int, default=1, help="number of repeated runs"
-        )
+        p.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated runs")
         p.add_argument(
             "--warmup",
             type=_parse_positive_int,
@@ -1487,9 +1444,7 @@ def add_tps_parser(
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=512, help="input token count")
-    p_measure.add_argument(
-        "--decode", type=_parse_positive_int, default=128, help="new tokens to generate"
-    )
+    p_measure.add_argument("--decode", type=_parse_positive_int, default=128, help="new tokens to generate")
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
 
@@ -1560,4 +1515,3 @@ def add_tps_parser(
     p_vlm.add_argument("--json", default=None, help="write VLM results as JSON")
     p_vlm.add_argument("--csv", default=None, help="write VLM rows as CSV")
     p_vlm.set_defaults(_handler=_cmd_vlm_sweep)
-

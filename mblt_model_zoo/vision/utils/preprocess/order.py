@@ -38,9 +38,7 @@ class SetOrder(PreOps):
         elif x.shape[-1] == 3:
             cdim = 2
         else:
-            raise ValueError(
-                f"Only assume HWC or CHW with 3 channels, but got shape {x.shape}"
-            )
+            raise ValueError(f"Only assume HWC or CHW with 3 channels, but got shape {x.shape}")
         is_tensor = isinstance(x, torch.Tensor)
         permute_fn = torch.permute if is_tensor else np.transpose
         if cdim == 0 and self.shape.lower() == "hwc":
