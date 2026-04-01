@@ -7,19 +7,22 @@ from collections import OrderedDict
 from .base import PreBase
 from .center_crop import CenterCrop
 from .letterbox import LetterBox
+from .normalize import Normalize
 from .order import SetOrder
 from .reader import Reader
 from .resize import Resize
 
 
-def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
+def build_preprocess(
+    pre_cfg: OrderedDict,
+):
     """Builds a preprocessing pipeline based on the configuration.
 
     Args:
-        pre_cfg (OrderedDict): Preprocessing configuration mapping operations to attributes.
+            pre_cfg: Preprocessing configuration mapping operations to attributes.
 
     Returns:
-        PreBase: An orchestrator for the sequence of preprocessing steps.
+            An orchestrator for the sequence of preprocessing steps.
     """
     res = []
     for pre_type, pre_attr in pre_cfg.items():
@@ -34,6 +37,8 @@ def build_preprocess(pre_cfg: OrderedDict) -> PreBase:
             res.append(SetOrder(**pre_attr))
         elif pre_type_lower == LetterBox.__name__.lower():
             res.append(LetterBox(**pre_attr))
+        elif pre_type_lower == Normalize.__name__.lower():
+            res.append(Normalize(**pre_attr))
         else:
             raise ValueError(f"Got unsupported pre_type={pre_type}.")
 

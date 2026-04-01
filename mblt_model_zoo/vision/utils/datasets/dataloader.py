@@ -37,9 +37,7 @@ class CustomCocodata:
 
     def _load_image(self, image_id: int):
         """Load image by ID"""
-        image_path = os.path.join(
-            self.root, self.coco.loadImgs(image_id)[0]["file_name"]
-        )
+        image_path = os.path.join(self.root, self.coco.loadImgs(image_id)[0]["file_name"])
         image = cv2.imread(image_path)  # Load image (BGR format)
 
         if image is None:
@@ -91,9 +89,7 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
             idx,
         )
 
-    return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
-    )
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
 
 
 class CustomImageFolder:
@@ -167,9 +163,7 @@ class CustomImageFolder:
         return len(self.samples)
 
 
-def get_imagenet_loader(
-    dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable
-):
+def get_imagenet_loader(dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable):
     """Creates a DataLoader for the ImageNet dataset.
 
     Args:
@@ -195,9 +189,7 @@ def get_imagenet_loader(
             np.array(labels),
         )  # BHWC, labels
 
-    return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
-    )
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
 
 
 class CustomWiderface:
@@ -275,9 +267,7 @@ class CustomWiderface:
         return len(self.samples)
 
 
-def get_widerface_loader(
-    dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable
-):
+def get_widerface_loader(dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable):
     """Creates a DataLoader for the WiderFace dataset.
 
     Args:
@@ -309,6 +299,4 @@ def get_widerface_loader(
             fnames,
         )
 
-    return torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
-    )
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)

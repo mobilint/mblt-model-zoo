@@ -112,13 +112,9 @@ if __name__ == "__main__":
         product=args.product,
     )
     if args.save_path is None:
-        args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"yolo11m_pose_{os.path.basename(args.input_path)}"
-        )
+        args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_pose_{os.path.basename(args.input_path)}")
 
     try:
-        run_inference(
-            model, args.input_path, args.save_path, args.conf_thres, args.iou_thres
-        )
+        run_inference(model, args.input_path, args.save_path, args.conf_thres, args.iou_thres)
     finally:
         model.dispose()

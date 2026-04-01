@@ -2,6 +2,7 @@
 FlexiViT model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,25 +13,32 @@ class FlexiViT_Small_Set(ModelInfoSet):
     """Configuration set for FlexiViT Small models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/FlexiVit_Small",
-            "filename": "flexivit_small.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 252,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [240, 240],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/FlexiVit_Small",
+                "filename": "flexivit_small.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 252,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [240, 240],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -38,25 +46,32 @@ class FlexiViT_Base_Set(ModelInfoSet):
     """Configuration set for FlexiViT Base models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/FlexiVit_Base",
-            "filename": "flexivit_base.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 252,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [240, 240],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/FlexiVit_Base",
+                "filename": "flexivit_base.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 252,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [240, 240],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -64,25 +79,32 @@ class FlexiViT_Large_Set(ModelInfoSet):
     """Configuration set for FlexiViT Large models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/FlexiVit_Large",
-            "filename": "flexivit_large.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 252,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [240, 240],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/FlexiVit_Large",
+                "filename": "flexivit_large.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 252,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [240, 240],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

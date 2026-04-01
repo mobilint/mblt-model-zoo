@@ -47,7 +47,7 @@ def test_llama(pipe):
         {"role": "user", "content": "Who are you?"},
     ]
 
-    outputs = pipe(
+    pipe(
         messages,
         max_length=512,
     )

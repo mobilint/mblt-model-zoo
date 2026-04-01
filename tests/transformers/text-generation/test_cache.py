@@ -55,7 +55,10 @@ def test_cache(model, tokenizer):
     messages = [
         {
             "role": "user",
-            "content": 'My name is James. You should remember my name. If I ask "What is my name?", you should answer "Your name is James."',
+            "content": (
+                "My name is James. You should remember my name. "
+                'If I ask "What is my name?", you should answer "Your name is James."'
+            ),
         }
     ]
 
@@ -80,9 +83,7 @@ def test_cache(model, tokenizer):
         max_new_tokens=1024,
     )
 
-    assistant_text = tokenizer.decode(
-        output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True
-    )
+    assistant_text = tokenizer.decode(output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True)
     messages += [{"role": "assistant", "content": assistant_text}]
     messages += [{"role": "user", "content": "What is my name?"}]
 
@@ -112,7 +113,5 @@ def test_cache(model, tokenizer):
         streamer=streamer,
         max_new_tokens=1024,
     )
-    final_message = tokenizer.decode(
-        output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True
-    )
+    final_message = tokenizer.decode(output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True)
     assert "James" in final_message

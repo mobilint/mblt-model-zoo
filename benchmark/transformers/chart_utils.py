@@ -1,5 +1,5 @@
-import json
 import importlib.util
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -10,9 +10,17 @@ import numpy as np
 try:
     from benchmark.common.chart_utils import (
         default_charts_dir as _default_charts_dir_common,
+    )
+    from benchmark.common.chart_utils import (
         plot_grouped_scalar_barh,
+    )
+    from benchmark.common.chart_utils import (
         sanitize_text as _sanitize_text_common,
+    )
+    from benchmark.common.chart_utils import (
         source_labels as _source_labels_common,
+    )
+    from benchmark.common.chart_utils import (
         source_prefix as _source_prefix_common,
     )
 except ModuleNotFoundError:
@@ -234,10 +242,7 @@ def plot_scalar_chart(
     x_label: str,
     output_path: Path,
 ) -> None:
-    grouped_values = [
-        {model: scalar_selector(source[model]) for model in models}
-        for source in metrics_by_folder
-    ]
+    grouped_values = [{model: scalar_selector(source[model]) for model in models} for source in metrics_by_folder]
     plot_grouped_scalar_barh(
         models=models,
         group_labels=folder_labels,

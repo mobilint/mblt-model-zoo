@@ -17,12 +17,26 @@ from transformers import pipeline as hf_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int_optional as _parse_positive_int_optional,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
@@ -175,7 +189,9 @@ def _build_pipeline(args: argparse.Namespace, model_id: str, revision: str | Non
     return hf_pipeline(**kwargs)
 
 
-def _iter_targets(model_ids: list[str], revision: str | None, all_revisions: bool) -> list[tuple[str, str | None, str, str]]:
+def _iter_targets(
+    model_ids: list[str], revision: str | None, all_revisions: bool
+) -> list[tuple[str, str | None, str, str]]:
     out: list[tuple[str, str | None, str, str]] = []
     if not all_revisions:
         for m in model_ids:
@@ -236,7 +252,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             if tracker is not None:
                 tracker.start()
             try:
-                run = measurer.measure_vision(image_resolution=resolution, repeat=1, prompt=args.prompt, show_progress=False)[0]
+                run = measurer.measure_vision(
+                    image_resolution=resolution, repeat=1, prompt=args.prompt, show_progress=False
+                )[0]
             finally:
                 _stop_tracker_safe(tracker)
             runs.append(run)
@@ -343,7 +361,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         desc=f"{label} llm@{llm_resolution} warmup",
         leave=False,
     ):
-        measurer.measure_llm(image_resolution=llm_resolution, num_decode=args.decode, repeat=1, prompt=args.prompt, show_progress=False)
+        measurer.measure_llm(
+            image_resolution=llm_resolution, num_decode=args.decode, repeat=1, prompt=args.prompt, show_progress=False
+        )
 
     llm_runs = []
     llm_avg_power_w: list[float] = []
@@ -367,7 +387,13 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         if tracker is not None:
             tracker.start()
         try:
-            run = measurer.measure_llm(image_resolution=llm_resolution, num_decode=args.decode, repeat=1, prompt=args.prompt, show_progress=False)[0]
+            run = measurer.measure_llm(
+                image_resolution=llm_resolution,
+                num_decode=args.decode,
+                repeat=1,
+                prompt=args.prompt,
+                show_progress=False,
+            )[0]
         finally:
             _stop_tracker_safe(tracker)
         if tracker is not None:
@@ -406,10 +432,18 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_avg_memory_used_pct = [float(r.avg_memory_used_pct) for r in llm_runs if r.avg_memory_used_pct is not None]
     llm_p99_memory_used_pct = [float(r.p99_memory_used_pct) for r in llm_runs if r.p99_memory_used_pct is not None]
     llm_total_energy_j = [float(r.total_energy_j) for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
-    llm_prefill_tok_per_j = [float(r.prefill_tokens_per_j) for r in llm_runs if getattr(r, "prefill_tokens_per_j", None) is not None]
-    llm_decode_tok_per_j = [float(r.decode_tokens_per_j) for r in llm_runs if getattr(r, "decode_tokens_per_j", None) is not None]
-    llm_prefill_j_per_tok = [float(r.prefill_j_per_token) for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None]
-    llm_decode_j_per_tok = [float(r.decode_j_per_token) for r in llm_runs if getattr(r, "decode_j_per_token", None) is not None]
+    llm_prefill_tok_per_j = [
+        float(r.prefill_tokens_per_j) for r in llm_runs if getattr(r, "prefill_tokens_per_j", None) is not None
+    ]
+    llm_decode_tok_per_j = [
+        float(r.decode_tokens_per_j) for r in llm_runs if getattr(r, "decode_tokens_per_j", None) is not None
+    ]
+    llm_prefill_j_per_tok = [
+        float(r.prefill_j_per_token) for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None
+    ]
+    llm_decode_j_per_tok = [
+        float(r.decode_j_per_token) for r in llm_runs if getattr(r, "decode_j_per_token", None) is not None
+    ]
     for idx, r in enumerate(llm_runs, start=1):
         csv_rows.append(
             {
@@ -742,7 +776,11 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
     axs[1].set_title("Vision FPS")
     axs[1].set_xlabel("resolution")
     axs[1].grid(True, alpha=0.3)
-    axs[2].bar(["prefill_tps", "decode_tps", "ttft_ms"], [prefill, decode, ttft], color=["tab:green", "tab:purple", "tab:orange"])
+    axs[2].bar(
+        ["prefill_tps", "decode_tps", "ttft_ms"],
+        [prefill, decode, ttft],
+        color=["tab:green", "tab:purple", "tab:orange"],
+    )
     axs[2].set_title("LLM Summary")
     axs[2].grid(axis="y", alpha=0.3)
     fig.suptitle(payload.get("model", "unknown"))
@@ -793,7 +831,9 @@ def main(argv: list[str] | None = None) -> int:
         help="reference resolution used for LLM-only benchmark (default: first image resolution)",
     )
     parser.add_argument("--prompt", default="Describe the image in one sentence.")
-    parser.add_argument("--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs")
+    parser.add_argument(
+        "--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs"
+    )
     parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="number of repeated runs")
     parser.add_argument(
         "--original-models",
@@ -814,7 +854,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--skip-existing", action="store_true", help="skip models with existing outputs")
     parser.add_argument("--rebuild-charts", action="store_true", help="skip benchmark run and rebuild combined outputs")
-    parser.add_argument("--results-dir", default=None, help="output directory (default: benchmark/transformers/results/image_text_to_text)")
+    parser.add_argument(
+        "--results-dir",
+        default=None,
+        help="output directory (default: benchmark/transformers/results/image_text_to_text)",
+    )
     args = parser.parse_args(argv)
 
     if not device_explicit and args.device is None:
@@ -829,7 +873,9 @@ def main(argv: list[str] | None = None) -> int:
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     script_dir = Path(__file__).resolve().parent
-    results_dir = Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    results_dir = (
+        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    )
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if args.rebuild_charts:

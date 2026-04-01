@@ -2,6 +2,7 @@
 Vision Transformer (ViT) model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,67 +13,53 @@ class ViT_B_16_Set(ModelInfoSet):
     """Configuration set for ViT_B_16 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_B_16.tv1_in1k",
-            "filename": "vit_b_16_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_B_16.tv1_in1k",
+                "filename": "vit_b_16_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
-    IMAGENET1K_SWAG_E2E_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_B_16.swag_e2e_in1k",
-            "filename": "vit_b_16_IMAGENET1K_SWAG_E2E_V1.mxq",
-            "revision": "main",
+    IMAGENET1K_SWAG_E2E_V1 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ViT_B_16.swag_e2e_in1k",
+        filename="vit_b_16_IMAGENET1K_SWAG_E2E_V1.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 384,
+            "interpolation": "bicubic",
         },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
+        CenterCrop={
+            "size": [384, 384],
         },
-        post_cfg={"task": "image_classification"},
     )
-    IMAGENET1K_SWAG_LINEAR_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_B_16.swag_linear_in1k",
-            "filename": "vit_b_16_IMAGENET1K_SWAG_LINEAR_V1.mxq",
-            "revision": "main",
+    IMAGENET1K_SWAG_LINEAR_V1 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ViT_B_16.swag_linear_in1k",
+        filename="vit_b_16_IMAGENET1K_SWAG_LINEAR_V1.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 224,
+            "interpolation": "bicubic",
         },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -81,25 +68,32 @@ class ViT_B_32_Set(ModelInfoSet):
     """Configuration set for ViT_B_32 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_B_32",
-            "filename": "vit_b_32_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_B_32",
+                "filename": "vit_b_32_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -108,67 +102,53 @@ class ViT_L_16_Set(ModelInfoSet):
     """Configuration set for ViT_L_16 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_L_16",
-            "filename": "vit_l_16_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 242,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_L_16",
+                "filename": "vit_l_16_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 242,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
-    IMAGENET1K_SWAG_E2E_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_L_16.swag_e2e_in1k",
-            "filename": "vit_l_16_IMAGENET1K_SWAG_E2E_V1.mxq",
-            "revision": "main",
+    IMAGENET1K_SWAG_E2E_V1 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ViT_L_16.swag_e2e_in1k",
+        filename="vit_l_16_IMAGENET1K_SWAG_E2E_V1.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 512,
+            "interpolation": "bicubic",
         },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 512,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [512, 512],
-            },
-            "SetOrder": {"shape": "HWC"},
+        CenterCrop={
+            "size": [512, 512],
         },
-        post_cfg={"task": "image_classification"},
     )
-    IMAGENET1K_SWAG_LINEAR_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_L_16.swag_linear_in1k",
-            "filename": "vit_l_16_IMAGENET1K_SWAG_LINEAR_V1.mxq",
-            "revision": "main",
+    IMAGENET1K_SWAG_LINEAR_V1 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ViT_L_16.swag_linear_in1k",
+        filename="vit_l_16_IMAGENET1K_SWAG_LINEAR_V1.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 224,
+            "interpolation": "bicubic",
         },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 224,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -177,25 +157,32 @@ class ViT_L_32_Set(ModelInfoSet):
     """Configuration set for ViT_L_32 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_L_32",
-            "filename": "vit_l_32_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_L_32",
+                "filename": "vit_l_32_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
     DEFAULT = IMAGENET1K_V1
 
@@ -204,25 +191,32 @@ class ViT_Tiny_Patch16_224_Set(ModelInfoSet):
     """Configuration set for ViT_Tiny_Patch16_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Tiny_Patch16_224",
-            "filename": "vit_tiny_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Tiny_Patch16_224",
+                "filename": "vit_tiny_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -230,25 +224,32 @@ class ViT_Tiny_Patch16_384_Set(ModelInfoSet):
     """Configuration set for ViT_Tiny_Patch16_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Tiny_Patch16_384",
-            "filename": "vit_tiny_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Tiny_Patch16_384",
+                "filename": "vit_tiny_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -256,25 +257,32 @@ class ViT_Small_Patch16_224_Set(ModelInfoSet):
     """Configuration set for ViT_Small_Patch16_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Small_Patch16_224",
-            "filename": "vit_small_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Small_Patch16_224",
+                "filename": "vit_small_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -282,25 +290,32 @@ class ViT_Small_Patch16_384_Set(ModelInfoSet):
     """Configuration set for ViT_Small_Patch16_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Small_Patch16_384",
-            "filename": "vit_small_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Small_Patch16_384",
+                "filename": "vit_small_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -308,25 +323,32 @@ class ViT_Small_Patch32_224_Set(ModelInfoSet):
     """Configuration set for ViT_Small_Patch32_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Small_Patch32_224",
-            "filename": "vit_small_patch32_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Small_Patch32_224",
+                "filename": "vit_small_patch32_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -334,25 +356,32 @@ class ViT_Small_Patch32_384_Set(ModelInfoSet):
     """Configuration set for ViT_Small_Patch32_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Small_Patch32_384",
-            "filename": "vit_small_patch32_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Small_Patch32_384",
+                "filename": "vit_small_patch32_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -360,25 +389,32 @@ class ViT_Base_Patch8_224_Set(ModelInfoSet):
     """Configuration set for ViT_Base_Patch8_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Base_Patch8_224",
-            "filename": "vit_base_patch8_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Base_Patch8_224",
+                "filename": "vit_base_patch8_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -386,25 +422,32 @@ class ViT_Base_Patch16_224_Set(ModelInfoSet):
     """Configuration set for ViT_Base_Patch16_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Base_Patch16_224",
-            "filename": "vit_base_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Base_Patch16_224",
+                "filename": "vit_base_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -412,25 +455,32 @@ class ViT_Base_Patch16_384_Set(ModelInfoSet):
     """Configuration set for ViT_Base_Patch16_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Base_Patch16_384",
-            "filename": "vit_base_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Base_Patch16_384",
+                "filename": "vit_base_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -438,25 +488,32 @@ class ViT_Base_Patch32_224_Set(ModelInfoSet):
     """Configuration set for ViT_Base_Patch32_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Base_Patch32_224",
-            "filename": "vit_base_patch32_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Base_Patch32_224",
+                "filename": "vit_base_patch32_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -464,25 +521,32 @@ class ViT_Base_Patch32_384_Set(ModelInfoSet):
     """Configuration set for ViT_Base_Patch32_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Base_Patch32_384",
-            "filename": "vit_base_patch32_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Base_Patch32_384",
+                "filename": "vit_base_patch32_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -490,25 +554,32 @@ class ViT_Large_Patch16_224_Set(ModelInfoSet):
     """Configuration set for ViT_Large_Patch16_224 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Large_Patch16_224",
-            "filename": "vit_large_patch16_224.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 248,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Large_Patch16_224",
+                "filename": "vit_large_patch16_224.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 248,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -516,25 +587,32 @@ class ViT_Large_Patch16_384_Set(ModelInfoSet):
     """Configuration set for ViT_Large_Patch16_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Large_Patch16_384",
-            "filename": "vit_large_patch16_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Large_Patch16_384",
+                "filename": "vit_large_patch16_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 
@@ -542,25 +620,32 @@ class ViT_Large_Patch32_384_Set(ModelInfoSet):
     """Configuration set for ViT_Large_Patch32_384 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ViT_Large_Patch32_384",
-            "filename": "vit_large_patch32_384.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 384,
-                "interpolation": "bicubic",
-            },
-            "CenterCrop": {
-                "size": [384, 384],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ViT_Large_Patch32_384",
+                "filename": "vit_large_patch32_384.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 384,
+                    "interpolation": "bicubic",
+                },
+                "CenterCrop": {
+                    "size": [384, 384],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "tf",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
 
 

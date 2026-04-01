@@ -8,3 +8,22 @@ from .yolov8_pose import (
     YOLOv8xPose,
     YOLOv8xPoseP6,
 )
+
+__all__ = [
+    "YOLO11lPose",
+    "YOLO11mPose",
+    "YOLO11nPose",
+    "YOLO11sPose",
+    "YOLO11xPose",
+    "YOLO26lPose",
+    "YOLO26mPose",
+    "YOLO26nPose",
+    "YOLO26sPose",
+    "YOLO26xPose",
+    "YOLOv8lPose",
+    "YOLOv8mPose",
+    "YOLOv8nPose",
+    "YOLOv8sPose",
+    "YOLOv8xPose",
+    "YOLOv8xPoseP6",
+]

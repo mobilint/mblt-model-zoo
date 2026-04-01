@@ -2,11 +2,13 @@
 Common postprocessing utility functions.
 """
 
-from typing import Optional, Union
+from typing import Any, List, Optional, Union
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from ..datasets import get_coco_inv
 
 
 # --- Box Conversion Utilities ---
@@ -63,7 +65,8 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     """
     Transform distance (ltrb) to bounding box (xywh or xyxy).
     Args:
-        distance (torch.Tensor): Distance from anchor points to box boundaries (left, top, right, bottom).
+        distance (torch.Tensor): Distance from anchor points to box boundaries
+            (left, top, right, bottom).
         anchor_points (torch.Tensor): Anchor points (center points).
         xywh (bool, optional): If True, return boxes in (cx, cy, w, h) format.
             If False, return in (x1, y1, x2, y2) format. Defaults to True.
@@ -86,7 +89,8 @@ def non_max_suppression(boxes, scores, iou_threshold, max_output):
     Modified non-maximum suppression (NMS) implemented with PyTorch.
     Args:
         boxes (torch.Tensor): Bounding boxes in (x1, y1, x2, y2) format.
-        scores (torch.Tensor): Confidence scores for each box (assumed to be sorted in descending order).
+        scores (torch.Tensor): Confidence scores for each box (assumed to be sorted in
+            descending order).
         iou_threshold (float): IoU threshold for suppression.
         max_output (int): Maximum number of boxes to keep.
     Returns:
@@ -147,10 +151,14 @@ def dual_topk(
     Returns:
         torch.Tensor: Filtered detections of shape (*, 6 + n_extra).
     """
+    if n_extra == 0:
+        ic = torch.amax(pre_topk[..., -nc:], dim=-1) > conf_thres
+    else:
+        ic = torch.amax(pre_topk[..., -nc - n_extra : -n_extra], dim=-1) > conf_thres
+    pre_topk = pre_topk[ic]  # (*, 84)
+
     if pre_topk.shape[0] == 0:
-        return torch.zeros(
-            (0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device
-        )
+        return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device)
     max_det = min(pre_topk.shape[0], max_det)
     # first topk
     box, scores, extra = pre_topk.split([4, nc, n_extra], dim=-1)
@@ -171,9 +179,7 @@ def dual_topk(
     box_cls = torch.cat([box, scores, labels, extra], dim=1)  # (max_det, 6 + n_extra)
     box_cls = box_cls[box_cls[:, 4] > conf_thres]  # final filtering
     if box_cls.numel() == 0:
-        return torch.zeros(
-            (0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device
-        )
+        return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device)
     return box_cls
 
 
@@ -181,16 +187,19 @@ def dual_topk(
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True):
     """
     Original Source: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/ops.py#L92
-    Rescales bounding boxes (in the format of xyxy) from the shape of the image they were originally specified in
-    (img1_shape) to the shape of a different image (img0_shape).
+    Rescales bounding boxes (in the format of xyxy) from the shape of the image they
+    were originally specified in (img1_shape) to the shape of a different image (img0_shape).
     Args:
-        img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of (height, width).
-        boxes (np.ndarray): the bounding boxes of the objects in the image, in the format of (x1, y1, x2, y2)
+        img1_shape (tuple): The shape of the image that the bounding boxes are for,
+            in the format of (height, width).
+        boxes (np.ndarray): the bounding boxes of the objects in the image,
+            in the format of (x1, y1, x2, y2)
         img0_shape (tuple): the shape of the target image, in the format of (height, width).
-        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio and pad will be
-            calculated based on the size difference between the two images.
-        padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If False then do regular
-            rescaling.
+        ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes.
+            If not provided, the ratio and pad will be calculated based on the size
+            difference between the two images.
+        padding (bool): If True, assuming the boxes is based on image augmented by
+            yolo style. If False then do regular rescaling.
     Returns:
         boxes (np.ndarray): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
@@ -218,11 +227,10 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, padding=True):
         coords (tuple): The scaled coordinates, in the format of (x, y)
     """
     if ratio_pad is None:  # calculate from img0_shape
-        gain = min(
-            img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
-        )  # gain  = old / new
-        pad = int((img1_shape[1] - img0_shape[1] * gain) / 2), int(
-            (img1_shape[0] - img0_shape[0] * gain) / 2
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
+        pad = (
+            int((img1_shape[1] - img0_shape[1] * gain) / 2),
+            int((img1_shape[0] - img0_shape[0] * gain) / 2),
         )  # wh padding
     else:
         gain = ratio_pad[0][0]
@@ -247,11 +255,10 @@ def compute_ratio_pad(img1_shape, img0_shape, ratio_pad=None):
         tuple: (gain, pad) where gain is the scaling factor and pad is the (x, y) padding.
     """
     if ratio_pad is None:  # calculate from img0_shape
-        gain = min(
-            img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
-        )  # gain  = old / new
-        pad = round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1), round(
-            (img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
+        pad = (
+            round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1),
+            round((img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1),
         )  # wh padding
     else:
         gain = ratio_pad[0][0]
@@ -317,9 +324,7 @@ def process_mask(protos, masks_in, bboxes, shape, upsample=False):
     downsampled_bboxes[:, 1] *= mh / ih
     masks = crop_mask(masks, downsampled_bboxes)  # CHW
     if upsample:
-        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[
-            0
-        ]  # CHW
+        masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)[0]  # CHW
     return masks.gt_(0.0)
 
 
@@ -357,12 +362,8 @@ def crop_mask(masks, boxes):
     """
     _, h, w = masks.shape
     x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)  # x1 shape(n,1,1)
-    r = torch.arange(w, device=masks.device, dtype=x1.dtype)[
-        None, None, :
-    ]  # rows shape(1,1,w)
-    c = torch.arange(h, device=masks.device, dtype=x1.dtype)[
-        None, :, None
-    ]  # cols shape(1,h,1)
+    r = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]  # rows shape(1,1,w)
+    c = torch.arange(h, device=masks.device, dtype=x1.dtype)[None, :, None]  # cols shape(1,h,1)
     return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
 
 
@@ -404,7 +405,224 @@ def scale_masks(
     masks = masks[..., top:bottom, left:right]
     if isinstance(masks, np.ndarray):
         masks = torch.from_numpy(masks)
-    masks = F.interpolate(
-        masks[None], shape, mode="bilinear", align_corners=False
-    )  # 1NHW
+    masks = F.interpolate(masks[None], shape, mode="bilinear", align_corners=False)  # 1NHW
     return masks[0]
+
+
+def to_string(counts: list[int]) -> str:
+    """Converts the RLE object into a compact string representation.
+
+    Each count is delta-encoded and variable-length encoded as a string.
+
+    Args:
+        counts (list[int]): List of RLE counts.
+
+    Returns:
+        str: Compact string representation of the RLE object.
+    """
+    result = []
+
+    for i, x in enumerate(counts):
+        x = int(x)
+
+        # Apply delta encoding for all counts after the second entry
+        if i > 2:
+            x -= int(counts[i - 2])
+
+        # Variable-length encode the value
+        while True:
+            c = x & 0x1F  # Take 5 bits
+            x >>= 5
+
+            # If the sign bit (0x10) is set, continue if x != -1;
+            # otherwise, continue if x != 0
+            more = (x != -1) if (c & 0x10) else (x != 0)
+            if more:
+                c |= 0x20  # Set continuation bit
+            c += 48  # Shift to ASCII
+            result.append(chr(c))
+            if not more:
+                break
+
+    return "".join(result)
+
+
+def multi_encode(pixels: torch.Tensor) -> list[int]:
+    """Convert multiple binary masks using Run-Length Encoding (RLE).
+
+    Args:
+        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask
+            with shape [N, H*W].
+
+    Returns:
+        list[list[int]]: A list of RLE counts for each mask.
+    """
+    transitions = pixels[:, 1:] != pixels[:, :-1]
+    row_idx, col_idx = torch.where(transitions)
+    col_idx = col_idx + 1
+
+    # Compute run lengths
+    counts = []
+    for i, pixel_row in enumerate(pixels):
+        positions = col_idx[row_idx == i]
+        if len(positions):
+            count = torch.diff(positions).tolist()
+            count.insert(0, positions[0].item())
+            count.append(len(pixel_row) - positions[-1].item())
+        else:
+            count = [len(pixel_row)]
+
+    return counts
+
+
+def nmsout2eval(nms_outs, img1_shape, img0_shapes):
+    """Converts NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (List[np.array or torch.Tensor] or torch.Tensor): The output of the NMS
+            operation of shape (n, 6), where n is the number of objects.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+    """
+
+    if not isinstance(nms_outs, list):
+        nms_outs = [nms_outs]
+    labels_list = []
+    boxes_list = []
+    scores_list = []
+    for nms_out, img0_shape in zip(nms_outs, img0_shapes):
+        boxes = nms_out[:, :4]
+        scores = nms_out[:, 4]
+        labels = nms_out[:, 5]
+        boxes = scale_boxes(img1_shape, boxes, img0_shape)  # scale boxes to original image size
+        boxes[:, 2:] = boxes[:, 2:] - boxes[:, :2]  # xyxy to xywh with corner xy
+
+        boxes = boxes.tolist()
+        scores = scores.tolist()
+        labels = labels.tolist()
+        labels = [get_coco_inv(int(label)) for label in labels]
+
+        labels_list.append(labels)
+        boxes_list.append(boxes)
+        scores_list.append(scores)
+
+    return labels_list, boxes_list, scores_list
+
+
+def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
+    """Converts segmentation NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - extra (list[list]): The encoded segmentation masks for each image.
+    """
+    if not isinstance(nms_outs[0], (list, tuple)):
+        nms_outs = [nms_outs]
+
+    det_results = []
+    seg_results = []
+    for nms_out in nms_outs:
+        det_results.append(nms_out[0])
+        seg_results.append(nms_out[1])
+
+    labels_list, boxes_list, scores_list = nmsout2eval(det_results, img1_shape, img0_shapes)
+
+    seg_results = [
+        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]))
+        for seg_result, img0_shape in zip(seg_results, img0_shapes)
+    ]
+
+    def mask_encode(seg_result):
+        extra = []
+        h, w = seg_result.shape[1:3]
+        seg_result = seg_result.permute(0, 2, 1).contiguous().view(seg_result.shape[0], h * w).byte()
+        counts = multi_encode(seg_result)
+        for c in counts:
+            extra.append({"size": [h, w], "counts": to_string(c)})
+        return extra
+
+    extra_list = [mask_encode(seg_result) for seg_result in seg_results]
+    return labels_list, boxes_list, scores_list, extra_list
+
+
+def nmsout2eval_pose(nms_outs, img1_shape, img0_shapes):
+    """Converts pose estimation NMS output to COCO evaluation format.
+
+    Args:
+        nms_outs (list): The output of the NMS operation.
+        img1_shape (tuple): Processed image shape (H, W).
+        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list]): The labels of the objects for each image.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+            - keypoints (list[list]): The scaled keypoints for each image.
+    """
+    if not isinstance(nms_outs, list):
+        nms_outs = [nms_outs]
+    labels_list, boxes_list, scores_list = nmsout2eval(nms_outs, img1_shape, img0_shapes)
+    extra = [
+        scale_coords(img1_shape, nms_out[:, 6:].reshape(-1, 17, 3), img0_shape).reshape(-1, 51)
+        for nms_out, img0_shape in zip(nms_outs, img0_shapes)
+    ]
+    return labels_list, boxes_list, scores_list, extra
+
+
+class YOLOSegPostMixin:
+    """Mixin class for YOLO segmentation postprocessing."""
+
+    def nmsout2eval(
+        self,
+        nms_out: Any,
+        img1_shape: tuple,
+        img0_shape: Union[tuple, List[tuple]],
+    ) -> tuple:
+        """Converts NMS output to evaluation format for segmentation.
+
+        Args:
+            nms_out: NMS output (detections and prototypes).
+            img1_shape: Resized image shape.
+            img0_shape: List of original image shapes.
+
+        Returns:
+            Tuple: (labels_list, boxes_list, scores_list, extra_list).
+        """
+        return nmsout2eval_seg(nms_out, img1_shape, img0_shape)
+
+
+class YOLOPosePostMixin:
+    """Mixin class for YOLO pose estimation postprocessing."""
+
+    def nmsout2eval(
+        self,
+        nms_out: Any,
+        img1_shape: tuple,
+        img0_shape: Union[tuple, List[tuple]],
+    ) -> tuple:
+        """Converts NMS output to evaluation format for pose estimation.
+
+        Args:
+            nms_out: NMS output (detections with keypoints).
+            img1_shape: Resized image shape.
+            img0_shape: List of original image shapes.
+
+        Returns:
+            Tuple: (labels_list, boxes_list, scores_list, extra_list).
+        """
+        return nmsout2eval_pose(nms_out, img1_shape, img0_shape)

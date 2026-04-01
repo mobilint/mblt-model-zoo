@@ -47,7 +47,7 @@ def test_clova(pipe):
         },
     ]
 
-    outputs = pipe(
+    pipe(
         messages,
         max_length=512,
     )

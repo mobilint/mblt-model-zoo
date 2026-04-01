@@ -3,10 +3,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
+
 def main() -> int:
     try:
         import nltk
-        nltk.download('averaged_perceptron_tagger_eng')
+
+        nltk.download("averaged_perceptron_tagger_eng")
     except Exception as e:  # pragma: no cover
         print(
             "nltk is not installed. Install MeloTTS extras first, e.g.\n"
@@ -19,7 +21,7 @@ def main() -> int:
         )
         print(f"Original error: {e}", file=sys.stderr)
         return 1
-    
+
     try:
         import unidic  # noqa: F401
     except Exception as e:  # pragma: no cover

@@ -9,8 +9,7 @@ import torch
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
-from ..datasets import CustomCocodata, get_coco_inv, get_coco_loader
-from ..postprocess.common import scale_boxes, scale_coords, scale_masks
+from ..datasets import CustomCocodata, get_coco_loader
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
@@ -87,129 +86,7 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
     return counts
 
 
-def nmsout2eval(nms_outs, img1_shape, img0_shapes):
-    """Converts NMS output to COCO evaluation format.
-
-    Args:
-        nms_outs (List[np.array or torch.Tensor] or torch.Tensor): The output of the NMS
-            operation of shape (n, 6), where n is the number of objects.
-        img1_shape (tuple): Processed image shape (H, W).
-        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
-
-    Returns:
-        tuple: A tuple containing:
-            - labels (list[list]): The labels of the objects for each image.
-            - boxes (list[list]): The bounding boxes (xywh) for each image.
-            - scores (list[list]): The confidence scores for each image.
-    """
-
-    if not isinstance(nms_outs, list):
-        nms_outs = [nms_outs]
-    labels_list = []
-    boxes_list = []
-    scores_list = []
-    for nms_out, img0_shape in zip(nms_outs, img0_shapes):
-        boxes = nms_out[:, :4]
-        scores = nms_out[:, 4]
-        labels = nms_out[:, 5]
-        boxes = scale_boxes(
-            img1_shape, boxes, img0_shape
-        )  # scale boxes to original image size
-        boxes[:, 2:] = boxes[:, 2:] - boxes[:, :2]  # xyxy to xywh with corner xy
-
-        boxes = boxes.tolist()
-        scores = scores.tolist()
-        labels = labels.tolist()
-        labels = [get_coco_inv(int(l)) for l in labels]
-
-        labels_list.append(labels)
-        boxes_list.append(boxes)
-        scores_list.append(scores)
-
-    return labels_list, boxes_list, scores_list
-
-
-def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
-    """Converts segmentation NMS output to COCO evaluation format.
-
-    Args:
-        nms_outs (list): The output of the NMS operation.
-        img1_shape (tuple): Processed image shape (H, W).
-        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
-
-    Returns:
-        tuple: A tuple containing:
-            - labels (list[list]): The labels of the objects for each image.
-            - boxes (list[list]): The bounding boxes (xywh) for each image.
-            - scores (list[list]): The confidence scores for each image.
-            - extra (list[list]): The encoded segmentation masks for each image.
-    """
-    if not isinstance(nms_outs[0], list):
-        nms_outs = [nms_outs]
-
-    det_results = []
-    seg_results = []
-    for nms_out in nms_outs:
-        det_results.append(nms_out[0])
-        seg_results.append(nms_out[1])
-
-    labels_list, boxes_list, scores_list = nmsout2eval(
-        det_results, img1_shape, img0_shapes
-    )
-
-    seg_results = [
-        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]))
-        for seg_result, img0_shape in zip(seg_results, img0_shapes)
-    ]
-
-    def mask_encode(seg_result):
-        extra = []
-        h, w = seg_result.shape[1:3]
-        seg_result = (
-            seg_result.permute(0, 2, 1)
-            .contiguous()
-            .view(seg_result.shape[0], h * w)
-            .byte()
-        )
-        counts = multi_encode(seg_result)
-        for c in counts:
-            extra.append({"size": [h, w], "counts": to_string(c)})
-        return extra
-
-    extra_list = [mask_encode(seg_result) for seg_result in seg_results]
-    return labels_list, boxes_list, scores_list, extra_list
-
-
-def nmsout2eval_pose(nms_outs, img1_shape, img0_shapes):
-    """Converts pose estimation NMS output to COCO evaluation format.
-
-    Args:
-        nms_outs (list): The output of the NMS operation.
-        img1_shape (tuple): Processed image shape (H, W).
-        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
-
-    Returns:
-        tuple: A tuple containing:
-            - labels (list[list]): The labels of the objects for each image.
-            - boxes (list[list]): The bounding boxes (xywh) for each image.
-            - scores (list[list]): The confidence scores for each image.
-            - keypoints (list[list]): The scaled keypoints for each image.
-    """
-    if not isinstance(nms_outs, list):
-        nms_outs = [nms_outs]
-    labels_list, boxes_list, scores_list = nmsout2eval(
-        nms_outs, img1_shape, img0_shapes
-    )
-    extra = [
-        scale_coords(img1_shape, nms_out[:, 6:].reshape(-1, 17, 3), img0_shape).reshape(
-            -1, 51
-        )
-        for nms_out, img0_shape in zip(nms_outs, img0_shapes)
-    ]
-    return labels_list, boxes_list, scores_list, extra
-
-
-def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids):
+def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids, postprocess):
     """Format the results for COCO evaluation.
     Args:
         task (str): The task to evaluate.
@@ -218,14 +95,13 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
         org_shape (tuple): The original shape of the image.
         idx (list): The indices of the images in the batch.
         dataset_ids (list): The list of image IDs in the dataset.
+        postprocess: The postprocessing instance.
     Returns:
         list: The formatted results.
     """
     results = []
     if task == "object_detection":
-        labels_list, boxes_list, scores_list = nmsout2eval(
-            nms_outs.output, input_shape, org_shape
-        )
+        labels_list, boxes_list, scores_list = postprocess.nmsout2eval(nms_outs.output, input_shape, org_shape)
         for i, labels, boxes, scores in zip(idx, labels_list, boxes_list, scores_list):
             results.extend(
                 [
@@ -239,12 +115,10 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
                 ]
             )
     elif task == "instance_segmentation":
-        labels_list, boxes_list, scores_list, extra_list = nmsout2eval_seg(
+        labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
             nms_outs.output, input_shape, org_shape
         )
-        for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
-        ):
+        for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
                 [
                     {
@@ -258,12 +132,10 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
                 ]
             )
     elif task == "pose_estimation":
-        labels_list, boxes_list, scores_list, extra_list = nmsout2eval_pose(
+        labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
             nms_outs.output, input_shape, org_shape
         )
-        for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
-        ):
+        for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
                 [
                     {
@@ -278,8 +150,7 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
             )
     else:
         raise NotImplementedError(
-            f"Only object detection, instance segmentation, and "
-            f"pose estimation are supported, but we got {task}"
+            f"Only object detection, instance segmentation, and pose estimation are supported, but we got {task}"
         )
     return results
 
@@ -329,9 +200,7 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
         out_npu = model(input_npu)
         inference_time += time() - tic
 
-        nms_outs = model.postprocess(
-            out_npu, conf_thres=conf_thres, iou_thres=iou_thres
-        )
+        nms_outs = model.postprocess(out_npu, conf_thres=conf_thres, iou_thres=iou_thres)
         infer_post_time += time() - tic
         results.extend(
             format_coco_results(
@@ -341,6 +210,7 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
                 org_shape,
                 idx,
                 dataset.ids,
+                model.postprocessor,
             )
         )
 
@@ -377,17 +247,11 @@ def evaluate_predictions_on_coco(coco_gt, coco_results: dict, task: str):
         coco_dt = COCO()
 
     if task.lower() == "object_detection":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "bbox", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "bbox", print_function=logger.info)
     elif task.lower() == "instance_segmentation":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "segm", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "segm", print_function=logger.info)
     elif task.lower() == "pose_estimation":
-        coco_eval = COCOeval_faster(
-            coco_gt, coco_dt, "keypoints", print_function=logger.info
-        )
+        coco_eval = COCOeval_faster(coco_gt, coco_dt, "keypoints", print_function=logger.info)
     else:
         raise NotImplementedError(f"Task {task} is not supported")
 

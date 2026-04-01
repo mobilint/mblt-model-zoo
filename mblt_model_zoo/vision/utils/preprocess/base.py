@@ -5,7 +5,11 @@ import torch
 
 
 class PreOps(ABC):
-    """Abstract base class for individual preprocessing operations."""
+    """Abstract base class for individual preprocessing operations.
+
+    Attributes:
+            device: The torch device where tensors should be placed.
+    """
 
     def __init__(self):
         """Initializes the preprocessing operation."""
@@ -13,20 +17,27 @@ class PreOps(ABC):
         self.device = torch.device("cpu")
 
     @abstractmethod
-    def __call__(self, x):
+    def __call__(
+        self,
+        x,
+    ):
         """Executes the preprocess operation.
 
         Args:
-            x (Any): Input data to be processed.
+                x: Input data to be processed.
 
         Returns:
-            Any: Processed data.
+                Processed data.
         """
 
-    def to(self, device: Union[str, torch.device]):
+    def to(
+        self,
+        device: Union[str, torch.device],
+    ):
         """Move the operation to the specified device.
+
         Args:
-            device (Union[str, torch.device]): Device to move the operation to.
+                device: Device to move the operation to.
         """
         if isinstance(device, str):
             self.device = torch.device(device)
@@ -40,13 +51,21 @@ class PreOps(ABC):
 
 
 class PreBase:
-    """Base class for orchestrating a series of preprocessing operations."""
+    """Base class for orchestrating a series of preprocessing operations.
 
-    def __init__(self, Ops: List[PreOps]):
+    Attributes:
+            Ops: List of ordered PreOps instances to be applied.
+            device: The torch device being used.
+    """
+
+    def __init__(
+        self,
+        Ops: List[PreOps],
+    ):
         """Initializes the PreBase class with a list of operations.
 
         Args:
-            Ops (List[PreOps]): List of ordered PreOps instances to be applied.
+                Ops: List of ordered PreOps instances to be applied.
         """
         self.Ops = Ops
         self._check_ops()
@@ -58,23 +77,30 @@ class PreBase:
             if not isinstance(op, PreOps):
                 raise TypeError(f"Got unsupported type={type(op)}.")
 
-    def __call__(self, x):
+    def __call__(
+        self,
+        x,
+    ):
         """Applies the sequence of preprocessing operations to the input.
 
         Args:
-            x (Any): Initial input data.
+                x: Initial input data.
 
         Returns:
-            Any: Fully processed data.
+                Fully processed data.
         """
         for op in self.Ops:
             x = op(x)
         return x
 
-    def to(self, device: Union[str, torch.device]):
+    def to(
+        self,
+        device: Union[str, torch.device],
+    ):
         """Move the operations to the specified device.
+
         Args:
-            device (Union[str, torch.device]): Device to move the operations to.
+                device: Device to move the operations to.
         """
         if isinstance(device, str):
             self.device = torch.device(device)

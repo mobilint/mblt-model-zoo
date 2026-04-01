@@ -13,27 +13,21 @@ from .yolo_anchorless_post import YOLOAnchorlessPost
 class YOLONMSFreePost(YOLOAnchorlessPost):
     """Postprocessing for YOLO NMS-free models."""
 
-    def __call__(self, x, conf_thres: float, iou_thres: float) -> List[torch.Tensor]:
-        """Executes YOLO postprocessing for NMS-free models.
+    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+        """Preprocesses inputs for NMS-free models.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
-            conf_thres (float): Confidence threshold.
-            iou_thres (float): IoU threshold.
+            x (List[torch.Tensor]): Raw model outputs.
 
         Returns:
-            List[torch.Tensor]: List of detections per image.
+            tuple: (processed_detections, None).
         """
-        self.set_threshold(conf_thres, iou_thres)
-        x = self.check_input(x)
         if len(x) == 2:
             x = self.conversion(x)
-            x = self.filter_conversion(x)
+            return self.filter_conversion(x), None
         else:
             x = self.rearrange(x)
-            x = self.decode(x)
-        x = self.nms(x)
-        return x
+            return self.decode(x), None
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.
@@ -57,21 +51,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         """
         x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
-        def process_conversion(x):
-            x = x.squeeze(0)
-            if self.n_extra == 0:
-                ic = torch.amax(x[..., -self.nc :], dim=-1) > self.conf_thres
-            else:
-                ic = (
-                    torch.amax(x[..., -self.nc - self.n_extra : -self.n_extra], dim=-1)
-                    > self.conf_thres
-                )
-            pre_topk = x[ic]  # (*, 84)
-            return dual_topk(
-                pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres
-            )
-
-        return [process_conversion(xi) for xi in x_list]
+        return [dual_topk(xi.squeeze(0), self.nc, self.n_extra, conf_thres=self.conf_thres) for xi in x_list]
 
     def process_box_cls(self, box_cls):
         """
@@ -85,9 +65,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
             return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
-        box, scores = torch.split(
-            box_cls[None], [self.reg_max * 4, self.nc], dim=1
-        )  # (1, 64, *), (1, 80, *)
+        box, scores = torch.split(box_cls[None], [self.reg_max * 4, self.nc], dim=1)  # (1, 64, *), (1, 80, *)
         dbox = (
             dist2bbox(
                 self.dfl(box),
@@ -97,9 +75,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
             )
             * self.stride[:, ic]
         )
-        pre_topk = (
-            torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)
-        )  # (*, 84)
+        pre_topk = torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
         return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
 
     def nms(

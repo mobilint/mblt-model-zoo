@@ -12,12 +12,8 @@ from mblt_model_zoo.vision.utils.datasets import organize_imagenet
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize ImageNet dataset")
-    parser.add_argument(
-        "--image-dir", type=str, required=True, help="Path to the image tar file"
-    )
-    parser.add_argument(
-        "--xml-dir", type=str, required=True, help="Path to the xml tgz file"
-    )
+    parser.add_argument("--image-dir", type=str, required=True, help="Path to the image tar file")
+    parser.add_argument("--xml-dir", type=str, required=True, help="Path to the xml tgz file")
     parser.add_argument(
         "--output-dir",
         type=str,

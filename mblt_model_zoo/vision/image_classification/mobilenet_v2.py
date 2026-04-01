@@ -2,6 +2,7 @@
 MobileNet V2 model definition.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,46 +13,41 @@ class MobileNet_V2_Set(ModelInfoSet):
     """Configuration set for MobileNet V2 models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/MobileNet_V2.tv1_in1k",
-            "filename": "mobilenet_v2_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/MobileNet_V2.tv1_in1k",
+                "filename": "mobilenet_v2_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict({"task": "image_classification"}),
     )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/MobileNet_V2.tv2_in1k",
-            "filename": "mobilenet_v2_IMAGENET1K_V2.mxq",
-            "revision": "main",
+    IMAGENET1K_V2 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/MobileNet_V2.tv2_in1k",
+        filename="mobilenet_v2_IMAGENET1K_V2.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 232,
+            "interpolation": "bilinear",
         },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={"task": "image_classification"},
     )
     DEFAULT = IMAGENET1K_V2  # Default model
 

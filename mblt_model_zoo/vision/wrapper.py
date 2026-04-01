@@ -3,7 +3,7 @@ Wrapper classes for MBLT model execution.
 """
 
 import os
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import qbruntime
@@ -18,31 +18,47 @@ from .utils.types import ModelInfoSet, TensorLike
 
 
 class MBLT_Engine:
-    """
-    Main engine class for running vision models from the MBLT zoo.
+    """Main engine class for running vision models from the MBLT zoo.
+
     Handles the full pipeline: Preprocessing -> Inference -> Postprocessing.
+
+    Attributes:
+            model_cfg: Model configuration.
+            pre_cfg: Preprocessing configuration.
+            post_cfg: Postprocessing configuration.
+            model: The underlying MXQ_Model.
+            device: The torch device being used.
     """
 
-    def __init__(self, model_cfg: dict, pre_cfg: dict, post_cfg: dict):
+    def __init__(
+        self,
+        model_cfg: dict,
+        pre_cfg: dict,
+        post_cfg: dict,
+    ):
         """Initializes the MBLT_Engine.
 
         Args:
-            model_cfg (dict): Model configuration.
-            pre_cfg (dict): Preprocessing configuration.
-            post_cfg (dict): Postprocessing configuration.
+                model_cfg: Model configuration.
+                pre_cfg: Preprocessing configuration.
+                post_cfg: Postprocessing configuration.
         """
         self.model_cfg = model_cfg
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.model = MXQ_Model(**self.model_cfg)
-        self._preprocess = build_preprocess(self.pre_cfg)
-        self._postprocess = build_postprocess(self.pre_cfg, self.post_cfg)
+
+        if self.model.uint8_input:
+            self.pre_cfg.pop("Normalize", None)
+
+        self.preprocessor = build_preprocess(self.pre_cfg)
+        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg)
         self.device = torch.device("cpu")
 
     @staticmethod
     def _get_configs(
         model_info_set: ModelInfoSet,
-        local_path: str = None,
+        local_path: Optional[str] = None,
         model_type: str = "DEFAULT",
         infer_mode: str = "global8",
         product: str = "aries",
@@ -50,18 +66,18 @@ class MBLT_Engine:
         """Extracts and prepares configuration dictionaries from a ModelInfoSet.
 
         Args:
-            model_info_set (ModelInfoSet): Set of model configurations.
-            local_path (str, optional): Path to a local model file. Defaults to None.
-            model_type (str, optional): Model configuration type. Defaults to "DEFAULT".
-            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
-            product (str, optional): Target hardware product. Defaults to "aries".
+                model_info_set: Set of model configurations.
+                local_path: Path to a local model file. Defaults to None.
+                model_type: Model configuration type. Defaults to "DEFAULT".
+                infer_mode: Inference execution mode. Defaults to "global8".
+                product: Target hardware product. Defaults to "aries".
 
         Returns:
-            tuple: (model_cfg, pre_cfg, post_cfg) dictionaries.
+                A tuple of (model_cfg, pre_cfg, post_cfg) dictionaries.
         """
-        assert (
-            model_type in model_info_set.__dict__.keys()
-        ), f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
+        assert model_type in model_info_set.__dict__.keys(), (
+            f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
+        )
 
         # Use copy() to avoid modifying the original ModelInfo in-place
         model_cfg = model_info_set.__dict__[model_type].value.model_cfg.copy()
@@ -74,56 +90,70 @@ class MBLT_Engine:
 
         return model_cfg, pre_cfg, post_cfg
 
-    def __call__(self, x: TensorLike):
+    def __call__(
+        self,
+        x: TensorLike,
+    ):
         """Runs raw model inference on the input.
 
         Note:
-            This does NOT include preprocessing or postprocessing.
+                This does NOT include preprocessing or postprocessing.
 
         Args:
-            x (TensorLike): Input tensor for the model.
+                x: Input tensor for the model.
 
         Returns:
-            Any: Raw model output.
+                Raw model output.
         """
         return self.model(x)
 
-    def preprocess(self, x, **kwargs):
+    def preprocess(
+        self,
+        x,
+        **kwargs,
+    ):
         """Runs preprocessing on the input.
 
         Args:
-            x: Input data.
-            **kwargs: Additional arguments for preprocessing.
+                x: Input data.
+                **kwargs: Additional arguments for preprocessing.
 
         Returns:
-            Any: Preprocessed data.
+                Preprocessed data.
         """
-        return self._preprocess(x, **kwargs)
+        return self.preprocessor(x, **kwargs)
 
-    def postprocess(self, x, **kwargs) -> Results:
+    def postprocess(
+        self,
+        x,
+        **kwargs,
+    ) -> Results:
         """Runs postprocessing on the input.
 
         Args:
-            x: Input data.
-            **kwargs: Additional arguments for postprocessing.
+                x: Input data.
+                **kwargs: Additional arguments for postprocessing.
 
         Returns:
-            Results: Postprocessed results.
+                Postprocessed results.
         """
-        pre_result = self._postprocess(x, **kwargs)
+        pre_result = self.postprocessor(x, **kwargs)
         return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
 
-    def to(self, device: Union[str, torch.device]):
+    def to(
+        self,
+        device: Union[str, torch.device],
+    ):
         """Moves the engine and its components to the specified device.
 
         Args:
-            device (Union[str, torch.device]): Target device.
+                device: Target device.
 
         Raises:
-            TypeError: If device type is unexpected.
+                TypeError: If device type is unexpected.
         """
-        self._preprocess.to(device)
-        self._postprocess.to(device)
+        self.preprocessor.to(device)
+        self.postprocessor.to(device)
 
         if isinstance(device, str):
             self.device = torch.device(device)
@@ -140,15 +170,18 @@ class MBLT_Engine:
         """Moves the engine to GPU (CUDA)."""
         self.to(device="cuda")
 
-    def cuda(self, device: Union[str, int] = 0):
+    def cuda(
+        self,
+        device: Union[str, int] = 0,
+    ):
         """Moves the engine to CUDA device.
 
         Args:
-            device (Union[str, int], optional): CUDA device identifier. Defaults to 0.
+                device: CUDA device identifier. Defaults to 0.
 
         Raises:
-            ValueError: If device string is invalid.
-            RuntimeError: If CUDA is not available.
+                ValueError: If device string is invalid.
+                RuntimeError: If CUDA is not available.
         """
         if isinstance(device, int):
             device = f"cuda:{device}"
@@ -170,32 +203,39 @@ class MBLT_Engine:
 
 
 class MXQ_Model:
-    """
-    Low-level wrapper for managing model execution on the Mobilint MXQ accelerator.
+    """Low-level wrapper for managing model execution on the Mobilint MXQ accelerator.
+
     Handles communication with the qbruntime and resource management.
+
+    Attributes:
+            infer_mode: Inference execution mode.
+            product: Target hardware product.
+            acc: The accelerator object.
+            model: The model object.
+            uint8_input: Whether the model expects uint8 input.
     """
 
     def __init__(
         self,
         product: str = "aries",
         infer_mode: str = "global8",
-        repo_id: str = None,
-        filename: str = None,
-        revision: str = None,
-        local_path: str = None,
-    ):
+        repo_id: Union[str, None] = None,
+        filename: Union[str, None] = None,
+        revision: Union[str, None] = None,
+        local_path: Union[str, None] = None,
+    ) -> None:
         """Initializes the MXQ_Model.
 
         Args:
-            repo_id (str, optional): Hugging Face repository ID. Defaults to None.
-            filename (str, optional): Model filename. Defaults to None.
-            revision (str, optional): Model revision. Defaults to None.
-            local_path (str, optional): Path to local model file. Defaults to None.
-            infer_mode (str, optional): Inference execution mode. Defaults to "global8".
-            product (str, optional): Target hardware product. Defaults to "aries".
+                product: Target hardware product. Defaults to "aries".
+                infer_mode: Inference execution mode. Defaults to "global8".
+                repo_id: Hugging Face repository ID. Defaults to None.
+                filename: Model filename. Defaults to None.
+                revision: Model revision. Defaults to None.
+                local_path: Path to local model file. Defaults to None.
 
         Raises:
-            ValueError: If inference mode or product is invalid, or model file is missing.
+                ValueError: If inference mode or product is invalid, or model file is missing.
         """
         self.infer_mode = infer_mode
         assert infer_mode in [
@@ -215,29 +255,21 @@ class MXQ_Model:
             if self.infer_mode == "single":
                 pass  # default is single with all cores
             elif self.infer_mode == "multi":
-                mc.set_multi_core_mode(
-                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
-                )
+                mc.set_multi_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
             elif self.infer_mode == "global4":
-                mc.set_global4_core_mode(
-                    [qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1]
-                )
+                mc.set_global4_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
             elif self.infer_mode == "global8":
                 mc.set_global8_core_mode()
             else:
                 raise ValueError("Inappropriate inference mode")
         elif self.product == "regulus":
-            assert (
-                self.infer_mode == "single"
-            ), "Only single core mode is available on REGULUS"
+            assert self.infer_mode == "single", "Only single core mode is available on REGULUS"
         else:
             raise ValueError("Inappropriate product")
 
         # -----------------Model Preparation-----------------------
         if local_path is not None:
-            assert os.path.isfile(
-                local_path
-            ), "The model should be prepared on local path"
+            assert os.path.isfile(local_path), "The model should be prepared on local path"
             cached_file = local_path
         elif repo_id is not None and filename is not None:
             try:
@@ -259,14 +291,25 @@ class MXQ_Model:
         log_model_details(cached_file)
         self.model.launch(self.acc)
 
-    def __call__(self, x: TensorLike):
+        input_dtype = str(self.model.get_model_input_data_type())
+        if input_dtype == "DataType.Uint8":
+            self.uint8_input = True
+        elif input_dtype == "DataType.Float32":
+            self.uint8_input = False
+        else:
+            raise ValueError(f"Got unsupported dtype. Got {input_dtype}")
+
+    def __call__(
+        self,
+        x: TensorLike,
+    ):
         """Runs inference on the input using the accelerator.
 
         Args:
-            x (TensorLike): Input tensor or array.
+                x: Input tensor or array.
 
         Returns:
-            Any: NPU outputs.
+                NPU outputs.
         """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()

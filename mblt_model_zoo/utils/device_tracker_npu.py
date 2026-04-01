@@ -21,11 +21,7 @@ class NPUDeviceTracker(BaseDeviceTracker):
         if platform.system() != "Linux":
             raise RuntimeError("NPUDeviceTracker currently supports Linux only")
         script_path = os.path.join(os.path.dirname(__file__), "device_tracker_npu.sh")
-        self._status_cmd = (
-            status_cmd
-            if status_cmd is not None
-            else f"bash {script_path} --sample-once --json"
-        )
+        self._status_cmd = status_cmd if status_cmd is not None else f"bash {script_path} --sample-once --json"
         self._scheduler: Optional[BackgroundScheduler] = None
         self._job_id = "npu_device_track"
         self._npu_power_glance: list[float] = []
@@ -159,51 +155,19 @@ class NPUDeviceTracker(BaseDeviceTracker):
                 self._scheduler = None
 
     def get_metric(self) -> Dict[str, Optional[float]]:
-        npu_avg = (
-            float(np.mean(self._npu_power_glance)) if self._npu_power_glance else None
-        )
-        total_avg = (
-            float(np.mean(self._total_power_glance))
-            if self._total_power_glance
-            else None
-        )
-        npu_p99 = (
-            float(np.percentile(self._npu_power_glance, 99))
-            if self._npu_power_glance
-            else None
-        )
-        total_p99 = (
-            float(np.percentile(self._total_power_glance, 99))
-            if self._total_power_glance
-            else None
-        )
-        npu_util_avg = (
-            float(np.mean(self._npu_util_glance)) if self._npu_util_glance else None
-        )
-        npu_util_p99 = (
-            float(np.percentile(self._npu_util_glance, 99))
-            if self._npu_util_glance
-            else None
-        )
-        npu_mem_used_avg = (
-            float(np.mean(self._npu_mem_used_mb_glance))
-            if self._npu_mem_used_mb_glance
-            else None
-        )
+        npu_avg = float(np.mean(self._npu_power_glance)) if self._npu_power_glance else None
+        total_avg = float(np.mean(self._total_power_glance)) if self._total_power_glance else None
+        npu_p99 = float(np.percentile(self._npu_power_glance, 99)) if self._npu_power_glance else None
+        total_p99 = float(np.percentile(self._total_power_glance, 99)) if self._total_power_glance else None
+        npu_util_avg = float(np.mean(self._npu_util_glance)) if self._npu_util_glance else None
+        npu_util_p99 = float(np.percentile(self._npu_util_glance, 99)) if self._npu_util_glance else None
+        npu_mem_used_avg = float(np.mean(self._npu_mem_used_mb_glance)) if self._npu_mem_used_mb_glance else None
         npu_mem_used_p99 = (
-            float(np.percentile(self._npu_mem_used_mb_glance, 99))
-            if self._npu_mem_used_mb_glance
-            else None
+            float(np.percentile(self._npu_mem_used_mb_glance, 99)) if self._npu_mem_used_mb_glance else None
         )
-        npu_mem_used_pct_avg = (
-            float(np.mean(self._npu_mem_used_pct_glance))
-            if self._npu_mem_used_pct_glance
-            else None
-        )
+        npu_mem_used_pct_avg = float(np.mean(self._npu_mem_used_pct_glance)) if self._npu_mem_used_pct_glance else None
         npu_mem_used_pct_p99 = (
-            float(np.percentile(self._npu_mem_used_pct_glance, 99))
-            if self._npu_mem_used_pct_glance
-            else None
+            float(np.percentile(self._npu_mem_used_pct_glance, 99)) if self._npu_mem_used_pct_glance else None
         )
         return {
             "avg_power_w": total_avg,

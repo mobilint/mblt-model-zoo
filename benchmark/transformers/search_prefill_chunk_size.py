@@ -13,25 +13,21 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
-import numpy as np
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
 
 def _safe_filename(text: str) -> str:
-    return (
-        text.replace("/", "__")
-        .replace("\\", "__")
-        .replace(":", "_")
-        .replace(" ", "_")
-    )
+    return text.replace("/", "__").replace("\\", "__").replace(":", "_").replace(" ", "_")
 
 
 def _discover_targets_from_mxq_dir(
@@ -100,9 +96,7 @@ def _parse_core_modes(raw: str) -> list[str]:
     allowed = {"single", "global4", "global8"}
     invalid = [m for m in modes if m not in allowed]
     if invalid:
-        raise argparse.ArgumentTypeError(
-            f"unsupported core mode(s): {invalid}. allowed={sorted(allowed)}"
-        )
+        raise argparse.ArgumentTypeError(f"unsupported core mode(s): {invalid}. allowed={sorted(allowed)}")
     return modes
 
 
@@ -305,10 +299,9 @@ def _run_prefill_grid(
                 "evals": len(evaluations),
             }
         )
+
     for prefill_length in prefill_lengths:
-        print(
-            f"[search] {log_prefix} prefill={prefill_length} chunks={chunk_candidates} guard={time_guard_sec:.1f}s"
-        )
+        print(f"[search] {log_prefix} prefill={prefill_length} chunks={chunk_candidates} guard={time_guard_sec:.1f}s")
         cutoff_chunk: int | None = None
         for chunk_size in chunk_candidates:
             if int(chunk_size) > int(prefill_length):
@@ -376,7 +369,8 @@ def _run_prefill_grid(
                 if too_slow and cutoff_chunk is None:
                     cutoff_chunk = int(chunk_size)
                     print(
-                        f"[search] {log_prefix} prefill={prefill_length} guard hit at chunk={chunk_size}. skip larger chunks."
+                        f"[search] {log_prefix} prefill={prefill_length} "
+                        f"guard hit at chunk={chunk_size}. skip larger chunks."
                     )
             except Exception as e:
                 is_timeout = _is_timeout_like_error(e)
@@ -403,7 +397,8 @@ def _run_prefill_grid(
                 if is_timeout and cutoff_chunk is None:
                     cutoff_chunk = int(chunk_size)
                     print(
-                        f"[search] {log_prefix} prefill={prefill_length} timeout at chunk={chunk_size}. skip larger chunks."
+                        f"[search] {log_prefix} prefill={prefill_length} "
+                        f"timeout at chunk={chunk_size}. skip larger chunks."
                     )
 
         feasible = [
@@ -503,12 +498,8 @@ def _collect_rows(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
                     "prefill_length": prefill_length,
                     "chunk_size": chunk_size,
                     "median_prefill_tps": float(ev["median_tps"]),
-                    "repeat_prefill_tps": ";".join(
-                        f"{float(x):.6f}" for x in ev.get("tps_values", [])
-                    ),
-                    "wall_time_values_s": ";".join(
-                        f"{float(x):.6f}" for x in ev.get("wall_time_values_s", [])
-                    ),
+                    "repeat_prefill_tps": ";".join(f"{float(x):.6f}" for x in ev.get("tps_values", [])),
+                    "wall_time_values_s": ";".join(f"{float(x):.6f}" for x in ev.get("wall_time_values_s", [])),
                     "too_slow": int(bool(ev.get("too_slow"))),
                     "failed": int(bool(ev.get("failed"))),
                     "error": "" if ev.get("error") is None else str(ev.get("error")),
@@ -648,11 +639,7 @@ def _plot_best_chunk_chart(
 
     all_prefills = sorted({int(r["prefill_length"]) for r in rows})
     ax.set_xticks(all_prefills)
-    ax.set_title(
-        f"Best Chunk Size vs Prefill Length ({mode}"
-        + (f", revision={revision}" if revision else "")
-        + ")"
-    )
+    ax.set_title(f"Best Chunk Size vs Prefill Length ({mode}" + (f", revision={revision}" if revision else "") + ")")
     ax.set_xlabel("prefill_length")
     ax.set_ylabel("best_chunk_size")
     ax.grid(True, linestyle="--", alpha=0.3)
@@ -676,11 +663,7 @@ def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_mode
     _write_csv(results_dir / "all_measurements.csv", measurement_rows)
     _write_csv(results_dir / "best_chunks.csv", best_rows)
     prefill_lengths = sorted(
-        {
-            int(r["prefill_length"])
-            for r in measurement_rows
-            if isinstance(r.get("prefill_length"), int)
-        }
+        {int(r["prefill_length"]) for r in measurement_rows if isinstance(r.get("prefill_length"), int)}
     )
     for mode in core_modes:
         for prefill_length in prefill_lengths:
@@ -688,8 +671,7 @@ def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_mode
                 {
                     str(r.get("revision", "") or "")
                     for r in measurement_rows
-                    if str(r.get("core_mode")) == mode
-                    and int(r.get("prefill_length", -1)) == int(prefill_length)
+                    if str(r.get("core_mode")) == mode and int(r.get("prefill_length", -1)) == int(prefill_length)
                 }
             )
             for revision in revisions:
@@ -703,11 +685,7 @@ def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_mode
                     revision=revision,
                 )
         best_revisions = sorted(
-            {
-                str(r.get("revision", "") or "")
-                for r in best_rows
-                if str(r.get("core_mode")) == mode
-            }
+            {str(r.get("revision", "") or "") for r in best_rows if str(r.get("core_mode")) == mode}
         )
         for revision in best_revisions:
             if not revision:
@@ -742,10 +720,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_parse_int_csv("128,256,512,1024,2048"),
         help="comma-separated prefill lengths (default: 128,256,512,1024,2048)",
     )
-    parser.add_argument("--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement")
+    parser.add_argument(
+        "--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement"
+    )
     parser.add_argument("--warmup", type=_parse_positive_int, default=1, help="warmup runs per model/core mode")
     parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="repeat count per chunk size")
-    parser.add_argument("--time-guard-sec", type=float, default=300.0, help="if a single run takes longer than this, larger chunks are skipped (default: 300s)")
+    parser.add_argument(
+        "--time-guard-sec",
+        type=float,
+        default=300.0,
+        help="if a single run takes longer than this, larger chunks are skipped (default: 300s)",
+    )
     parser.add_argument(
         "--chunk-candidates",
         type=_parse_int_csv,
@@ -753,7 +738,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="comma-separated chunk sizes to test (default: 128,256,512,1024,2048)",
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    parser.add_argument("--skip-existing", action="store_true", help="reuse existing record JSON for model/core-mode pairs")
+    parser.add_argument(
+        "--skip-existing", action="store_true", help="reuse existing record JSON for model/core-mode pairs"
+    )
     parser.add_argument(
         "--rebuild-charts",
         "--rebuild-chart",
@@ -779,9 +766,7 @@ def main(argv: list[str] | None = None) -> int:
 
     script_dir = Path(__file__).resolve().parent
     results_dir = (
-        Path(args.results_dir).resolve()
-        if args.results_dir
-        else script_dir / "results" / "prefill_chunk_search"
+        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "prefill_chunk_search"
     )
     records_dir = results_dir / "records"
     records_dir.mkdir(parents=True, exist_ok=True)
@@ -825,7 +810,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[skip] {row['mxq_file']}: {row['reason']}")
             summary_payload = {
                 "mxq_dir": str(mxq_dir),
-                "total_mxq_files": len(list(mxq_dir.glob('*.mxq'))),
+                "total_mxq_files": len(list(mxq_dir.glob("*.mxq"))),
                 "valid_targets": 0,
                 "skipped_files": skipped_mxq_files,
             }
@@ -964,9 +949,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_csv(results_dir / "failed_pairs.csv", failed_pairs)
     summary_payload = {
         "mxq_dir": None if mxq_dir is None else str(mxq_dir),
-        "total_mxq_files": (
-            0 if mxq_dir is None else len(list(mxq_dir.glob("*.mxq")))
-        ),
+        "total_mxq_files": (0 if mxq_dir is None else len(list(mxq_dir.glob("*.mxq")))),
         "valid_targets": len(targets),
         "processed_pairs": total,
         "processed_records": len(records),

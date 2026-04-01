@@ -44,10 +44,8 @@ def eval_imagenet(model, data_path, batch_size):
         cum_correct += (result.output.argmax(-1).cpu().numpy() == label).sum().item()
         acc = cum_correct / cum_num_data
         total_time += time() - tic
-        pbar.set_postfix_str(
-            f"Top 1 Acc.: {100*acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}"
-        )
+        pbar.set_postfix_str(f"Top 1 Acc.: {100 * acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}")
     pbar.close()
     print("ImageNet evaluation completed")
-    print(f"Top 1 Acc.: {100*acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}")
+    print(f"Top 1 Acc.: {100 * acc:.3f}%, NPU FPS: {cum_num_data / inference_time:.3f}")
     return acc

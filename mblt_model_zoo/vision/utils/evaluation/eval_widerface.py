@@ -41,25 +41,15 @@ def bbox_overlaps(boxes, query_boxes):
     query_boxes = query_boxes[None, :, :]  # (1, K, 4)
 
     # Intersection
-    iw = (
-        np.minimum(boxes[..., 2], query_boxes[..., 2])
-        - np.maximum(boxes[..., 0], query_boxes[..., 0])
-        + 1
-    )
-    ih = (
-        np.minimum(boxes[..., 3], query_boxes[..., 3])
-        - np.maximum(boxes[..., 1], query_boxes[..., 1])
-        + 1
-    )
+    iw = np.minimum(boxes[..., 2], query_boxes[..., 2]) - np.maximum(boxes[..., 0], query_boxes[..., 0]) + 1
+    ih = np.minimum(boxes[..., 3], query_boxes[..., 3]) - np.maximum(boxes[..., 1], query_boxes[..., 1]) + 1
     iw = np.maximum(iw, 0)
     ih = np.maximum(ih, 0)
     inter = iw * ih  # (N, K)
 
     # Areas
     box_area = (boxes[..., 2] - boxes[..., 0] + 1) * (boxes[..., 3] - boxes[..., 1] + 1)
-    query_area = (query_boxes[..., 2] - query_boxes[..., 0] + 1) * (
-        query_boxes[..., 3] - query_boxes[..., 1] + 1
-    )
+    query_area = (query_boxes[..., 2] - query_boxes[..., 0] + 1) * (query_boxes[..., 3] - query_boxes[..., 1] + 1)
 
     # Union
     union = box_area + query_area - inter
@@ -101,17 +91,24 @@ def norm_score(pred):
     pred {key: [[x1,y1,x2,y2,s]]}
     """
 
-    max_score = 0
-    min_score = 1
+    max_score = -1e9
+    min_score = 1e9
+    found = False
 
     for _, k in pred.items():
         for _, v in k.items():
             if len(v) == 0:
                 continue
-            _min = np.min(v[:, -1])
-            _max = np.max(v[:, -1])
-            max_score = max(_max, max_score)
-            min_score = min(_min, min_score)
+            found = True
+            _min = float(np.min(v[:, -1]))
+            _max = float(np.max(v[:, -1]))
+            if _max > max_score:
+                max_score = _max
+            if _min < min_score:
+                min_score = _min
+
+    if not found:
+        return pred
 
     diff = max_score - min_score
     for _, k in pred.items():
@@ -280,13 +277,9 @@ def evaluation(pred, gt_path, iou_thresh=0.5):
                 ignore = np.zeros(gt_boxes.shape[0])
                 if len(keep_index) != 0:
                     ignore[keep_index - 1] = 1
-                pred_recall, proposal_list = image_eval(
-                    pred_info, gt_boxes, ignore, iou_thresh
-                )
+                pred_recall, proposal_list = image_eval(pred_info, gt_boxes, ignore, iou_thresh)
 
-                _img_pr_info = img_pr_info(
-                    thresh_num, pred_info, proposal_list, pred_recall
-                )
+                _img_pr_info = img_pr_info(thresh_num, pred_info, proposal_list, pred_recall)
                 pr_curve += _img_pr_info
         pr_curve = dataset_pr_info(thresh_num, pr_curve, count_face)
         propose = pr_curve[:, 0]

@@ -32,9 +32,7 @@ class Reader(PreOps):
         ], f"Unsupported style={style} for image reader."
         self.style = style.lower()
 
-    def __call__(
-        self, x: Union[str, TensorLike, Image.Image]
-    ) -> Union[np.ndarray, Image.Image]:
+    def __call__(self, x: Union[str, TensorLike, Image.Image]) -> Union[np.ndarray, Image.Image]:
         """Reads/converts the input into an image object.
 
         Args:

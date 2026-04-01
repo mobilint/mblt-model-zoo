@@ -24,8 +24,18 @@ def resnet50():
     model.dispose()
 
 
-def run_inference(model, image_path, save_path):
-    """Run inference with the given model and image."""
+def run_inference(
+    model,
+    image_path,
+    save_path,
+):
+    """Run inference with the given model and image.
+
+    Args:
+            model: The vision model to use.
+            image_path: Path to the input image.
+            save_path: Path to save the output visualization.
+    """
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     input_img = model.preprocess(image_path)
@@ -42,9 +52,7 @@ def run_inference(model, image_path, save_path):
 def test_resnet50(resnet50):
     """Test ResNet50 inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "volcano.jpg")
-    save_path = os.path.join(
-        TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}"
-    )
+    save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}")
 
     run_inference(resnet50, image_path, save_path)
 
@@ -99,9 +107,7 @@ if __name__ == "__main__":
         product=args.product,
     )
     if args.save_path is None:
-        args.save_path = os.path.join(
-            TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}"
-        )
+        args.save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}")
 
     try:
         run_inference(model, args.input_path, args.save_path)

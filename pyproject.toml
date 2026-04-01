@@ -106,4 +106,23 @@ dev = [
     "numba>=0.60.0, <=0.60.0",
     "hf_xet",
     "build",
+    "ruff",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [
+    "mblt_model_zoo/hf_transformers",
+    "mblt_model_zoo/MeloTTS",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["PLC0414"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

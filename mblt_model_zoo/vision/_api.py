@@ -20,20 +20,21 @@ def list_tasks() -> List[str]:
     """Lists the available vision tasks.
 
     Returns:
-        List[str]: A list of task names.
+            A list of task names.
     """
     return TASKS
 
 
-def list_models(tasks: Union[str, List[str]] = None) -> dict:
+def list_models(
+    tasks: Union[str, List[str]] = None,
+):
     """Lists the available models for the specified tasks.
 
     Args:
-        tasks (Union[str, List[str]], optional): The task(s) to list models for.
-            Defaults to all TASKS.
+            tasks: The task(s) to list models for. Defaults to all TASKS.
 
     Returns:
-        dict: A dictionary where keys are task names and values are lists of model names.
+            A dictionary where keys are task names and values are lists of model names.
     """
 
     if tasks is None:
@@ -46,19 +47,13 @@ def list_models(tasks: Union[str, List[str]] = None) -> dict:
     for task in tasks:
         available_models[task] = []
         try:
-            module = importlib.import_module(
-                f".{task}", package=__name__.replace("._api", "")
-            )
+            module = importlib.import_module(f".{task}", package=__name__.replace("._api", ""))
         except ImportError as e:
             print(f"Failed to import module for task '{task}': {e}")
             continue
 
         for name, obj in inspect.getmembers(module):
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, MBLT_Engine)
-                and obj is not MBLT_Engine
-            ):
+            if inspect.isclass(obj) and issubclass(obj, MBLT_Engine) and obj is not MBLT_Engine:
                 available_models[task].append(name)
 
     return available_models

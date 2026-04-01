@@ -2,6 +2,7 @@
 YOLOv7 model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,344 +13,250 @@ class YOLOv7_Set(ModelInfoSet):
     """Configuration set for YOLOv7 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7",
-            "filename": "yolov7.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7",
+                "filename": "yolov7.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [12, 16, 19, 36, 40, 28],
+                    [36, 75, 76, 55, 72, 146],
+                    [142, 110, 192, 243, 459, 401],
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7",
-            "filename": "yolov7.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7d6_Set(ModelInfoSet):
     """Configuration set for YOLOv7d6 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7d6",
-            "filename": "yolov7d6.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7d6",
+                "filename": "yolov7d6.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [1280, 1280],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [19, 27, 44, 40, 38, 94],  # P3/8
+                    [96, 68, 86, 152, 180, 137],  # P4/16
+                    [140, 301, 303, 264, 238, 542],  # P5/32
+                    [436, 615, 739, 380, 925, 792],  # P6/64
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7d6",
-            "filename": "yolov7d6.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7e6_Set(ModelInfoSet):
     """Configuration set for YOLOv7e6 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7e6",
-            "filename": "yolov7e6.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7e6",
+                "filename": "yolov7e6.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [1280, 1280],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [19, 27, 44, 40, 38, 94],  # P3/8
+                    [96, 68, 86, 152, 180, 137],  # P4/16
+                    [140, 301, 303, 264, 238, 542],  # P5/32
+                    [436, 615, 739, 380, 925, 792],  # P6/64
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7e6",
-            "filename": "yolov7e6.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7e6e_Set(ModelInfoSet):
     """Configuration set for YOLOv7e6e models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7e6e",
-            "filename": "yolov7e6e.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7e6e",
+                "filename": "yolov7e6e.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [1280, 1280],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [19, 27, 44, 40, 38, 94],  # P3/8
+                    [96, 68, 86, 152, 180, 137],  # P4/16
+                    [140, 301, 303, 264, 238, 542],  # P5/32
+                    [436, 615, 739, 380, 925, 792],  # P6/64
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7e6e",
-            "filename": "yolov7e6e.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7w6_Set(ModelInfoSet):
     """Configuration set for YOLOv7w6 models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7w6",
-            "filename": "yolov7w6.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7w6",
+                "filename": "yolov7w6.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [1280, 1280],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [19, 27, 44, 40, 38, 94],  # P3/8
+                    [96, 68, 86, 152, 180, 137],  # P4/16
+                    [140, 301, 303, 264, 238, 542],  # P5/32
+                    [436, 615, 739, 380, 925, 792],  # P6/64
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7w6",
-            "filename": "yolov7w6.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [1280, 1280],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [19, 27, 44, 40, 38, 94],  # P3/8
-                [96, 68, 86, 152, 180, 137],  # P4/16
-                [140, 301, 303, 264, 238, 542],  # P5/32
-                [436, 615, 739, 380, 925, 792],  # P6/64
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7x_Set(ModelInfoSet):
     """Configuration set for YOLOv7x models."""
 
     DEFAULT = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7x",
-            "filename": "yolov7x.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/YOLOv7x",
+                "filename": "yolov7x.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "numpy",
+                },
+                "LetterBox": {
+                    "img_size": [640, 640],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "cv",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "object_detection",
+                "nc": 80,  # Number of classes
+                "anchors": [
+                    [12, 16, 19, 36, 40, 28],
+                    [36, 75, 76, 55, 72, 146],
+                    [142, 110, 192, 243, 459, 401],
+                ],
+            }
+        ),
     )
 
-    TURBO = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/YOLOv7x",
-            "filename": "yolov7x.mxq",
-            "revision": "TURBO",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "numpy",
-            },
-            "LetterBox": {
-                "img_size": [640, 640],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "object_detection",
-            "nc": 80,  # Number of classes
-            "anchors": [
-                [12, 16, 19, 36, 40, 28],
-                [36, 75, 76, 55, 72, 146],
-                [142, 110, 192, 243, 459, 401],
-            ],
-        },
-    )
+    TURBO = DEFAULT.update_model_cfg(revision="TURBO")
 
 
 class YOLOv7(MBLT_Engine):

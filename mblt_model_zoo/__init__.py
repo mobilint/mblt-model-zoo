@@ -1,14 +1,16 @@
-__version__ = "1.0.0"
-from . import utils, vision
-
-try:  # optional
-    from . import hf_transformers
-except Exception as e:
-    pass
-
-try:  # optional
-    from . import MeloTTS
-except Exception as e:
-    pass
-
+__version__ = "1.1.0"
 __all__ = ["utils", "vision"]
+
+try:
+    from . import hf_transformers as hf_transformers  # noqa: F401
+
+    __all__.append("hf_transformers")
+except ImportError:
+    pass
+
+try:
+    from . import MeloTTS as MeloTTS  # noqa: F401
+
+    __all__.append("MeloTTS")
+except ImportError:
+    pass

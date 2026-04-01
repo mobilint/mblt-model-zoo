@@ -2,6 +2,7 @@
 ResNeXt model definitions.
 """
 
+from collections import OrderedDict
 from typing import Optional
 
 from ..utils.types import ModelInfo, ModelInfoSet
@@ -12,49 +13,44 @@ class ResNeXt50_32x4d_Set(ModelInfoSet):
     """Configuration set for ResNeXt50 32x4d models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNeXt50_32X4D.tv1_in1k",
-            "filename": "resnext50_32x4d_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ResNeXt50_32X4D.tv1_in1k",
+                "filename": "resnext50_32x4d_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNeXt50_32X4D.tv2_in1k",
-            "filename": "resnext50_32x4d_IMAGENET1K_V2.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
+    IMAGENET1K_V2 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ResNeXt50_32X4D.tv2_in1k",
+        filename="resnext50_32x4d_IMAGENET1K_V2.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 232,
+            "interpolation": "bilinear",
         },
     )
     DEFAULT = IMAGENET1K_V2  # Default model
@@ -64,49 +60,44 @@ class ResNeXt101_32x8d_Set(ModelInfoSet):
     """Configuration set for ResNeXt101 32x8d models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNeXt101_32X8D.tv1_in1k",
-            "filename": "resnext101_32x8d_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 256,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ResNeXt101_32X8D.tv1_in1k",
+                "filename": "resnext101_32x8d_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 256,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
-    IMAGENET1K_V2 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNeXt101_32X8D.tv2_in1k",
-            "filename": "resnext101_32x8d_IMAGENET1K_V2.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
+    IMAGENET1K_V2 = IMAGENET1K_V1.update_model_cfg(
+        repo_id="mobilint/ResNeXt101_32X8D.tv2_in1k",
+        filename="resnext101_32x8d_IMAGENET1K_V2.mxq",
+    ).update_pre_cfg(
+        Resize={
+            "size": 232,
+            "interpolation": "bilinear",
         },
     )
     DEFAULT = IMAGENET1K_V2  # Default model
@@ -116,27 +107,36 @@ class ResNeXt101_64x4d_Set(ModelInfoSet):
     """Configuration set for ResNeXt101 64x4d models."""
 
     IMAGENET1K_V1 = ModelInfo(
-        model_cfg={
-            "repo_id": "mobilint/ResNeXt101_64X4D",
-            "filename": "resnext101_64x4d_IMAGENET1K_V1.mxq",
-            "revision": "main",
-        },
-        pre_cfg={
-            "Reader": {
-                "style": "pil",
-            },
-            "Resize": {
-                "size": 232,
-                "interpolation": "bilinear",
-            },
-            "CenterCrop": {
-                "size": [224, 224],
-            },
-            "SetOrder": {"shape": "HWC"},
-        },
-        post_cfg={
-            "task": "image_classification",
-        },
+        model_cfg=OrderedDict(
+            {
+                "repo_id": "mobilint/ResNeXt101_64X4D",
+                "filename": "resnext101_64x4d_IMAGENET1K_V1.mxq",
+                "revision": "main",
+            }
+        ),
+        pre_cfg=OrderedDict(
+            {
+                "Reader": {
+                    "style": "pil",
+                },
+                "Resize": {
+                    "size": 232,
+                    "interpolation": "bilinear",
+                },
+                "CenterCrop": {
+                    "size": [224, 224],
+                },
+                "SetOrder": {"shape": "HWC"},
+                "Normalize": {
+                    "style": "torch",
+                },
+            }
+        ),
+        post_cfg=OrderedDict(
+            {
+                "task": "image_classification",
+            }
+        ),
     )
     DEFAULT = IMAGENET1K_V1  # Default model
 
