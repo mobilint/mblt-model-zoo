@@ -1,4 +1,6 @@
 __version__ = "1.1.0"
+from . import utils, vision
+
 __all__ = ["utils", "vision"]
 
 try:
