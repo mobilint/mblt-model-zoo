@@ -18,9 +18,15 @@ from transformers import pipeline as hf_pipeline
 
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    add_pipeline_device_args as _add_pipeline_device_args,
-    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
     CORE_MODE_SWEEP_VALUES as _CORE_MODE_SWEEP_VALUES_COMMON,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -82,6 +88,48 @@ def _discover_targets_from_mxq_dir(
                 "revision": revision,
             }
         )
+    return targets, skipped
+
+
+def _revision_exists(model_id: str, revision: str) -> bool | None:
+    """Checks whether a Hugging Face model revision exists."""
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        refs = api.list_repo_refs(model_id, repo_type="model")
+        return any(branch.name == revision for branch in getattr(refs, "branches", []))
+    except Exception:
+        return None
+
+
+def _discover_targets_from_available_models(
+    available_model_ids: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Builds benchmark targets from public Mobilint text-generation models."""
+    targets: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    revisions = ("W4V8", "W8")
+    for model_id in sorted(str(x) for x in available_model_ids if str(x).startswith("mobilint/")):
+        for revision in revisions:
+            exists = _revision_exists(model_id, revision)
+            if exists is False:
+                skipped.append(
+                    {
+                        "model_id": model_id,
+                        "revision": revision,
+                        "reason": "revision not found on Hugging Face Hub",
+                    }
+                )
+                continue
+            targets.append(
+                {
+                    "mxq_file": None,
+                    "mxq_path": None,
+                    "model_id": model_id,
+                    "revision": revision,
+                }
+            )
     return targets, skipped
 
 
@@ -701,7 +749,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--mxq-dir",
         type=str,
         default=None,
-        help="directory containing mxq files named as <model_without_group>-<W8|W4V8>.mxq",
+        help=(
+            "directory containing mxq files named as <model_without_group>-<W8|W4V8>.mxq; "
+            "if omitted, benchmark public mobilint text-generation models for W4V8/W8 revisions"
+        ),
     )
     parser.add_argument(
         "--core-modes",
@@ -776,10 +827,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Rebuilt outputs from existing records: {results_dir}")
         return 0
 
-    if not args.rebuild_charts:
-        if not args.mxq_dir:
-            print("--mxq-dir is required unless --rebuild-charts is used.")
-            return 2
+    if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).resolve()
         if not mxq_dir.is_dir():
             print(f"--mxq-dir does not exist or is not a directory: {mxq_dir}")
@@ -793,6 +841,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     skipped_mxq_files: list[dict[str, str]] = []
+    skipped_model_revisions: list[dict[str, Any]] = []
     targets: list[dict[str, Any]] = []
     if mxq_dir is not None:
         targets, skipped_mxq_files = _discover_targets_from_mxq_dir(
@@ -811,10 +860,22 @@ def main(argv: list[str] | None = None) -> int:
             }
             _write_json(results_dir / "summary.json", summary_payload)
             return 0
+    else:
+        targets, skipped_model_revisions = _discover_targets_from_available_models([str(x) for x in available])
+        if not targets:
+            print("No valid public Mobilint text-generation model revisions found for W4V8/W8.")
+            summary_payload = {
+                "mxq_dir": None,
+                "total_mxq_files": 0,
+                "valid_targets": 0,
+                "skipped_model_revisions": skipped_model_revisions,
+            }
+            _write_json(results_dir / "summary.json", summary_payload)
+            return 0
 
     prefill_lengths = [int(x) for x in args.prefill_lengths]
     chunk_candidates = [int(x) for x in args.chunk_candidates]
-    print(f"Valid mxq targets: {len(targets)}")
+    print(f"Valid targets: {len(targets)}")
     print(f"Core modes: {args.core_modes}")
     print(f"Prefill lengths ({len(prefill_lengths)}): {prefill_lengths}")
     print(f"Chunk candidates ({len(chunk_candidates)}): {chunk_candidates}")
@@ -823,6 +884,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Skipped mxq files during discovery: {len(skipped_mxq_files)}")
         for row in skipped_mxq_files:
             print(f"[skip] {row['mxq_file']}: {row['reason']}")
+    if skipped_model_revisions:
+        print(f"Skipped model revisions during discovery: {len(skipped_model_revisions)}")
+        for row in skipped_model_revisions:
+            print(f"[skip] {row['model_id']}@{row['revision']}: {row['reason']}")
 
     total = len(targets) * len(args.core_modes)
     pbar = tqdm(total=total, desc="model/core_mode search", unit="pair")
@@ -830,8 +895,8 @@ def main(argv: list[str] | None = None) -> int:
         for target in targets:
             model_id = str(target["model_id"])
             revision = str(target["revision"])
-            mxq_path = str(target["mxq_path"])
-            mxq_file = str(target["mxq_file"])
+            mxq_path = None if target["mxq_path"] is None else str(target["mxq_path"])
+            mxq_file = None if target["mxq_file"] is None else str(target["mxq_file"])
             for core_mode in args.core_modes:
                 base_name = f"{_safe_filename(model_id)}__{revision}__{core_mode}.json"
                 record_path = records_dir / base_name
@@ -950,6 +1015,8 @@ def main(argv: list[str] | None = None) -> int:
         "processed_records": len(records),
         "skipped_files_count": len(skipped_mxq_files),
         "skipped_files": skipped_mxq_files,
+        "skipped_model_revisions_count": len(skipped_model_revisions),
+        "skipped_model_revisions": skipped_model_revisions,
         "failed_pairs_count": len(failed_pairs),
         "failed_pairs": failed_pairs,
     }
