@@ -213,13 +213,13 @@ VLM compare mode saves:
 
 ## Search best prefill chunk size
 
-`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** with fixed `prefill_length=2048` (configurable), while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
+`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
 
 Important behavior:
 - Core mode is fixed at model creation time, so the script recreates the model instance for each core mode.
 - Input targets come from `--mxq-dir` and filename pattern: `<model_id_without_group_id>-<W8|W4V8>.mxq`.
 - If filename format is invalid, model base is not found in HF text-generation model list, or mapping is ambiguous, that mxq file is skipped with warning.
-- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `128,256,512,1024,2048`).
+- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `1024,2048`).
 - For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `128,256,512,1024,2048`).
 - Candidates where `chunk_size > prefill_length` are skipped automatically.
 - Each `(prefill_length, chunk_size)` pair is measured with repeats and median prefill TPS.
@@ -248,7 +248,7 @@ Example:
 ```bash
 python benchmark/transformers/search_prefill_chunk_size.py \
   --mxq-dir . \
-  --prefill-lengths 128,256,512,1024,2048 \
+  --prefill-lengths 1024,2048 \
   --chunk-candidates 128,256,512,1024,2048 \
   --time-guard-sec 300 \
   --repeat 3 \

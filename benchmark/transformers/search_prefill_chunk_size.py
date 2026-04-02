@@ -712,8 +712,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prefill-lengths",
         type=_parse_int_csv,
-        default=_parse_int_csv("128,256,512,1024,2048"),
-        help="comma-separated prefill lengths (default: 128,256,512,1024,2048)",
+        default=_parse_int_csv("1024,2048"),
+        help="comma-separated prefill lengths (default: 1024,2048)",
     )
     parser.add_argument(
         "--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement"
