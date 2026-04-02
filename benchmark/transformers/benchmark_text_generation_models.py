@@ -1061,10 +1061,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
-    lookup_path = args.chunk_size_lookup_csv
-    if lookup_path and not os.path.isabs(lookup_path):
-        lookup_path = os.path.join(os.path.dirname(__file__), lookup_path)
-    chunk_lookup = _load_chunk_size_lookup_csv(lookup_path)
+    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    if disable_npu_specific_args:
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/chunk_size).")
+        chunk_lookup: dict[tuple[str, str, str], int] = {}
+    else:
+        lookup_path = args.chunk_size_lookup_csv
+        if lookup_path and not os.path.isabs(lookup_path):
+            lookup_path = os.path.join(os.path.dirname(__file__), lookup_path)
+        chunk_lookup = _load_chunk_size_lookup_csv(lookup_path)
 
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
@@ -1116,8 +1121,8 @@ def main(argv: list[str] | None = None) -> int:
                 all_revisions=args.all,
             )
         )
-    core_modes = _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str]] = []
+    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
     for model_id, revision_candidates, label, base, mxq_path in targets:
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
@@ -1202,28 +1207,31 @@ def main(argv: list[str] | None = None) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
             _print_device_status(args, tracker_prefill)
-            lookup_chunk = _resolve_lookup_chunk_size(
-                chunk_lookup,
-                model_id=model_id,
-                revision=revision,
-                core_mode=core_mode,
-            )
-            resolved_chunk_size = args.chunk_size
-            if resolved_chunk_size is None and lookup_chunk is not None:
-                resolved_chunk_size = lookup_chunk
-                print(
-                    f"Using chunk-size lookup: model={model_id} revision={revision} "
-                    f"core_mode={core_mode} chunk_size={resolved_chunk_size}"
+            if disable_npu_specific_args:
+                resolved_chunk_size = None
+            else:
+                lookup_chunk = _resolve_lookup_chunk_size(
+                    chunk_lookup,
+                    model_id=model_id,
+                    revision=revision,
+                    core_mode=core_mode,
                 )
-            elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
-                resolved_chunk_size = DEFAULT_FALLBACK_CHUNK_SIZE
-                print(
-                    f"Warning: no chunk-size lookup match for model={model_id} "
-                    f"revision={revision} core_mode={core_mode}; "
-                    f"using fallback chunk_size={resolved_chunk_size}"
-                )
-            elif args.chunk_size is not None and lookup_chunk is not None:
-                print(f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}")
+                resolved_chunk_size = args.chunk_size
+                if resolved_chunk_size is None and lookup_chunk is not None:
+                    resolved_chunk_size = lookup_chunk
+                    print(
+                        f"Using chunk-size lookup: model={model_id} revision={revision} "
+                        f"core_mode={core_mode} chunk_size={resolved_chunk_size}"
+                    )
+                elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
+                    resolved_chunk_size = DEFAULT_FALLBACK_CHUNK_SIZE
+                    print(
+                        f"Warning: no chunk-size lookup match for model={model_id} "
+                        f"revision={revision} core_mode={core_mode}; "
+                        f"using fallback chunk_size={resolved_chunk_size}"
+                    )
+                elif args.chunk_size is not None and lookup_chunk is not None:
+                    print(f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}")
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.fixed_prefill,

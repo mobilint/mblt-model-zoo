@@ -868,6 +868,10 @@ def main(argv: list[str] | None = None) -> int:
         args.device_backend = "auto" if args.original_models else "npu"
         print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
 
+    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    if disable_npu_specific_args:
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode).")
+
     os.environ.setdefault("MPLBACKEND", "Agg")
     script_dir = Path(__file__).resolve().parent
     results_dir = (
@@ -914,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
             targets.append((model_id, revision, label, base, args.mxq_path))
 
-    core_modes = _iter_core_modes_common(args.core_mode)
+    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
     run_targets: list[tuple[str, str | None, str, str, str | None, str | None]] = []
     for model_id, revision, label, base, target_mxq_path in targets:
         for core_mode in core_modes:
