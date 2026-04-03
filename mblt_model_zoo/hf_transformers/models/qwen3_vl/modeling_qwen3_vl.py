@@ -60,6 +60,15 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         grid_thw: torch.Tensor,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Run the NPU vision encoder.
+
+        The compiled encoder expects a fixed-shape tensor with the following flow:
+
+        1. HF processor output: `(256, 1536)` for a 224x224 image
+        2. Runtime repreprocess: `(1, 6, 1024, 64)`
+        3. Final MXQ input: `(1024, 64, 6)`
+        """
+        del kwargs
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")
 
@@ -72,6 +81,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return image_embeds, deepstack_embeds
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
+        """Match the runtime `repreprocess_pixel_values` layout for Qwen3-VL vision input."""
         gt, gh, gw = grid_thw[0].tolist()
         c = int(self.config.in_channels)
         pt = int(self.config.temporal_patch_size)
@@ -114,7 +124,21 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return hidden_states
 
     def _prepare_npu_inputs(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> np.ndarray:
+        """Convert runtime repreprocess output to the exact MXQ input shape.
+
+        Args:
+            hidden_states: HF processor pixel values, typically `(256, 1536)`.
+            grid_thw: Visual grid metadata, typically `[[1, 16, 16]]`.
+
+        Returns:
+            Float32 numpy tensor with shape `(1024, 64, 6)`.
+        """
         processed = self._repreprocess_pixel_values(hidden_states, grid_thw)
+        if processed.ndim != 4 or processed.shape[0] != 1:
+            raise ValueError(f"Unexpected preprocessed vision tensor shape: {tuple(processed.shape)}")
+
+        # `(1, 6, 1024, 64)` -> `(1024, 64, 6)`
+        processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
         return processed.cpu().numpy().astype(np.float32)
 
     def _reorder_encoder_outputs(
@@ -126,14 +150,14 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Expected at least 4 encoder outputs, got {len(encoder_outputs)}")
 
         image_embeds = torch.tensor(
-            np.squeeze(encoder_outputs[0]).T,
+            np.squeeze(encoder_outputs[0]),
             dtype=torch.float32,
             device=device,
         )
         deepstack_embeds = [
-            torch.tensor(np.squeeze(encoder_outputs[2]).T, dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[3]).T, dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[1]).T, dtype=torch.float32, device=device),
+            torch.tensor(np.squeeze(encoder_outputs[2]), dtype=torch.float32, device=device),
+            torch.tensor(np.squeeze(encoder_outputs[3]), dtype=torch.float32, device=device),
+            torch.tensor(np.squeeze(encoder_outputs[1]), dtype=torch.float32, device=device),
         ]
         return image_embeds, deepstack_embeds
 
@@ -234,7 +258,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         )
 
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
-        deepstack_np = deepstack_tensor.cpu().numpy()
+        deepstack_np = deepstack_tensor.type(torch.float32).cpu().numpy()
 
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_prefill_chunk_size))
@@ -270,7 +294,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if logits_ndarray is None:
             raise RuntimeError("Text MXQ inference did not produce logits.")
 
-        return torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
+        return torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
 
     def _build_deepstack_tensor(
         self,
