@@ -27,28 +27,6 @@ from .configuration_qwen3_vl import (
 logger = logging.get_logger(__name__)
 
 
-def _repreprocess_pixel_values(hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
-    """Convert processor pixel values to the MXQ encoder layout.
-
-    Args:
-        hidden_states: Raw processor-produced pixel tensor.
-        grid_thw: Temporal, height, width metadata for the visual input.
-
-    Returns:
-        Pixel values reordered for the compiled vision encoder.
-    """
-    try:
-        from qbcompiler.model_dict.parser.backend.fx_hf_extensions.transformers.models.qwen3vl import (
-            repreprocess_pixel_values,
-        )
-    except ImportError as exc:
-        raise ImportError(
-            "Mobilint Qwen3-VL requires qbcompiler to preprocess visual inputs for the MXQ vision encoder."
-        ) from exc
-
-    return repreprocess_pixel_values(hidden_states, grid_thw[0].tolist())
-
-
 class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
     config: MobilintQwen3VLConfig
     base_model_prefix = "model"
@@ -66,33 +44,84 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     config: MobilintQwen3VLVisionConfig
     input_modalities = ("image", "video")
 
-    def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, **kwargs) -> torch.Tensor:
+    @property
+    def dtype(self) -> torch.dtype:
+        """Expose the MXQ vision input dtype expected by upstream Qwen3-VL helpers."""
+        return torch.float32
+
+    @property
+    def spatial_merge_size(self) -> int:
+        """Expose the merge factor expected by upstream Qwen3-VL helpers."""
+        return int(self.config.spatial_merge_size)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")
 
-        processed = _repreprocess_pixel_values(hidden_states, grid_thw)
-        processed_np = processed.cpu().numpy().astype(np.float32)
-        encoder_outputs = self.get_mxq_model().infer(processed_np)
+        npu_inputs = self._prepare_npu_inputs(hidden_states, grid_thw)
+        encoder_outputs = self.get_mxq_model().infer(npu_inputs)
         if encoder_outputs is None:
             raise RuntimeError("Vision MXQ inference returned None.")
 
         image_embeds, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
         return image_embeds, deepstack_embeds
 
+    def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
+        gt, gh, gw = grid_thw[0].tolist()
+        c = int(self.config.in_channels)
+        pt = int(self.config.temporal_patch_size)
+        merge_size = int(self.config.spatial_merge_size)
+        gh_merged = gh // merge_size
+        gw_merged = gw // merge_size
+        ph = pw = int((hidden_states.shape[-1] // (pt * c)) ** 0.5)
+
+        expected_tokens = gt * gh_merged * gw_merged * merge_size * merge_size
+        expected_hidden = c * pt * ph * pw
+        if hidden_states.shape[0] != expected_tokens:
+            raise ValueError(
+                "Unexpected pixel token count for Qwen3-VL vision input: "
+                f"{hidden_states.shape[0]} vs {expected_tokens}"
+            )
+        if hidden_states.shape[1] != expected_hidden:
+            raise ValueError(
+                "Unexpected pixel hidden size for Qwen3-VL vision input: "
+                f"{hidden_states.shape[1]} vs {expected_hidden}"
+            )
+
+        hidden_states = hidden_states.view(
+            gt,
+            gh_merged,
+            gw_merged,
+            merge_size,
+            merge_size,
+            c,
+            pt,
+            ph,
+            pw,
+        )
+        hidden_states = hidden_states.permute(0, 6, 5, 1, 2, 7, 3, 4, 8).contiguous()
+        hidden_states = hidden_states.view(
+            gt,
+            pt * c,
+            gh_merged * gw_merged * ph,
+            merge_size * merge_size * pw,
+        )
+        return hidden_states
+
+    def _prepare_npu_inputs(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> np.ndarray:
+        processed = self._repreprocess_pixel_values(hidden_states, grid_thw)
+        return processed.cpu().numpy().astype(np.float32)
+
     def _reorder_encoder_outputs(
         self,
         encoder_outputs: list[np.ndarray],
         device: torch.device,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        """Convert MXQ vision outputs to the ordering expected by Qwen3-VL.
-
-        Args:
-            encoder_outputs: Raw MXQ outputs from the compiled vision encoder.
-            device: Target device for returned tensors.
-
-        Returns:
-            The merged image embeddings and deepstack embeddings in layer order.
-        """
         if len(encoder_outputs) < 4:
             raise ValueError(f"Expected at least 4 encoder outputs, got {len(encoder_outputs)}")
 
@@ -282,7 +311,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
 class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, Qwen3VLModel):
     _no_split_modules = []
-    
+
     def __init__(self, config: MobilintQwen3VLConfig, *args, **kwargs):
         MobilintQwen3VLPreTrainedModel.__init__(self, config, *args, **kwargs)
         self.visual = MobilintQwen3VLVisionModel._from_config(config.vision_config, _internal_call=True)
@@ -290,8 +319,35 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
         self.rope_deltas = None
 
+    def get_image_features(
+        self,
+        pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.LongTensor] = None,
+    ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
+        """Encode images and return split image embeddings plus deepstack features."""
+        if image_grid_thw is None:
+            raise ValueError("image_grid_thw must not be None.")
 
-class MobilintQwen3VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, MobilintGenerationMixin, Qwen3VLForConditionalGeneration):
+        image_embeds, deepstack_image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
+        image_embeds = torch.split(image_embeds, split_sizes)
+        return image_embeds, deepstack_image_embeds
+
+    def get_video_features(
+        self,
+        pixel_values_videos: torch.FloatTensor,
+        video_grid_thw: Optional[torch.LongTensor] = None,
+    ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
+        """Encode videos using the same MXQ vision path as images."""
+        return self.get_image_features(pixel_values_videos, video_grid_thw)
+
+
+class MobilintQwen3VLForConditionalGeneration(
+    PretrainedOnlyMixin,
+    MobilintQwen3VLPreTrainedModel,
+    MobilintGenerationMixin,
+    Qwen3VLForConditionalGeneration,
+):
     def __init__(self, config: MobilintQwen3VLConfig, *args, **kwargs):
         """Initialize the multimodal model and bypass HF lm_head."""
         PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)

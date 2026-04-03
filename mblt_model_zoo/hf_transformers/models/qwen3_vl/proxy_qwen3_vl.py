@@ -1,5 +1,3 @@
-"""Proxy imports for Mobilint Qwen3-VL."""
-
 try:
     from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import (
         MobilintQwen3VLConfig,
