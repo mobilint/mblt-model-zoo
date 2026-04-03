@@ -36,9 +36,8 @@ Common CLI options:
 - `--decode-range` (e.g., `128:512:128`)
 - `--fixed-decode` (default: `10`)
 - `--fixed-prefill` (default: `128`)
-- `--chunk-size` (optional fixed chunk size)
+- `--prefill-chunk-size` (optional fixed prefill chunk size override)
 - `--core-mode` (`single`, `global4`, `global8`, `all`; default: `global8`) for fixed-core benchmarking
-- `--chunk-size-lookup-csv` (default: script-relative `prefill_chunk_size.csv`; columns: `model_id,revision,core_mode,best_chunk_size`)
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
 - `--device-metrics/--no-device-metrics` (default: `--device-metrics`)
@@ -59,7 +58,6 @@ Example:
 python benchmark/transformers/benchmark_text_generation_models.py \
   --revision W8 \
   --core-mode global8 \
-  --chunk-size-lookup-csv benchmark/transformers/results/prefill_chunk_search/consolidated_best_chunk_fixed512.csv \
   --prefill-range 128:512:128 \
   --decode-range 128:512:128 \
   --skip-existing

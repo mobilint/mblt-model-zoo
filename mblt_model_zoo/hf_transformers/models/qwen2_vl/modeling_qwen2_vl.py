@@ -98,7 +98,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         output_hidden_states: Union[bool, None] = None,
         return_dict: Union[bool, None] = None,
         cache_position: Union[torch.LongTensor, None] = None,
-        chunk_size: int = 128,
+        prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -136,7 +136,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             inputs_embeds,
             past_key_values,
             cache_position,
-            chunk_size,
+            prefill_chunk_size,
             count_npu_time=count_npu_time,
         )
 
@@ -188,3 +188,5 @@ class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2
         
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
+
+

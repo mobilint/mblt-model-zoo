@@ -37,7 +37,7 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        chunk_size: int = 128,
+        prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
@@ -65,7 +65,7 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds,
             past_key_values,
             cache_position,
-            chunk_size,
+            prefill_chunk_size,
             count_npu_time=count_npu_time,
         )
 
@@ -83,3 +83,5 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
 AutoModel.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
 AutoModelForCausalLM.register(MobilintLlamaConfig, MobilintLlamaForCausalLM)
+
+

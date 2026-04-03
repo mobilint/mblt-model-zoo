@@ -268,6 +268,14 @@ To make it easier to test custom compiled models, we support overriding the inpu
   The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
   The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
 
+#### prefill_chunk_size
+
+- `prefill_chunk_size` (`int`)
+
+  Overrides the prefill chunk size used by Mobilint text-generation backends.
+  If omitted or set to `None`, the runtime reads `prefill_chunk_size` from the model's `config.json`
+  using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
+
 ### Original Keyword Parameters from `transformers`
 
 The parameters below follow the standard `transformers` semantics. For Mobilint quantized `*.mxq` models, they only affect the non-NPU parts of the model (typically CPU-side layers such as embeddings). NPU execution always runs on Mobilint NPUs.

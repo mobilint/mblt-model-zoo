@@ -259,7 +259,7 @@ def _measure_prefill_once(
     single = measurer.measure(
         num_prefill=prefill_length,
         num_decode=decode_length,
-        chunk_size=chunk_size,
+        prefill_chunk_size=chunk_size,
         show_progress=False,
     )
     t1 = time.perf_counter()
@@ -281,7 +281,7 @@ def _measure_prefill_median(
             measurer=measurer,
             prefill_length=prefill_length,
             decode_length=decode_length,
-            chunk_size=chunk_size,
+            prefill_chunk_size=chunk_size,
         )
         tps_values.append(tps)
         wall_times.append(wall)
@@ -950,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
                             measurer.measure(
                                 num_prefill=int(prefill_lengths[0]),
                                 num_decode=args.decode_length,
-                                chunk_size=int(chunk_candidates[0]),
+                                prefill_chunk_size=int(chunk_candidates[0]),
                                 show_progress=False,
                             )
                     search_budget = max(1, len(prefill_lengths) * len(chunk_candidates))
@@ -1028,3 +1028,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
