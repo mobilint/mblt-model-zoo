@@ -1,7 +1,10 @@
 import pytest
 from transformers import AutoProcessor, TextStreamer, pipeline
 
-MODEL_PATHS = ("mobilint/Qwen3-VL-4B-Instruct",)
+MODEL_PATHS = (
+    "mobilint/Qwen3-VL-2B-Instruct",
+    "mobilint/Qwen3-VL-4B-Instruct",
+)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
