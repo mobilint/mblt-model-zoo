@@ -706,10 +706,11 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
+    warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=args.fixed_prefill,
-            num_decode=args.fixed_decode,
+            num_prefill=warmup_prefill,
+            num_decode=args.decode_window,
             prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
@@ -750,9 +751,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             runs.append(
                 measurer.measure_full(
                     prefill_range=args.prefill_range,
-                    decode_range=args.decode_range,
-                    fixed_decode_len=args.fixed_decode,
-                    fixed_prefill_len=args.fixed_prefill,
+                    cache_lengths=args.cache_lengths,
+                    decode_window=args.decode_window,
                     prefill_chunk_size=args.prefill_chunk_size,
                     trace_path=args.trace if i == 0 else None,
                     show_progress=True,
@@ -1457,22 +1457,16 @@ def add_tps_parser(
         help="prefill sweep range (start:end:step)",
     )
     p_sweep.add_argument(
-        "--decode-range",
-        type=_parse_range,
-        default=(128, 512, 128),
-        help="decode sweep range (start:end:step)",
+        "--cache-lengths",
+        type=_parse_int_list,
+        default=[1024, 2048, 4096, 8192],
+        help="comma-separated cache lengths for decode sweep",
     )
     p_sweep.add_argument(
-        "--fixed-decode",
-        type=_parse_positive_int,
-        default=10,
-        help="fixed decode length for prefill sweep",
-    )
-    p_sweep.add_argument(
-        "--fixed-prefill",
+        "--decode-window",
         type=_parse_positive_int,
         default=128,
-        help="fixed prefill length for decode sweep",
+        help="decode token window measured after each cache-length prefill",
     )
     p_sweep.add_argument("--plot", default="tps_benchmark.png", help="write PNG plot")
     p_sweep.add_argument(

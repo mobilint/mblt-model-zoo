@@ -323,7 +323,8 @@ mblt-model-zoo tps measure --model mobilint/Llama-3.2-1B-Instruct \
 
 # repeated sweep (writes aggregate curve + per-run payload)
 mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
-  --prefill-range 128:512:128 --decode-range 128:512:128 \
+  --prefill-range 128:512:128 --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --repeat 5 --json tps.json --csv tps.csv --plot tps.png
 ```
 

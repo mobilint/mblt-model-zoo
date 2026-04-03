@@ -13,13 +13,13 @@ def test_cli_tps_sweep_range_parsing():
             "mobilint/Llama-3.2-1B-Instruct",
             "--prefill-range",
             "1:3:1",
-            "--decode-range",
-            "2,4,2",
+            "--cache-lengths",
+            "1024,2048,4096",
             "--no-plot",
         ]
     )
     assert args.prefill_range == (1, 3, 1)
-    assert args.decode_range == (2, 4, 2)
+    assert args.cache_lengths == [1024, 2048, 4096]
     assert args.plot is None
     assert args.device_backend == "none"
 
@@ -81,17 +81,8 @@ def test_cli_tps_device_backend_none_parsing():
             "sweep",
             "--model",
             "mobilint/Llama-3.2-1B-Instruct",
-            "--fixed-decode",
+            "--decode-window",
             "0",
-            "--no-plot",
-        ],
-        [
-            "tps",
-            "sweep",
-            "--model",
-            "mobilint/Llama-3.2-1B-Instruct",
-            "--fixed-prefill",
-            "-2",
             "--no-plot",
         ],
     ],

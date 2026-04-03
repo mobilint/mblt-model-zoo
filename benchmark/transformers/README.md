@@ -4,7 +4,7 @@ The `benchmark/` folder contains runnable scripts for text-generation benchmarki
 
 ## Benchmark all available models
 
-`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
+`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py
@@ -33,9 +33,8 @@ Common CLI options:
 - `--all` (benchmark `W8` and `W4V8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--prefill-range` (e.g., `128:512:128`)
-- `--decode-range` (e.g., `128:512:128`)
-- `--fixed-decode` (default: `10`)
-- `--fixed-prefill` (default: `128`)
+- `--cache-lengths` (e.g., `1024,2048,4096,8192`)
+- `--decode-window` (default: `128`)
 - `--prefill-chunk-size` (optional fixed prefill chunk size override)
 - `--core-mode` (`single`, `global4`, `global8`, `all`; default: `global8`) for fixed-core benchmarking
 - `--warmup` (default: `1`)
@@ -59,7 +58,8 @@ python benchmark/transformers/benchmark_text_generation_models.py \
   --revision W8 \
   --core-mode global8 \
   --prefill-range 128:512:128 \
-  --decode-range 128:512:128 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --skip-existing
 ```
 

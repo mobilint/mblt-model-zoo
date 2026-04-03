@@ -74,6 +74,20 @@ def _parse_positive_int_optional(raw: str) -> int | None:
     return _parse_positive_int_optional_common(raw)
 
 
+def _parse_int_list(raw: str) -> list[int]:
+    values: list[int] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        values.append(int(item))
+    if not values:
+        raise argparse.ArgumentTypeError("expected at least one integer")
+    if any(v <= 0 for v in values):
+        raise argparse.ArgumentTypeError("all values must be positive integers")
+    return values
+
+
 def _build_pipeline(
     model_id: str,
     revision: str | None = None,
@@ -920,22 +934,16 @@ def main(argv: list[str] | None = None) -> int:
         help="prefill sweep range as 'start:end:step' (default: 128:512:128)",
     )
     parser.add_argument(
-        "--decode-range",
-        type=_parse_range_arg,
-        default=(128, 512, 128),
-        help="decode sweep range as 'start:end:step' (default: 128:512:128)",
+        "--cache-lengths",
+        type=_parse_int_list,
+        default=[1024, 2048, 4096, 8192],
+        help="decode sweep cache lengths as comma-separated integers (default: 1024,2048,4096,8192)",
     )
     parser.add_argument(
-        "--fixed-decode",
-        type=_parse_positive_int,
-        default=10,
-        help="fixed decode length used during prefill sweep",
-    )
-    parser.add_argument(
-        "--fixed-prefill",
+        "--decode-window",
         type=_parse_positive_int,
         default=128,
-        help="fixed prefill length used during decode sweep",
+        help="decode token window measured after each cache-length prefill (default: 128)",
     )
     parser.add_argument(
         "--prefill-chunk-size",
@@ -1141,10 +1149,11 @@ def main(argv: list[str] | None = None) -> int:
             tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
             _print_device_status(args, tracker_prefill)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
-                    num_prefill=args.fixed_prefill,
-                    num_decode=args.fixed_decode,
+                    num_prefill=warmup_prefill,
+                    num_decode=args.decode_window,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     trace_path=None,
                     show_progress=True,
@@ -1153,9 +1162,8 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = measurer.measure_full(
                     prefill_range=args.prefill_range,
-                    decode_range=args.decode_range,
-                    fixed_decode_len=args.fixed_decode,
-                    fixed_prefill_len=args.fixed_prefill,
+                    cache_lengths=args.cache_lengths,
+                    decode_window=args.decode_window,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     show_progress=True,
                     progress_prefix=label,
