@@ -35,6 +35,16 @@ class MobilintQwen2VLPreTrainedModel(PreTrainedModel):
 class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, MobilintQwen2VLPreTrainedModel):
     config: MobilintQwen2VLVisionConfig
     input_modalities = ("image", "video")
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Expose the MXQ vision input dtype expected by upstream Qwen2-VL helpers."""
+        return torch.float32
+
+    @property
+    def spatial_merge_size(self) -> int:
+        """Expose the merge factor expected by upstream Qwen2-VL helpers."""
+        return int(self.config.spatial_merge_size)
     
     def forward(
         self,
@@ -170,6 +180,46 @@ class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        position_ids=None,
+        use_cache=True,
+        pixel_values=None,
+        pixel_values_videos=None,
+        image_grid_thw=None,
+        video_grid_thw=None,
+        **kwargs,
+    ):
+        """Prepare generation inputs while backfilling missing text position ids.
+
+        The local wrapper exposes a generic ``forward(*args, **kwargs)`` signature, so
+        Transformers' default generation helper does not auto-create ``position_ids``.
+        Upstream Qwen2-VL expects them to exist before it appends vision positions.
+        """
+        if position_ids is None and attention_mask is not None:
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+
+        return super().prepare_inputs_for_generation(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            inputs_embeds=inputs_embeds,
+            cache_position=cache_position,
+            position_ids=position_ids,
+            use_cache=use_cache,
+            pixel_values=pixel_values,
+            pixel_values_videos=pixel_values_videos,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+            **kwargs,
+        )
+
     def forward(
         self,
         *args,
@@ -181,5 +231,3 @@ class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2
         
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
-
-
