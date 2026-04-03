@@ -1,6 +1,3 @@
-from typing import Any, Union
-
-from transformers.configuration_utils import SpecificPretrainedConfigType
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.qwen2_vl.configuration_qwen2_vl import (
     Qwen2VLConfig,

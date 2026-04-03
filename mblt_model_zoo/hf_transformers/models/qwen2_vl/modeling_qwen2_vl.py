@@ -157,13 +157,6 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
         self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config, _internal_call=True)
         self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config, _internal_call=True)
         self.rope_deltas = None  # cache rope_deltas here
-    
-    def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None):
-        assert image_grid_thw is not None, "image_grid_thw is None!"
-        image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
-        split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
-        image_embeds = torch.split(image_embeds, split_sizes)
-        return image_embeds
 
 class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
     def __init__(self, config: MobilintQwen2VLConfig, *args, **kwargs):
