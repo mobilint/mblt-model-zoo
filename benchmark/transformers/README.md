@@ -95,7 +95,7 @@ Notes for `--mxq-dir`:
 
 `benchmark/transformers/benchmark_image_text_to_text_models.py` benchmarks VLM models for:
 - vision stage: encode latency / FPS across `--image-resolutions`
-- llm stage: prefill/decode TPS at one reference resolution (`--llm-resolution`, default: first resolution)
+- llm stage: total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`, default: first resolution)
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py
@@ -107,7 +107,7 @@ Common options:
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--core-mode` (`single`, `multi`, `global4`, `global8`, `all`; default: `global8`)
 - `--image-resolutions` (default: `224,384,512,768`)
-- `--llm-resolution`, `--decode`, `--prompt`
+- `--llm-resolution`, `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`, `--prompt`
 - `--repeat`, `--warmup`
 - `--original-models` (resolve listed Mobilint models to parent/base model IDs)
 - `--device`, `--device-map`, `--dtype`, `--trust-remote-code`
@@ -137,7 +137,9 @@ Example:
 python benchmark/transformers/benchmark_image_text_to_text_models.py \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
-  --decode 128 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096,8192 \
+  --llm-decode-window 128 \
   --repeat 5 \
   --skip-existing
 ```

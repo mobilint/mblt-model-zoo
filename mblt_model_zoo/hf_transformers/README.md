@@ -332,13 +332,15 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
 
 `vlm-sweep` measures:
 - Vision encode latency (`vision_encode_ms`) and FPS (`vision_fps`) per image resolution
-- LLM-phase prefill/decode TPS separately, using one reference resolution (`--llm-resolution`)
+- LLM-phase total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`)
 
 ```bash
 mblt-model-zoo tps vlm-sweep --model mobilint/Qwen2-VL-2B-Instruct \
   --image-resolutions 224,384,512,768 \
   --llm-resolution 224 \
-  --decode 128 --repeat 10 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096,8192 \
+  --llm-decode-window 128 --repeat 10 \
   --json vlm_tps.json --csv vlm_tps.csv
 ```
 

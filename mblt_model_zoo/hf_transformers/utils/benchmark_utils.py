@@ -915,6 +915,147 @@ class VLMTPSMeasurer:
         _, image_features = self._measure_vision_encode(inputs)
         return self._build_inputs_embeds(inputs, image_features=image_features)
 
+    def _build_text_suffix_ids(self, length: int, device: torch.device) -> torch.LongTensor:
+        if length <= 0:
+            return torch.empty((1, 0), dtype=torch.long, device=device)
+
+        vocab_size = int(self.model.config.vocab_size)
+        low = 100 if vocab_size > 100 else 0
+        suffix_ids = torch.randint(low, vocab_size, (1, length), device=device)
+
+        blocked_ids = {
+            int(x)
+            for x in (
+                getattr(self.tokenizer, "bos_token_id", None),
+                getattr(self.tokenizer, "eos_token_id", None),
+                getattr(self.tokenizer, "pad_token_id", None),
+                getattr(self.model.config, "image_token_id", None),
+            )
+            if x is not None
+        }
+        if blocked_ids:
+            replacement_id = next((idx for idx in range(vocab_size) if idx not in blocked_ids), 0)
+            for blocked_id in blocked_ids:
+                suffix_ids[suffix_ids == blocked_id] = replacement_id
+
+        return suffix_ids
+
+    def _build_inputs_embeds_from_base(
+        self,
+        inputs: dict,
+        image_features: torch.Tensor,
+        total_prefill_len: int,
+    ) -> tuple[torch.Tensor | None, int]:
+        input_ids = inputs["input_ids"].to(self.model.device)
+        base_total_len = int(input_ids.shape[1])
+        if total_prefill_len < base_total_len:
+            return None, base_total_len
+
+        extra_len = total_prefill_len - base_total_len
+        if extra_len > 0:
+            suffix_ids = self._build_text_suffix_ids(extra_len, device=input_ids.device)
+            input_ids = torch.cat((input_ids, suffix_ids), dim=1)
+
+        adjusted_inputs = dict(inputs)
+        adjusted_inputs["input_ids"] = input_ids
+        if "attention_mask" in adjusted_inputs:
+            adjusted_inputs["attention_mask"] = torch.ones_like(input_ids, device=input_ids.device)
+
+        inputs_embeds = self._build_inputs_embeds(adjusted_inputs, image_features=image_features)
+        if int(inputs_embeds.shape[1]) != total_prefill_len:
+            raise AssertionError(
+                "Adjusted VLM inputs_embeds length does not match target total prefill length: "
+                f"{int(inputs_embeds.shape[1])} vs {total_prefill_len}"
+            )
+        return inputs_embeds, base_total_len
+
+    def measure_llm_full(
+        self,
+        image_resolution: int,
+        prompt: str,
+        prefill_range: Tuple[int, int, int] = (128, 2048, 128),
+        cache_lengths: Optional[Iterable[int]] = None,
+        decode_window: int = 128,
+        show_progress: bool = False,
+        progress_prefix: str = "",
+    ) -> BenchmarkResult:
+        full_result = BenchmarkResult()
+        prefix = f"{progress_prefix} " if progress_prefix else ""
+        resolved_cache_lengths = list(cache_lengths or [1024, 2048, 4096, 8192])
+        base_inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+        _, image_features = self._measure_vision_encode(base_inputs)
+
+        p_start, p_end, p_step = prefill_range
+        prefill_iter = range(p_start, p_end + 1, p_step)
+        if show_progress:
+            prefill_iter = tqdm(prefill_iter, desc=f"{prefix}vlm llm prefill sweep", leave=False)
+
+        t_prefill_start = time.perf_counter()
+        min_total_len_seen: int | None = None
+        for p_len in prefill_iter:
+            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                inputs=base_inputs,
+                image_features=image_features,
+                total_prefill_len=p_len,
+            )
+            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+            if inputs_embeds is None:
+                if show_progress:
+                    tqdm.write(
+                        f"{prefix}skip prefill target={p_len}: "
+                        f"minimum multimodal prefix length is {min_total_len}"
+                    )
+                continue
+            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=1)
+            full_result.prefill_sweep.x_values.append(p_len)
+            full_result.prefill_sweep.tps_values.append(res.prefill_tps)
+            full_result.prefill_sweep.time_values.append(res.prefill_latency)
+            full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
+            full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
+        t_prefill_end = time.perf_counter()
+        full_result.prefill_phase_duration_s = max(0.0, t_prefill_end - t_prefill_start)
+
+        decode_iter = resolved_cache_lengths
+        if show_progress:
+            decode_iter = tqdm(decode_iter, desc=f"{prefix}vlm llm decode sweep", leave=False)
+
+        t_decode_start = time.perf_counter()
+        for cache_len in decode_iter:
+            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                inputs=base_inputs,
+                image_features=image_features,
+                total_prefill_len=cache_len,
+            )
+            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+            if inputs_embeds is None:
+                if show_progress:
+                    tqdm.write(
+                        f"{prefix}skip cache length={cache_len}: "
+                        f"minimum multimodal prefix length is {min_total_len}"
+                    )
+                continue
+            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=decode_window)
+            full_result.decode_sweep.x_values.append(cache_len)
+            full_result.decode_sweep.tps_values.append(res.decode_tps)
+            full_result.decode_sweep.time_values.append(res.decode_duration)
+            full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
+            full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
+        t_decode_end = time.perf_counter()
+        full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
+
+        if (
+            show_progress
+            and min_total_len_seen is not None
+            and not full_result.prefill_sweep.x_values
+            and not full_result.decode_sweep.x_values
+        ):
+            tqdm.write(
+                f"{prefix}all VLM LLM sweep points were skipped: "
+                f"minimum multimodal prefix length is {min_total_len_seen}"
+            )
+
+        return full_result
+
     def measure_vision(
         self,
         image_resolution: int,

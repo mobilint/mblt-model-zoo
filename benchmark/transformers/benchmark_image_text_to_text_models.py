@@ -73,6 +73,24 @@ def _parse_int_csv(raw: str) -> list[int]:
     return sorted(set(values))
 
 
+def _parse_range_arg(raw: str) -> tuple[int, int, int]:
+    sep = ":" if ":" in raw else ("," if "," in raw else None)
+    if sep is None:
+        raise argparse.ArgumentTypeError("expected format 'start:end:step' or 'start,end,step'")
+    parts = [p.strip() for p in raw.split(sep)]
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("expected exactly 3 integers: 'start:end:step' or 'start,end,step'")
+    try:
+        start, end, step = (int(p) for p in parts)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("range values must be integers") from e
+    if start <= 0 or end <= 0 or step <= 0:
+        raise argparse.ArgumentTypeError("range values must be positive integers")
+    if start > end:
+        raise argparse.ArgumentTypeError("range start must be <= end")
+    return start, end, step
+
+
 def _mean(values: list[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
 
@@ -358,8 +376,13 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         desc=f"{label} llm@{llm_resolution} warmup",
         leave=False,
     ):
-        measurer.measure_llm(
-            image_resolution=llm_resolution, num_decode=args.decode, repeat=1, prompt=args.prompt, show_progress=False
+        measurer.measure_llm_full(
+            image_resolution=llm_resolution,
+            prompt=args.prompt,
+            prefill_range=args.llm_prefill_range,
+            cache_lengths=args.llm_cache_lengths,
+            decode_window=args.llm_decode_window,
+            show_progress=False,
         )
 
     llm_runs = []
@@ -384,13 +407,14 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         if tracker is not None:
             tracker.start()
         try:
-            run = measurer.measure_llm(
+            run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
-                num_decode=args.decode,
-                repeat=1,
                 prompt=args.prompt,
+                prefill_range=args.llm_prefill_range,
+                cache_lengths=args.llm_cache_lengths,
+                decode_window=args.llm_decode_window,
                 show_progress=False,
-            )[0]
+            )
         finally:
             _stop_tracker_safe(tracker)
         if tracker is not None:
@@ -404,22 +428,27 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             run.avg_memory_used_pct = metric.get("avg_memory_used_pct")
             run.p99_memory_used_pct = metric.get("p99_memory_used_pct")
             if run.avg_power_w is not None:
-                e = float(run.avg_power_w) * float(run.total_time)
+                total_time = float(run.prefill_phase_duration_s or 0.0) + float(run.decode_phase_duration_s or 0.0)
+                e = float(run.avg_power_w) * total_time
                 run.total_energy_j = e
-                t1 = _safe_div(float(run.num_prefill), e)
-                t2 = _safe_div(float(run.num_decode), e)
-                j1 = _safe_div(e, float(run.num_prefill))
-                j2 = _safe_div(e, float(run.num_decode))
+                decode_last_tps = float(run.decode_sweep.tps_values[-1]) if run.decode_sweep.tps_values else 0.0
+                prefill_last_tps = float(run.prefill_sweep.tps_values[-1]) if run.prefill_sweep.tps_values else 0.0
+                t1 = _safe_div(prefill_last_tps, float(run.avg_power_w))
+                t2 = _safe_div(decode_last_tps, float(run.avg_power_w))
+                j1 = _safe_div(1.0, t1) if t1 not in (None, 0) else None
+                j2 = _safe_div(1.0, t2) if t2 not in (None, 0) else None
                 run.prefill_tokens_per_j = t1
                 run.decode_tokens_per_j = t2
                 run.prefill_j_per_token = j1
                 run.decode_j_per_token = j2
         llm_runs.append(run)
-    llm_prefill = [float(r.prefill_tps) for r in llm_runs]
-    llm_decode = [float(r.decode_tps) for r in llm_runs]
-    llm_ttft_ms = [float(r.prefill_latency * 1000.0) for r in llm_runs]
-    llm_decode_ms = [float(r.decode_duration * 1000.0) for r in llm_runs]
-    llm_total_ms = [float(r.total_time * 1000.0) for r in llm_runs]
+    llm_prefill = [float(r.prefill_sweep.tps_values[-1]) for r in llm_runs if r.prefill_sweep.tps_values]
+    llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]
+    llm_ttft_ms = [float(r.prefill_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.prefill_sweep.time_values]
+    llm_decode_ms = [float(r.decode_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.decode_sweep.time_values]
+    llm_total_ms = [
+        float((r.prefill_phase_duration_s or 0.0) + (r.decode_phase_duration_s or 0.0)) * 1000.0 for r in llm_runs
+    ]
     llm_avg_power_w = [float(r.avg_power_w) for r in llm_runs if r.avg_power_w is not None]
     llm_p99_power_w = [float(r.p99_power_w) for r in llm_runs if r.p99_power_w is not None]
     llm_avg_utilization_pct = [float(r.avg_utilization_pct) for r in llm_runs if r.avg_utilization_pct is not None]
@@ -442,6 +471,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         float(r.decode_j_per_token) for r in llm_runs if getattr(r, "decode_j_per_token", None) is not None
     ]
     for idx, r in enumerate(llm_runs, start=1):
+        llm_prefill_tps = float(r.prefill_sweep.tps_values[-1]) if r.prefill_sweep.tps_values else None
+        llm_decode_tps = float(r.decode_sweep.tps_values[-1]) if r.decode_sweep.tps_values else None
+        llm_ttft_ms = float(r.prefill_sweep.time_values[-1] * 1000.0) if r.prefill_sweep.time_values else None
         csv_rows.append(
             {
                 "type": "llm",
@@ -449,9 +481,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "repeat_index": idx,
                 "vision_encode_ms": None,
                 "vision_fps": None,
-                "llm_prefill_tps": r.prefill_tps,
-                "llm_decode_tps": r.decode_tps,
-                "llm_ttft_ms": r.prefill_latency * 1000.0,
+                "llm_prefill_tps": llm_prefill_tps,
+                "llm_decode_tps": llm_decode_tps,
+                "llm_ttft_ms": llm_ttft_ms,
                 "avg_power_w": r.avg_power_w,
                 "p99_power_w": r.p99_power_w,
                 "avg_utilization_pct": r.avg_utilization_pct,
@@ -474,7 +506,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         "task": "image-text-to-text",
         "benchmark": {
             "prompt": args.prompt,
-            "decode": args.decode,
+            "llm_prefill_range": list(args.llm_prefill_range),
+            "llm_cache_lengths": args.llm_cache_lengths,
+            "llm_decode_window": args.llm_decode_window,
             "llm_reference_resolution": llm_resolution,
             "vision_results": vision_results,
             "vision_summary": {
@@ -820,7 +854,24 @@ def main(argv: list[str] | None = None) -> int:
         default=_parse_int_csv("224,384,512,768"),
         help="comma-separated image resolutions (default: 224,384,512,768)",
     )
-    parser.add_argument("--decode", type=_parse_positive_int, default=128, help="decode tokens for LLM phase")
+    parser.add_argument(
+        "--llm-prefill-range",
+        type=_parse_range_arg,
+        default=(128, 512, 128),
+        help="llm prefill sweep range by total multimodal prefix length (default: 128:512:128)",
+    )
+    parser.add_argument(
+        "--llm-cache-lengths",
+        type=_parse_int_csv,
+        default=_parse_int_csv("1024,2048,4096,8192"),
+        help="comma-separated llm cache lengths for decode sweep (default: 1024,2048,4096,8192)",
+    )
+    parser.add_argument(
+        "--llm-decode-window",
+        type=_parse_positive_int,
+        default=128,
+        help="decode token window for llm cache-length sweep",
+    )
     parser.add_argument(
         "--llm-resolution",
         type=_parse_positive_int_optional,
