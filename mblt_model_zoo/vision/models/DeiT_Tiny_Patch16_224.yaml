@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/DeiT_Tiny_Patch16_224
+    filename: deit_tiny_patch16_224.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 248
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification

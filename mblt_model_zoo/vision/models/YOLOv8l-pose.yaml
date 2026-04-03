@@ -1,0 +1,26 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv8l-pose
+    filename: yolov8l-pose.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: pose_estimation
+    nc: 1
+    nl: 3
+    n_extra: 51
+    reg_max: 16
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

@@ -1,3 +1,0 @@
-"""
-Face detection module.
-"""

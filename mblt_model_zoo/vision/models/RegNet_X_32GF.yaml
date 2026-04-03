@@ -1,0 +1,31 @@
+DEFAULT: IMAGENET1K_V2
+IMAGENET1K_V1:
+  file_cfg:
+    repo_id: mobilint/RegNet_X_32GF.tv1_in1k
+    filename: regnet_x_32gf_IMAGENET1K_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 256
+      interpolation: bilinear
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification
+IMAGENET1K_V2:
+  update: IMAGENET1K_V1
+  file_cfg:
+    repo_id: mobilint/RegNet_X_32GF.tv2_in1k
+    filename: regnet_x_32gf_IMAGENET1K_V2.mxq
+  pre_cfg:
+    Resize:
+      size: 232
+      interpolation: bilinear

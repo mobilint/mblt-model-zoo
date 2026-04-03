@@ -1,0 +1,22 @@
+DEFAULT: IMAGENET1K_V1
+IMAGENET1K_V1:
+  file_cfg:
+    repo_id: mobilint/EfficientNet_B6
+    filename: efficientnet_b6_IMAGENET1K_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 528
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 528
+      - 528
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification

@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv8m-cls
+    filename: yolov8m-cls.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 224
+      interpolation: bilinear
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: image_classification

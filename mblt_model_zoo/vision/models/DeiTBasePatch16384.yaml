@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/DeiT_Base_Patch16_384
+    filename: deit_base_patch16_384.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 384
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 384
+      - 384
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification

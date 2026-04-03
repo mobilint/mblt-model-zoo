@@ -1,0 +1,26 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO12l-seg
+    filename: yolo12l-seg.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: instance_segmentation
+    nc: 80
+    nl: 3
+    n_extra: 32
+    reg_max: 16
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

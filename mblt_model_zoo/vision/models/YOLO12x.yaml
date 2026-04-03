@@ -1,0 +1,25 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO12x
+    filename: yolo12x.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: object_detection
+    nc: 80
+    nl: 3
+    reg_max: 16
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

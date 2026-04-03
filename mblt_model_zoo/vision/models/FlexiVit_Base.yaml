@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/FlexiVit_Base
+    filename: flexivit_base.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 252
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 240
+      - 240
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: tf
+  post_cfg:
+    task: image_classification

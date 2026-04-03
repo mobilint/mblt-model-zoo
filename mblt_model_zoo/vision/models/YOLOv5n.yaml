@@ -1,0 +1,42 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv5n
+    filename: yolov5n.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: object_detection
+    nc: 80
+    anchors:
+    - - 10
+      - 13
+      - 16
+      - 30
+      - 33
+      - 23
+    - - 30
+      - 61
+      - 62
+      - 45
+      - 59
+      - 119
+    - - 116
+      - 90
+      - 156
+      - 198
+      - 373
+      - 326
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

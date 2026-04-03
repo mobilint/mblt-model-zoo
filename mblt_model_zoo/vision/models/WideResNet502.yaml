@@ -1,0 +1,30 @@
+DEFAULT: IMAGENET1K_V2
+IMAGENET1K_V1:
+  file_cfg:
+    repo_id: mobilint/Wide_ResNet50_2.tv1_in1k
+    filename: wide_resnet50_2_IMAGENET1K_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 256
+      interpolation: bilinear
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification
+IMAGENET1K_V2:
+  update: IMAGENET1K_V1
+  file_cfg:
+    repo_id: mobilint/Wide_ResNet50_2.tv2_in1k
+    filename: wide_resnet50_2_IMAGENET1K_V2.mxq
+  pre_cfg:
+    Resize:
+      size: 232

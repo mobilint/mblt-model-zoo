@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/ViT_Base_Patch32_384
+    filename: vit_base_patch32_384.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 384
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 384
+      - 384
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: tf
+  post_cfg:
+    task: image_classification

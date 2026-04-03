@@ -1,0 +1,64 @@
+DEFAULT: IMAGENET1K_V1
+IMAGENET1K_V1:
+  file_cfg:
+    repo_id: mobilint/ViT_L_16
+    filename: vit_l_16_IMAGENET1K_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 242
+      interpolation: bilinear
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification
+IMAGENET1K_SWAG_E2E_V1:
+  file_cfg:
+    repo_id: mobilint/ViT_L_16.swag_e2e_in1k
+    filename: vit_l_16_IMAGENET1K_SWAG_E2E_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 512
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 512
+      - 512
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification
+IMAGENET1K_SWAG_LINEAR_V1:
+  file_cfg:
+    repo_id: mobilint/ViT_L_16.swag_linear_in1k
+    filename: vit_l_16_IMAGENET1K_SWAG_LINEAR_V1.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 224
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification

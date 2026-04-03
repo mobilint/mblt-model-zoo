@@ -1,0 +1,36 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv3-tiny
+    filename: yolov3-tiny.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: object_detection
+    nc: 80
+    anchors:
+    - - 10
+      - 14
+      - 23
+      - 27
+      - 37
+      - 58
+    - - 81
+      - 82
+      - 135
+      - 169
+      - 344
+      - 319
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO
