@@ -1,5 +1,4 @@
 import argparse
-import csv
 import gc
 import json
 import os
@@ -18,8 +17,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    append_core_mode_suffix as _append_core_mode_suffix_common,
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -27,8 +26,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    iter_core_modes as _iter_core_modes_common,
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -43,13 +41,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
-    BenchmarkResult,
-    SweepData,
-    TPSMeasurer,
-)
-
-DEFAULT_FALLBACK_CHUNK_SIZE = 128
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import BenchmarkResult, SweepData, TPSMeasurer
 
 
 def _safe_filename(model_id: str) -> str:
@@ -82,6 +74,20 @@ def _parse_positive_int_optional(raw: str) -> int | None:
     return _parse_positive_int_optional_common(raw)
 
 
+def _parse_int_list(raw: str) -> list[int]:
+    values: list[int] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        values.append(int(item))
+    if not values:
+        raise argparse.ArgumentTypeError("expected at least one integer")
+    if any(v <= 0 for v in values):
+        raise argparse.ArgumentTypeError("all values must be positive integers")
+    return values
+
+
 def _build_pipeline(
     model_id: str,
     revision: str | None = None,
@@ -104,14 +110,7 @@ def _build_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    if core_mode:
-        model_kwargs["core_mode"] = core_mode
-        if core_mode == "single":
-            model_kwargs["target_cores"] = ["0:0"]
-        elif core_mode == "global4":
-            model_kwargs["target_clusters"] = [0]
-        elif core_mode == "global8":
-            model_kwargs["target_clusters"] = [0, 1]
+    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -243,53 +242,6 @@ def _should_precheck_cuda(args: argparse.Namespace) -> bool:
         return True
     # If only device_map is set (e.g. auto), target GPU topology is ambiguous.
     return False
-
-
-def _load_chunk_size_lookup_csv(path: str | None) -> dict[tuple[str, str, str], int]:
-    if not path:
-        return {}
-    csv_path = Path(path)
-    if not csv_path.is_file():
-        print(f"Warning: chunk-size lookup CSV not found: {csv_path}")
-        return {}
-    out: dict[tuple[str, str, str], int] = {}
-    try:
-        with csv_path.open("r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                model = str(row.get("model_id", "")).strip()
-                revision = str(row.get("revision", "")).strip()
-                core_mode = str(row.get("core_mode", "")).strip()
-                raw_chunk = row.get("best_chunk_size")
-                if not model or not revision or not core_mode:
-                    continue
-                try:
-                    chunk = int(float(str(raw_chunk)))
-                except Exception:
-                    continue
-                if chunk <= 0:
-                    continue
-                out[(model, revision, core_mode)] = chunk
-    except Exception as e:
-        print(f"Warning: failed to load chunk-size lookup CSV: {e}")
-        return {}
-    print(f"Loaded chunk-size lookup entries: {len(out)} from {csv_path}")
-    return out
-
-
-def _resolve_lookup_chunk_size(
-    lookup: dict[tuple[str, str, str], int],
-    *,
-    model_id: str,
-    revision: str | None,
-    core_mode: str | None,
-) -> int | None:
-    if not lookup:
-        return None
-    if core_mode is None:
-        return None
-    rev = "" if revision is None else str(revision)
-    return lookup.get((model_id, rev, core_mode))
 
 
 def _normalize_repo_id(value: str) -> str:
@@ -982,41 +934,28 @@ def main(argv: list[str] | None = None) -> int:
         help="prefill sweep range as 'start:end:step' (default: 128:512:128)",
     )
     parser.add_argument(
-        "--decode-range",
-        type=_parse_range_arg,
-        default=(128, 512, 128),
-        help="decode sweep range as 'start:end:step' (default: 128:512:128)",
+        "--cache-lengths",
+        type=_parse_int_list,
+        default=[1024, 2048, 4096, 8192],
+        help="decode sweep cache lengths as comma-separated integers (default: 1024,2048,4096,8192)",
     )
     parser.add_argument(
-        "--fixed-decode",
-        type=_parse_positive_int,
-        default=10,
-        help="fixed decode length used during prefill sweep",
-    )
-    parser.add_argument(
-        "--fixed-prefill",
+        "--decode-window",
         type=_parse_positive_int,
         default=128,
-        help="fixed prefill length used during decode sweep",
+        help="decode token window measured after each cache-length prefill (default: 128)",
     )
     parser.add_argument(
-        "--chunk-size",
+        "--prefill-chunk-size",
         type=_parse_positive_int_optional,
         default=None,
-        help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
+        help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
     )
     parser.add_argument(
         "--core-mode",
-        choices=["single", "global4", "global8"],
+        choices=["single", "global4", "global8", "all"],
         default="global8",
-        help="core mode passed to model_kwargs (default: global8)",
-    )
-    parser.add_argument(
-        "--chunk-size-lookup-csv",
-        default="prefill_chunk_size.csv",
-        help=(
-            "CSV path for per-model chunk_size lookup. Expected columns: model_id,revision,core_mode,best_chunk_size"
-        ),
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
     parser.add_argument(
         "--skip-existing",
@@ -1069,10 +1008,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
-    lookup_path = args.chunk_size_lookup_csv
-    if lookup_path and not os.path.isabs(lookup_path):
-        lookup_path = os.path.join(os.path.dirname(__file__), lookup_path)
-    chunk_lookup = _load_chunk_size_lookup_csv(lookup_path)
+    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    if disable_npu_specific_args:
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
 
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
@@ -1124,16 +1062,31 @@ def main(argv: list[str] | None = None) -> int:
                 all_revisions=args.all,
             )
         )
+    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
+    for model_id, revision_candidates, label, base, mxq_path in targets:
+        for core_mode in core_modes:
+            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
+            run_targets.append(
+                (model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode)
+            )
+
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
-        _rebuild_combined_outputs(results_dir, targets)
+        _rebuild_combined_outputs(
+            results_dir,
+            [
+                (model_id, revision_candidates, label, base, mxq_path)
+                for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+            ],
+        )
         return 0
 
-    for model_id, revision_candidates, label, base, mxq_path in tqdm(
-        targets,
+    for model_id, revision_candidates, label, base, mxq_path, core_mode in tqdm(
+        run_targets,
         desc="Benchmarking models",
-        total=len(targets),
-        unit="model",
+        total=len(run_targets),
+        unit="model-mode",
     ):
         # Ensure pre-check sees memory state after releasing previous model.
         if _is_cuda_device(args.device):
@@ -1178,7 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
-                    core_mode=args.core_mode,
+                    core_mode=core_mode,
                     mxq_path=mxq_path,
                 )
             except Exception as e:
@@ -1195,33 +1148,13 @@ def main(argv: list[str] | None = None) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
             _print_device_status(args, tracker_prefill)
-            lookup_chunk = _resolve_lookup_chunk_size(
-                chunk_lookup,
-                model_id=model_id,
-                revision=revision,
-                core_mode=args.core_mode,
-            )
-            resolved_chunk_size = args.chunk_size
-            if resolved_chunk_size is None and lookup_chunk is not None:
-                resolved_chunk_size = lookup_chunk
-                print(
-                    f"Using chunk-size lookup: model={model_id} revision={revision} "
-                    f"core_mode={args.core_mode} chunk_size={resolved_chunk_size}"
-                )
-            elif args.chunk_size is None and args.chunk_size_lookup_csv and lookup_chunk is None:
-                resolved_chunk_size = DEFAULT_FALLBACK_CHUNK_SIZE
-                print(
-                    f"Warning: no chunk-size lookup match for model={model_id} "
-                    f"revision={revision} core_mode={args.core_mode}; "
-                    f"using fallback chunk_size={resolved_chunk_size}"
-                )
-            elif args.chunk_size is not None and lookup_chunk is not None:
-                print(f"Note: --chunk-size={args.chunk_size} overrides lookup chunk_size={lookup_chunk}")
+            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
-                    num_prefill=args.fixed_prefill,
-                    num_decode=args.fixed_decode,
-                    chunk_size=resolved_chunk_size,
+                    num_prefill=warmup_prefill,
+                    num_decode=args.decode_window,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
                     trace_path=None,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
@@ -1229,10 +1162,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = measurer.measure_full(
                     prefill_range=args.prefill_range,
-                    decode_range=args.decode_range,
-                    fixed_decode_len=args.fixed_decode,
-                    fixed_prefill_len=args.fixed_prefill,
-                    chunk_size=resolved_chunk_size,
+                    cache_lengths=args.cache_lengths,
+                    decode_window=args.decode_window,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
                     show_progress=True,
                     progress_prefix=label,
                     on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
@@ -1416,7 +1348,13 @@ def main(argv: list[str] | None = None) -> int:
 
         _release_pipeline(pipeline, args.device)
 
-    _rebuild_combined_outputs(results_dir, targets)
+    _rebuild_combined_outputs(
+        results_dir,
+        [
+            (model_id, revision_candidates, label, base, mxq_path)
+            for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+        ],
+    )
 
     return 0
 

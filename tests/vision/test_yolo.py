@@ -1,6 +1,8 @@
 """
 Test script for YOLO11m model.
+Test script for YOLO11m model.
 
+This script tests the YOLO11m model by running inference on a sample image.
 This script tests the YOLO11m model by running inference on a sample image.
 It can be run as a pytest test or as a standalone script.
 """
@@ -63,6 +65,7 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Path to the YOLO11m model file (.mxq)",
+        help="Path to the YOLO11m model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",
@@ -118,6 +121,7 @@ if __name__ == "__main__":
         core_mode=args.core_mode,
     )
     if args.save_path is None:
+        args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}")
         args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}")
 
     try:

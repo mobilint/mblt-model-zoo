@@ -22,7 +22,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install setuptools wheel build
+          python -m pip install build
 
       - name: Build package
         run: python -m build
@@ -33,14 +33,29 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-  publish-to-pypi:
-    name: Publish to PyPI 🚀
+  publish-to-testpypi:
+    name: Publish to TestPyPI 🧪
     needs: [build]
     runs-on: ubuntu-latest
+    environment: testpypi
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_TOKEN }}
+
+  publish-to-pypi:
+    name: Publish to PyPI 🚀
+    needs: [build, publish-to-testpypi]
+    runs-on: ubuntu-latest
     environment: pypi
-    permissions:
-      id-token: write
-    
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
@@ -51,4 +66,4 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ secrets.PYPI_TOKEN }}

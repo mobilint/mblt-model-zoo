@@ -4,7 +4,7 @@ The `benchmark/` folder contains runnable scripts for text-generation benchmarki
 
 ## Benchmark all available models
 
-`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill/decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
+`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py
@@ -12,7 +12,7 @@ python benchmark/transformers/benchmark_text_generation_models.py
 
 Outputs (created under `benchmark/transformers/results/text_generation/`):
 
-- `{model}.json` and `{model}.png` for each model
+- `{model}[-{revision}]-{core_mode}.json` and `{model}[-{revision}]-{core_mode}.png` for each model
 - `combined.csv` and `combined.md`
 - `combined_device.csv` (when device metrics are available)
 - metric-wise charts:
@@ -33,12 +33,10 @@ Common CLI options:
 - `--all` (benchmark `W8` and `W4V8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
 - `--prefill-range` (e.g., `128:512:128`)
-- `--decode-range` (e.g., `128:512:128`)
-- `--fixed-decode` (default: `10`)
-- `--fixed-prefill` (default: `128`)
-- `--chunk-size` (optional fixed chunk size)
-- `--core-mode` (`single`, `global4`, `global8`, default: `global8`) for fixed-core benchmarking
-- `--chunk-size-lookup-csv` (default: script-relative `prefill_chunk_size.csv`; columns: `model_id,revision,core_mode,best_chunk_size`)
+- `--cache-lengths` (e.g., `1024,2048,4096,8192`)
+- `--decode-window` (default: `128`)
+- `--prefill-chunk-size` (optional fixed prefill chunk size override)
+- `--core-mode` (`single`, `global4`, `global8`, `all`; default: `global8`) for fixed-core benchmarking
 - `--warmup` (default: `1`)
 - `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
 - `--device-metrics/--no-device-metrics` (default: `--device-metrics`)
@@ -59,9 +57,9 @@ Example:
 python benchmark/transformers/benchmark_text_generation_models.py \
   --revision W8 \
   --core-mode global8 \
-  --chunk-size-lookup-csv benchmark/transformers/results/prefill_chunk_search/consolidated_best_chunk_fixed512.csv \
   --prefill-range 128:512:128 \
-  --decode-range 128:512:128 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --skip-existing
 ```
 
@@ -71,10 +69,12 @@ Example (`--all`):
 python benchmark/transformers/benchmark_text_generation_models.py --all --skip-existing
 ```
 
-When `--all` is used, results are saved with suffixes in both the output files and table labels, for example:
+When `--all` or an explicit `--core-mode` is used, results are saved with suffixes in both the output files and table labels. When `--core-mode all` is used, each revision is benchmarked three times (`single`, `global4`, `global8`) against the same model or local `.mxq` file. For example:
 
-- `{model}-W8.json`, `{model}-W8.png`
-- `{model}-W4V8.json`, `{model}-W4V8.png`
+- `{model}-W8-single.json`, `{model}-W8-single.png`
+- `{model}-W8-global4.json`, `{model}-W8-global4.png`
+- `{model}-W8-global8.json`, `{model}-W8-global8.png`
+- `{model}-W4V8-single.json`, `{model}-W4V8-single.png`
 
 Example (`--mxq-dir`):
 
@@ -89,12 +89,13 @@ Notes for `--mxq-dir`:
 - Only files matching `<model_id>-<W8|W4V8>.mxq` are used.
 - `<model_id>` can be full repo id (e.g. `mobilint/Qwen2.5-1.5B-Instruct`) or basename when uniquely resolvable.
 - `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
+- A single local `.mxq` target is reused across every selected core mode. With `--core-mode all`, the script runs `single`, `global4`, and `global8` for each discovered `.mxq`.
 
 ## Benchmark image-text-to-text models
 
 `benchmark/transformers/benchmark_image_text_to_text_models.py` benchmarks VLM models for:
 - vision stage: encode latency / FPS across `--image-resolutions`
-- llm stage: prefill/decode TPS at one reference resolution (`--llm-resolution`, default: first resolution)
+- llm stage: total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`, default: first resolution)
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py
@@ -104,8 +105,9 @@ Common options:
 - `--model` (benchmark a single model id)
 - `--revision`, `--all` (W8/W4V8 sweep)
 - `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
+- `--core-mode` (`single`, `multi`, `global4`, `global8`, `all`; default: `global8`)
 - `--image-resolutions` (default: `224,384,512,768`)
-- `--llm-resolution`, `--decode`, `--prompt`
+- `--llm-resolution`, `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`, `--prompt`
 - `--repeat`, `--warmup`
 - `--original-models` (resolve listed Mobilint models to parent/base model IDs)
 - `--device`, `--device-map`, `--dtype`, `--trust-remote-code`
@@ -118,9 +120,9 @@ Device auto-selection rule when `--device` is omitted:
 - `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
 
 Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
-- `{model}.json`: per-model full benchmark payload
-- `{model}.csv`: per-run raw rows (`vision`/`llm`)
-- `{model}.png`: per-model summary chart
+- `{model}[-{revision}]-{core_mode}.json`: per-model full benchmark payload
+- `{model}[-{revision}]-{core_mode}.csv`: per-run raw rows (`vision`/`llm`)
+- `{model}[-{revision}]-{core_mode}.png`: per-model summary chart
 - `combined.csv`: model-wise integrated summary (LLM + vision)
 - `combined.md`: markdown summary table
 - `combined_device.csv`: model-wise device summary
@@ -133,11 +135,16 @@ Example:
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py \
+  --core-mode global8 \
   --image-resolutions 224,384,512 \
-  --decode 128 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096,8192 \
+  --llm-decode-window 128 \
   --repeat 5 \
   --skip-existing
 ```
+
+When `--core-mode all` is used, each target model or discovered local `.mxq` is benchmarked three times with `single`, `global4`, and `global8`, and the output filenames include the core-mode suffix.
 
 ## Compare result folders
 
@@ -206,13 +213,13 @@ VLM compare mode saves:
 
 ## Search best prefill chunk size
 
-`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** with fixed `prefill_length=2048` (configurable), while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
+`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
 
 Important behavior:
 - Core mode is fixed at model creation time, so the script recreates the model instance for each core mode.
 - Input targets come from `--mxq-dir` and filename pattern: `<model_id_without_group_id>-<W8|W4V8>.mxq`.
 - If filename format is invalid, model base is not found in HF text-generation model list, or mapping is ambiguous, that mxq file is skipped with warning.
-- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `128,256,512,1024,2048`).
+- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `1024,2048`).
 - For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `128,256,512,1024,2048`).
 - Candidates where `chunk_size > prefill_length` are skipped automatically.
 - Each `(prefill_length, chunk_size)` pair is measured with repeats and median prefill TPS.
@@ -241,10 +248,9 @@ Example:
 ```bash
 python benchmark/transformers/search_prefill_chunk_size.py \
   --mxq-dir . \
-  --prefill-lengths 128,256,512,1024,2048 \
+  --prefill-lengths 1024,2048 \
   --chunk-candidates 128,256,512,1024,2048 \
   --time-guard-sec 300 \
   --repeat 3 \
   --skip-existing
 ```
-

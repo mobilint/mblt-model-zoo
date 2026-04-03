@@ -12,7 +12,7 @@ pip install -e ".[transformers]" --group dev
 
 ## Run All Tests
 
-Execute the entire Transformers test matrix (this may take a while because it loads every supported model):
+Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`:
 
 ```bash
 pytest tests/transformers
@@ -48,6 +48,20 @@ Or you can just write the part of the model name.
 pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
 ```
 
+## Sweep Core Modes
+
+If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can sweep all supported runtime modes in one pytest invocation:
+
+```bash
+pytest tests/transformers/text-generation/test_qwen2.py --core-mode all
+```
+
+Prefix-specific sweeps are also supported for multi-backend models:
+
+```bash
+pytest tests/transformers/image-text-to-text/test_qwen2_vl.py --vision-core-mode all --text-core-mode all
+```
+
 ## Keyword Parameters
 
 For any test, you can use keyword parameters explained in README.md [Keyword Parameters](../../mblt_model_zoo/hf_transformers/README.md#keyword-parameters) section. Please note that overriding parameters affect every tests you run. We recommend to narrow tests down to only single model case, described [above](#run-a-single-model-case)
@@ -56,7 +70,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --mxq-path=MXQ_PATH   Override default mxq_path for pipeline loading.
   --dev-no=DEV_NO       NPU device number.
   --core-mode=CORE_MODE
-                        NPU core mode (single, multi, global4, global8).
+                        NPU core mode (default: all=single/global4/global8).
   --target-cores=TARGET_CORES
                         Target cores (e.g., "0:0;0:1;0:2;0:3").
   --target-clusters=TARGET_CLUSTERS
@@ -66,7 +80,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --encoder-dev-no=ENCODER_DEV_NO
                         encoder NPU device number.
   --encoder-core-mode=ENCODER_CORE_MODE
-                        encoder NPU core mode (single, multi, global4, global8).
+                        encoder NPU core mode (single, multi, global4, global8, all=single/global4/global8).
   --encoder-target-cores=ENCODER_TARGET_CORES
                         encoder target cores (e.g., "0:0;0:1;0:2;0:3").
   --encoder-target-clusters=ENCODER_TARGET_CLUSTERS
@@ -76,7 +90,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --decoder-dev-no=DECODER_DEV_NO
                         decoder NPU device number.
   --decoder-core-mode=DECODER_CORE_MODE
-                        decoder NPU core mode (single, multi, global4, global8).
+                        decoder NPU core mode (single, multi, global4, global8, all=single/global4/global8).
   --decoder-target-cores=DECODER_TARGET_CORES
                         decoder target cores (e.g., "0:0;0:1;0:2;0:3").
   --decoder-target-clusters=DECODER_TARGET_CLUSTERS
@@ -86,7 +100,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --vision-dev-no=VISION_DEV_NO
                         vision NPU device number.
   --vision-core-mode=VISION_CORE_MODE
-                        vision NPU core mode (single, multi, global4, global8).
+                        vision NPU core mode (single, multi, global4, global8, all=single/global4/global8).
   --vision-target-cores=VISION_TARGET_CORES
                         vision target cores (e.g., "0:0;0:1;0:2;0:3").
   --vision-target-clusters=VISION_TARGET_CLUSTERS
@@ -96,7 +110,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --text-dev-no=TEXT_DEV_NO
                         text NPU device number.
   --text-core-mode=TEXT_CORE_MODE
-                        text NPU core mode (single, multi, global4, global8).
+                        text NPU core mode (single, multi, global4, global8, all=single/global4/global8).
   --text-target-cores=TEXT_TARGET_CORES
                         text target cores (e.g., "0:0;0:1;0:2;0:3").
   --text-target-clusters=TEXT_TARGET_CLUSTERS

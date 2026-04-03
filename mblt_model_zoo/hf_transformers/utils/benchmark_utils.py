@@ -335,7 +335,7 @@ class TPSMeasurer:
         self,
         num_prefill=512,
         num_decode=128,
-        chunk_size: Optional[int] = None,
+        prefill_chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
@@ -364,8 +364,8 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-            if chunk_size is not None:
-                gen_kwargs["chunk_size"] = int(chunk_size)
+            if prefill_chunk_size is not None:
+                gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
 
@@ -478,10 +478,9 @@ class TPSMeasurer:
     def measure_full(
         self,
         prefill_range: Tuple[int, int, int] = (128, 2048, 128),
-        decode_range: Tuple[int, int, int] = (128, 1024, 128),
-        fixed_decode_len=10,
-        fixed_prefill_len=128,
-        chunk_size: Optional[int] = None,
+        cache_lengths: Optional[Iterable[int]] = None,
+        decode_window: int = 128,
+        prefill_chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
@@ -494,6 +493,7 @@ class TPSMeasurer:
         try:
             full_result = BenchmarkResult()
             prefix = f"{progress_prefix} " if progress_prefix else ""
+            resolved_cache_lengths = list(cache_lengths or [1024, 2048, 4096, 8192])
             t_prefill_start = time.perf_counter()
             if on_prefill_start is not None:
                 on_prefill_start()
@@ -507,12 +507,12 @@ class TPSMeasurer:
             for p_len in prefill_iter:
                 res = self.measure(
                     num_prefill=p_len,
-                    num_decode=fixed_decode_len,
-                    chunk_size=chunk_size,
+                    num_decode=1,
+                    prefill_chunk_size=prefill_chunk_size,
                     show_progress=show_progress,
-                    progress_desc=f"{prefix}prefill generate ({p_len},{fixed_decode_len})",
+                    progress_desc=f"{prefix}prefill generate ({p_len})",
                 )
-                
+
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
                 full_result.prefill_sweep.time_values.append(res.prefill_latency)
@@ -527,111 +527,26 @@ class TPSMeasurer:
             t_decode_start = time.perf_counter()
             if on_decode_start is not None:
                 on_decode_start()
-            d_start, d_end, d_step = decode_range
-            input_ids = torch.randint(100, self.model.config.vocab_size, (1, fixed_prefill_len))
-            input_ids = input_ids.to(self.device)
-
-            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-            gen_kwargs = dict(
-                input_ids=input_ids,
-                streamer=streamer,
-                min_new_tokens=d_end,
-                max_new_tokens=d_end,
-                do_sample=False,
-                eos_token_id=None,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-            if chunk_size is not None:
-                gen_kwargs["chunk_size"] = int(chunk_size)
-            if self._supports_npu_timing():
-                gen_kwargs["count_npu_time"] = True
-
-            targets = set(range(d_start, d_end + 1, d_step))
-            pbar_decode = (
-                tqdm(total=len(targets), desc=f"{prefix}decode sweep", leave=False)
-                if show_progress
-                else None
-            )
-            decode_token_pbar = (
-                tqdm(total=d_end, desc=f"{prefix}decode generate ({fixed_prefill_len},{d_end})", leave=False)
-                if show_progress
-                else None
-            )
-
-            npu_decode_time = 0.0
-            npu_decode_tokens = 0
-            first_decode_seen = False
-
-            thread_error: list[Exception] = []
-
-            def _run_generate():
-                try:
-                    self.model.generate(**gen_kwargs)
-                except Exception as e:
-                    thread_error.append(e)
-                    try:
-                        streamer.end()
-                    except Exception:
-                        pass
-
-            thread = Thread(target=_run_generate)
-            thread.start()
-
-            first_token_time = None
-            decoded_tokens = 0
-            stream_error: Exception | None = None
-            try:
-                for _ in streamer:
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter()
-                    decoded_tokens += 1
-                    if decode_token_pbar is not None:
-                        decode_token_pbar.update(1)
-                    if getattr(self.model, "npu_time", None) is not None:
-                        if decoded_tokens == 1:
-                            first_decode_seen = True
-                        else:
-                            npu_decode_time += self.model.npu_time
-                            npu_decode_tokens += 1
-                    if decoded_tokens in targets:
-                        t_hit = time.perf_counter()
-                        decode_duration = t_hit - first_token_time
-                        decode_count = decoded_tokens - 1
-                        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0
-                        avg_total_token_latency = decode_duration / decode_count if decode_count > 0 else 0
-                        avg_npu_token_latency = (
-                            npu_decode_time / npu_decode_tokens
-                            if npu_decode_tokens > 0
-                            else None
-                        )
-
-                        full_result.decode_sweep.x_values.append(decoded_tokens)
-                        full_result.decode_sweep.tps_values.append(decode_tps)
-                        full_result.decode_sweep.time_values.append(decode_duration)
-                        full_result.decode_sweep.avg_total_token_latency_values.append(avg_total_token_latency)
-                        full_result.decode_sweep.avg_npu_token_latency_values.append(avg_npu_token_latency)
-
-                        if pbar_decode is not None:
-                            pbar_decode.update(1)
-            except Exception as e:
-                stream_error = e
-
-            thread.join()
-            if thread_error:
-                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
-            if stream_error is not None:
-                raise stream_error
-            if decode_token_pbar is not None:
-                decode_token_pbar.close()
-            if pbar_decode is not None:
-                pbar_decode.close()
+            decode_iter = resolved_cache_lengths
+            if show_progress:
+                decode_iter = tqdm(decode_iter, desc=f"{prefix}decode sweep", leave=False)
+            for cache_len in decode_iter:
+                res = self.measure(
+                    num_prefill=cache_len,
+                    num_decode=decode_window,
+                    prefill_chunk_size=prefill_chunk_size,
+                    show_progress=show_progress,
+                    progress_desc=f"{prefix}decode generate (cache={cache_len}, window={decode_window})",
+                )
+                full_result.decode_sweep.x_values.append(cache_len)
+                full_result.decode_sweep.tps_values.append(res.decode_tps)
+                full_result.decode_sweep.time_values.append(res.decode_duration)
+                full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
+                full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
             t_decode_end = time.perf_counter()
             if on_decode_end is not None:
                 on_decode_end()
             full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
-
-            if first_token_time is None:
-                raise RuntimeError("Generation ended before the first token.")
 
             return full_result
         finally:
@@ -659,22 +574,22 @@ class TPSMeasurer:
         axs[0, 1].set_ylabel('Latency (ms)')
         axs[0, 1].grid(True)
 
-        # 3. Decode: Token vs TPS
+        # 3. Decode: Cache length vs TPS
         axs[1, 0].plot(result.decode_sweep.x_values, result.decode_sweep.tps_values, 'g-o')
-        axs[1, 0].set_title('Decode: Tokens vs TPS')
-        axs[1, 0].set_xlabel('Output Tokens')
+        axs[1, 0].set_title('Decode: Cache Length vs TPS')
+        axs[1, 0].set_xlabel('Cache Length (tokens)')
         axs[1, 0].set_ylabel('TPS (tokens/sec)')
         axs[1, 0].grid(True)
 
-        # 4. Decode: Token vs Time
+        # 4. Decode: Cache length vs Time
         axs[1, 1].plot(
             result.decode_sweep.x_values,
             [t * 1000.0 for t in result.decode_sweep.time_values],
             'm-o',
         )
-        axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
-        axs[1, 1].set_xlabel('Output Tokens')
-        axs[1, 1].set_ylabel('Total Generation Time (ms)')
+        axs[1, 1].set_title('Decode: Cache Length vs Time (Duration)')
+        axs[1, 1].set_xlabel('Cache Length (tokens)')
+        axs[1, 1].set_ylabel('Decode Window Duration (ms)')
         axs[1, 1].grid(True)
 
         plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))
@@ -719,14 +634,14 @@ class TPSMeasurer:
         axs[0, 1].set_ylabel('Latency (ms)')
         axs[0, 1].grid(True)
 
-        axs[1, 0].set_title('Decode: Tokens vs TPS')
-        axs[1, 0].set_xlabel('Output Tokens')
+        axs[1, 0].set_title('Decode: Cache Length vs TPS')
+        axs[1, 0].set_xlabel('Cache Length (tokens)')
         axs[1, 0].set_ylabel('TPS (tokens/sec)')
         axs[1, 0].grid(True)
 
-        axs[1, 1].set_title('Decode: Tokens vs Time (Duration)')
-        axs[1, 1].set_xlabel('Output Tokens')
-        axs[1, 1].set_ylabel('Total Generation Time (ms)')
+        axs[1, 1].set_title('Decode: Cache Length vs Time (Duration)')
+        axs[1, 1].set_xlabel('Cache Length (tokens)')
+        axs[1, 1].set_ylabel('Decode Window Duration (ms)')
         axs[1, 1].grid(True)
 
         for ax in axs.flat:
@@ -999,6 +914,147 @@ class VLMTPSMeasurer:
         inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
         _, image_features = self._measure_vision_encode(inputs)
         return self._build_inputs_embeds(inputs, image_features=image_features)
+
+    def _build_text_suffix_ids(self, length: int, device: torch.device) -> torch.LongTensor:
+        if length <= 0:
+            return torch.empty((1, 0), dtype=torch.long, device=device)
+
+        vocab_size = int(self.model.config.vocab_size)
+        low = 100 if vocab_size > 100 else 0
+        suffix_ids = torch.randint(low, vocab_size, (1, length), device=device)
+
+        blocked_ids = {
+            int(x)
+            for x in (
+                getattr(self.tokenizer, "bos_token_id", None),
+                getattr(self.tokenizer, "eos_token_id", None),
+                getattr(self.tokenizer, "pad_token_id", None),
+                getattr(self.model.config, "image_token_id", None),
+            )
+            if x is not None
+        }
+        if blocked_ids:
+            replacement_id = next((idx for idx in range(vocab_size) if idx not in blocked_ids), 0)
+            for blocked_id in blocked_ids:
+                suffix_ids[suffix_ids == blocked_id] = replacement_id
+
+        return suffix_ids
+
+    def _build_inputs_embeds_from_base(
+        self,
+        inputs: dict,
+        image_features: torch.Tensor,
+        total_prefill_len: int,
+    ) -> tuple[torch.Tensor | None, int]:
+        input_ids = inputs["input_ids"].to(self.model.device)
+        base_total_len = int(input_ids.shape[1])
+        if total_prefill_len < base_total_len:
+            return None, base_total_len
+
+        extra_len = total_prefill_len - base_total_len
+        if extra_len > 0:
+            suffix_ids = self._build_text_suffix_ids(extra_len, device=input_ids.device)
+            input_ids = torch.cat((input_ids, suffix_ids), dim=1)
+
+        adjusted_inputs = dict(inputs)
+        adjusted_inputs["input_ids"] = input_ids
+        if "attention_mask" in adjusted_inputs:
+            adjusted_inputs["attention_mask"] = torch.ones_like(input_ids, device=input_ids.device)
+
+        inputs_embeds = self._build_inputs_embeds(adjusted_inputs, image_features=image_features)
+        if int(inputs_embeds.shape[1]) != total_prefill_len:
+            raise AssertionError(
+                "Adjusted VLM inputs_embeds length does not match target total prefill length: "
+                f"{int(inputs_embeds.shape[1])} vs {total_prefill_len}"
+            )
+        return inputs_embeds, base_total_len
+
+    def measure_llm_full(
+        self,
+        image_resolution: int,
+        prompt: str,
+        prefill_range: Tuple[int, int, int] = (128, 2048, 128),
+        cache_lengths: Optional[Iterable[int]] = None,
+        decode_window: int = 128,
+        show_progress: bool = False,
+        progress_prefix: str = "",
+    ) -> BenchmarkResult:
+        full_result = BenchmarkResult()
+        prefix = f"{progress_prefix} " if progress_prefix else ""
+        resolved_cache_lengths = list(cache_lengths or [1024, 2048, 4096, 8192])
+        base_inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+        _, image_features = self._measure_vision_encode(base_inputs)
+
+        p_start, p_end, p_step = prefill_range
+        prefill_iter = range(p_start, p_end + 1, p_step)
+        if show_progress:
+            prefill_iter = tqdm(prefill_iter, desc=f"{prefix}vlm llm prefill sweep", leave=False)
+
+        t_prefill_start = time.perf_counter()
+        min_total_len_seen: int | None = None
+        for p_len in prefill_iter:
+            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                inputs=base_inputs,
+                image_features=image_features,
+                total_prefill_len=p_len,
+            )
+            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+            if inputs_embeds is None:
+                if show_progress:
+                    tqdm.write(
+                        f"{prefix}skip prefill target={p_len}: "
+                        f"minimum multimodal prefix length is {min_total_len}"
+                    )
+                continue
+            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=1)
+            full_result.prefill_sweep.x_values.append(p_len)
+            full_result.prefill_sweep.tps_values.append(res.prefill_tps)
+            full_result.prefill_sweep.time_values.append(res.prefill_latency)
+            full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
+            full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
+        t_prefill_end = time.perf_counter()
+        full_result.prefill_phase_duration_s = max(0.0, t_prefill_end - t_prefill_start)
+
+        decode_iter = resolved_cache_lengths
+        if show_progress:
+            decode_iter = tqdm(decode_iter, desc=f"{prefix}vlm llm decode sweep", leave=False)
+
+        t_decode_start = time.perf_counter()
+        for cache_len in decode_iter:
+            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                inputs=base_inputs,
+                image_features=image_features,
+                total_prefill_len=cache_len,
+            )
+            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+            if inputs_embeds is None:
+                if show_progress:
+                    tqdm.write(
+                        f"{prefix}skip cache length={cache_len}: "
+                        f"minimum multimodal prefix length is {min_total_len}"
+                    )
+                continue
+            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=decode_window)
+            full_result.decode_sweep.x_values.append(cache_len)
+            full_result.decode_sweep.tps_values.append(res.decode_tps)
+            full_result.decode_sweep.time_values.append(res.decode_duration)
+            full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
+            full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
+        t_decode_end = time.perf_counter()
+        full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
+
+        if (
+            show_progress
+            and min_total_len_seen is not None
+            and not full_result.prefill_sweep.x_values
+            and not full_result.decode_sweep.x_values
+        ):
+            tqdm.write(
+                f"{prefix}all VLM LLM sweep points were skipped: "
+                f"minimum multimodal prefix length is {min_total_len_seen}"
+            )
+
+        return full_result
 
     def measure_vision(
         self,

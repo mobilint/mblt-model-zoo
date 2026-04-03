@@ -502,7 +502,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         measurer.measure(
             num_prefill=args.prefill,
             num_decode=args.decode,
-            chunk_size=args.chunk_size,
+            prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
@@ -515,7 +515,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
             run = measurer.measure(
                 num_prefill=args.prefill,
                 num_decode=args.decode,
-                chunk_size=args.chunk_size,
+                prefill_chunk_size=args.prefill_chunk_size,
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
@@ -706,11 +706,12 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
+    warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=args.fixed_prefill,
-            num_decode=args.fixed_decode,
-            chunk_size=args.chunk_size,
+            num_prefill=warmup_prefill,
+            num_decode=args.decode_window,
+            prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
@@ -750,10 +751,9 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             runs.append(
                 measurer.measure_full(
                     prefill_range=args.prefill_range,
-                    decode_range=args.decode_range,
-                    fixed_decode_len=args.fixed_decode,
-                    fixed_prefill_len=args.fixed_prefill,
-                    chunk_size=args.chunk_size,
+                    cache_lengths=args.cache_lengths,
+                    decode_window=args.decode_window,
+                    prefill_chunk_size=args.prefill_chunk_size,
                     trace_path=args.trace if i == 0 else None,
                     show_progress=True,
                     progress_prefix=f"run {i + 1}/{args.repeat}",
@@ -1205,11 +1205,12 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
     for _ in range(args.warmup):
-        measurer.measure_llm(
+        measurer.measure_llm_full(
             image_resolution=llm_resolution,
-            num_decode=args.decode,
-            repeat=1,
             prompt=args.prompt,
+            prefill_range=args.llm_prefill_range,
+            cache_lengths=args.llm_cache_lengths,
+            decode_window=args.llm_decode_window,
             show_progress=False,
         )
     llm_runs = []
@@ -1217,17 +1218,18 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         if tracker is not None:
             tracker.start()
         try:
-            run = measurer.measure_llm(
+            run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
-                num_decode=args.decode,
-                repeat=1,
                 prompt=args.prompt,
+                prefill_range=args.llm_prefill_range,
+                cache_lengths=args.llm_cache_lengths,
+                decode_window=args.llm_decode_window,
                 show_progress=False,
-            )[0]
+            )
         finally:
             if tracker is not None:
                 tracker.stop()
-        if tracker is not None:
+        if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
             metric = _extract_device_metric(tracker)
             _enrich_single_run_device(
                 run=run,
@@ -1236,33 +1238,36 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             )
         llm_runs.append(run)
 
-    llm_prefill_tps = [r.prefill_tps for r in llm_runs]
-    llm_decode_tps = [r.decode_tps for r in llm_runs]
-    llm_ttft_ms = [r.prefill_latency * 1000.0 for r in llm_runs]
-    llm_decode_ms = [r.decode_duration * 1000.0 for r in llm_runs]
-    llm_total_ms = [r.total_time * 1000.0 for r in llm_runs]
-    llm_avg_power_w = [r.avg_power_w for r in llm_runs if r.avg_power_w is not None]
-    llm_p99_power_w = [r.p99_power_w for r in llm_runs if r.p99_power_w is not None]
-    llm_avg_utilization_pct = [r.avg_utilization_pct for r in llm_runs if r.avg_utilization_pct is not None]
-    llm_p99_utilization_pct = [r.p99_utilization_pct for r in llm_runs if r.p99_utilization_pct is not None]
-    llm_avg_memory_used_mb = [r.avg_memory_used_mb for r in llm_runs if r.avg_memory_used_mb is not None]
-    llm_p99_memory_used_mb = [r.p99_memory_used_mb for r in llm_runs if r.p99_memory_used_mb is not None]
-    llm_total_memory_mb = [r.total_memory_mb for r in llm_runs if r.total_memory_mb is not None]
-    llm_avg_memory_used_pct = [r.avg_memory_used_pct for r in llm_runs if r.avg_memory_used_pct is not None]
-    llm_p99_memory_used_pct = [r.p99_memory_used_pct for r in llm_runs if r.p99_memory_used_pct is not None]
-    llm_total_energy_j = [r.total_energy_j for r in llm_runs if r.total_energy_j is not None]
-    llm_prefill_tok_per_j = [r.prefill_tokens_per_j for r in llm_runs if r.prefill_tokens_per_j is not None]
-    llm_decode_tok_per_j = [r.decode_tokens_per_j for r in llm_runs if r.decode_tokens_per_j is not None]
-    llm_prefill_j_per_tok = [r.prefill_j_per_token for r in llm_runs if r.prefill_j_per_token is not None]
-    llm_decode_j_per_tok = [r.decode_j_per_token for r in llm_runs if r.decode_j_per_token is not None]
+    llm_result = _aggregate_sweep_results(llm_runs)
+    llm_prefill_tps = [r.prefill_sweep.tps_values[-1] for r in llm_runs if r.prefill_sweep.tps_values]
+    llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
+    llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
+    llm_decode_ms = [r.decode_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.decode_sweep.time_values]
+    llm_avg_power_w = [r.avg_power_w for r in llm_runs if getattr(r, "avg_power_w", None) is not None]
+    llm_p99_power_w = [r.p99_power_w for r in llm_runs if getattr(r, "p99_power_w", None) is not None]
+    llm_avg_utilization_pct = [
+        r.avg_utilization_pct for r in llm_runs if getattr(r, "avg_utilization_pct", None) is not None
+    ]
+    llm_p99_utilization_pct = [
+        r.p99_utilization_pct for r in llm_runs if getattr(r, "p99_utilization_pct", None) is not None
+    ]
+    llm_avg_memory_used_mb = [r.avg_memory_used_mb for r in llm_runs if getattr(r, "avg_memory_used_mb", None) is not None]
+    llm_p99_memory_used_mb = [r.p99_memory_used_mb for r in llm_runs if getattr(r, "p99_memory_used_mb", None) is not None]
+    llm_total_memory_mb = [r.total_memory_mb for r in llm_runs if getattr(r, "total_memory_mb", None) is not None]
+    llm_avg_memory_used_pct = [
+        r.avg_memory_used_pct for r in llm_runs if getattr(r, "avg_memory_used_pct", None) is not None
+    ]
+    llm_p99_memory_used_pct = [
+        r.p99_memory_used_pct for r in llm_runs if getattr(r, "p99_memory_used_pct", None) is not None
+    ]
+    llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
 
     print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}")
     _print_summary_header()
-    _print_summary("llm_prefill_tps", llm_prefill_tps, "tok/s")
-    _print_summary("llm_decode_tps", llm_decode_tps, "tok/s")
-    _print_summary("llm_ttft", llm_ttft_ms, "ms")
-    _print_summary("llm_decode_duration", llm_decode_ms, "ms")
-    _print_summary("llm_total", llm_total_ms, "ms")
+    _print_summary("llm_prefill_tps(last)", llm_prefill_tps, "tok/s")
+    _print_summary("llm_decode_tps(last)", llm_decode_tps, "tok/s")
+    _print_summary("llm_ttft(last)", llm_ttft_ms, "ms")
+    _print_summary("llm_decode_duration(last)", llm_decode_ms, "ms")
     if args.device_metrics:
         _print_summary("llm_avg_power", llm_avg_power_w, "W")
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
@@ -1274,15 +1279,17 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary("llm_avg_mem_used_pct", llm_avg_memory_used_pct, "%")
         _print_summary("llm_p99_mem_used_pct", llm_p99_memory_used_pct, "%")
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
-        _print_summary("llm_prefill_tok_per_j", llm_prefill_tok_per_j, "tok/J")
-        _print_summary("llm_decode_tok_per_j", llm_decode_tok_per_j, "tok/J")
-        _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
-        _print_summary("llm_decode_j_per_tok", llm_decode_j_per_tok, "J/tok")
         if not llm_avg_power_w:
             print("[device] warning: no llm device samples were collected")
     _print_summary_footer()
 
     for idx, run in enumerate(llm_runs, start=1):
+        prefill_tokens = run.prefill_sweep.x_values[-1] if run.prefill_sweep.x_values else None
+        decode_tokens = run.decode_sweep.x_values[-1] if run.decode_sweep.x_values else None
+        prefill_tps = run.prefill_sweep.tps_values[-1] if run.prefill_sweep.tps_values else None
+        decode_tps = run.decode_sweep.tps_values[-1] if run.decode_sweep.tps_values else None
+        ttft_ms = (run.prefill_sweep.time_values[-1] * 1000.0) if run.prefill_sweep.time_values else None
+        decode_ms = (run.decode_sweep.time_values[-1] * 1000.0) if run.decode_sweep.time_values else None
         csv_rows.append(
             {
                 "type": "llm",
@@ -1290,27 +1297,27 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "repeat_index": idx,
                 "vision_encode_ms": None,
                 "vision_fps": None,
-                "llm_prefill_tokens": run.num_prefill,
-                "llm_decode_tokens": run.num_decode,
-                "llm_prefill_tps": run.prefill_tps,
-                "llm_decode_tps": run.decode_tps,
-                "llm_ttft_ms": run.prefill_latency * 1000.0,
-                "llm_decode_ms": run.decode_duration * 1000.0,
-                "llm_total_ms": run.total_time * 1000.0,
-                "avg_power_w": run.avg_power_w,
-                "p99_power_w": run.p99_power_w,
-                "avg_utilization_pct": run.avg_utilization_pct,
-                "p99_utilization_pct": run.p99_utilization_pct,
-                "avg_memory_used_mb": run.avg_memory_used_mb,
-                "p99_memory_used_mb": run.p99_memory_used_mb,
-                "total_memory_mb": run.total_memory_mb,
-                "avg_memory_used_pct": run.avg_memory_used_pct,
-                "p99_memory_used_pct": run.p99_memory_used_pct,
-                "total_energy_j": run.total_energy_j,
-                "prefill_tok_per_j": run.prefill_tokens_per_j,
-                "decode_tok_per_j": run.decode_tokens_per_j,
-                "prefill_j_per_tok": run.prefill_j_per_token,
-                "decode_j_per_tok": run.decode_j_per_token,
+                "llm_prefill_tokens": prefill_tokens,
+                "llm_decode_tokens": decode_tokens,
+                "llm_prefill_tps": prefill_tps,
+                "llm_decode_tps": decode_tps,
+                "llm_ttft_ms": ttft_ms,
+                "llm_decode_ms": decode_ms,
+                "llm_total_ms": None,
+                "avg_power_w": getattr(run, "avg_power_w", None),
+                "p99_power_w": getattr(run, "p99_power_w", None),
+                "avg_utilization_pct": getattr(run, "avg_utilization_pct", None),
+                "p99_utilization_pct": getattr(run, "p99_utilization_pct", None),
+                "avg_memory_used_mb": getattr(run, "avg_memory_used_mb", None),
+                "p99_memory_used_mb": getattr(run, "p99_memory_used_mb", None),
+                "total_memory_mb": getattr(run, "total_memory_mb", None),
+                "avg_memory_used_pct": getattr(run, "avg_memory_used_pct", None),
+                "p99_memory_used_pct": getattr(run, "p99_memory_used_pct", None),
+                "total_energy_j": getattr(run, "total_energy_j", None),
+                "prefill_tok_per_j": None,
+                "decode_tok_per_j": None,
+                "prefill_j_per_tok": None,
+                "decode_j_per_tok": None,
                 "vision_img_per_j": None,
                 "vision_j_per_img": None,
             }
@@ -1323,18 +1330,20 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "task": args.task,
                 "model": args.model,
                 "prompt": args.prompt,
-                "decode": args.decode,
+                "llm_prefill_range": list(args.llm_prefill_range),
+                "llm_cache_lengths": args.llm_cache_lengths,
+                "llm_decode_window": args.llm_decode_window,
                 "vision_results": resolution_payloads,
                 "llm_reference_resolution": llm_resolution,
                 "llm_results": {
                     "repeat": args.repeat,
+                    "aggregate": asdict(llm_result),
                     "runs": [asdict(r) for r in llm_runs],
                     "summary": {
-                        "llm_prefill_tps": _summary(llm_prefill_tps),
-                        "llm_decode_tps": _summary(llm_decode_tps),
-                        "llm_ttft_ms": _summary(llm_ttft_ms),
-                        "llm_decode_duration_ms": _summary(llm_decode_ms),
-                        "llm_total_ms": _summary(llm_total_ms),
+                        "llm_prefill_tps_last": _summary(llm_prefill_tps),
+                        "llm_decode_tps_last": _summary(llm_decode_tps),
+                        "llm_ttft_ms_last": _summary(llm_ttft_ms),
+                        "llm_decode_duration_ms_last": _summary(llm_decode_ms),
                         "avg_power_w": _summary(llm_avg_power_w),
                         "p99_power_w": _summary(llm_p99_power_w),
                         "avg_utilization_pct": _summary(llm_avg_utilization_pct),
@@ -1345,10 +1354,6 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                         "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
                         "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
                         "total_energy_j": _summary(llm_total_energy_j),
-                        "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
-                        "decode_tok_per_j": _summary(llm_decode_tok_per_j),
-                        "prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
-                        "decode_j_per_tok": _summary(llm_decode_j_per_tok),
                     },
                 },
             },
@@ -1434,10 +1439,10 @@ def add_tps_parser(
             help="write qbruntime trace to the given JSON path (first run only)",
         )
         p.add_argument(
-            "--chunk-size",
+            "--prefill-chunk-size",
             type=_parse_positive_int_optional,
             default=None,
-            help="optional chunk_size forwarded to model.generate/model.forward (default: None)",
+            help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
         )
         _add_device_tracking_args(p)
 
@@ -1457,22 +1462,16 @@ def add_tps_parser(
         help="prefill sweep range (start:end:step)",
     )
     p_sweep.add_argument(
-        "--decode-range",
-        type=_parse_range,
-        default=(128, 512, 128),
-        help="decode sweep range (start:end:step)",
+        "--cache-lengths",
+        type=_parse_int_list,
+        default=[1024, 2048, 4096, 8192],
+        help="comma-separated cache lengths for decode sweep",
     )
     p_sweep.add_argument(
-        "--fixed-decode",
-        type=_parse_positive_int,
-        default=10,
-        help="fixed decode length for prefill sweep",
-    )
-    p_sweep.add_argument(
-        "--fixed-prefill",
+        "--decode-window",
         type=_parse_positive_int,
         default=128,
-        help="fixed prefill length for decode sweep",
+        help="decode token window measured after each cache-length prefill",
     )
     p_sweep.add_argument("--plot", default="tps_benchmark.png", help="write PNG plot")
     p_sweep.add_argument(
@@ -1496,10 +1495,22 @@ def add_tps_parser(
         help="comma-separated image resolutions (e.g., 224,384,512)",
     )
     p_vlm.add_argument(
-        "--decode",
+        "--llm-prefill-range",
+        type=_parse_range,
+        default=(128, 512, 128),
+        help="llm prefill sweep range by total multimodal prefix length (start:end:step)",
+    )
+    p_vlm.add_argument(
+        "--llm-cache-lengths",
+        type=_parse_int_list,
+        default=[1024, 2048, 4096, 8192],
+        help="comma-separated llm cache lengths for decode sweep",
+    )
+    p_vlm.add_argument(
+        "--llm-decode-window",
         type=_parse_positive_int,
         default=128,
-        help="decode tokens for LLM phase",
+        help="decode token window for llm cache-length sweep",
     )
     p_vlm.add_argument(
         "--llm-resolution",
@@ -1515,3 +1526,4 @@ def add_tps_parser(
     p_vlm.add_argument("--json", default=None, help="write VLM results as JSON")
     p_vlm.add_argument("--csv", default=None, help="write VLM rows as CSV")
     p_vlm.set_defaults(_handler=_cmd_vlm_sweep)
+

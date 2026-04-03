@@ -101,7 +101,6 @@ from transformers import TextStreamer, pipeline, AutoProcessor
 
 model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
-processor = AutoProcessor.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
 processor = AutoProcessor.from_pretrained(
     model_name,
     use_fast=True,
@@ -186,7 +185,8 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
   - `global4`: global scheduling across 4 cores (use `target_clusters`)
   - `global8`: global scheduling across all cores (requires all clusters)
 
-  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. If you are not sure, keep the default stored in the model config.
+  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while others may only support the default stored in the model config.
+  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it.
 
 - `target_cores` (`list[str]`)
 
@@ -268,6 +268,14 @@ To make it easier to test custom compiled models, we support overriding the inpu
   The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
   The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
 
+#### prefill_chunk_size
+
+- `prefill_chunk_size` (`int`)
+
+  Overrides the prefill chunk size used by Mobilint text-generation backends.
+  If omitted or set to `None`, the runtime reads `prefill_chunk_size` from the model's `config.json`
+  using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
+
 ### Original Keyword Parameters from `transformers`
 
 The parameters below follow the standard `transformers` semantics. For Mobilint quantized `*.mxq` models, they only affect the non-NPU parts of the model (typically CPU-side layers such as embeddings). NPU execution always runs on Mobilint NPUs.
@@ -315,7 +323,8 @@ mblt-model-zoo tps measure --model mobilint/Llama-3.2-1B-Instruct \
 
 # repeated sweep (writes aggregate curve + per-run payload)
 mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
-  --prefill-range 128:512:128 --decode-range 128:512:128 \
+  --prefill-range 128:512:128 --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --repeat 5 --json tps.json --csv tps.csv --plot tps.png
 ```
 
@@ -323,13 +332,15 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
 
 `vlm-sweep` measures:
 - Vision encode latency (`vision_encode_ms`) and FPS (`vision_fps`) per image resolution
-- LLM-phase prefill/decode TPS separately, using one reference resolution (`--llm-resolution`)
+- LLM-phase total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`)
 
 ```bash
 mblt-model-zoo tps vlm-sweep --model mobilint/Qwen2-VL-2B-Instruct \
   --image-resolutions 224,384,512,768 \
   --llm-resolution 224 \
-  --decode 128 --repeat 10 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096,8192 \
+  --llm-decode-window 128 --repeat 10 \
   --json vlm_tps.json --csv vlm_tps.csv
 ```
 
@@ -338,6 +349,16 @@ Note:
 - Some models/backends may enforce a fixed effective input size at runtime.
 
 For TPS benchmark commands, you can use keyword parameters explained in [Keyword Parameters](#keyword-parameters).
+
+## Tests And Benchmark Scripts
+
+- Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
+  - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
+  - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
+- Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
+  - Text-generation and VLM benchmarks default to `--core-mode global8`.
+  - Passing `--core-mode all` benchmarks `single`, `global4`, and `global8`, and result filenames include the core-mode suffix.
+  - When `--mxq-dir` is used, a single discovered `.mxq` target is reused across every selected core mode.
 
 ## Model List
 
