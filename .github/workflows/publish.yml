@@ -4,6 +4,12 @@ on:
   release:
     types: [published]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build distribution 🛠️
@@ -38,6 +44,8 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     environment: testpypi
+    permissions:
+      id-token: write
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
@@ -49,13 +57,14 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_TOKEN }}
 
   publish-to-pypi:
     name: Publish to PyPI 🚀
     needs: [build, publish-to-testpypi]
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
@@ -65,5 +74,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}
