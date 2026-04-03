@@ -41,7 +41,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        chunk_size: int = 128,
+        prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[Tuple[Union[torch.Tensor, MobilintCache], ...], CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -78,7 +78,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds,
             past_key_values,
             cache_position,
-            chunk_size,
+            prefill_chunk_size,
             count_npu_time=count_npu_time,
         )
 
@@ -112,3 +112,5 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
 AutoModel.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
 AutoModelForCausalLM.register(MobilintExaoneConfig, MobilintExaoneForCausalLM)
+
+

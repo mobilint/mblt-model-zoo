@@ -56,6 +56,14 @@ class MobilintConfigMixin(PretrainedConfig):
     @target_clusters.setter
     def target_clusters(self, values: list) -> None:
         self.npu_backend.target_clusters = values
+
+    @property
+    def prefill_chunk_size(self) -> Any:
+        return self.__dict__.get("prefill_chunk_size", None)
+
+    @prefill_chunk_size.setter
+    def prefill_chunk_size(self, value: Any) -> None:
+        self.__dict__["prefill_chunk_size"] = value
     
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
@@ -261,6 +269,14 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     @text_target_clusters.setter
     def text_target_clusters(self, values: list) -> None:
         self.text_config.target_clusters = values
+
+    @property
+    def text_prefill_chunk_size(self) -> Any:
+        return self.text_config.prefill_chunk_size
+
+    @text_prefill_chunk_size.setter
+    def text_prefill_chunk_size(self, value: Any) -> None:
+        self.text_config.prefill_chunk_size = value
 
     @classmethod
     def from_dict(

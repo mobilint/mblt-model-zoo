@@ -1,7 +1,7 @@
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -16,6 +16,7 @@ from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConf
 
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     npu_backend_prefix: Literal["", "encoder_", "decoder_"] = ""
+    _DEFAULT_PREFILL_CHUNK_SIZE = 128
     
     def __init__(self, config: Union[MobilintConfigMixin, MobilintEncoderDecoderConfigMixin], *args, **kwargs):
         no_launch = kwargs.pop("no_launch", False)
@@ -130,7 +131,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         inputs_embeds: torch.Tensor,
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
-        chunk_size: int = 128,
+        prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
     ):
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
@@ -138,15 +139,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
-        assert chunk_size > 0, "chunk_size should be a positive number! chunk_size: %d" % chunk_size
-        num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / chunk_size)
+        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
 
         mxq_model = self.npu_backend.mxq_model
         self.npu_time = 0.0 if count_npu_time else None
         
         for i in range(num_of_chunks):
-            start_index = i * chunk_size
-            end_index = min(start_index + chunk_size, inputs_embeds_numpy.shape[2])
+            start_index = i * resolved_prefill_chunk_size
+            end_index = min(start_index + resolved_prefill_chunk_size, inputs_embeds_numpy.shape[2])
             cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
 
             if count_npu_time:
@@ -165,6 +166,43 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
 
         return logits
+
+    def resolve_prefill_chunk_size(self, prefill_chunk_size: Optional[int]) -> int:
+        explicit_prefill_chunk_size = self._coerce_positive_int(prefill_chunk_size)
+        if explicit_prefill_chunk_size is not None:
+            return explicit_prefill_chunk_size
+
+        config_value = self._get_config_prefill_chunk_size()
+        config_prefill_chunk_size = self._coerce_positive_int(config_value)
+        if config_prefill_chunk_size is not None:
+            return config_prefill_chunk_size
+
+        return self._DEFAULT_PREFILL_CHUNK_SIZE
+
+    def _get_config_prefill_chunk_size(self) -> Any:
+        config_value = getattr(self.config, "prefill_chunk_size", None)
+        if isinstance(config_value, dict):
+            core_mode = getattr(self.npu_backend, "core_mode", None)
+            if core_mode is None:
+                return None
+            return config_value.get(core_mode)
+        return config_value
+
+    @staticmethod
+    def _coerce_positive_int(value: Any) -> Optional[int]:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, float) and value.is_integer():
+            return int(value) if value > 0 else None
+        if isinstance(value, str):
+            try:
+                parsed = int(value.strip())
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+        return None
 
     def decoder_forward(
         self,
