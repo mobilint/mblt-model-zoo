@@ -348,7 +348,6 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         pixel_values: torch.FloatTensor,
         image_grid_thw: Optional[torch.LongTensor] = None,
     ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
-        """Encode images and return split image embeddings plus deepstack features."""
         if image_grid_thw is None:
             raise ValueError("image_grid_thw must not be None.")
 
@@ -362,7 +361,6 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         pixel_values_videos: torch.FloatTensor,
         video_grid_thw: Optional[torch.LongTensor] = None,
     ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
-        """Encode videos using the same MXQ vision path as images."""
         return self.get_image_features(pixel_values_videos, video_grid_thw)
 
 
@@ -373,7 +371,6 @@ class MobilintQwen3VLForConditionalGeneration(
     Qwen3VLForConditionalGeneration,
 ):
     def __init__(self, config: MobilintQwen3VLConfig, *args, **kwargs):
-        """Initialize the multimodal model and bypass HF lm_head."""
         PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
         
         self.model = MobilintQwen3VLModel(config, _internal_call=True)
