@@ -1,7 +1,7 @@
-"""Update Hugging Face config.json files with prefill_chunk_size values.
+"""Update Hugging Face config.json files with npu_prefill_chunk_size values.
 
 This script reads `prefill_chunk_size.csv`, groups rows by `(model_id, revision)`,
-and writes a `prefill_chunk_size` dict into each target branch's `config.json`.
+and writes an `npu_prefill_chunk_size` dict into each target branch's `config.json`.
 It also updates the `main` branch by inferring whether `main` currently points to
 the `W8` or `W4V8` mxq variant from `config.json.mxq_path`.
 """
@@ -25,7 +25,7 @@ def _parse_args() -> argparse.Namespace:
     Returns:
         Parsed CLI arguments.
     """
-    parser = argparse.ArgumentParser(description="Update HF config.json prefill_chunk_size entries.")
+    parser = argparse.ArgumentParser(description="Update HF config.json npu_prefill_chunk_size entries.")
     parser.add_argument(
         "--csv",
         default=Path(__file__).with_name("prefill_chunk_size.csv"),
@@ -162,11 +162,11 @@ def _update_branch(
         `True` when a change is needed, otherwise `False`.
     """
     config, _ = _download_config(api, model_id, revision, token)
-    if config.get("prefill_chunk_size") == prefill_chunk_size:
+    if config.get("npu_prefill_chunk_size") == prefill_chunk_size:
         print(f"[skip] {model_id}@{revision or 'main'} already up to date")
         return False
 
-    config["prefill_chunk_size"] = prefill_chunk_size
+    config["npu_prefill_chunk_size"] = prefill_chunk_size
     print(f"[plan] {model_id}@{revision or 'main'} -> {prefill_chunk_size}")
     if not apply_changes:
         return True

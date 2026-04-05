@@ -273,7 +273,7 @@ To make it easier to test custom compiled models, we support overriding the inpu
 - `prefill_chunk_size` (`int`)
 
   Overrides the prefill chunk size used by Mobilint text-generation backends.
-  If omitted or set to `None`, the runtime reads `prefill_chunk_size` from the model's `config.json`
+  If omitted or set to `None`, the runtime reads `npu_prefill_chunk_size` from the model's `config.json`
   using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
 
 ### Original Keyword Parameters from `transformers`
