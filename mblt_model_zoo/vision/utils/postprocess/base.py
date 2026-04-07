@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -58,6 +58,8 @@ class YOLOPostBase(PostBase):
         """
         super().__init__()
         img_size = pre_cfg.get("LetterBox")["img_size"]
+        self.imh: int
+        self.imw: int
         if isinstance(img_size, int):
             self.imh = self.imw = img_size
         elif isinstance(img_size, list):
@@ -66,9 +68,12 @@ class YOLOPostBase(PostBase):
         self.nc: int = post_cfg.get("nc")
         assert self.nc is not None, "nc should be provided in post_cfg"
         self.anchors: Union[list, torch.Tensor] = post_cfg.get("anchors", None)  # anchor coordinates
+        self.nl: int
+        self.na: int
         if self.anchors is None:
-            self.nl = post_cfg.get("nl")
-            assert self.nl is not None, "nl should be provided in post_cfg"
+            nl = post_cfg.get("nl")
+            assert nl is not None, "nl should be provided in post_cfg"
+            self.nl = nl
             if self.nl == 2:
                 self.stride = [2 ** (4 + i) for i in range(self.nl)]
             else:
@@ -105,7 +110,7 @@ class YOLOPostBase(PostBase):
             return self.masking(x, proto_outs)
         return x
 
-    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+    def _pre_process(self, x: List[torch.Tensor]) -> Tuple[List[torch.Tensor], Optional[List[torch.Tensor]]]:
         """Protected method to preprocess inputs into (predictions, prototypes).
 
         Args:
@@ -117,9 +122,8 @@ class YOLOPostBase(PostBase):
         if len(x) == 1:
             x = self.conversion(x)
             return self.filter_conversion(x), None
-        else:
-            x = self.rearrange(x)
-            return self.decode(x), None
+        x = self.rearrange(x)
+        return self.decode(x), None
 
     def nmsout2eval(
         self,
@@ -262,7 +266,7 @@ class YOLOPostBase(PostBase):
             list[torch.Tensor]: Detections after NMS.
         """
 
-    def masking(self, x, proto_outs):
+    def masking(self, x: List[torch.Tensor], proto_outs: List[torch.Tensor]):
         """Apply masking to detection results.
         Args:
             x: Detection results.
