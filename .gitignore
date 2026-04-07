@@ -27,6 +27,7 @@
 *.whl
 *.zip
 *__pycache__*
+.codex
 .venv
 .vscode/
 benchmark/**/results/
