@@ -151,7 +151,7 @@ class MBLT_Engine:
                 cached_file = hf_hub_download(
                     repo_id=self.file_cfg.pop("repo_id"),
                     filename=self.file_cfg.pop("filename"),
-                    subfolder=f"aries/{self.file_cfg['core_mode']}",
+                    subfolder="aries",
                     revision=self.file_cfg.pop("revision"),
                     local_dir=MOBILINT_CACHE_DIR,
                 )

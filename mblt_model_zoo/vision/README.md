@@ -117,11 +117,11 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 | Wide_ResNet50_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V2 |
 | Wide_ResNet101_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
 | Wide_ResNet101_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
-| YOLOv5n-cls | (224,224,3) | 63.366 | 63.982 | 0.43 | 2.49 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5s-cls | (224,224,3) | 70.564 | 70.854 | 1.42 | 5.45 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5m-cls | (224,224,3) | 75.194 | 75.418 | 4.03 | 12.95 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5l-cls | (224,224,3) | 77.226 | 77.528 | 8.82 | 26.54 | [Link](https://github.com/ultralytics/yolov5/) | |
-| YOLOv5x-cls | (224,224,3) | 78.180 | 78.312 | 16.46 | 48.07 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5n-cls | (224,224,3) | 63.418 | 63.982 | 0.43 | 2.49 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5s-cls | (224,224,3) | 70.736 | 70.854 | 1.42 | 5.45 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5m-cls | (224,224,3) | 75.380 | 75.418 | 4.03 | 12.95 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5l-cls | (224,224,3) | 77.456 | 77.528 | 8.82 | 26.54 | [Link](https://github.com/ultralytics/yolov5/) | |
+| YOLOv5x-cls | (224,224,3) | 78.308 | 78.312 | 16.46 | 48.07 | [Link](https://github.com/ultralytics/yolov5/) | |
 | YOLOv8s-cls | (224,224,3) | 72.352 | 73.774 | 1.67 | 6.36 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLOv8m-cls | (224,224,3) | 76.038 | 76.824 | 5.37 | 17.04 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
 | YOLOv8l-cls | (224,224,3) | 77.660 | 78.276 | 12.53 | 37.47 | [Link](https://docs.ultralytics.com/models/yolov8/) | |
