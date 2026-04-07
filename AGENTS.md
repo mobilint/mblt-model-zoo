@@ -1,142 +1,177 @@
+---
+description: Repository-wide instructions for agents working in the Mobilint Model Zoo codebase.
+paths:
+  - "**"
+---
+
 # Agent Guidelines
+
+## Scope
+
+These instructions apply across the repository. For Python implementation details, treat
+`mblt_model_zoo/vision`, `tests/vision`, and `benchmark/vision` as the strictest reference area
+because they are the most consistently structured.
+
+## Repo Map
+
+- `mblt_model_zoo/vision`: Vision public API, model wrappers, preprocess and postprocess helpers,
+  evaluation, datasets, and result types
+- `mblt_model_zoo/hf_transformers`: Hugging Face model integrations and utilities
+- `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization
+- `mblt_model_zoo/cli`: CLI entry points and command registration
+- `tests`: Feature-specific pytest suites plus shared fixtures in `tests/conftest.py`
+- `benchmark`: Dataset organization and benchmark scripts
 
 ## Code Style Guide
 
-**Paths**: `mblt_model_zoo/vision`, `tests/vision`, `benchmark/vision`
+### Formatting
 
-### 1. Indentation & Formatting
+- Use 4 spaces for indentation.
+- Keep lines at 120 characters or fewer.
+- Use Ruff for linting, import sorting, and formatting.
+- Follow existing local formatting when touching files under `mblt_model_zoo/hf_transformers` or
+  `mblt_model_zoo/MeloTTS`, because those paths are excluded from repo-wide Ruff checks in
+  `pyproject.toml`.
 
-- **Indentation**: Use **4 Spaces** for indentation.
-- **Line Length**: Max 120 characters.
-- **Multi-line Formatting**: Defer to Black's default styling for multi-line function or class definitions (closing parenthesis matches the indentation of the opening line).
+### Typing and Docstrings
 
-**Example (Ruff/Black Style):**
+- Use PEP 484 type annotations for all new or modified function and method signatures.
+- Use Google-style docstrings for every new or modified module, class, and function.
+- Do not duplicate type information or default values in docstrings when the signature already
+  communicates them.
+- Keep docstrings accurate when behavior changes. Do not leave stale `Args`, `Returns`, or
+  `Raises` sections behind.
 
-```python
-def very_long_function_name(
-    arg_one: str,
-    arg_two: int,
-):
-    # Function body indented with 4 spaces
-    pass
-```
+### Error Handling
 
-### 2. Typing & Docstrings
+- Use `try` and `except` with specific exception types.
+- Raise informative errors with clear messages that help the caller recover.
+- Avoid catching `Exception` unless you immediately re-raise or intentionally convert the failure
+  with added context.
 
-- **Typing**: Use PEP484 type annotations for all function/method signatures.
-- **Docstrings**: Use **Google Style**. Do not duplicate type information or default values in the docstring if they are already in the signature.
+### Imports
 
-### 3. Error Handling
+- Group imports into standard library, third-party, and local sections.
+- Let Ruff and isort-compatible ordering be the source of truth.
 
-- Use `try/except` blocks with specific exceptions. Avoid catching `Exception` unless absolutely necessary.
-- Raise informative errors with clear messages.
+## Repo-Specific Python Guidance
 
-### 4. Imports & Tools
+### Vision Stack
 
-- **Imports**: Group imports (stdlib, third-party, local) and follow `ruff` rules (isort compatible).
-- **Formatter**: Use **Ruff** (configured for 120 chars and compatible with these rules).
+- Vision model families typically define `ModelInfoSet` enums plus an `MBLT_Engine` subclass.
+- Preserve the shape of `model_cfg`, `pre_cfg`, and `post_cfg` objects unless the change
+  explicitly updates the public contract.
+- Keep public constructor arguments such as `local_path`, `model_type`, `infer_mode`, and
+  `product` stable when extending existing models.
+- When adding or renaming exported vision models, update the relevant `__init__.py` files so
+  `mblt_model_zoo.vision.list_models()` continues to discover them.
 
----
+### Tests and Benchmarks
+
+- Many tests depend on Mobilint hardware, downloaded model artifacts, or optional extras.
+- Prefer targeted validation over running the entire matrix by default.
+- Reuse the documented commands in `tests/vision/TEST.md`, `tests/transformers/TEST.md`,
+  `tests/MeloTTS/TEST.md`, and `benchmark/vision/README.md`.
+- Use the shared NPU pytest options from `tests/conftest.py` instead of inventing custom flags.
 
 ## Comment Style Guide
 
-
-**Paths**: `**/*.py`
-
-### 1. Docstrings
-
-Every module, class, and function must have a docstring. Use **Google Style** docstrings.
-
-- **Modules**: Describe the purpose of the module at the top of the file.
-- **Classes**: Describe the class and its attributes.
-- **Functions/Methods**: Describe the purpose, arguments (Args), return value (Returns), and any exceptions raised (Raises).
-
-**Good Example:**
-
-```python
-def normalize_image(image: np.ndarray, mean: list, std: list) -> np.ndarray:
-    """Normalizes an image using mean and standard deviation.
-
-    Args:
-        image: The input image as a numpy array.
-        mean: A list of mean values for each channel.
-        std: A list of standard deviation values for each channel.
-
-    Returns:
-        The normalized image as a numpy array.
-    """
-    return (image - mean) / std
-```
-
-### 2. Type Hinting
-
-Always use type hints for function arguments and return values. This improves readability and allows for better static analysis.
-
-### 3. Inline Comments
+### Inline Comments
 
 - Use inline comments sparingly.
-- Explain **why** something is done, not **how**. The code should be clear enough to explain the "how".
-- Avoid obvious comments like `x = x + 1  # Increment x`.
+- Explain why a choice exists, not how the code works.
+- Avoid obvious comments that restate the implementation.
 
-### 4. TODOs
+### TODOs
 
-Use `TODO(username): description` for temporary notes or planned improvements.
+- Use `TODO(username): description` for temporary notes or planned follow-ups.
 
----
+## Validation Guide
+
+Use the smallest validation that meaningfully covers the change.
+
+### Common Setup
+
+```bash
+pip install -e . --group dev
+```
+
+### Optional Extras
+
+```bash
+pip install -e ".[transformers]" --group dev
+pip install -e ".[MeloTTS]" --group dev
+```
+
+### Python Checks
+
+```bash
+ruff check mblt_model_zoo tests benchmark
+ruff format mblt_model_zoo tests benchmark
+pre-commit run --files path/to/touched_file.py
+```
+
+### Targeted Tests
+
+```bash
+pytest tests/vision/test_resnet50.py
+pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
+pytest tests/MeloTTS/test_melo.py -k "KR"
+```
+
+If required hardware, models, or extras are unavailable, run the narrowest safe validation and
+state the limitation clearly.
 
 ## Git Rules
 
-### Pre-commit Hook (CRITICAL)
+### Pre-commit Hook
 
-- **Never skip pre-commit hooks** (`--no-verify` is forbidden).
-- After `.pre-commit-config.yaml` exists, run `pre-commit install` to register the git hook.
-- If pre-commit fails, fix the underlying issue and create a new commit.
+- Never skip pre-commit hooks. `--no-verify` is forbidden.
+- After `.pre-commit-config.yaml` exists, run `pre-commit install` in a fresh clone to register
+  the hook.
+- If pre-commit fails, fix the underlying issue and rerun it.
 
-### Commit Message Guidelines
+### Commits
 
-- **Use Conventional Commits**: Prefix the commit message with a type (e.g., `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`).
-- **Imperative Mood**: Write the subject line in the imperative mood (e.g., `feat: add user authentication` instead of `added user authentication`).
-- **Subject Length**: Keep the summary line concise (under 50 characters).
-- **Detailed Body**: Use the body of the commit to explain the what and why if further explanation is needed, separated from the title by a single blank line.
+- Use Conventional Commits such as `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, or `test:`.
+- Write the subject in the imperative mood.
+- Keep the subject line under 50 characters.
+- Keep commits atomic and focused on one logical change.
 
-### General Practices
+### Working Tree Safety
 
-- **Atomic Commits**: Keep commits small, logical, and focused on a single change.
-
----
+- Do not revert unrelated user changes.
+- If the repo is already dirty, limit your edits to the files relevant to the task and verify
+  diffs carefully before committing.
 
 ## Markdown Style Guidelines
 
-When creating or modifying Markdown (`.md`) files in this repository, follow these precise styling rules to ensure consistency and readability.
+### Headers
 
-### 1. Headers
+- Use ATX-style headers.
+- Leave a single blank line before and after each header, except for the document title at the
+  top.
+- Do not skip header levels.
 
-- Use ATX-style headers (e.g., `# Header 1`, `## Header 2`).
-- Always leave a single blank line before and after a header, except for the document title (`# Header 1`) at the very top.
-- Do not skip header levels (e.g., do not jump from `#` to `###`).
+### Lists
 
-### 2. Lists
+- Use hyphens for unordered lists.
+- Indent nested list items by exactly 2 spaces when nesting is necessary.
+- Use sentence-ending periods only when the list item is a full sentence.
 
-- Use hyphens (`-`) for unordered lists, not asterisks (`*`) or pluses (`+`).
-- For nested lists, indent by exactly 2 spaces.
-- Use periods after list items only if they are complete sentences.
+### Code and Links
 
-### 3. Code Blocks
+- Always include a language identifier for fenced code blocks.
+- Use inline code for file names, paths, commands, variables, and symbols in prose.
+- Prefer descriptive link text and meaningful image alt text.
 
-- Always specify a language identifier for fenced code blocks (e.g., ` ```python `).
-- Use inline code formatting (backticks) for file names, variable names, functions, and terminal commands appearing within regular text.
+### Spacing
 
-### 4. Links and Images
+- Keep exactly one blank line between distinct blocks.
+- Avoid trailing whitespace.
+- Keep paragraphs concise.
 
-- Prefer reference-style links for long documents, or inline links for short documents.
-- Always provide descriptive `alt` text for images (e.g., `![System Architecture Diagram](./assets/arch.png)`).
+### Frontmatter
 
-### 5. Spacing and Line Length
-
-- Ensure there is exactly one blank line between distinct elements (paragraphs, lists, code blocks).
-- Avoid trailing whitespaces at the end of lines.
-- No strict hard wrap for line lengths, but try to keep individual paragraphs concise.
-
-### 6. Frontmatter
-
-- If the document represents a rule or workflow for the agent, it must include YAML frontmatter at the top specifying its `description` and any target `paths` it applies to.
+- If a Markdown file represents an agent rule, workflow, or reusable operating guide, add YAML
+  frontmatter with `description` and `paths`.

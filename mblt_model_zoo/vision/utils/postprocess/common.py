@@ -447,7 +447,7 @@ def to_string(counts: list[int]) -> str:
     return "".join(result)
 
 
-def multi_encode(pixels: torch.Tensor) -> list[int]:
+def multi_encode(pixels: torch.Tensor) -> list[list[int]]:
     """Convert multiple binary masks using Run-Length Encoding (RLE).
 
     Args:
@@ -471,6 +471,9 @@ def multi_encode(pixels: torch.Tensor) -> list[int]:
             count.append(len(pixel_row) - positions[-1].item())
         else:
             count = [len(pixel_row)]
+        if pixel_row[0].item() == 1:
+            count = [0, *count]
+        counts.append(count)
 
     return counts
 
@@ -519,9 +522,11 @@ def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
     """Converts segmentation NMS output to COCO evaluation format.
 
     Args:
-        nms_outs (list): The output of the NMS operation.
+        nms_outs (Union[list, tuple]): Segmentation postprocess output in one of two forms:
+            `(det_result, seg_result)` for a single image or a list of those pairs for a batch.
         img1_shape (tuple): Processed image shape (H, W).
-        img0_shapes (list[tuple]): Original image shapes [(H, W), ...].
+        img0_shapes (Union[tuple, list[tuple]]): Original image shape for a single image or
+            a list of original shapes for a batch.
 
     Returns:
         tuple: A tuple containing:
@@ -530,6 +535,8 @@ def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
             - scores (list[list]): The confidence scores for each image.
             - extra (list[list]): The encoded segmentation masks for each image.
     """
+    if isinstance(img0_shapes, tuple):
+        img0_shapes = [img0_shapes]
     if not isinstance(nms_outs[0], (list, tuple)):
         nms_outs = [nms_outs]
 
@@ -551,11 +558,16 @@ def nmsout2eval_seg(nms_outs, img1_shape, img0_shapes):
         h, w = seg_result.shape[1:3]
         seg_result = seg_result.permute(0, 2, 1).contiguous().view(seg_result.shape[0], h * w).byte()
         counts = multi_encode(seg_result)
+        assert len(counts) == seg_result.shape[0], "The number of encoded masks must match the mask tensor batch size."
         for c in counts:
             extra.append({"size": [h, w], "counts": to_string(c)})
         return extra
 
     extra_list = [mask_encode(seg_result) for seg_result in seg_results]
+    for labels, boxes, scores, extra in zip(labels_list, boxes_list, scores_list, extra_list):
+        assert len(labels) == len(boxes) == len(scores) == len(extra), (
+            "Segmentation evaluation outputs must have matching detection and mask counts."
+        )
     return labels_list, boxes_list, scores_list, extra_list
 
 
