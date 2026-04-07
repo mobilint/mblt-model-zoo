@@ -23,15 +23,16 @@ class YOLOAnchorPost(YOLOPostBase):
         self.no = self.nc + 5 + self.n_extra
         self.make_anchor_grid()
 
-    def rearrange(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def rearrange(self, x: List[torch.Tensor]) -> List[torch.Tensor] | tuple[List[torch.Tensor], torch.Tensor]:
         """Rearranges raw model output tensors into a standardized channel-first format.
 
         Args:
             x (List[torch.Tensor]): Raw output tensors from the model detection heads.
 
         Returns:
-            List[torch.Tensor]: Rearranged tensors in (batch, channels, height, width) format,
-                sorted by image size descending.
+            List[torch.Tensor] | tuple[List[torch.Tensor], torch.Tensor]: Rearranged tensors in
+                (batch, channels, height, width) format, optionally paired with prototype masks
+                in segmentation subclasses.
         """
         assert len(x) == self.nl, f"Got unsupported number of detection heads: {len(x)}."
         y = []
@@ -200,9 +201,8 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
         if len(x) == 2:
             x, proto_outs = self.conversion(x)
             return self.filter_conversion(x), proto_outs
-        else:
-            x, proto_outs = self.rearrange(x)
-            return self.decode(x), proto_outs
+        x, proto_outs = self.rearrange(x)
+        return self.decode(x), proto_outs
 
     def conversion(self, x: List[torch.Tensor]) -> tuple:
         """Converts raw model output tensors into detections and prototypes.
@@ -225,14 +225,14 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
             )
         raise NotImplementedError(f"Input shape {x[0].shape} not supported.")
 
-    def rearrange(self, x: List[torch.Tensor]) -> tuple:
+    def rearrange(self, x: List[torch.Tensor]) -> tuple[List[torch.Tensor], torch.Tensor]:
         """Rearranges model output tensors for segmentation tasks.
 
         Args:
             x (List[torch.Tensor]): Raw output tensors from detection and prototype heads.
 
         Returns:
-            tuple: (rearranged_detections, prototype_masks)
+            tuple[List[torch.Tensor], torch.Tensor]: Rearranged detections and prototype masks.
         """
         proto = None
         for i, xi in enumerate(x):

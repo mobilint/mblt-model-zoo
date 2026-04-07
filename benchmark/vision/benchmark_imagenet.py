@@ -8,37 +8,27 @@ It initializes the model and evaluates its performance.
 import argparse
 import os
 
-import mblt_model_zoo
+from mblt_model_zoo.vision import MBLT_Engine
 from mblt_model_zoo.vision.utils.evaluation import eval_imagenet
-
-TOTAL_MODELS = mblt_model_zoo.vision.list_models()
-MODEL_LIST = TOTAL_MODELS["image_classification"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # --- Model Configuration ---
+    parser.add_argument("--model-cls", type=str, default="resnet50", help="model type you want to test")
     parser.add_argument(
-        "--model-name",
+        "--mxq-path",
         type=str,
-        default="ResNet50",
-        choices=MODEL_LIST,
-        help="Model name",
-    )
-    parser.add_argument(
-        "--local-path",
-        type=str,
-        default=None,
+        default="",
         help="Path to the ResNet50 model file (.mxq)",
     )
-    parser.add_argument("--model-type", type=str, default="DEFAULT", help="Model type")
+    parser.add_argument("--model-type", type=str, default="DEFAULT", help="model type")
     parser.add_argument(
-        "--infer-mode",
+        "--core-mode",
         type=str,
         default="global8",
         choices=["single", "multi", "global4", "global8"],
-        help="Inference mode",
+        help="Inference core mode",
     )
-    parser.add_argument("--product", type=str, default="aries", help="Product")
     # --- Benchmark Configuration ---
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument(
@@ -48,13 +38,12 @@ if __name__ == "__main__":
         help="Path to the ImageNet data",
     )
     args = parser.parse_args()
-    model_cls = getattr(mblt_model_zoo.vision, args.model_name)
-    # --- Model Initialization ---
-    model = model_cls(
-        local_path=args.local_path,
+    # Load model with the specified mxq_path
+    model = MBLT_Engine(
+        model_cls=args.model_cls,
+        mxq_path=args.mxq_path,
         model_type=args.model_type,
-        infer_mode=args.infer_mode,
-        product=args.product,
+        core_mode=args.core_mode,
     )
 
     # --- Benchmark Execution ---

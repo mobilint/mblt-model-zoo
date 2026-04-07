@@ -258,7 +258,7 @@ def evaluation(pred, gt_path, iou_thresh=0.5):
         pbar = tqdm(range(event_num))
         cum_num_image = 0
         for i in pbar:
-            pbar.set_description("Processing {}".format(settings[setting_id]))
+            pbar.set_description(f"Processing {settings[setting_id]}")
             event_name = str(event_list[i][0][0])
             img_list = file_list[i][0]
             pred_list = pred[event_name]
@@ -266,8 +266,8 @@ def evaluation(pred, gt_path, iou_thresh=0.5):
             # img_pr_info_list = np.zeros((len(img_list), thresh_num, 2))
             gt_bbx_list = facebox_list[i][0]
             cum_num_image += len(img_list)
-            for j in range(len(img_list)):
-                pred_info = pred_list[str(img_list[j][0][0])]
+            for j, img_info in enumerate(img_list):
+                pred_info = pred_list[str(img_info[0][0])]
                 gt_boxes = np.array(gt_bbx_list[j][0], dtype=np.float32)
                 keep_index = np.array(sub_gt_list[j][0], dtype=np.int64)
                 count_face += len(keep_index)

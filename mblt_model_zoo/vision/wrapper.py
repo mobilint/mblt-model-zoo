@@ -300,15 +300,15 @@ class MBLT_Engine:
 
         if len(matches) == 1:
             return matches[0]
-        elif len(matches) > 1:
+
+        if len(matches) > 1:
             raise ValueError(
                 f"Model name '{model_name}' is ambiguous. "
                 f"It matches multiple configurations: {sorted(matches)}. "
                 "Please use a more specific name."
             )
-        else:
-            raise ValueError(
-                f"No model configuration found for '{model_name}'. "
-                f"Available models are located in '{MODEL_CONFIG_DIR}'. "
-                "Check spelling or use the exact YAML filename."
-            )
+        raise ValueError(
+            f"No model configuration found for '{model_name}'. "
+            f"Available models are located in '{MODEL_CONFIG_DIR}'. "
+            "Check spelling or use the exact YAML filename."
+        )
