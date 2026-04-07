@@ -253,7 +253,18 @@ class MXQ_Model:
         mc = qbruntime.ModelConfig()
         if self.product == "aries":
             if self.infer_mode == "single":
-                pass  # default is single with all cores
+                mc.set_single_core_mode(
+                    core_ids=[
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core0),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core1),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core2),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core3),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core0),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core1),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core2),
+                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core3),
+                    ]
+                )
             elif self.infer_mode == "multi":
                 mc.set_multi_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
             elif self.infer_mode == "global4":

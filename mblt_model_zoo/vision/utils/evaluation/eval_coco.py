@@ -5,7 +5,6 @@ import math
 import os
 from time import time
 
-import torch
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
@@ -13,77 +12,6 @@ from ..datasets import CustomCocodata, get_coco_loader
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
-
-
-def to_string(counts: list[int]) -> str:
-    """Converts the RLE object into a compact string representation.
-
-    Each count is delta-encoded and variable-length encoded as a string.
-
-    Args:
-        counts (list[int]): List of RLE counts.
-
-    Returns:
-        str: Compact string representation of the RLE object.
-    """
-    result = []
-
-    for i, x in enumerate(counts):
-        x = int(x)
-
-        # Apply delta encoding for all counts after the second entry
-        if i > 2:
-            x -= int(counts[i - 2])
-
-        # Variable-length encode the value
-        while True:
-            c = x & 0x1F  # Take 5 bits
-            x >>= 5
-
-            # If the sign bit (0x10) is set, continue if x != -1;
-            # otherwise, continue if x != 0
-            more = (x != -1) if (c & 0x10) else (x != 0)
-            if more:
-                c |= 0x20  # Set continuation bit
-            c += 48  # Shift to ASCII
-            result.append(chr(c))
-            if not more:
-                break
-
-    return "".join(result)
-
-
-def multi_encode(pixels: torch.Tensor) -> list[int]:
-    """Convert multiple binary masks using Run-Length Encoding (RLE).
-
-    Args:
-        pixels (torch.Tensor): A 2D tensor where each row represents a flattened binary mask
-            with shape [N, H*W].
-
-    Returns:
-        list[list[int]]: A list of RLE counts for each mask.
-    """
-    transitions = pixels[:, 1:] != pixels[:, :-1]
-    row_idx, col_idx = torch.where(transitions)
-    col_idx = col_idx + 1
-
-    # Compute run lengths
-    counts = []
-    for i, pixel_row in enumerate(pixels):
-        positions = col_idx[row_idx == i]
-        if len(positions):
-            count = torch.diff(positions).tolist()
-            count.insert(0, positions[0].item())
-            count.append(len(pixel_row) - positions[-1].item())
-        else:
-            count = [len(pixel_row)]
-
-        # Ensure starting with background (0) count
-        if pixel_row[0].item() == 1:
-            count = [0, *count]
-        counts.append(count)
-
-    return counts
 
 
 def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids, postprocess):
