@@ -5,10 +5,10 @@ from transformers import AutoTokenizer, TextStreamer, pipeline
 from utils import BatchTextStreamer
 
 MODEL_PATHS = (
+    "mobilint/Llama-3.2-1B-Instruct-Batch16",
     "mobilint/Llama-3.2-1B-Instruct-Batch32",
     "mobilint/Llama-3.2-3B-Instruct-Batch16",
     "mobilint/Llama-3.1-8B-Instruct-Batch16",
-    "mobilint/Llama-3.1-8B-Instruct-Batch32",
 )
 
 
@@ -196,7 +196,7 @@ def test_llama(pipe):
     pipe(
         messages,
         batch_size=batch_size,
-        max_new_tokens=512,
+        max_new_tokens=256,
         streamer=BatchTextStreamer(
             tokenizer=pipe.tokenizer,
             batch_size=batch_size,
