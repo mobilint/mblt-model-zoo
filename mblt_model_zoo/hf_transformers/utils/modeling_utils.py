@@ -140,19 +140,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         count_npu_time: bool = False,
         attention_mask: Optional[torch.Tensor] = None,
     ):
+        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        
         if attention_mask is not None:
             return self._llm_forward_batch(
                 inputs_embeds,
                 attention_mask,
                 past_key_values,
-                chunk_size,
+                resolved_prefill_chunk_size,
             )
 
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
-        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
 
         mxq_model = self.npu_backend.mxq_model
@@ -185,7 +186,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         inputs_embeds: torch.Tensor,
         attention_mask: torch.Tensor,
         past_key_values: Optional[MobilintCache],
-        chunk_size: int = 0,
+        prefill_chunk_size: int = 0,
     ):
         batch_size = attention_mask.shape[0]
 
@@ -208,15 +209,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         max_sequence_length = max(sequence_lengths)
         mxq_model = self.npu_backend.mxq_model
-        if chunk_size == 0:
-            chunk_size = mxq_model.get_input_buffer_info()[0].max_width
-        assert chunk_size > 0, "chunk_size should be a positive number! chunk_size: %d" % chunk_size
-        num_of_chunks = math.ceil(max_sequence_length / chunk_size)
+        if prefill_chunk_size == 0:
+            prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
+        assert prefill_chunk_size > 0, "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
+        num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
 
         logits_dict: dict[int, torch.Tensor] = {}
 
         for i in range(num_of_chunks):
-            start_index = i * chunk_size
+            start_index = i * prefill_chunk_size
 
             sequence_lengths_chunks: list[int] = []
             cache_sizes_chunks: list[int] = []
@@ -226,7 +227,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             seen_tokens: dict[int, int] = {}
 
             for j in range(batch_size):
-                end_index = min(start_index + chunk_size, sequence_lengths[j])
+                end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
                 if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
                     sequence_lengths_chunks.append(end_index - start_index)
                     cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
@@ -249,7 +250,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     sequence_length=sequence_lengths_chunks[k],
                     cache_size=cache_sizes_chunks[k],
                     cache_id=cache_ids[k],
-                    prefill_mask=prefill_masks[k],
                 )
                 for k in range(len(cache_ids))
             ]

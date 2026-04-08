@@ -1,19 +1,77 @@
+from typing import Any, Optional
+
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 from utils import BatchTextStreamer
 
 MODEL_PATHS = (
+    "mobilint/Llama-3.2-1B-Instruct-Batch32",
     "mobilint/Llama-3.2-3B-Instruct-Batch16",
     "mobilint/Llama-3.1-8B-Instruct-Batch16",
     "mobilint/Llama-3.1-8B-Instruct-Batch32",
 )
 
 
+def _parse_target_cores(value: Optional[str]) -> Optional[list[str]]:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return [item.strip() for item in text.split(";") if item.strip()]
+
+
+def _parse_target_clusters(value: Optional[str]) -> Optional[list[int]]:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return [int(item.strip()) for item in text.split(";") if item.strip()]
+
+
+def _build_model_kwargs(request: pytest.FixtureRequest, embedding_weight: Optional[str]) -> dict[str, Any]:
+    config = request.config
+    model_kwargs: dict[str, Any] = {}
+
+    mxq_path = config.getoption("--mxq-path")
+    if mxq_path:
+        model_kwargs["mxq_path"] = mxq_path
+
+    dev_no = config.getoption("--dev-no")
+    if dev_no is not None:
+        model_kwargs["dev_no"] = dev_no
+
+    raw_core_mode = config.getoption("--core-mode")
+    core_mode = None if raw_core_mode in {None, "", "all"} else raw_core_mode
+    if core_mode:
+        model_kwargs["core_mode"] = core_mode
+
+    target_cores = _parse_target_cores(config.getoption("--target-cores"))
+    if target_cores is not None:
+        model_kwargs["target_cores"] = target_cores
+
+    target_clusters = _parse_target_clusters(config.getoption("--target-clusters"))
+    if target_clusters is not None:
+        model_kwargs["target_clusters"] = target_clusters
+
+    if core_mode == "single" and target_cores is None:
+        model_kwargs["target_cores"] = ["0:0"]
+    elif core_mode == "global4" and target_clusters is None:
+        model_kwargs["target_clusters"] = [0]
+    elif core_mode == "global8" and target_clusters is None:
+        model_kwargs["target_clusters"] = [0, 1]
+
+    if embedding_weight:
+        model_kwargs["embedding_weight"] = embedding_weight
+
+    return model_kwargs
+
+
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, revision, npu_params):
+def pipe(request, revision, embedding_weight):
     model_path = request.param
-    npu_params.warn_unused({"base"})
-    model_kwargs = npu_params.base
+    model_kwargs = _build_model_kwargs(request, embedding_weight)
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
 
@@ -138,12 +196,10 @@ def test_llama(pipe):
     pipe(
         messages,
         batch_size=batch_size,
-        chunk_size=16,
         max_new_tokens=512,
         streamer=BatchTextStreamer(
             tokenizer=pipe.tokenizer,
             batch_size=batch_size,
             skip_prompt=False,
-            alert_token_length=[256, 260, 270, 280],
         ),
     )
