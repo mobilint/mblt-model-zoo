@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, cast
 
 import torch
 
@@ -19,11 +19,10 @@ class YOLODFLFreePost(YOLOPostBase):
             tuple: (processed_detections, None).
         """
         if len(x) == 2:
-            x = self.conversion(x)
-            return self.filter_conversion(x), None
-        else:
-            x = self.rearrange(x)
-            return self.decode(x), None
+            converted = self.conversion(x)
+            return self.filter_conversion(converted), None
+        rearranged = self.rearrange(x)
+        return self.decode(rearranged), None
 
     def conversion(self, x: List[torch.Tensor]) -> torch.Tensor:
         """Converts raw model output tensors into a single concatenated tensor.
@@ -147,11 +146,10 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
             tuple: (decoded_detections, prototype_masks).
         """
         if len(x) == 4:
-            x, proto_outs = self.conversion(x)
-            return self.filter_conversion(x), proto_outs
-        else:
-            x, proto_outs = self.rearrange(x)
-            return self.decode(x), proto_outs
+            converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
+            return self.filter_conversion(converted), proto_outs
+        rearranged, proto_outs = self.rearrange(x)
+        return self.decode(rearranged), proto_outs
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.
@@ -164,18 +162,18 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         """
 
         x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
-        outputs = []
-        protos = []
+        outputs: List[torch.Tensor] = []
+        protos: List[torch.Tensor] = []
         for xi in x:
             if xi.shape[-1] == self.n_extra:
                 protos.append(xi)
             else:
                 outputs.append(xi)
         proto = protos.pop(0 if self.nc < 4 else -1)
-        outputs = torch.cat(outputs + protos, dim=-1).squeeze(1)
-        return outputs, proto
+        converted = torch.cat(outputs + protos, dim=-1).squeeze(1)
+        return converted, proto
 
-    def rearrange(self, x):
+    def rearrange(self, x: List[torch.Tensor]) -> tuple[List[torch.Tensor], torch.Tensor]:
         y_det = []
         y_cls = []
         y_ext = []
@@ -220,13 +218,12 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
             tuple: (processed_detections, None).
         """
         if len(x) == 3:
-            x = self.conversion(x)
-            return self.filter_conversion(x), None
-        else:
-            x = self.rearrange(x)
-            return self.decode(x), None
+            converted = self.conversion(x)
+            return self.filter_conversion(converted), None
+        rearranged = self.rearrange(x)
+        return self.decode(rearranged), None
 
-    def conversion(self, x: List[torch.Tensor]):
+    def conversion(self, x: List[torch.Tensor]) -> torch.Tensor:
         """Convert input tensors.
         Args:
             x (List[torch.Tensor]): Input tensors.
@@ -235,11 +232,11 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         """
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=True)
-        kpt = x.pop(0)
+        kpt: torch.Tensor = x.pop(0)
         kpt = kpt.permute(0, 3, 1, 2).flatten(-2)
         return torch.cat([torch.cat(x, dim=-1).squeeze(1), kpt], dim=-1)  # [b, 8400, 56]
 
-    def rearrange(self, x):
+    def rearrange(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
         y_det = []
         y_cls = []
         y_kpt = []

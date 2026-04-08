@@ -23,11 +23,10 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
             tuple: (processed_detections, None).
         """
         if len(x) == 2:
-            x = self.conversion(x)
-            return self.filter_conversion(x), None
-        else:
-            x = self.rearrange(x)
-            return self.decode(x), None
+            converted = self.conversion(x)
+            return self.filter_conversion(converted), None
+        rearranged = self.rearrange(x)
+        return self.decode(rearranged), None
 
     def conversion(self, x: List[torch.Tensor]):
         """Convert input tensors.

@@ -2,7 +2,7 @@
 YOLO anchor-based postprocessing.
 """
 
-from typing import List
+from typing import List, cast
 
 import torch
 
@@ -149,7 +149,9 @@ class YOLOAnchorPost(YOLOPostBase):
         """
         Pre-calculate the anchor grid for decoding.
         """
-        self.grid, self.anchor_grid, self.stride = [], [], []
+        grid_parts: List[torch.Tensor] = []
+        anchor_grid_parts: List[torch.Tensor] = []
+        stride_parts: List[torch.Tensor] = []
         strides = [2 ** (3 + i) for i in range(self.nl)]
         if self.nl == 2:
             strides = [strd * 2 for strd in strides]
@@ -161,16 +163,16 @@ class YOLOAnchorPost(YOLOPostBase):
                 indexing="ij",
             )
             grid = torch.stack((xv, yv), 2).expand(self.na, ny, nx, 2)
-            self.grid.append(grid)
+            grid_parts.append(grid)
             anchr = torch.broadcast_to(
                 torch.tensor(anchr).reshape(self.na, 1, 1, 2),
                 (self.na, ny, nx, 2),
             )
-            self.anchor_grid.append(anchr)
-            self.stride.append(strd * torch.ones(self.na, ny, nx, 2))
-        self.grid = torch.cat([grd.reshape(-1, 2) for grd in self.grid], dim=0)
-        self.anchor_grid = torch.cat([anc.reshape(-1, 2) for anc in self.anchor_grid], dim=0)
-        self.stride = torch.cat([strd.reshape(-1, 2) for strd in self.stride], dim=0)
+            anchor_grid_parts.append(anchr)
+            stride_parts.append(strd * torch.ones(self.na, ny, nx, 2))
+        self.grid = torch.cat([grd.reshape(-1, 2) for grd in grid_parts], dim=0)
+        self.anchor_grid = torch.cat([anc.reshape(-1, 2) for anc in anchor_grid_parts], dim=0)
+        self.stride = torch.cat([strd.reshape(-1, 2) for strd in stride_parts], dim=0)
 
     def chop(self, npu_out: torch.Tensor, idx: int = 0) -> tuple:
         """Splits the detection tensor into individual components (xy, wh, conf, scores, extra).
@@ -199,12 +201,12 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
             tuple: (decoded_detections, prototype_masks).
         """
         if len(x) == 2:
-            x, proto_outs = self.conversion(x)
-            return self.filter_conversion(x), proto_outs
-        x, proto_outs = self.rearrange(x)
-        return self.decode(x), proto_outs
+            converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
+            return self.filter_conversion(converted), proto_outs
+        rearranged, proto_outs = self.rearrange(x)
+        return self.decode(rearranged), proto_outs
 
-    def conversion(self, x: List[torch.Tensor]) -> tuple:
+    def conversion(self, x: List[torch.Tensor]):
         """Converts raw model output tensors into detections and prototypes.
 
         Args:
@@ -234,7 +236,7 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
         Returns:
             tuple[List[torch.Tensor], torch.Tensor]: Rearranged detections and prototype masks.
         """
-        proto = None
+        proto: torch.Tensor | None = None
         for i, xi in enumerate(x):
             if self.n_extra == xi.shape[-1]:
                 proto = x.pop(i)

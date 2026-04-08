@@ -201,11 +201,10 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
             tuple: (decoded_detections, prototype_masks).
         """
         if len(x) == 2:
-            x, proto_outs = self.conversion(x)
-            return self.filter_conversion(x), proto_outs
-        else:
-            x, proto_outs = self.rearrange(x)
-            return self.decode(x), proto_outs
+            converted, proto_outs = self.conversion(x)
+            return self.filter_conversion(converted), proto_outs
+        rearranged, proto_outs = self.rearrange(x)
+        return self.decode(rearranged), proto_outs
 
     def conversion(self, x: List[torch.Tensor]) -> tuple:
         """Converts raw model output tensors into detections and prototypes.
@@ -236,9 +235,9 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         Returns:
             tuple: (rearranged_detections, prototype_masks)
         """
-        y_det = []
-        y_cls = []
-        y_ext = []
+        y_det: List[torch.Tensor] = []
+        y_cls: List[torch.Tensor] = []
+        y_ext: List[torch.Tensor] = []
         for xi in x:
             if xi.shape[-1] == self.n_extra:
                 y_ext.append(xi.permute(0, 3, 1, 2))  # (b, 32, 160, 160), (b, 32, 80, 80), ...
