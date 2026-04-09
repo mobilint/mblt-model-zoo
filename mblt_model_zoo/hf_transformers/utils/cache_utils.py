@@ -55,7 +55,6 @@ class MobilintLayer(CacheLayerMixin):
 
     def load_cache_memory(self):
         if self.get_seq_length() > 0:
-            self.mxq_model.reset_cache_memory()
             self.mxq_model.load_cache_memory(self.buffer, self.cache_id)
 
     def dump_cache_memory_to(self, cache_dir: str):

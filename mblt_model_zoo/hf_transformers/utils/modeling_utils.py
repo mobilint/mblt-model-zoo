@@ -143,6 +143,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         
         if attention_mask is not None:
+            self._validate_batch_cache(past_key_values, attention_mask.shape[0])
             return self._llm_forward_batch(
                 inputs_embeds,
                 attention_mask,
@@ -301,6 +302,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
         return cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
+
+    @staticmethod
+    def _validate_batch_cache(past_key_values: Optional[MobilintCache], batch_size: int) -> None:
+        if past_key_values is None:
+            return
+
+        cache_batch_size = getattr(past_key_values, "batch_size", 1)
+        if cache_batch_size != batch_size:
+            raise ValueError(
+                "Batch cache size mismatch: "
+                f"past_key_values.batch_size={cache_batch_size}, input batch_size={batch_size}. "
+                "Create MobilintCache with the same batch size as the batched request."
+            )
 
     def resolve_prefill_chunk_size(self, prefill_chunk_size: Optional[int]) -> int:
         explicit_prefill_chunk_size = self._coerce_positive_int(prefill_chunk_size)
