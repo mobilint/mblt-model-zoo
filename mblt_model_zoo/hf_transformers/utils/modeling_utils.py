@@ -189,6 +189,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         prefill_chunk_size: int = 0,
     ):
+        debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
 
         if attention_mask.shape == inputs_embeds.shape[:-1]:
@@ -200,13 +201,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
             sequence_lengths = [1 for _ in range(batch_size)]
 
-        logger.warning(
-            "[BATCH-LLM][START] inputs_embeds=%s attention_mask=%s batch_size=%d sequence_lengths=%s",
-            tuple(inputs_embeds.shape),
-            tuple(attention_mask.shape),
-            batch_size,
-            sequence_lengths,
-        )
+        if debug_enabled:
+            logger.debug(
+                "[BATCH-LLM][START] inputs_embeds=%s attention_mask=%s batch_size=%d sequence_lengths=%s",
+                tuple(inputs_embeds.shape),
+                tuple(attention_mask.shape),
+                batch_size,
+                sequence_lengths,
+            )
 
         max_sequence_length = max(sequence_lengths)
         mxq_model = self.npu_backend.mxq_model
@@ -255,21 +257,48 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 for k in range(len(cache_ids))
             ]
 
-            batch_seq_sum = sum(param.sequence_length for param in batch_params)
-            logger.warning(
-                "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d",
-                i + 1,
-                num_of_chunks,
-                start_index,
-                len(cache_ids),
-                cache_ids,
-                sequence_lengths_chunks,
-                cache_sizes_chunks,
-                prefill_masks,
-                tuple(inputs_embeds_numpy.shape),
-                batch_seq_sum,
-            )
+            if debug_enabled:
+                batch_seq_sum = sum(param.sequence_length for param in batch_params)
+                logger.debug(
+                    "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d",
+                    i + 1,
+                    num_of_chunks,
+                    start_index,
+                    len(cache_ids),
+                    cache_ids,
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
+                    prefill_masks,
+                    tuple(inputs_embeds_numpy.shape),
+                    batch_seq_sum,
+                )
 
+                logger.debug(
+                    "[BATCH-LLM][CHUNK %d/%d][BATCH_PARAMS] %s",
+                    i + 1,
+                    num_of_chunks,
+                    [
+                        {
+                            "sequence_length": sequence_lengths_chunks[k],
+                            "cache_size": cache_sizes_chunks[k],
+                            "cache_id": cache_ids[k],
+                        }
+                        for k in range(len(cache_ids))
+                    ],
+                )
+
+                first_input_chunk = inputs_embeds_chunks[0]
+                input_batch_same = all(
+                    chunk.shape == first_input_chunk.shape and torch.equal(chunk, first_input_chunk)
+                    for chunk in inputs_embeds_chunks[1:]
+                )
+                logger.debug(
+                    "[BATCH-LLM][CHUNK %d/%d] input_batch_same=%s",
+                    i + 1,
+                    num_of_chunks,
+                    input_batch_same,
+                )
+            
             result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
             assert result is not None, "mxq infer result is None!"
 
@@ -278,12 +307,48 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 torch.tensor(result[0], dtype=torch.float32).reshape([len(cache_ids), 1, -1]),
             )
 
-            logger.warning(
-                "[BATCH-LLM][CHUNK %d/%d] infer_output_shape=%s",
-                i + 1,
-                num_of_chunks,
-                tuple(logits_chunks.shape),
-            )
+            if debug_enabled:
+                first_logits = logits_chunks[0]
+                result_batch_same = all(torch.equal(chunk, first_logits) for chunk in logits_chunks[1:])
+                next_tokens = logits_chunks[:, -1, :].argmax(dim=-1).tolist()
+                logger.debug(
+                    "[BATCH-LLM][CHUNK %d/%d] result_batch_same=%s next_tokens=%s",
+                    i + 1,
+                    num_of_chunks,
+                    result_batch_same,
+                    next_tokens,
+                )
+                if not result_batch_same and len(cache_ids) > 1:
+                    logits_vectors = logits_chunks[:, -1, :]
+                    cosine_similarity = torch.nn.functional.cosine_similarity(
+                        logits_vectors.unsqueeze(1),
+                        logits_vectors.unsqueeze(0),
+                        dim=-1,
+                    )
+                    max_abs_diff = torch.abs(logits_vectors.unsqueeze(1) - logits_vectors.unsqueeze(0)).amax(dim=-1)
+                    cosine_rows = [
+                        " ".join(f"{float(cosine_similarity[row, col]):7.3f}" for col in range(cosine_similarity.shape[1]))
+                        for row in range(cosine_similarity.shape[0])
+                    ]
+                    max_abs_diff_rows = [
+                        " ".join(f"{float(max_abs_diff[row, col]):7.3f}" for col in range(max_abs_diff.shape[1]))
+                        for row in range(max_abs_diff.shape[0])
+                    ]
+                    logger.debug(
+                        "[BATCH-LLM][CHUNK %d/%d][COSINE_SIM]\ncache_ids=%s\n%s\n[MAX_ABS_DIFF]\n%s",
+                        i + 1,
+                        num_of_chunks,
+                        cache_ids,
+                        "\n".join(cosine_rows),
+                        "\n".join(max_abs_diff_rows),
+                    )
+
+                logger.debug(
+                    "[BATCH-LLM][CHUNK %d/%d] infer_output_shape=%s",
+                    i + 1,
+                    num_of_chunks,
+                    tuple(logits_chunks.shape),
+                )
 
             for j, prefill_mask in enumerate(prefill_masks):
                 if prefill_mask is False:
@@ -293,12 +358,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
 
-        missing_ids = [cache_id for cache_id in range(batch_size) if cache_id not in logits_dict]
-        logger.warning(
-            "[BATCH-LLM][END] logits_dict_keys=%s missing_ids=%s",
-            sorted(list(logits_dict.keys())),
-            missing_ids,
-        )
+        if debug_enabled:
+            missing_ids = [cache_id for cache_id in range(batch_size) if cache_id not in logits_dict]
+            logger.debug(
+                "[BATCH-LLM][END] logits_dict_keys=%s missing_ids=%s",
+                sorted(list(logits_dict.keys())),
+                missing_ids,
+            )
 
         logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
         return cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
