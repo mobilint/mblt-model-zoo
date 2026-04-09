@@ -1,7 +1,7 @@
 from typing import Any, Optional
 
 import pytest
-from transformers import AutoTokenizer, TextStreamer, pipeline
+from transformers import AutoTokenizer, pipeline
 from utils import BatchTextStreamer
 
 MODEL_PATHS = (
@@ -85,7 +85,6 @@ def pipe(request, revision, embedding_weight):
             "text-generation",
             model=model_path,
             tokenizer=tokenizer,
-            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
             trust_remote_code=True,
             revision=revision,
             model_kwargs=model_kwargs,
@@ -95,7 +94,6 @@ def pipe(request, revision, embedding_weight):
             "text-generation",
             model=model_path,
             tokenizer=tokenizer,
-            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
             trust_remote_code=True,
             revision=revision,
         )
