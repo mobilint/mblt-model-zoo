@@ -1,8 +1,7 @@
+import logging
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
-import logging
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import numpy as np
@@ -45,7 +44,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if commit_hash:
             self.npu_backend._commit_hash = commit_hash
         self.npu_backend.create()
-        if no_launch != True:
+        if not no_launch:
             self.launch()
     
     @classmethod
@@ -96,7 +95,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         embed_dim = input_embeddings.weight.shape[1]
 
         if new_weight.shape[1] != embed_dim:
-            raise ValueError(f"Embedding dimension mismatch! Model expects {embed_dim}, but file has {new_weight.shape[1]}")
+            raise ValueError(
+                f"Embedding dimension mismatch! Model expects {embed_dim}, but file has {new_weight.shape[1]}"
+            )
 
         if original_vocab_size != new_vocab_size:
             raise ValueError(f"Vocab size mismatch! Model expects {original_vocab_size}, but file has {new_vocab_size}")
@@ -141,6 +142,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         attention_mask: Optional[torch.Tensor] = None,
     ):
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        self.npu_time = 0.0 if count_npu_time else None
         
         if attention_mask is not None:
             self._validate_batch_cache(past_key_values, attention_mask.shape[0])
@@ -149,6 +151,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 attention_mask,
                 past_key_values,
                 resolved_prefill_chunk_size,
+                count_npu_time=count_npu_time,
             )
 
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
@@ -158,7 +161,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
 
         mxq_model = self.npu_backend.mxq_model
-        self.npu_time = 0.0 if count_npu_time else None
         
         for i in range(num_of_chunks):
             start_index = i * resolved_prefill_chunk_size
@@ -188,6 +190,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         attention_mask: torch.Tensor,
         past_key_values: Optional[MobilintCache],
         prefill_chunk_size: int = 0,
+        count_npu_time: bool = False,
     ):
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
@@ -214,7 +217,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         mxq_model = self.npu_backend.mxq_model
         if prefill_chunk_size == 0:
             prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
-        assert prefill_chunk_size > 0, "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
+        assert prefill_chunk_size > 0, (
+            "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
+        )
         num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
 
         logits_dict: dict[int, torch.Tensor] = {}
@@ -260,7 +265,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if debug_enabled:
                 batch_seq_sum = sum(param.sequence_length for param in batch_params)
                 logger.debug(
-                    "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d",
+                    (
+                        "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s "
+                        "cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d"
+                    ),
                     i + 1,
                     num_of_chunks,
                     start_index,
@@ -299,12 +307,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     input_batch_same,
                 )
             
-            result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
+            if count_npu_time:
+                t0 = time.perf_counter()
+                result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
+                assert self.npu_time is not None
+                self.npu_time += time.perf_counter() - t0
+            else:
+                result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
             assert result is not None, "mxq infer result is None!"
 
             logits_chunks = cast(
                 torch.FloatTensor,
-                torch.tensor(result[0], dtype=torch.float32).reshape([len(cache_ids), 1, -1]),
+                torch.tensor(result[0], dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
+                    [len(cache_ids), 1, -1]
+                ),
             )
 
             if debug_enabled:
@@ -327,7 +343,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     )
                     max_abs_diff = torch.abs(logits_vectors.unsqueeze(1) - logits_vectors.unsqueeze(0)).amax(dim=-1)
                     cosine_rows = [
-                        " ".join(f"{float(cosine_similarity[row, col]):7.3f}" for col in range(cosine_similarity.shape[1]))
+                        " ".join(
+                            f"{float(cosine_similarity[row, col]):7.3f}" for col in range(cosine_similarity.shape[1])
+                        )
                         for row in range(cosine_similarity.shape[0])
                     ]
                     max_abs_diff_rows = [
