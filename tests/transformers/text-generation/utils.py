@@ -1,4 +1,5 @@
 import math
+import textwrap
 
 import torch
 from rich import box
@@ -9,6 +10,8 @@ from transformers.generation.streamers import BaseStreamer
 
 
 class BatchTextStreamer(BaseStreamer):
+    """Stream batch decoding results in a fixed-size rich table."""
+
     def __init__(
         self,
         tokenizer,
@@ -39,6 +42,7 @@ class BatchTextStreamer(BaseStreamer):
         )
 
     def put(self, value: torch.Tensor):
+        """Append streamed tokens and refresh the live tail view."""
         if self.live and not self.live.is_started:
             self.live.start()
 
@@ -72,10 +76,70 @@ class BatchTextStreamer(BaseStreamer):
         self.live.update(self.make_table(), refresh=True)
 
     def end(self):
+        """Stop live rendering and print the final full table once."""
         if self.live:
             self.live.stop()
+            self.console.print()
+            self.console.print(self.make_table(truncate=False))
 
-    def make_table(self) -> Table:
+    def _get_cell_width(self) -> int:
+        """Estimate the usable width for each table cell."""
+        border_width = self.num_columns + 1
+        inner_padding = self.num_columns * 2
+        usable_width = self.console.size.width - border_width - inner_padding
+        return max(8, usable_width // self.num_columns)
+
+    def _get_cell_max_lines(self) -> int:
+        """Estimate the maximum visible line count per cell."""
+        border_lines = self.num_rows + 1
+        live_margin = 3
+        usable_height = self.console.size.height - border_lines - live_margin
+        return max(1, usable_height // self.num_rows)
+
+    def _wrap_text(self, text: str, width: int) -> list[str]:
+        """Wrap text according to the estimated cell width."""
+        wrapped_lines: list[str] = []
+
+        for raw_line in text.splitlines():
+            if not raw_line:
+                wrapped_lines.append("")
+                continue
+
+            wrapped_lines.extend(
+                textwrap.wrap(
+                    raw_line,
+                    width=width,
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                )
+            )
+
+        if text.endswith("\n"):
+            wrapped_lines.append("")
+
+        return wrapped_lines or [""]
+
+    def _truncate_for_display(self, text: str, truncate: bool) -> str:
+        """Keep the latest visible lines and mark omitted leading content."""
+        if not truncate:
+            return text
+
+        wrapped_lines = self._wrap_text(text, self._get_cell_width())
+        max_lines = self._get_cell_max_lines()
+
+        if len(wrapped_lines) <= max_lines:
+            return text
+
+        if max_lines == 1:
+            return "..."
+
+        visible_lines = wrapped_lines[-(max_lines - 1) :]
+        return "\n".join(["...", *visible_lines])
+
+    def make_table(self, truncate: bool = True) -> Table:
+        """Build the rich table for the current batch outputs."""
         table = Table(
             show_header=False,
             header_style="bold magenta",
@@ -89,6 +153,9 @@ class BatchTextStreamer(BaseStreamer):
 
         for i in range(self.num_rows):
             sliced_outputs = self.print_buffers[i * self.num_columns : (1 + i) * self.num_columns]
-            table.add_row(*sliced_outputs)
+            display_outputs = [self._truncate_for_display(output, truncate) for output in sliced_outputs]
+            if len(display_outputs) < self.num_columns:
+                display_outputs.extend([""] * (self.num_columns - len(display_outputs)))
+            table.add_row(*display_outputs)
 
         return table
