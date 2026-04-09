@@ -1,14 +1,18 @@
+"""Shared pytest fixtures and NPU backend option handling for test suites."""
+
 import warnings
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import pytest
 
 _WARNED_UNUSED_PREFIXES: set[str] = set()
 _CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
+_ALL_PREFIXES = ("base", "encoder", "decoder", "vision", "text")
 
 
-def _parse_target_cores(value: Optional[str]) -> Optional[List[str]]:
+def _parse_target_cores(value: Optional[str]) -> Optional[list[str]]:
+    """Parse a semicolon-delimited target core option."""
     if value is None:
         return None
     text = value.strip()
@@ -17,7 +21,8 @@ def _parse_target_cores(value: Optional[str]) -> Optional[List[str]]:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
-def _parse_target_clusters(value: Optional[str]) -> Optional[List[int]]:
+def _parse_target_clusters(value: Optional[str]) -> Optional[list[int]]:
+    """Parse a semicolon-delimited target cluster option."""
     if value is None:
         return None
     text = value.strip()
@@ -33,6 +38,7 @@ def _parse_target_clusters(value: Optional[str]) -> Optional[List[int]]:
 
 
 def _expand_core_modes(value: Optional[str]) -> list[Optional[str]]:
+    """Expand a core mode option into the values used for parametrization."""
     if value is None:
         return [None]
     text = value.strip()
@@ -44,6 +50,7 @@ def _expand_core_modes(value: Optional[str]) -> list[Optional[str]]:
 
 
 def _default_target_kwargs(core_mode: Optional[str], *, prefix: str) -> dict[str, Any]:
+    """Return default target core or cluster options implied by a core mode."""
     if core_mode == "single":
         return {f"{prefix + '_' if prefix else ''}target_cores": ["0:0"]}
     if core_mode == "global4":
@@ -59,6 +66,7 @@ def _collect_npu_kwargs(
     *,
     core_mode_override: Optional[str] = None,
 ) -> tuple[dict[str, Any], bool]:
+    """Collect backend kwargs for the requested prefix from pytest options."""
     opt_prefix = f"--{prefix}-" if prefix else "--"
     mxq_path = config.getoption(f"{opt_prefix}mxq-path")
     dev_no = config.getoption(f"{opt_prefix}dev-no")
@@ -97,76 +105,208 @@ def _collect_npu_kwargs(
 
 
 @dataclass(frozen=True)
-class NpuParams:
-    base: dict[str, Any]
-    encoder: dict[str, Any]
-    decoder: dict[str, Any]
-    text: dict[str, Any]
-    vision: dict[str, Any]
-    _provided: dict[str, bool]
+class BaseNpuParams:
+    """NPU backend kwargs for single-backend models."""
 
-    def warn_unused(self, used_prefixes: set[str]) -> None:
-        for prefix, provided in self._provided.items():
-            if provided and prefix not in used_prefixes and prefix not in _WARNED_UNUSED_PREFIXES:
-                _WARNED_UNUSED_PREFIXES.add(prefix)
-                warnings.warn(
-                    f"Provided {prefix} NPU backend options will be ignored for this model.",
-                    UserWarning,
-                )
+    base: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class NpuSweepSpec:
+class EncoderDecoderNpuParams:
+    """NPU backend kwargs for encoder-decoder models."""
+
+    encoder: dict[str, Any]
+    decoder: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class VisionTextNpuParams:
+    """NPU backend kwargs for vision-text models."""
+
+    vision: dict[str, Any]
+    text: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BaseNpuSweepSpec:
+    """Parametrized core mode for base-only models."""
+
     base_core_mode: Optional[str]
+
+    def id(self) -> str:
+        """Return the pytest id fragment for this sweep spec."""
+        return f"base={self.base_core_mode}" if self.base_core_mode is not None else "default"
+
+
+@dataclass(frozen=True)
+class EncoderDecoderNpuSweepSpec:
+    """Parametrized core modes for encoder-decoder models."""
+
     encoder_core_mode: Optional[str]
     decoder_core_mode: Optional[str]
+
+    def id(self) -> str:
+        """Return the pytest id fragment for this sweep spec."""
+        parts = []
+        if self.encoder_core_mode is not None:
+            parts.append(f"encoder={self.encoder_core_mode}")
+        if self.decoder_core_mode is not None:
+            parts.append(f"decoder={self.decoder_core_mode}")
+        return ",".join(parts) if parts else "default"
+
+
+@dataclass(frozen=True)
+class VisionTextNpuSweepSpec:
+    """Parametrized core modes for vision-text models."""
+
     vision_core_mode: Optional[str]
     text_core_mode: Optional[str]
 
     def id(self) -> str:
+        """Return the pytest id fragment for this sweep spec."""
         parts = []
-        for name, value in (
-            ("base", self.base_core_mode),
-            ("encoder", self.encoder_core_mode),
-            ("decoder", self.decoder_core_mode),
-            ("vision", self.vision_core_mode),
-            ("text", self.text_core_mode),
-        ):
-            if value is not None:
-                parts.append(f"{name}={value}")
+        if self.vision_core_mode is not None:
+            parts.append(f"vision={self.vision_core_mode}")
+        if self.text_core_mode is not None:
+            parts.append(f"text={self.text_core_mode}")
         return ",".join(parts) if parts else "default"
 
 
+def _option_flag(prefix: str, option_name: str) -> str:
+    """Return the CLI flag name for a backend option."""
+    if prefix:
+        return f"--{prefix}-{option_name.replace('_', '-')}"
+    return f"--{option_name.replace('_', '-')}"
+
+
+def _option_value_was_provided(config: pytest.Config, prefix: str, option_name: str) -> bool:
+    """Return whether the user explicitly set a CLI option."""
+    args = config.invocation_params.args
+    flag = _option_flag(prefix, option_name)
+    return any(arg == flag or arg.startswith(f"{flag}=") for arg in args)
+
+
+def _collect_provided_prefixes(config: pytest.Config, embedding_weight: Optional[str]) -> set[str]:
+    """Collect prefixes that have explicit backend options in the current test run."""
+    provided: set[str] = set()
+
+    if embedding_weight:
+        provided.add("base")
+
+    for prefix in _ALL_PREFIXES:
+        option_prefix = "" if prefix == "base" else prefix
+        if any(
+            (
+                _option_value_was_provided(config, option_prefix, "mxq_path"),
+                _option_value_was_provided(config, option_prefix, "dev_no"),
+                _option_value_was_provided(config, option_prefix, "core_mode"),
+                _option_value_was_provided(config, option_prefix, "target_cores"),
+                _option_value_was_provided(config, option_prefix, "target_clusters"),
+            )
+        ):
+            provided.add(prefix)
+
+    return provided
+
+
+def _warn_unused_prefixes(provided_prefixes: set[str], used_prefixes: set[str]) -> None:
+    """Warn once for explicit backend prefixes that the active test fixture does not consume."""
+    for prefix in sorted(provided_prefixes - used_prefixes):
+        if prefix not in _WARNED_UNUSED_PREFIXES:
+            _WARNED_UNUSED_PREFIXES.add(prefix)
+            warnings.warn(
+                f"Provided {prefix} NPU backend options will be ignored for this model.",
+                UserWarning,
+            )
+
+
+def _build_base_specs(config: pytest.Config) -> list[BaseNpuSweepSpec]:
+    """Build sweep specs for base-only models."""
+    return [BaseNpuSweepSpec(base_core_mode=mode) for mode in _expand_core_modes(config.getoption("--core-mode"))]
+
+
+def _build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpuSweepSpec]:
+    """Build synchronized sweep specs for encoder-decoder models."""
+    encoder_raw = config.getoption("--encoder-core-mode")
+    decoder_raw = config.getoption("--decoder-core-mode")
+
+    if encoder_raw and decoder_raw:
+        return [
+            EncoderDecoderNpuSweepSpec(
+                encoder_core_mode=encoder_mode,
+                decoder_core_mode=decoder_mode,
+            )
+            for encoder_mode in _expand_core_modes(encoder_raw)
+            for decoder_mode in _expand_core_modes(decoder_raw)
+        ]
+
+    raw = encoder_raw or decoder_raw or config.getoption("--core-mode")
+    return [
+        EncoderDecoderNpuSweepSpec(
+            encoder_core_mode=mode,
+            decoder_core_mode=mode,
+        )
+        for mode in _expand_core_modes(raw)
+    ]
+
+
+def _build_vision_text_specs(config: pytest.Config) -> list[VisionTextNpuSweepSpec]:
+    """Build synchronized sweep specs for vision-text models."""
+    vision_raw = config.getoption("--vision-core-mode")
+    text_raw = config.getoption("--text-core-mode")
+
+    if vision_raw and text_raw:
+        return [
+            VisionTextNpuSweepSpec(
+                vision_core_mode=vision_mode,
+                text_core_mode=text_mode,
+            )
+            for vision_mode in _expand_core_modes(vision_raw)
+            for text_mode in _expand_core_modes(text_raw)
+        ]
+
+    raw = vision_raw or text_raw or config.getoption("--core-mode")
+    return [
+        VisionTextNpuSweepSpec(
+            vision_core_mode=mode,
+            text_core_mode=mode,
+        )
+        for mode in _expand_core_modes(raw)
+    ]
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    if "_npu_sweep_spec" not in metafunc.fixturenames:
-        return
+    """Parametrize role-specific NPU sweep fixtures only for tests that use them."""
+    if "_base_npu_sweep_spec" in metafunc.fixturenames:
+        specs = _build_base_specs(metafunc.config)
+        metafunc.parametrize(
+            "_base_npu_sweep_spec",
+            specs,
+            ids=[spec.id() for spec in specs],
+            scope="module",
+        )
 
-    config = metafunc.config
-    specs: list[NpuSweepSpec] = []
-    for base_mode in _expand_core_modes(config.getoption("--core-mode")):
-        for encoder_mode in _expand_core_modes(config.getoption("--encoder-core-mode")):
-            for decoder_mode in _expand_core_modes(config.getoption("--decoder-core-mode")):
-                for vision_mode in _expand_core_modes(config.getoption("--vision-core-mode")):
-                    for text_mode in _expand_core_modes(config.getoption("--text-core-mode")):
-                        specs.append(
-                            NpuSweepSpec(
-                                base_core_mode=base_mode,
-                                encoder_core_mode=encoder_mode,
-                                decoder_core_mode=decoder_mode,
-                                vision_core_mode=vision_mode,
-                                text_core_mode=text_mode,
-                            )
-                        )
+    if "_encoder_decoder_npu_sweep_spec" in metafunc.fixturenames:
+        specs = _build_encoder_decoder_specs(metafunc.config)
+        metafunc.parametrize(
+            "_encoder_decoder_npu_sweep_spec",
+            specs,
+            ids=[spec.id() for spec in specs],
+            scope="module",
+        )
 
-    metafunc.parametrize(
-        "_npu_sweep_spec",
-        specs,
-        ids=[spec.id() for spec in specs],
-        scope="module",
-    )
+    if "_vision_text_npu_sweep_spec" in metafunc.fixturenames:
+        specs = _build_vision_text_specs(metafunc.config)
+        metafunc.parametrize(
+            "_vision_text_npu_sweep_spec",
+            specs,
+            ids=[spec.id() for spec in specs],
+            scope="module",
+        )
 
 
 def pytest_addoption(parser):
+    """Register shared CLI options used by tests."""
     parser.addoption(
         "--mxq-path",
         action="store",
@@ -246,58 +386,109 @@ def pytest_addoption(parser):
 
 @pytest.fixture(scope="module")
 def mxq_path(request):
+    """Return the base mxq path option."""
     return request.config.getoption("--mxq-path")
 
 
 @pytest.fixture(scope="module")
 def revision(request):
+    """Return the optional model revision."""
     return request.config.getoption("--revision")
 
 
 @pytest.fixture(scope="module")
 def embedding_weight(request):
+    """Return the optional embedding weight path."""
     return request.config.getoption("--embedding-weight")
 
 
 @pytest.fixture(scope="module")
-def _npu_sweep_spec(request) -> NpuSweepSpec:
+def _base_npu_sweep_spec(request) -> BaseNpuSweepSpec:
+    """Return the parametrized base-only NPU sweep spec."""
     return request.param
 
 
 @pytest.fixture(scope="module")
-def npu_params(request, embedding_weight, _npu_sweep_spec: NpuSweepSpec):
+def _encoder_decoder_npu_sweep_spec(request) -> EncoderDecoderNpuSweepSpec:
+    """Return the parametrized encoder-decoder NPU sweep spec."""
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def _vision_text_npu_sweep_spec(request) -> VisionTextNpuSweepSpec:
+    """Return the parametrized vision-text NPU sweep spec."""
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def base_npu_params(
+    request,
+    embedding_weight,
+    _base_npu_sweep_spec: BaseNpuSweepSpec,
+) -> BaseNpuParams:
+    """Return NPU kwargs for tests that use a single backend config."""
     config = request.config
-    base_kwargs, base_provided = _collect_npu_kwargs(
-        config, "", core_mode_override=_npu_sweep_spec.base_core_mode
-    )
+    provided_prefixes = _collect_provided_prefixes(config, embedding_weight)
+    _warn_unused_prefixes(provided_prefixes, {"base"})
+
+    base_kwargs, _ = _collect_npu_kwargs(config, "", core_mode_override=_base_npu_sweep_spec.base_core_mode)
     if embedding_weight:
         base_kwargs["embedding_weight"] = embedding_weight
-        base_provided = True
 
-    encoder_kwargs, encoder_provided = _collect_npu_kwargs(
-        config, "encoder", core_mode_override=_npu_sweep_spec.encoder_core_mode
+    return BaseNpuParams(base=base_kwargs)
+
+
+@pytest.fixture(scope="module")
+def encoder_decoder_npu_params(
+    request,
+    embedding_weight,
+    _encoder_decoder_npu_sweep_spec: EncoderDecoderNpuSweepSpec,
+) -> EncoderDecoderNpuParams:
+    """Return NPU kwargs for tests that use encoder and decoder backend configs."""
+    config = request.config
+    provided_prefixes = _collect_provided_prefixes(config, embedding_weight)
+    _warn_unused_prefixes(provided_prefixes, {"encoder", "decoder"})
+
+    encoder_kwargs, _ = _collect_npu_kwargs(
+        config,
+        "encoder",
+        core_mode_override=_encoder_decoder_npu_sweep_spec.encoder_core_mode,
     )
-    decoder_kwargs, decoder_provided = _collect_npu_kwargs(
-        config, "decoder", core_mode_override=_npu_sweep_spec.decoder_core_mode
-    )
-    vision_kwargs, vision_provided = _collect_npu_kwargs(
-        config, "vision", core_mode_override=_npu_sweep_spec.vision_core_mode
-    )
-    text_kwargs, text_provided = _collect_npu_kwargs(
-        config, "text", core_mode_override=_npu_sweep_spec.text_core_mode
+    decoder_kwargs, _ = _collect_npu_kwargs(
+        config,
+        "decoder",
+        core_mode_override=_encoder_decoder_npu_sweep_spec.decoder_core_mode,
     )
 
-    return NpuParams(
-        base=base_kwargs,
+    return EncoderDecoderNpuParams(
         encoder=encoder_kwargs,
         decoder=decoder_kwargs,
-        text=text_kwargs,
+    )
+
+
+@pytest.fixture(scope="module")
+def vision_text_npu_params(
+    request,
+    embedding_weight,
+    _vision_text_npu_sweep_spec: VisionTextNpuSweepSpec,
+) -> VisionTextNpuParams:
+    """Return NPU kwargs for tests that use vision and text backend configs."""
+    config = request.config
+    provided_prefixes = _collect_provided_prefixes(config, embedding_weight)
+    _warn_unused_prefixes(provided_prefixes, {"vision", "text"})
+
+    vision_kwargs, _ = _collect_npu_kwargs(
+        config,
+        "vision",
+        core_mode_override=_vision_text_npu_sweep_spec.vision_core_mode,
+    )
+    text_kwargs, _ = _collect_npu_kwargs(
+        config,
+        "text",
+        core_mode_override=_vision_text_npu_sweep_spec.text_core_mode,
+    )
+
+    return VisionTextNpuParams(
         vision=vision_kwargs,
-        _provided={
-            "base": base_provided,
-            "encoder": encoder_provided,
-            "decoder": decoder_provided,
-            "vision": vision_provided,
-            "text": text_provided,
-        },
+        text=text_kwargs,
     )

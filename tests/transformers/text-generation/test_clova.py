@@ -5,10 +5,9 @@ MODEL_PATHS = ("mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, revision, npu_params):
+def pipe(request, revision, base_npu_params):
     model_path = request.param
-    npu_params.warn_unused({"base"})
-    model_kwargs = npu_params.base
+    model_kwargs = base_npu_params.base
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
     if model_kwargs:
