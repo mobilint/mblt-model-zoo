@@ -229,24 +229,20 @@ def _build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNp
     """Build synchronized sweep specs for encoder-decoder models."""
     encoder_raw = config.getoption("--encoder-core-mode")
     decoder_raw = config.getoption("--decoder-core-mode")
+    shared_raw = config.getoption("--core-mode")
+    encoder_explicit = _option_value_was_provided(config, "encoder", "core_mode")
+    decoder_explicit = _option_value_was_provided(config, "decoder", "core_mode")
+    shared_explicit = _option_value_was_provided(config, "", "core_mode")
 
-    if encoder_raw and decoder_raw:
-        return [
-            EncoderDecoderNpuSweepSpec(
-                encoder_core_mode=encoder_mode,
-                decoder_core_mode=decoder_mode,
-            )
-            for encoder_mode in _expand_core_modes(encoder_raw)
-            for decoder_mode in _expand_core_modes(decoder_raw)
-        ]
-
-    raw = encoder_raw or decoder_raw or config.getoption("--core-mode")
+    encoder_modes = _expand_core_modes(encoder_raw if encoder_explicit else shared_raw if shared_explicit else None)
+    decoder_modes = _expand_core_modes(decoder_raw if decoder_explicit else shared_raw if shared_explicit else None)
     return [
         EncoderDecoderNpuSweepSpec(
-            encoder_core_mode=mode,
-            decoder_core_mode=mode,
+            encoder_core_mode=encoder_mode,
+            decoder_core_mode=decoder_mode,
         )
-        for mode in _expand_core_modes(raw)
+        for encoder_mode in encoder_modes
+        for decoder_mode in decoder_modes
     ]
 
 
@@ -254,24 +250,20 @@ def _build_vision_text_specs(config: pytest.Config) -> list[VisionTextNpuSweepSp
     """Build synchronized sweep specs for vision-text models."""
     vision_raw = config.getoption("--vision-core-mode")
     text_raw = config.getoption("--text-core-mode")
+    shared_raw = config.getoption("--core-mode")
+    vision_explicit = _option_value_was_provided(config, "vision", "core_mode")
+    text_explicit = _option_value_was_provided(config, "text", "core_mode")
+    shared_explicit = _option_value_was_provided(config, "", "core_mode")
 
-    if vision_raw and text_raw:
-        return [
-            VisionTextNpuSweepSpec(
-                vision_core_mode=vision_mode,
-                text_core_mode=text_mode,
-            )
-            for vision_mode in _expand_core_modes(vision_raw)
-            for text_mode in _expand_core_modes(text_raw)
-        ]
-
-    raw = vision_raw or text_raw or config.getoption("--core-mode")
+    vision_modes = _expand_core_modes(vision_raw if vision_explicit else shared_raw if shared_explicit else None)
+    text_modes = _expand_core_modes(text_raw if text_explicit else shared_raw if shared_explicit else None)
     return [
         VisionTextNpuSweepSpec(
-            vision_core_mode=mode,
-            text_core_mode=mode,
+            vision_core_mode=vision_mode,
+            text_core_mode=text_mode,
         )
-        for mode in _expand_core_modes(raw)
+        for vision_mode in vision_modes
+        for text_mode in text_modes
     ]
 
 
