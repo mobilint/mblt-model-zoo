@@ -309,11 +309,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             return
 
         cache_batch_size = getattr(past_key_values, "batch_size", 1)
-        if cache_batch_size != batch_size:
+        if cache_batch_size < batch_size:
             raise ValueError(
-                "Batch cache size mismatch: "
+                "Batch cache size is too small: "
                 f"past_key_values.batch_size={cache_batch_size}, input batch_size={batch_size}. "
-                "Create MobilintCache with the same batch size as the batched request."
+                "Create MobilintCache with a batch size greater than or equal to the batched request."
             )
 
     def resolve_prefill_chunk_size(self, prefill_chunk_size: Optional[int]) -> int:
