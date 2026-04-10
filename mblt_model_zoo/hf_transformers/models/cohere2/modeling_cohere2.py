@@ -60,6 +60,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             
         assert inputs_embeds is not None
         configured_batch_size = max(1, self.config.max_batch_size)
+        effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
 
         if use_cache and past_key_values is None:
             past_key_values = self._get_cache("", configured_batch_size, 0)
@@ -69,9 +70,6 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             cache_position = cast(torch.LongTensor, torch.arange(
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             ))
-        
-        if configured_batch_size > 1 and attention_mask is None:
-            raise ValueError("attention_mask is required when config.max_batch_size > 1")
         
         if output_attentions:
             logger.warning("output_attentions is not supported.")
@@ -85,7 +83,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
-            attention_mask=attention_mask if configured_batch_size > 1 else None,
+            attention_mask=effective_attention_mask,
         )
         logits = logits * self.logit_scale  # main diff from Llama
 
@@ -103,5 +101,4 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
 AutoModel.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
 AutoModelForCausalLM.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
-
 

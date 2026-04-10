@@ -183,6 +183,23 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
 
         return logits
+
+    def resolve_batched_attention_mask(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        """Return the attention mask used by batched LLM inference."""
+        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
+        if configured_batch_size <= 1:
+            return None
+        if attention_mask is not None:
+            return attention_mask
+        return torch.ones(
+            inputs_embeds.shape[:2],
+            dtype=torch.long,
+            device=inputs_embeds.device,
+        )
     
     def _llm_forward_batch(
         self,

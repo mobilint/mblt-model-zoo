@@ -93,3 +93,26 @@ def test_llm_forward_batch_rejects_zero_length_rows():
             count_npu_time=False,
             attention_mask=attention_mask,
         )
+
+
+def test_resolve_batched_attention_mask_creates_all_ones_for_batched_models():
+    model = MobilintModelMixin.__new__(MobilintModelMixin)
+    model.config = type("Config", (), {"max_batch_size": 16})()
+
+    inputs_embeds = torch.randn(1, 3, 4, dtype=torch.float16)
+
+    attention_mask = model.resolve_batched_attention_mask(inputs_embeds, attention_mask=None)
+
+    assert attention_mask is not None
+    assert torch.equal(attention_mask, torch.ones((1, 3), dtype=torch.long, device=inputs_embeds.device))
+
+
+def test_resolve_batched_attention_mask_keeps_none_for_non_batched_models():
+    model = MobilintModelMixin.__new__(MobilintModelMixin)
+    model.config = type("Config", (), {"max_batch_size": 1})()
+
+    inputs_embeds = torch.randn(1, 3, 4, dtype=torch.float16)
+
+    attention_mask = model.resolve_batched_attention_mask(inputs_embeds, attention_mask=None)
+
+    assert attention_mask is None
