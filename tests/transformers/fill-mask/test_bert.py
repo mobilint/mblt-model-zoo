@@ -10,10 +10,9 @@ MODEL_PATHS_AND_PROMPTS = (
 
 
 @pytest.fixture(params=MODEL_PATHS_AND_PROMPTS, scope="module")
-def pipe_and_prompt(request, revision, npu_params):
+def pipe_and_prompt(request, revision, base_npu_params):
     model_path, prompt = request.param
-    npu_params.warn_unused({"base"})
-    model_kwargs = npu_params.base
+    model_kwargs = base_npu_params.base
 
     if model_kwargs:
         pipe = pipeline(

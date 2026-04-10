@@ -1,8 +1,8 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Dict
 
 import qbruntime
-from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
+from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
 
 from ..utils.cache_utils import MobilintCache
 from ..utils.modeling_utils import MobilintModelMixin
@@ -21,8 +21,11 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     def _get_cache(
         self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
     ) -> MobilintCache:
+        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
         if not hasattr(self, "_cache"):
-            self._cache = MobilintCache(self.get_cache_mxq_model())
+            self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
+            self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
         else:
             self._cache.reset()
             

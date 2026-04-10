@@ -7,10 +7,9 @@ MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def model(request, revision, npu_params):
+def model(request, revision, base_npu_params):
     model_path = request.param
-    npu_params.warn_unused({"base"})
-    model_kwargs = npu_params.base
+    model_kwargs = base_npu_params.base
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         trust_remote_code=True,

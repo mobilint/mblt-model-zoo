@@ -51,22 +51,25 @@ class MobilintExaone4ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds = self.embed_tokens(input_ids)
             
         assert inputs_embeds is not None
+        configured_batch_size = max(1, self.config.max_batch_size)
+        effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
 
         if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+            past_key_values = self._get_cache("", configured_batch_size, 0)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
             cache_position = cast(torch.LongTensor, torch.arange(
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             ))
-
+        
         logits = self.llm_forward(
             inputs_embeds,
             past_key_values,
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=effective_attention_mask,
         )
 
         loss = None
@@ -83,5 +86,4 @@ class MobilintExaone4ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
 AutoModel.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)
 AutoModelForCausalLM.register(MobilintExaone4Config, MobilintExaone4ForCausalLM)
-
 

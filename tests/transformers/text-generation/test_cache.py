@@ -30,9 +30,8 @@ def model_path(request):
 
 
 @pytest.fixture(scope="module")
-def model(model_path, revision, npu_params):
-    npu_params.warn_unused({"base"})
-    model_kwargs = npu_params.base
+def model(model_path, revision, base_npu_params):
+    model_kwargs = base_npu_params.base
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         trust_remote_code=True,
