@@ -84,3 +84,33 @@ def test_text_uses_shared_core_mode_when_explicitly_provided():
     specs = conftest._build_vision_text_specs(config)
 
     assert specs == [conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="single")]
+
+
+def test_shared_encoder_decoder_all_stays_pairwise_aligned():
+    config = _make_config(
+        shared_core_mode="all",
+        explicit_args=("--core-mode=all",),
+    )
+
+    specs = conftest._build_encoder_decoder_specs(config)
+
+    assert specs == [
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="single", decoder_core_mode="single"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global4", decoder_core_mode="global4"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="global8"),
+    ]
+
+
+def test_shared_vision_text_all_stays_pairwise_aligned():
+    config = _make_config(
+        shared_core_mode="all",
+        explicit_args=("--core-mode=all",),
+    )
+
+    specs = conftest._build_vision_text_specs(config)
+
+    assert specs == [
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="single", text_core_mode="single"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global4", text_core_mode="global4"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="global8"),
+    ]

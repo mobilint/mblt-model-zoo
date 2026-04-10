@@ -73,3 +73,23 @@ def test_llm_forward_batch_updates_npu_time_and_preserves_tensor_attributes(monk
     assert logits.dtype == inputs_embeds.dtype
     assert logits.device == inputs_embeds.device
     assert logits.shape == (2, 1, 5)
+
+
+def test_llm_forward_batch_rejects_zero_length_rows():
+    model = MobilintModelMixin.__new__(MobilintModelMixin)
+    model.npu_backend = _FakeBackend(_FakeMxqModel())
+    model.config = type("Config", (), {"npu_prefill_chunk_size": 2})()
+    model.npu_time = None
+
+    inputs_embeds = torch.randn(2, 3, 4, dtype=torch.float16)
+    attention_mask = torch.tensor([[0, 0, 0], [1, 1, 0]], dtype=torch.long)
+    cache_position = torch.arange(inputs_embeds.shape[1])
+
+    with pytest.raises(ValueError, match="Zero-length rows: \\[0\\]"):
+        model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            count_npu_time=False,
+            attention_mask=attention_mask,
+        )

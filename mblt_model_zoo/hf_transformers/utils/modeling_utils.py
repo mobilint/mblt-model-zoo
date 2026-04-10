@@ -199,6 +199,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
             inputs_embeds_masked = [inputs_embeds[i, attention_mask_bool[i, :], :] for i in range(batch_size)]
             sequence_lengths = cast(list[int], attention_mask.sum(dim=1).tolist())
+            zero_length_rows = [
+                row_index for row_index, sequence_length in enumerate(sequence_lengths) if sequence_length == 0
+            ]
+            if zero_length_rows:
+                raise ValueError(
+                    "Batched LLM inputs contain empty sequences after applying attention_mask. "
+                    f"Zero-length rows: {zero_length_rows}"
+                )
         else:
             assert inputs_embeds.shape[1] == 1
             inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]

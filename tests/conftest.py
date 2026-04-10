@@ -234,6 +234,15 @@ def _build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNp
     decoder_explicit = _option_value_was_provided(config, "decoder", "core_mode")
     shared_explicit = _option_value_was_provided(config, "", "core_mode")
 
+    if shared_explicit and not encoder_explicit and not decoder_explicit:
+        return [
+            EncoderDecoderNpuSweepSpec(
+                encoder_core_mode=mode,
+                decoder_core_mode=mode,
+            )
+            for mode in _expand_core_modes(shared_raw)
+        ]
+
     encoder_modes = _expand_core_modes(encoder_raw if encoder_explicit else shared_raw if shared_explicit else None)
     decoder_modes = _expand_core_modes(decoder_raw if decoder_explicit else shared_raw if shared_explicit else None)
     return [
@@ -254,6 +263,15 @@ def _build_vision_text_specs(config: pytest.Config) -> list[VisionTextNpuSweepSp
     vision_explicit = _option_value_was_provided(config, "vision", "core_mode")
     text_explicit = _option_value_was_provided(config, "text", "core_mode")
     shared_explicit = _option_value_was_provided(config, "", "core_mode")
+
+    if shared_explicit and not vision_explicit and not text_explicit:
+        return [
+            VisionTextNpuSweepSpec(
+                vision_core_mode=mode,
+                text_core_mode=mode,
+            )
+            for mode in _expand_core_modes(shared_raw)
+        ]
 
     vision_modes = _expand_core_modes(vision_raw if vision_explicit else shared_raw if shared_explicit else None)
     text_modes = _expand_core_modes(text_raw if text_explicit else shared_raw if shared_explicit else None)
