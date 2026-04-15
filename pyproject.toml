@@ -110,7 +110,7 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
-    "mblt-tracker>=0.0.2",
+    "mblt-tracker>=0.1.0",
 ]
 
 [tool.ruff]
