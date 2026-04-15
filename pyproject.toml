@@ -29,7 +29,6 @@ dependencies = [
     "wheel",
     "nvidia-ml-py>=12.560.30",
     "apscheduler>=3.11.2",
-    "mblt-tracker>=0.0.1",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -111,6 +110,7 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
+    "mblt-tracker>=0.0.2",
 ]
 
 [tool.ruff]
