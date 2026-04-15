@@ -17,8 +17,14 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     append_core_mode_suffix as _append_core_mode_suffix_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -26,7 +32,11 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -369,6 +379,8 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         "p99_power_w",
         "avg_utilization_pct",
         "p99_utilization_pct",
+        "avg_temperature_c",
+        "p99_temperature_c",
         "avg_memory_used_mb",
         "p99_memory_used_mb",
         "total_memory_mb",
@@ -537,6 +549,8 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
                 "p99_power_w",
                 "avg_utilization_pct",
                 "p99_utilization_pct",
+                "avg_temperature_c",
+                "p99_temperature_c",
                 "avg_memory_used_mb",
                 "p99_memory_used_mb",
                 "total_memory_mb",
@@ -561,17 +575,19 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
         return
     lines = [
         "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | "
-        "avg_memory_used_mb | p99_memory_used_mb | total_memory_mb | avg_memory_used_pct | "
+        "avg_temperature_c | p99_temperature_c | avg_memory_used_mb | p99_memory_used_mb | "
+        "total_memory_mb | avg_memory_used_pct | "
         "p99_memory_used_pct | total_energy_j | prefill_tps_last | decode_tps_last | "
         "prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | "
         "decode_j_per_tok_last |\n",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
-        "---: | ---: | ---: | ---: | ---: | ---: |\n",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
     ]
     for row in rows:
         lines.append(
             "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | "
-            "{p99_utilization_pct} | {avg_memory_used_mb} | {p99_memory_used_mb} | "
+            "{p99_utilization_pct} | {avg_temperature_c} | {p99_temperature_c} | "
+            "{avg_memory_used_mb} | {p99_memory_used_mb} | "
             "{total_memory_mb} | {avg_memory_used_pct} | {p99_memory_used_pct} | "
             "{total_energy_j} | {prefill_tps_last} | {decode_tps_last} | "
             "{prefill_tok_per_j_last} | {decode_tok_per_j_last} | "
@@ -581,6 +597,8 @@ def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | 
                 p99_power_w="" if row["p99_power_w"] is None else f"{row['p99_power_w']:.6f}",
                 avg_utilization_pct="" if row["avg_utilization_pct"] is None else f"{row['avg_utilization_pct']:.6f}",
                 p99_utilization_pct="" if row["p99_utilization_pct"] is None else f"{row['p99_utilization_pct']:.6f}",
+                avg_temperature_c="" if row["avg_temperature_c"] is None else f"{row['avg_temperature_c']:.6f}",
+                p99_temperature_c="" if row["p99_temperature_c"] is None else f"{row['p99_temperature_c']:.6f}",
                 avg_memory_used_mb="" if row["avg_memory_used_mb"] is None else f"{row['avg_memory_used_mb']:.6f}",
                 p99_memory_used_mb="" if row["p99_memory_used_mb"] is None else f"{row['p99_memory_used_mb']:.6f}",
                 total_memory_mb="" if row["total_memory_mb"] is None else f"{row['total_memory_mb']:.6f}",
@@ -640,6 +658,8 @@ def _write_single_combined_markdown(
         "p99_power_w",
         "avg_utilization_pct",
         "p99_utilization_pct",
+        "avg_temperature_c",
+        "p99_temperature_c",
         "avg_memory_used_mb",
         "p99_memory_used_mb",
         "total_memory_mb",
@@ -713,6 +733,8 @@ def _rebuild_combined_outputs(
                     "p99_power_w": device.get("p99_power_w"),
                     "avg_utilization_pct": device.get("avg_utilization_pct"),
                     "p99_utilization_pct": device.get("p99_utilization_pct"),
+                    "avg_temperature_c": device.get("avg_temperature_c"),
+                    "p99_temperature_c": device.get("p99_temperature_c"),
                     "avg_memory_used_mb": device.get("avg_memory_used_mb"),
                     "p99_memory_used_mb": device.get("p99_memory_used_mb"),
                     "total_memory_mb": device.get("total_memory_mb"),
@@ -855,6 +877,24 @@ def _rebuild_combined_outputs(
             title="P99 Utilization",
             x_label="Utilization (%)",
             output_path=Path(results_dir) / "p99_utilization_pct.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_temperature_c,
+            title="Average Temperature",
+            x_label="Temperature (C)",
+            output_path=Path(results_dir) / "avg_temperature_c.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_temperature_c,
+            title="P99 Temperature",
+            x_label="Temperature (C)",
+            output_path=Path(results_dir) / "p99_temperature_c.png",
         )
         plot_scalar_chart(
             models=models,
@@ -1067,9 +1107,7 @@ def main(argv: list[str] | None = None) -> int:
     for model_id, revision_candidates, label, base, mxq_path in targets:
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append(
-                (model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode)
-            )
+            run_targets.append((model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode))
 
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
@@ -1234,6 +1272,23 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 default=None,
             )
+            avg_temperature = _weighted_two(
+                prefill_metric.get("avg_temperature_c"),
+                prefill_phase_duration_s,
+                decode_metric.get("avg_temperature_c"),
+                decode_phase_duration_s,
+            )
+            p99_temperature = max(
+                [
+                    v
+                    for v in (
+                        prefill_metric.get("p99_temperature_c"),
+                        decode_metric.get("p99_temperature_c"),
+                    )
+                    if v is not None
+                ],
+                default=None,
+            )
             avg_memory_used_mb = _weighted_two(
                 prefill_metric.get("avg_memory_used_mb"),
                 prefill_phase_duration_s,
@@ -1293,6 +1348,8 @@ def main(argv: list[str] | None = None) -> int:
                 "p99_power_w": p99_power,
                 "avg_utilization_pct": avg_utilization,
                 "p99_utilization_pct": p99_utilization,
+                "avg_temperature_c": avg_temperature,
+                "p99_temperature_c": p99_temperature,
                 "avg_memory_used_mb": avg_memory_used_mb,
                 "p99_memory_used_mb": p99_memory_used_mb,
                 "total_memory_mb": total_memory_mb,
@@ -1309,6 +1366,8 @@ def main(argv: list[str] | None = None) -> int:
                 "prefill_p99_power_w": prefill_metric.get("p99_power_w"),
                 "prefill_avg_utilization_pct": prefill_metric.get("avg_utilization_pct"),
                 "prefill_p99_utilization_pct": prefill_metric.get("p99_utilization_pct"),
+                "prefill_avg_temperature_c": prefill_metric.get("avg_temperature_c"),
+                "prefill_p99_temperature_c": prefill_metric.get("p99_temperature_c"),
                 "prefill_avg_memory_used_mb": prefill_metric.get("avg_memory_used_mb"),
                 "prefill_p99_memory_used_mb": prefill_metric.get("p99_memory_used_mb"),
                 "prefill_avg_memory_used_pct": prefill_metric.get("avg_memory_used_pct"),
@@ -1317,6 +1376,8 @@ def main(argv: list[str] | None = None) -> int:
                 "decode_p99_power_w": decode_metric.get("p99_power_w"),
                 "decode_avg_utilization_pct": decode_metric.get("avg_utilization_pct"),
                 "decode_p99_utilization_pct": decode_metric.get("p99_utilization_pct"),
+                "decode_avg_temperature_c": decode_metric.get("avg_temperature_c"),
+                "decode_p99_temperature_c": decode_metric.get("p99_temperature_c"),
                 "decode_avg_memory_used_mb": decode_metric.get("avg_memory_used_mb"),
                 "decode_p99_memory_used_mb": decode_metric.get("p99_memory_used_mb"),
                 "decode_avg_memory_used_pct": decode_metric.get("avg_memory_used_pct"),

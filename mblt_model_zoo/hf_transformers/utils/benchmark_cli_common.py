@@ -12,6 +12,8 @@ DEVICE_METRIC_KEYS = (
     "p99_power_w",
     "avg_utilization_pct",
     "p99_utilization_pct",
+    "avg_temperature_c",
+    "p99_temperature_c",
     "avg_memory_used_mb",
     "p99_memory_used_mb",
     "total_memory_mb",
