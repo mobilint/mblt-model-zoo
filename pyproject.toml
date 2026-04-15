@@ -25,6 +25,7 @@ dependencies = [
     "huggingface-hub",
     "scipy",
     "tqdm",
+    "mblt-tracker>=0.1.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -103,7 +104,6 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
-    "mblt-tracker>=0.1.0",
 ]
 
 [tool.ruff]
