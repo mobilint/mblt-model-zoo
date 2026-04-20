@@ -17,6 +17,7 @@ jobs:
   codex-review:
     uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
     permissions:
+      actions: write
       contents: read
       pull-requests: write
       issues: write
