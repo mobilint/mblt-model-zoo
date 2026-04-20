@@ -1,0 +1,29 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+  issue_comment:
+    types:
+      - created
+  pull_request_review_comment:
+    types:
+      - created
+
+jobs:
+  codex-review:
+    uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    with:
+      post_untrusted_notice: true
+      skip_draft_pr: true
+      max_files: 200
+      max_diff_chars: 200000
+      official_review_wait_minutes: 5
+      review_on_pr_synchronize: false

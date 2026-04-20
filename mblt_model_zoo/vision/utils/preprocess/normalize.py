@@ -60,4 +60,4 @@ class Normalize(PreOps):
             x = np.array(x)
         x = x.astype(np.float32) / 255.0
         x = (x - self.mean) / self.std
-        return x
+        return x.astype(np.float32)

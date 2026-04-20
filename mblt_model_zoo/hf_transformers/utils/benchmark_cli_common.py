@@ -12,6 +12,8 @@ DEVICE_METRIC_KEYS = (
     "p99_power_w",
     "avg_utilization_pct",
     "p99_utilization_pct",
+    "avg_temperature_c",
+    "p99_temperature_c",
     "avg_memory_used_mb",
     "p99_memory_used_mb",
     "total_memory_mb",
@@ -199,7 +201,7 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any):
         return None
 
     if backend == "npu":
-        from mblt_model_zoo.utils.device_tracker_npu import NPUDeviceTracker
+        from mblt_tracker import NPUDeviceTracker
 
         try:
             return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC)
@@ -208,7 +210,7 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any):
             return None
 
     if backend == "gpu":
-        from mblt_model_zoo.utils.device_tracker_gpu import GPUDeviceTracker
+        from mblt_tracker import GPUDeviceTracker
 
         gpu_id = infer_gpu_ids(args.device, args.device_gpu_id)
         try:

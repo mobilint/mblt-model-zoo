@@ -59,9 +59,11 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds = self.embed_tokens(input_ids)
             
         assert inputs_embeds is not None
+        configured_batch_size = max(1, self.config.max_batch_size)
+        effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
 
         if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+            past_key_values = self._get_cache("", configured_batch_size, 0)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -81,6 +83,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=effective_attention_mask,
         )
         logits = logits * self.logit_scale  # main diff from Llama
 
@@ -98,5 +101,4 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         
 AutoModel.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
 AutoModelForCausalLM.register(MobilintCohere2Config, MobilintCohere2ForCausalLM)
-
 

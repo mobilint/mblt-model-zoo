@@ -8,10 +8,9 @@ MODEL_PATHS = (
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
-def pipe(request, revision, npu_params):
+def pipe(request, revision, vision_text_npu_params):
     model_path = request.param
-    npu_params.warn_unused({"vision", "text"})
-    model_kwargs = {**npu_params.vision, **npu_params.text}
+    model_kwargs = {**vision_text_npu_params.vision, **vision_text_npu_params.text}
     processor = AutoProcessor.from_pretrained(
         model_path,
         use_fast=True,
