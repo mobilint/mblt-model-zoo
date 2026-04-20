@@ -51,6 +51,8 @@ class ModelMetrics:
     total_energy_j: Optional[float]
     avg_utilization_pct: Optional[float]
     p99_utilization_pct: Optional[float]
+    avg_temperature_c: Optional[float]
+    p99_temperature_c: Optional[float]
     avg_memory_used_mb: Optional[float]
     p99_memory_used_mb: Optional[float]
     avg_memory_used_pct: Optional[float]
@@ -142,6 +144,8 @@ def load_model_metrics(path: Path) -> Optional[tuple[str, ModelMetrics]]:
         total_energy_j=_as_float(device.get("total_energy_j")),
         avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
         p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+        avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+        p99_temperature_c=_as_float(device.get("p99_temperature_c")),
         avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
         p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
         avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),

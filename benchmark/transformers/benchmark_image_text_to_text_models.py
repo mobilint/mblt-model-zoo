@@ -20,13 +20,23 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     append_core_mode_suffix as _append_core_mode_suffix_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -60,6 +70,7 @@ except Exception:
         _resolve_original_model_ids,
         _should_precheck_cuda,
     )
+
 
 def _safe_filename(text: str) -> str:
     return text.replace("/", "__")
@@ -232,6 +243,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     all_vision_p99_power_w: list[float] = []
     all_vision_avg_utilization_pct: list[float] = []
     all_vision_p99_utilization_pct: list[float] = []
+    all_vision_avg_temperature_c: list[float] = []
+    all_vision_p99_temperature_c: list[float] = []
     all_vision_avg_memory_used_mb: list[float] = []
     all_vision_p99_memory_used_mb: list[float] = []
     all_vision_avg_memory_used_pct: list[float] = []
@@ -252,6 +265,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         p99_power_vals: list[float] = []
         util_vals: list[float] = []
         p99_util_vals: list[float] = []
+        temp_vals: list[float] = []
+        p99_temp_vals: list[float] = []
         mem_mb_vals: list[float] = []
         p99_mem_mb_vals: list[float] = []
         mem_pct_vals: list[float] = []
@@ -279,6 +294,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 p99_power = metric.get("p99_power_w")
                 avg_util = metric.get("avg_utilization_pct")
                 p99_util = metric.get("p99_utilization_pct")
+                avg_temp = metric.get("avg_temperature_c")
+                p99_temp = metric.get("p99_temperature_c")
                 avg_mem = metric.get("avg_memory_used_mb")
                 p99_mem = metric.get("p99_memory_used_mb")
                 avg_mem_pct = metric.get("avg_memory_used_pct")
@@ -297,6 +314,10 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     util_vals.append(float(avg_util))
                 if p99_util is not None:
                     p99_util_vals.append(float(p99_util))
+                if avg_temp is not None:
+                    temp_vals.append(float(avg_temp))
+                if p99_temp is not None:
+                    p99_temp_vals.append(float(p99_temp))
                 if avg_mem is not None:
                     mem_mb_vals.append(float(avg_mem))
                 if p99_mem is not None:
@@ -313,6 +334,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         all_vision_p99_power_w.extend(p99_power_vals)
         all_vision_avg_utilization_pct.extend(util_vals)
         all_vision_p99_utilization_pct.extend(p99_util_vals)
+        all_vision_avg_temperature_c.extend(temp_vals)
+        all_vision_p99_temperature_c.extend(p99_temp_vals)
         all_vision_avg_memory_used_mb.extend(mem_mb_vals)
         all_vision_p99_memory_used_mb.extend(p99_mem_mb_vals)
         all_vision_avg_memory_used_pct.extend(mem_pct_vals)
@@ -331,6 +354,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_power_w": _summary(p99_power_vals),
                     "avg_utilization_pct": _summary(util_vals),
                     "p99_utilization_pct": _summary(p99_util_vals),
+                    "avg_temperature_c": _summary(temp_vals),
+                    "p99_temperature_c": _summary(p99_temp_vals),
                     "avg_memory_used_mb": _summary(mem_mb_vals),
                     "p99_memory_used_mb": _summary(p99_mem_mb_vals),
                     "avg_memory_used_pct": _summary(mem_pct_vals),
@@ -356,6 +381,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_power_w": p99_power_vals[idx - 1] if idx - 1 < len(p99_power_vals) else None,
                     "avg_utilization_pct": util_vals[idx - 1] if idx - 1 < len(util_vals) else None,
                     "p99_utilization_pct": p99_util_vals[idx - 1] if idx - 1 < len(p99_util_vals) else None,
+                    "avg_temperature_c": temp_vals[idx - 1] if idx - 1 < len(temp_vals) else None,
+                    "p99_temperature_c": p99_temp_vals[idx - 1] if idx - 1 < len(p99_temp_vals) else None,
                     "avg_memory_used_mb": mem_mb_vals[idx - 1] if idx - 1 < len(mem_mb_vals) else None,
                     "p99_memory_used_mb": p99_mem_mb_vals[idx - 1] if idx - 1 < len(p99_mem_mb_vals) else None,
                     "avg_memory_used_pct": mem_pct_vals[idx - 1] if idx - 1 < len(mem_pct_vals) else None,
@@ -390,6 +417,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_power_w: list[float] = []
     llm_avg_utilization_pct: list[float] = []
     llm_p99_utilization_pct: list[float] = []
+    llm_avg_temperature_c: list[float] = []
+    llm_p99_temperature_c: list[float] = []
     llm_avg_memory_used_mb: list[float] = []
     llm_p99_memory_used_mb: list[float] = []
     llm_avg_memory_used_pct: list[float] = []
@@ -423,6 +452,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             run.p99_power_w = metric.get("p99_power_w")
             run.avg_utilization_pct = metric.get("avg_utilization_pct")
             run.p99_utilization_pct = metric.get("p99_utilization_pct")
+            run.avg_temperature_c = metric.get("avg_temperature_c")
+            run.p99_temperature_c = metric.get("p99_temperature_c")
             run.avg_memory_used_mb = metric.get("avg_memory_used_mb")
             run.p99_memory_used_mb = metric.get("p99_memory_used_mb")
             run.avg_memory_used_pct = metric.get("avg_memory_used_pct")
@@ -453,6 +484,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_power_w = [float(r.p99_power_w) for r in llm_runs if r.p99_power_w is not None]
     llm_avg_utilization_pct = [float(r.avg_utilization_pct) for r in llm_runs if r.avg_utilization_pct is not None]
     llm_p99_utilization_pct = [float(r.p99_utilization_pct) for r in llm_runs if r.p99_utilization_pct is not None]
+    llm_avg_temperature_c = [float(r.avg_temperature_c) for r in llm_runs if r.avg_temperature_c is not None]
+    llm_p99_temperature_c = [float(r.p99_temperature_c) for r in llm_runs if r.p99_temperature_c is not None]
     llm_avg_memory_used_mb = [float(r.avg_memory_used_mb) for r in llm_runs if r.avg_memory_used_mb is not None]
     llm_p99_memory_used_mb = [float(r.p99_memory_used_mb) for r in llm_runs if r.p99_memory_used_mb is not None]
     llm_avg_memory_used_pct = [float(r.avg_memory_used_pct) for r in llm_runs if r.avg_memory_used_pct is not None]
@@ -488,6 +521,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "p99_power_w": r.p99_power_w,
                 "avg_utilization_pct": r.avg_utilization_pct,
                 "p99_utilization_pct": r.p99_utilization_pct,
+                "avg_temperature_c": r.avg_temperature_c,
+                "p99_temperature_c": r.p99_temperature_c,
                 "avg_memory_used_mb": r.avg_memory_used_mb,
                 "p99_memory_used_mb": r.p99_memory_used_mb,
                 "avg_memory_used_pct": r.avg_memory_used_pct,
@@ -518,6 +553,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "p99_power_w": _summary(all_vision_p99_power_w),
                 "avg_utilization_pct": _summary(all_vision_avg_utilization_pct),
                 "p99_utilization_pct": _summary(all_vision_p99_utilization_pct),
+                "avg_temperature_c": _summary(all_vision_avg_temperature_c),
+                "p99_temperature_c": _summary(all_vision_p99_temperature_c),
                 "avg_memory_used_mb": _summary(all_vision_avg_memory_used_mb),
                 "p99_memory_used_mb": _summary(all_vision_p99_memory_used_mb),
                 "avg_memory_used_pct": _summary(all_vision_avg_memory_used_pct),
@@ -538,6 +575,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_power_w": _summary(llm_p99_power_w),
                     "avg_utilization_pct": _summary(llm_avg_utilization_pct),
                     "p99_utilization_pct": _summary(llm_p99_utilization_pct),
+                    "avg_temperature_c": _summary(llm_avg_temperature_c),
+                    "p99_temperature_c": _summary(llm_p99_temperature_c),
                     "avg_memory_used_mb": _summary(llm_avg_memory_used_mb),
                     "p99_memory_used_mb": _summary(llm_p99_memory_used_mb),
                     "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
@@ -555,6 +594,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             "p99_power_w": max(llm_p99_power_w) if llm_p99_power_w else None,
             "avg_utilization_pct": _mean(llm_avg_utilization_pct),
             "p99_utilization_pct": max(llm_p99_utilization_pct) if llm_p99_utilization_pct else None,
+            "avg_temperature_c": _mean(llm_avg_temperature_c),
+            "p99_temperature_c": max(llm_p99_temperature_c) if llm_p99_temperature_c else None,
             "avg_memory_used_mb": _mean(llm_avg_memory_used_mb),
             "p99_memory_used_mb": max(llm_p99_memory_used_mb) if llm_p99_memory_used_mb else None,
             "avg_memory_used_pct": _mean(llm_avg_memory_used_pct),
@@ -568,6 +609,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             "decode_j_per_tok_last": llm_decode_j_per_tok[-1] if llm_decode_j_per_tok else None,
             "vision_avg_power_w": _mean(all_vision_avg_power_w),
             "vision_p99_power_w": max(all_vision_p99_power_w) if all_vision_p99_power_w else None,
+            "vision_avg_temperature_c": _mean(all_vision_avg_temperature_c),
+            "vision_p99_temperature_c": max(all_vision_p99_temperature_c) if all_vision_p99_temperature_c else None,
             "vision_img_per_j": _mean(all_vision_img_per_j),
             "vision_j_per_img": _mean(all_vision_j_per_img),
         },
@@ -614,6 +657,8 @@ def _rebuild_combined(results_dir: Path) -> None:
                 "llm_decode_tok_per_j_mean": summ.get("decode_tok_per_j", {}).get("mean"),
                 "llm_prefill_j_per_tok_mean": summ.get("prefill_j_per_tok", {}).get("mean"),
                 "llm_decode_j_per_tok_mean": summ.get("decode_j_per_tok", {}).get("mean"),
+                "avg_temperature_c": payload.get("device", {}).get("avg_temperature_c"),
+                "p99_temperature_c": payload.get("device", {}).get("p99_temperature_c"),
                 "vision_encode_ms_mean": vision_summ.get("vision_encode_ms", {}).get("mean"),
                 "vision_fps_mean": vision_summ.get("vision_fps", {}).get("mean"),
                 "vision_img_per_j_mean": vision_summ.get("vision_img_per_j", {}).get("mean"),
@@ -656,6 +701,8 @@ def _rebuild_combined(results_dir: Path) -> None:
     ttft = [float(r.get("llm_ttft_ms_mean") or 0.0) for r in llm_rows]
     vision_encode = [float(r.get("vision_encode_ms_mean") or 0.0) for r in llm_rows]
     vision_fps = [float(r.get("vision_fps_mean") or 0.0) for r in llm_rows]
+    avg_temp = [float(r.get("avg_temperature_c") or 0.0) for r in llm_rows]
+    p99_temp = [float(r.get("p99_temperature_c") or 0.0) for r in llm_rows]
     llm_prefill_tpj = [float(r.get("llm_prefill_tok_per_j_mean") or 0.0) for r in llm_rows]
     llm_decode_tpj = [float(r.get("llm_decode_tok_per_j_mean") or 0.0) for r in llm_rows]
     llm_prefill_jpt = [float(r.get("llm_prefill_j_per_tok_mean") or 0.0) for r in llm_rows]
@@ -717,6 +764,28 @@ def _rebuild_combined(results_dir: Path) -> None:
     ax.grid(axis="x", linestyle="--", alpha=0.3)
     plt.tight_layout()
     fig.savefig(results_dir / "vision_fps.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), avg_temp)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("C")
+    ax.set_title("Average Temperature")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "avg_temperature_c.png", dpi=220)
+    plt.close(fig)
+    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
+    ax.barh(list(y), p99_temp)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(models)
+    ax.invert_yaxis()
+    ax.set_xlabel("C")
+    ax.set_title("P99 Temperature")
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(results_dir / "p99_temperature_c.png", dpi=220)
     plt.close(fig)
     fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
     ax.barh(list(y), llm_prefill_tpj)
@@ -974,9 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
     for model_id, revision, label, base, target_mxq_path in targets:
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append(
-                (model_id, revision, mode_label, mode_base, target_mxq_path, core_mode)
-            )
+            run_targets.append((model_id, revision, mode_label, mode_base, target_mxq_path, core_mode))
 
     for model_id, revision, label, base, target_mxq_path, core_mode in tqdm(
         run_targets,

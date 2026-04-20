@@ -67,6 +67,8 @@ class VLMCompareMetrics:
     total_energy_j: Optional[float]
     avg_utilization_pct: Optional[float]
     p99_utilization_pct: Optional[float]
+    avg_temperature_c: Optional[float]
+    p99_temperature_c: Optional[float]
     avg_memory_used_mb: Optional[float]
     p99_memory_used_mb: Optional[float]
     avg_memory_used_pct: Optional[float]
@@ -165,6 +167,8 @@ def _load_vlm_model_metrics(path: Path) -> Optional[tuple[str, VLMCompareMetrics
         total_energy_j=_as_float(device.get("total_energy_j")),
         avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
         p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+        avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+        p99_temperature_c=_as_float(device.get("p99_temperature_c")),
         avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
         p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
         avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
@@ -355,6 +359,24 @@ def main() -> int:
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_temperature_c,
+            title="Average Temperature",
+            x_label="Temperature (C)",
+            output_path=output_dir / "avg_temperature_c.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_temperature_c,
+            title="P99 Temperature",
+            x_label="Temperature (C)",
+            output_path=output_dir / "p99_temperature_c.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.avg_memory_used_mb,
             title="Average Memory Used",
             x_label="Memory (MB)",
@@ -531,6 +553,24 @@ def main() -> int:
             title="P99 Utilization",
             x_label="Utilization (%)",
             output_path=output_dir / "p99_utilization_pct.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.avg_temperature_c,
+            title="Average Temperature",
+            x_label="Temperature (C)",
+            output_path=output_dir / "avg_temperature_c.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.p99_temperature_c,
+            title="P99 Temperature",
+            x_label="Temperature (C)",
+            output_path=output_dir / "p99_temperature_c.png",
         )
         plot_scalar_chart(
             models=models,

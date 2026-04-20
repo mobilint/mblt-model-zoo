@@ -5,8 +5,8 @@ from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import torch
-from transformers import TextIteratorStreamer
 from tqdm.auto import tqdm
+from transformers import TextIteratorStreamer
 
 
 class TokenIteratorStreamer(TextIteratorStreamer):
@@ -55,6 +55,12 @@ class SingleMeasurement:
     prefill_p99_utilization_pct: Optional[float] = None
     decode_avg_utilization_pct: Optional[float] = None
     decode_p99_utilization_pct: Optional[float] = None
+    avg_temperature_c: Optional[float] = None
+    p99_temperature_c: Optional[float] = None
+    prefill_avg_temperature_c: Optional[float] = None
+    prefill_p99_temperature_c: Optional[float] = None
+    decode_avg_temperature_c: Optional[float] = None
+    decode_p99_temperature_c: Optional[float] = None
     avg_memory_used_mb: Optional[float] = None
     p99_memory_used_mb: Optional[float] = None
     prefill_avg_memory_used_mb: Optional[float] = None
@@ -716,7 +722,11 @@ class VLMTPSMeasurer:
 
         with torch.no_grad():
             t0 = time.perf_counter()
-            if "image_grid_thw" in inputs and hasattr(self.model, "model") and hasattr(self.model.model, "get_image_features"):
+            if (
+                "image_grid_thw" in inputs
+                and hasattr(self.model, "model")
+                and hasattr(self.model.model, "get_image_features")
+            ):
                 image_grid_thw = inputs["image_grid_thw"].to(self.model.device)
                 image_features = self.model.model.get_image_features(
                     pixel_values=pixel_values,

@@ -21,14 +21,11 @@ dependencies = [
     "torch>=2.4.1",
     "opencv-python>=4.11.0.86",
     "pillow>=11.1.0",
-    "setuptools>=70.0.0",
     "faster-coco-eval",
     "huggingface-hub",
     "scipy",
     "tqdm",
-    "wheel",
-    "nvidia-ml-py>=12.560.30",
-    "apscheduler>=3.11.2",
+    "mblt-tracker>=0.1.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -91,9 +88,6 @@ version = { attr = "mblt_model_zoo.__version__" }
     "MeloTTS/text/cmudict.rep",
     "MeloTTS/text/cmudict_cache.pickle"
 ]
-
-[tool.uv.sources]
-qbruntime = { path = "qbruntime-0.0.0+c0c8f4ec-cp310-cp310-manylinux_2_31_x86_64.whl" }
 
 [dependency-groups]
 dev = [
