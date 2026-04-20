@@ -31,7 +31,7 @@ pytest tests/transformers/text-generation
 Target a specific file to focus on one model family:
 
 ```bash
-pytest tests/transformers/image-text-to-text/test_aya.py
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py
 ```
 
 ## Run a Single Model Case
@@ -39,13 +39,13 @@ pytest tests/transformers/image-text-to-text/test_aya.py
 Many tests are parameterized over multiple `mobilint/*` model IDs. Use `-k` to run just one of those cases, e.g., the smallest Qwen variant inside the causal LM suite:
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
 ```
 
 Or you can just write the part of the model name.
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "0.5B"
 ```
 
 ## Sweep Core Modes
@@ -53,7 +53,7 @@ pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
 If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can sweep all supported runtime modes in one pytest invocation:
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py --core-mode all
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py --core-mode all
 ```
 
 Prefix-specific sweeps are also supported for multi-backend models:
