@@ -15,6 +15,7 @@ on:
 
 jobs:
   codex-review:
+    if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
     uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
     permissions:
       actions: write
