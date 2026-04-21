@@ -1,46 +1,38 @@
 from __future__ import annotations
 
-from argparse import ArgumentParser
-from typing import cast
-
-import transformers
 from transformers import HfArgumentParser
-from transformers.commands.chat import ChatCommand
 
-from .chat import register_mobilint_models
 from .melo import add_melo_parser
 from .melo_ui import add_melo_ui_parser
 from .tps import add_tps_parser
+from .transformers_compat import dispatch_transformers_cli, is_transformers_cli_command
 
 
 def build_parser() -> HfArgumentParser:
-    parser = HfArgumentParser(prog="mblt-model-zoo")
+    parser = HfArgumentParser(
+        prog="mblt-model-zoo",
+        description=(
+            "Mobilint CLI helpers. Upstream Transformers commands such as "
+            "`chat`, `serve`, `download`, `env`, and `version` are delegated "
+            "to the installed `transformers` package."
+        ),
+    )
     commands_parser = parser.add_subparsers(help="mblt-model-zoo command helpers")
 
     add_tps_parser(commands_parser)
     add_melo_parser(commands_parser)
     add_melo_ui_parser(commands_parser)
-    ChatCommand.register_subcommand(cast(ArgumentParser, commands_parser))
-    _set_subparser_help(commands_parser, "chat", "Transformers chat interface")
 
     return parser
-
-
-def _set_subparser_help(subparsers, name: str, help_text: str) -> None:
-    choices_actions = getattr(subparsers, "_choices_actions", [])
-    for action in choices_actions:
-        if getattr(action, "dest", None) == name:
-            action.help = help_text
-            return
-    pseudo_action_cls = getattr(type(subparsers), "_ChoicesPseudoAction", None)
-    if pseudo_action_cls is not None:
-        choices_actions.append(pseudo_action_cls(name, [], help_text))
 
 
 def main():
     # Click-based MeloTTS CLI needs to accept arbitrary options/args (including `--help`)
     # without argparse rejecting them, so we delegate early.
     import sys
+
+    if is_transformers_cli_command(sys.argv):
+        return dispatch_transformers_cli(sys.argv)
 
     if len(sys.argv) > 1 and sys.argv[1] in {"melo", "melotts"}:
         from .melo import _require_melotts_deps
@@ -61,18 +53,12 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    if hasattr(args, "func"):
-        register_mobilint_models(args, transformers)
-        service = args.func(args)
-        service.run()
-        exit(0)
-
     if hasattr(args, "_handler"):
-        exit(args._handler(args))
+        return args._handler(args)
 
     parser.print_help()
-    exit(1)
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
