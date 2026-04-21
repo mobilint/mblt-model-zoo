@@ -29,10 +29,10 @@ def test_main_delegates_transformers_cli_command(monkeypatch: pytest.MonkeyPatch
 
 def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     """Register Mobilint chat models before delegating local chat commands."""
-    calls: list[str] = []
+    calls: list[tuple[str, str | None]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append(args.model_name_or_path_or_address)
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
@@ -40,7 +40,42 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
         ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"]
     )
 
-    assert calls == ["mobilint/Llama-3.2-1B-Instruct"]
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", None)]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [
+            "mblt-model-zoo",
+            "chat",
+            "--model-revision",
+            "release/test-branch",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ],
+        [
+            "mblt-model-zoo",
+            "chat",
+            "--model_revision=release/test-branch",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ],
+    ],
+)
+def test_registers_mobilint_chat_model_with_requested_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    """Preserve the requested chat revision when registering Mobilint models."""
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(argv)
+
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
 
 
 @pytest.mark.parametrize(
@@ -56,6 +91,14 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
         ),
         (
             ["mblt-model-zoo", "chat", "--dtype", "float16", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            ["mblt-model-zoo", "chat", "--max_new_tokens", "128", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            ["mblt-model-zoo", "chat", "--temperature", "0.7", "mobilint/Llama-3.2-1B-Instruct"],
             "mobilint/Llama-3.2-1B-Instruct",
         ),
         (
@@ -77,6 +120,31 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
                 "mblt-model-zoo",
                 "chat",
                 "--model-name-or-path=mobilint/Llama-3.2-1B-Instruct",
+            ],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            [
+                "mblt-model-zoo",
+                "chat",
+                "--model-name-or-path",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--future-value-option",
+                "custom-template.jinja",
+            ],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            ["mblt-model-zoo", "chat", "--future-boolean-flag", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            [
+                "mblt-model-zoo",
+                "chat",
+                "--future-boolean-flag",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "max_new_tokens=128",
             ],
             "mobilint/Llama-3.2-1B-Instruct",
         ),
