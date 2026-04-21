@@ -150,10 +150,10 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     fake_serve_module = ModuleType("transformers.cli.serve")
     fake_serve_module.Serve = _FakeServe
 
-    calls: list[str] = []
+    calls: list[tuple[str, str | None]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append(args.model_name_or_path_or_address)
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -175,7 +175,7 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     result = service._load_model_and_data_processor("mobilint/Llama-3.2-1B-Instruct@main")
 
     assert wrapped_loader is _FakeServe._load_model_and_data_processor
-    assert calls == ["mobilint/Llama-3.2-1B-Instruct"]
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "main")]
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
 
 
@@ -223,10 +223,10 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
     fake_serve_module.ServeCommand = _FakeServe
     fake_serve_module.transformers = object()
 
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[str, str | None, Any]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, transformers_module))
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -246,8 +246,8 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", transformers_compat.transformers),
-        ("mobilint/Llama-3.2-1B-Instruct", fake_serve_module.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", fake_serve_module.transformers),
     ]
 
 
@@ -271,10 +271,10 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
     fake_model_manager_module.ModelManager = _FakeModelManager
     fake_model_manager_module.transformers = object()
 
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[str, str | None, Any]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, transformers_module))
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -298,8 +298,26 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", transformers_compat.transformers),
-        ("mobilint/Llama-3.2-1B-Instruct", fake_model_manager_module.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", fake_model_manager_module.transformers),
+    ]
+
+
+def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the requested revision when registering serve models."""
+    calls: list[tuple[str, str | None, Any]] = []
+    extra_transformers = object()
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._register_mobilint_model_for_modules("mobilint/demo-model@dev", extra_transformers)
+
+    assert calls == [
+        ("mobilint/demo-model", "dev", transformers_compat.transformers),
+        ("mobilint/demo-model", "dev", extra_transformers),
     ]
 
 

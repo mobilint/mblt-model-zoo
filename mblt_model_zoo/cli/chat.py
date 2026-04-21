@@ -2,8 +2,10 @@ from argparse import Namespace
 
 
 def register_mobilint_models(args: Namespace, transformers):
+    revision = getattr(args, "model_revision", None)
     config = transformers.AutoConfig.from_pretrained(
         args.model_name_or_path_or_address,
+        revision=revision,
         trust_remote_code=True,
     )
 

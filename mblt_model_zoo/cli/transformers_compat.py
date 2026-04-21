@@ -161,8 +161,11 @@ def _install_registration_wrapper(target_cls: type, method_name: str, extra_tran
 
 
 def _register_mobilint_model_for_modules(model_id_and_revision: str, extra_transformers: object) -> None:
-    model_name_or_path_or_address = model_id_and_revision.split("@", 1)[0]
-    args = SimpleNamespace(model_name_or_path_or_address=model_name_or_path_or_address)
+    model_name_or_path_or_address, model_revision = _split_model_id_and_revision(model_id_and_revision)
+    args = SimpleNamespace(
+        model_name_or_path_or_address=model_name_or_path_or_address,
+        model_revision=model_revision,
+    )
     register_mobilint_models(args, transformers)
     if extra_transformers is not transformers:
         register_mobilint_models(args, extra_transformers)
@@ -174,6 +177,13 @@ def _get_transformers_serve_module_name() -> str:
     if _has_module("transformers.commands.serving"):
         return "transformers.commands.serving"
     return "transformers.commands.serve"
+
+
+def _split_model_id_and_revision(model_id_and_revision: str) -> tuple[str, str | None]:
+    model_name_or_path_or_address, separator, model_revision = model_id_and_revision.partition("@")
+    if not separator:
+        return model_name_or_path_or_address, None
+    return model_name_or_path_or_address, model_revision
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:
