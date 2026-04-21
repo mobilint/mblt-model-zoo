@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
 
@@ -197,10 +198,51 @@ def _get_transformers_serve_module_name() -> str:
 
 
 def _split_model_id_and_revision(model_id_and_revision: str) -> tuple[str, str | None]:
+    """Split inline revisions only for clear Hub-style model identifiers."""
     model_name_or_path_or_address, separator, model_revision = model_id_and_revision.partition("@")
     if not separator:
         return model_name_or_path_or_address, None
+    if not _looks_like_hub_model_id_with_revision(
+        model_id_and_revision,
+        model_name_or_path_or_address,
+        model_revision,
+    ):
+        return model_id_and_revision, None
     return model_name_or_path_or_address, model_revision
+
+
+def _looks_like_hub_model_id_with_revision(
+    model_id_and_revision: str,
+    model_name_or_path_or_address: str,
+    model_revision: str,
+) -> bool:
+    """Return whether the value clearly matches Hub `model_id@revision` syntax."""
+    if not model_name_or_path_or_address or not model_revision:
+        return False
+    if _looks_like_local_model_path(model_id_and_revision):
+        return False
+    if model_name_or_path_or_address.count("/") > 1:
+        return False
+    return True
+
+
+def _looks_like_local_model_path(value: str) -> bool:
+    """Return whether the value clearly points to a local filesystem path."""
+    if value.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\", "\\\\", "//")):
+        return True
+    if value.endswith(("/", "\\")):
+        return True
+    if "\\" in value or _looks_like_windows_drive_path(value):
+        return True
+    try:
+        return Path(value).expanduser().exists()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _looks_like_windows_drive_path(value: str) -> bool:
+    """Return whether the value looks like a Windows drive-qualified path."""
+    return len(value) >= 2 and value[0].isalpha() and value[1] == ":"
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -57,6 +58,23 @@ def test_registers_mobilint_chat_model_with_inline_revision(monkeypatch: pytest.
     transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model@dev"])
 
     assert calls == [("mobilint/demo-model", "dev")]
+
+
+@pytest.mark.parametrize(
+    ("model_id_and_revision", "expected"),
+    [
+        ("/models/mobilint@2026/", ("/models/mobilint@2026/", None)),
+        ("./models/mobilint@2026", ("./models/mobilint@2026", None)),
+        (r"C:\models\mobilint@2026", (r"C:\models\mobilint@2026", None)),
+        ("folder/sub/model@dev", ("folder/sub/model@dev", None)),
+    ],
+)
+def test_split_model_id_and_revision_preserves_path_like_values(
+    model_id_and_revision: str,
+    expected: tuple[str, str | None],
+) -> None:
+    """Keep `@` in local or path-like values instead of treating it as a revision delimiter."""
+    assert transformers_compat._split_model_id_and_revision(model_id_and_revision) == expected
 
 
 @pytest.mark.parametrize(
@@ -116,6 +134,26 @@ def test_explicit_chat_revision_overrides_inline_revision(monkeypatch: pytest.Mo
     )
 
     assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
+
+
+def test_registers_mobilint_chat_model_with_existing_local_path_containing_at(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preserve existing local chat paths that contain `@`."""
+    calls: list[tuple[str, str | None]] = []
+    local_model_path = tmp_path / "mobilint@2026"
+    local_model_path.mkdir()
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", str(local_model_path)])
+
+    assert calls == [(str(local_model_path), None)]
 
 
 def test_skips_mobilint_chat_registration_for_v5_chat_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -447,6 +485,29 @@ def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pyt
     assert calls == [
         ("mobilint/demo-model", "dev", transformers_compat.transformers),
         ("mobilint/demo-model", "dev", extra_transformers),
+    ]
+
+
+def test_register_mobilint_model_for_modules_preserves_existing_local_path_with_at(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep `@` in existing local serve paths instead of treating it as a revision."""
+    calls: list[tuple[str, str | None, Any]] = []
+    extra_transformers = object()
+    local_model_path = tmp_path / "mobilint@2026"
+    local_model_path.mkdir()
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._register_mobilint_model_for_modules(str(local_model_path), extra_transformers)
+
+    assert calls == [
+        (str(local_model_path), None, transformers_compat.transformers),
+        (str(local_model_path), None, extra_transformers),
     ]
 
 
