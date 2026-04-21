@@ -80,11 +80,10 @@ def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
 
 
 def _install_transformers_serve_registration_hook() -> None:
-    serve_module_name = (
-        "transformers.cli.serve" if _has_module("transformers.cli.serve") else "transformers.commands.serve"
-    )
+    serve_module_name = _get_transformers_serve_module_name()
     serve_module = importlib.import_module(serve_module_name)
     serve_cls = serve_module.Serve if hasattr(serve_module, "Serve") else serve_module.ServeCommand
+    serve_transformers = getattr(serve_module, "transformers", transformers)
 
     if getattr(serve_cls, "_mblt_registration_hook_installed", False):
         return
@@ -93,14 +92,22 @@ def _install_transformers_serve_registration_hook() -> None:
 
     def _wrapped_load_model_and_data_processor(self, model_id_and_revision: str):
         model_name_or_path_or_address = model_id_and_revision.split("@", 1)[0]
-        register_mobilint_models(
-            SimpleNamespace(model_name_or_path_or_address=model_name_or_path_or_address),
-            transformers,
-        )
+        args = SimpleNamespace(model_name_or_path_or_address=model_name_or_path_or_address)
+        register_mobilint_models(args, transformers)
+        if serve_transformers is not transformers:
+            register_mobilint_models(args, serve_transformers)
         return original_load(self, model_id_and_revision)
 
     serve_cls._load_model_and_data_processor = _wrapped_load_model_and_data_processor
     serve_cls._mblt_registration_hook_installed = True
+
+
+def _get_transformers_serve_module_name() -> str:
+    if _has_module("transformers.cli.serve"):
+        return "transformers.cli.serve"
+    if _has_module("transformers.commands.serving"):
+        return "transformers.commands.serving"
+    return "transformers.commands.serve"
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:

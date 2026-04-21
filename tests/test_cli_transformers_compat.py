@@ -111,6 +111,49 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
 
 
+def test_install_transformers_serve_registration_hook_registers_separate_serve_transformers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Register Mobilint architectures on both top-level and serve-local Transformers modules."""
+
+    class _FakeServe:
+        _mblt_registration_hook_installed = False
+
+        def _load_model_and_data_processor(self, model_id_and_revision: str) -> tuple[str, str]:
+            return ("loaded", model_id_and_revision)
+
+    fake_serve_module = ModuleType("transformers.commands.serving")
+    fake_serve_module.ServeCommand = _FakeServe
+    fake_serve_module.transformers = object()
+
+    calls: list[tuple[str, Any]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, transformers_module))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_has_module",
+        lambda module_name: module_name == "transformers.commands.serving",
+    )
+    monkeypatch.setattr(
+        transformers_compat.importlib,
+        "import_module",
+        lambda module_name: fake_serve_module,
+    )
+
+    transformers_compat._install_transformers_serve_registration_hook()
+    service = _FakeServe()
+    result = service._load_model_and_data_processor("mobilint/Llama-3.2-1B-Instruct@main")
+
+    assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
+    assert calls == [
+        ("mobilint/Llama-3.2-1B-Instruct", transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", fake_serve_module.transformers),
+    ]
+
+
 def test_dispatch_transformers_cli_prefers_v5_entrypoint_and_restores_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
