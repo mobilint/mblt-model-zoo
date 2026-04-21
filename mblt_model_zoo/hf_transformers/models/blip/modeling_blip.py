@@ -7,7 +7,6 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import (
     AutoModel,
     AutoModelForImageTextToText,
-    AutoModelForVision2Seq,
 )
 from transformers.models.blip.modeling_blip import (
     BlipForConditionalGenerationModelOutput,
@@ -131,7 +130,9 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
                 .to(image_embeds.device)
             ))
 
-        input_ids[:, 0] = self.config.text_config.bos_token_id if self.config.text_config.bos_token_id is not None else 0
+        input_ids[:, 0] = (
+            self.config.text_config.bos_token_id if self.config.text_config.bos_token_id is not None else 0
+        )
 
         outputs = self.text_decoder.generate(
             input_ids=input_ids[:, :-1],
@@ -146,5 +147,4 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
         return outputs
 
 AutoModel.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
-AutoModelForVision2Seq.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
