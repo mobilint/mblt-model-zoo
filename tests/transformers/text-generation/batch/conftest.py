@@ -12,7 +12,11 @@ from transformers import AutoTokenizer, pipeline
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from utils import BatchTextStreamer  # noqa: E402
 
-from tests.npu_backend_options import BaseNpuParams
+from tests.npu_backend_options import (
+    BaseNpuParams,
+    build_base_npu_params,
+    validate_single_only_core_mode,
+)
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -25,6 +29,20 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         return
 
     metafunc.parametrize("pipe", model_paths, indirect=True, ids=list(model_paths), scope="module")
+
+
+@pytest.fixture(scope="module")
+def base_npu_params(
+    request: pytest.FixtureRequest,
+    embedding_weight: Optional[str],
+) -> BaseNpuParams:
+    """Return base backend kwargs for batch suites, forcing single-core execution."""
+    validate_single_only_core_mode(request.config, suite_name="Batch text-generation tests")
+    return build_base_npu_params(
+        request.config,
+        embedding_weight,
+        core_mode_override="single",
+    )
 
 
 @pytest.fixture(scope="module")
