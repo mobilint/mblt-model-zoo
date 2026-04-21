@@ -12,7 +12,7 @@ pip install -e ".[transformers]" --group dev
 
 ## Run All Tests
 
-Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`:
+Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`. Batch text-generation suites are the exception and always run with `single` because batched LLM execution does not support other core modes:
 
 ```bash
 pytest tests/transformers
@@ -56,6 +56,8 @@ If a model family can run the same `.mxq` across `single`, `global4`, and `globa
 pytest tests/transformers/text-generation/non_batch/test_qwen2.py --core-mode all
 ```
 
+Batch text-generation tests do not participate in this sweep. They always run with `single`. The repository-wide default `--core-mode all` is accepted and folded into `single` for these suites, while explicit `global4` or `global8` values raise a usage error.
+
 Prefix-specific sweeps are also supported for multi-backend models:
 
 ```bash
@@ -71,6 +73,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --dev-no=DEV_NO       NPU device number.
   --core-mode=CORE_MODE
                         NPU core mode (default: all=single/global4/global8).
+                        Batch text-generation tests only accept `single`.
   --target-cores=TARGET_CORES
                         Target cores (e.g., "0:0;0:1;0:2;0:3").
   --target-clusters=TARGET_CLUSTERS
