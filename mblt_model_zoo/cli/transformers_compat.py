@@ -41,6 +41,7 @@ CHAT_OPTIONS_WITH_REQUIRED_VALUE = frozenset(
         "--model_revision",
         "--model-revision",
         "--device",
+        "--dtype",
         "--torch_dtype",
         "--torch-dtype",
         "--attn_implementation",

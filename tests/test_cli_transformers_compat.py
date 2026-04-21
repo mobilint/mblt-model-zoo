@@ -55,6 +55,10 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
             "mobilint/Llama-3.2-1B-Instruct",
         ),
         (
+            ["mblt-model-zoo", "chat", "--dtype", "float16", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
             ["mblt-model-zoo", "chat", "--model-name-or-path", "mobilint/Llama-3.2-1B-Instruct"],
             "mobilint/Llama-3.2-1B-Instruct",
         ),
