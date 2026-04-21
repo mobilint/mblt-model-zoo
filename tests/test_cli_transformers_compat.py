@@ -43,6 +43,20 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
     assert calls == [("mobilint/Llama-3.2-1B-Instruct", None)]
 
 
+def test_registers_mobilint_chat_model_with_inline_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Split inline chat revisions before registering Mobilint models."""
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model@dev"])
+
+    assert calls == [("mobilint/demo-model", "dev")]
+
+
 @pytest.mark.parametrize(
     "argv",
     [
@@ -74,6 +88,28 @@ def test_registers_mobilint_chat_model_with_requested_revision(
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(argv)
+
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
+
+
+def test_explicit_chat_revision_overrides_inline_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prefer explicit chat revision flags over inline model revisions during registration."""
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(
+        [
+            "mblt-model-zoo",
+            "chat",
+            "--model-revision",
+            "release/test-branch",
+            "mobilint/Llama-3.2-1B-Instruct@dev",
+        ]
+    )
 
     assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
 

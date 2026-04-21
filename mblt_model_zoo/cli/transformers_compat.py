@@ -120,6 +120,9 @@ def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
     model_name_or_path_or_address, is_remote, model_revision = _extract_chat_model_registration_target(argv[2:])
     if model_name_or_path_or_address is None or is_remote:
         return
+    model_name_or_path_or_address, inline_model_revision = _split_model_id_and_revision(model_name_or_path_or_address)
+    if model_revision is None:
+        model_revision = inline_model_revision
 
     register_mobilint_models(
         SimpleNamespace(
