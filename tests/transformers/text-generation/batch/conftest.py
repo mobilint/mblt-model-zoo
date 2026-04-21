@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, pipeline
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from utils import BatchTextStreamer  # noqa: E402
 
-from tests.npu_backend_options import build_base_npu_params, validate_single_only_core_mode
+from tests.npu_backend_options import BaseNpuParams
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -28,15 +28,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 
 @pytest.fixture(scope="module")
-def pipe(request: pytest.FixtureRequest, revision: Optional[str], embedding_weight: Optional[str]):
+def pipe(
+    request: pytest.FixtureRequest,
+    revision: Optional[str],
+    base_npu_params: BaseNpuParams,
+):
     """Create a batch-capable text-generation pipeline for the parametrized model."""
     model_path = request.param
-    validate_single_only_core_mode(request.config, suite_name="Batch text-generation tests")
-    model_kwargs = build_base_npu_params(
-        request.config,
-        embedding_weight,
-        core_mode_override="single",
-    ).base
+    model_kwargs = base_npu_params.base
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
     if tokenizer.pad_token_id is None:
