@@ -112,9 +112,16 @@ def _prepare_transformers_cli(argv: Sequence[str]) -> None:
         _install_transformers_serve_registration_hook()
 
 
+def _should_register_mobilint_chat_model() -> bool:
+    """Return whether delegated chat still needs local Mobilint registration."""
+    return not _has_module("transformers.cli.chat")
+
+
 def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
     """Register local Mobilint chat models before delegating to the upstream CLI."""
     if len(argv) <= 2 or argv[1] != "chat":
+        return
+    if not _should_register_mobilint_chat_model():
         return
 
     model_name_or_path_or_address, is_remote, model_revision = _extract_chat_model_registration_target(argv[2:])

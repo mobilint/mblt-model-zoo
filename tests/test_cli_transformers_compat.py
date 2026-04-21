@@ -34,6 +34,7 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(
@@ -50,6 +51,7 @@ def test_registers_mobilint_chat_model_with_inline_revision(monkeypatch: pytest.
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model@dev"])
@@ -85,6 +87,7 @@ def test_registers_mobilint_chat_model_with_requested_revision(
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(argv)
@@ -99,6 +102,7 @@ def test_explicit_chat_revision_overrides_inline_revision(monkeypatch: pytest.Mo
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(
@@ -112,6 +116,25 @@ def test_explicit_chat_revision_overrides_inline_revision(monkeypatch: pytest.Mo
     )
 
     assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
+
+
+def test_skips_mobilint_chat_registration_for_v5_chat_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid local registration when delegated chat is a client-only v5 command."""
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+
+    monkeypatch.setattr(
+        transformers_compat,
+        "_has_module",
+        lambda module_name: module_name == "transformers.cli.chat",
+    )
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model"])
+
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -209,6 +232,7 @@ def test_skips_mobilint_chat_registration_for_remote_endpoint(
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append(args.model_name_or_path_or_address)
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(argv)
@@ -233,6 +257,7 @@ def test_skips_mobilint_chat_registration_for_v5_remote_endpoint(
     def _fake_register(args: Any, transformers_module: Any) -> None:
         calls.append(args.model_name_or_path_or_address)
 
+    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._maybe_register_mobilint_chat_model(argv)
