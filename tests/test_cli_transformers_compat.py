@@ -60,6 +60,17 @@ def test_registers_mobilint_chat_model_with_inline_revision(monkeypatch: pytest.
     assert calls == [("mobilint/demo-model", "dev")]
 
 
+def test_split_model_id_and_revision_splits_canonicalized_existing_local_paths(tmp_path: Path) -> None:
+    """Split the last `@revision` suffix when the prefix is an existing local path."""
+    local_model_path = tmp_path / "mobilint@2026"
+    local_model_path.mkdir()
+
+    assert transformers_compat._split_model_id_and_revision(f"{local_model_path}@main") == (
+        str(local_model_path),
+        "main",
+    )
+
+
 @pytest.mark.parametrize(
     ("model_id_and_revision", "expected"),
     [
@@ -485,6 +496,29 @@ def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pyt
     assert calls == [
         ("mobilint/demo-model", "dev", transformers_compat.transformers),
         ("mobilint/demo-model", "dev", extra_transformers),
+    ]
+
+
+def test_register_mobilint_model_for_modules_splits_canonicalized_existing_local_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Use the existing local path prefix when serve passes `path@revision`."""
+    calls: list[tuple[str, str | None, Any]] = []
+    extra_transformers = object()
+    local_model_path = tmp_path / "mobilint@2026"
+    local_model_path.mkdir()
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._register_mobilint_model_for_modules(f"{local_model_path}@main", extra_transformers)
+
+    assert calls == [
+        (str(local_model_path), "main", transformers_compat.transformers),
+        (str(local_model_path), "main", extra_transformers),
     ]
 
 

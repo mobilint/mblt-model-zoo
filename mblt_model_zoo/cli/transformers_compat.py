@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Sequence
 
 import transformers
+from huggingface_hub.errors import HFValidationError
+from huggingface_hub.utils import validate_repo_id
 
 from .chat import register_mobilint_models
 
@@ -198,30 +200,39 @@ def _get_transformers_serve_module_name() -> str:
 
 
 def _split_model_id_and_revision(model_id_and_revision: str) -> tuple[str, str | None]:
-    """Split inline revisions only for clear Hub-style model identifiers."""
-    model_name_or_path_or_address, separator, model_revision = model_id_and_revision.partition("@")
-    if not separator:
-        return model_name_or_path_or_address, None
-    if not _looks_like_hub_model_id_with_revision(
-        model_id_and_revision,
-        model_name_or_path_or_address,
-        model_revision,
-    ):
+    """Split Hub and canonicalized local refs into a model reference plus revision."""
+    if "@" not in model_id_and_revision:
         return model_id_and_revision, None
-    return model_name_or_path_or_address, model_revision
+    if _existing_local_model_path(model_id_and_revision) is not None:
+        return model_id_and_revision, None
 
+    model_name_or_path_or_address, separator, model_revision = model_id_and_revision.rpartition("@")
+    if not separator or not model_name_or_path_or_address or not model_revision:
+        return model_id_and_revision, None
 
-def _looks_like_hub_model_id_with_revision(
-    model_id_and_revision: str,
-    model_name_or_path_or_address: str,
-    model_revision: str,
-) -> bool:
-    """Return whether the value clearly matches Hub `model_id@revision` syntax."""
-    if not model_name_or_path_or_address or not model_revision:
-        return False
+    if _existing_local_model_path(model_name_or_path_or_address) is not None:
+        return model_name_or_path_or_address, model_revision
     if _looks_like_local_model_path(model_id_and_revision):
-        return False
-    if model_name_or_path_or_address.count("/") > 1:
+        return model_id_and_revision, None
+    if _is_valid_hub_model_id(model_name_or_path_or_address):
+        return model_name_or_path_or_address, model_revision
+    return model_id_and_revision, None
+
+
+def _existing_local_model_path(value: str) -> Path | None:
+    """Return the expanded local path when it exists on disk."""
+    try:
+        path = Path(value).expanduser()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return path if path.exists() else None
+
+
+def _is_valid_hub_model_id(value: str) -> bool:
+    """Return whether the value is a valid Hugging Face repo ID."""
+    try:
+        validate_repo_id(value)
+    except HFValidationError:
         return False
     return True
 
@@ -234,10 +245,7 @@ def _looks_like_local_model_path(value: str) -> bool:
         return True
     if "\\" in value or _looks_like_windows_drive_path(value):
         return True
-    try:
-        return Path(value).expanduser().exists()
-    except (OSError, RuntimeError, ValueError):
-        return False
+    return value.count("/") > 1
 
 
 def _looks_like_windows_drive_path(value: str) -> bool:
