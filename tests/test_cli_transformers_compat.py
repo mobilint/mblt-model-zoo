@@ -111,6 +111,35 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
 
 
+@pytest.mark.parametrize(
+    ("argv", "expect_hook"),
+    [
+        (["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"], False),
+        (["mblt-model-zoo", "env"], False),
+        (["mblt-model-zoo", "version"], False),
+        (["mblt-model-zoo", "serve", "mobilint/Llama-3.2-1B-Instruct"], True),
+    ],
+)
+def test_prepare_transformers_cli_installs_serve_hook_only_for_serve(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    expect_hook: bool,
+) -> None:
+    """Only touch the serving stack when delegating the serve subcommand."""
+    install_calls = 0
+
+    def _fake_install_hook() -> None:
+        nonlocal install_calls
+        install_calls += 1
+
+    monkeypatch.setattr(transformers_compat, "_maybe_register_mobilint_chat_model", lambda argv: None)
+    monkeypatch.setattr(transformers_compat, "_install_transformers_serve_registration_hook", _fake_install_hook)
+
+    transformers_compat._prepare_transformers_cli(argv)
+
+    assert install_calls == int(expect_hook)
+
+
 def test_install_transformers_serve_registration_hook_registers_separate_serve_transformers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

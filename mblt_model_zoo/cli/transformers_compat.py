@@ -62,7 +62,8 @@ def _has_module(module_name: str) -> bool:
 
 def _prepare_transformers_cli(argv: Sequence[str]) -> None:
     _maybe_register_mobilint_chat_model(argv)
-    _install_transformers_serve_registration_hook()
+    if len(argv) > 1 and argv[1] == "serve":
+        _install_transformers_serve_registration_hook()
 
 
 def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
