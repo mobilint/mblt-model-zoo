@@ -28,36 +28,20 @@ def test_main_delegates_transformers_cli_command(monkeypatch: pytest.MonkeyPatch
     assert cli_main_module.main() == 7
 
 
-def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Register Mobilint chat models before delegating local chat commands."""
-    calls: list[tuple[str, str | None]] = []
+@pytest.mark.parametrize(
+    ("module_name", "expected"),
+    [
+        ("transformers.commands.chat", True),
+        ("transformers.cli.chat", False),
+    ],
+)
+def test_chat_uses_transformers_serve_backend(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, expected: bool
+) -> None:
+    """Use the serve registration hook only for legacy chat implementations."""
+    monkeypatch.setattr(transformers_compat, "_has_module_spec", lambda name: name == module_name)
 
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(
-        ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"]
-    )
-
-    assert calls == [("mobilint/Llama-3.2-1B-Instruct", None)]
-
-
-def test_registers_mobilint_chat_model_with_inline_revision(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Split inline chat revisions before registering Mobilint models."""
-    calls: list[tuple[str, str | None]] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model@dev"])
-
-    assert calls == [("mobilint/demo-model", "dev")]
+    assert transformers_compat._chat_uses_transformers_serve_backend() is expected
 
 
 def test_split_model_id_and_revision_splits_canonicalized_existing_local_paths(tmp_path: Path) -> None:
@@ -86,232 +70,6 @@ def test_split_model_id_and_revision_preserves_path_like_values(
 ) -> None:
     """Keep `@` in local or path-like values instead of treating it as a revision delimiter."""
     assert transformers_compat._split_model_id_and_revision(model_id_and_revision) == expected
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        [
-            "mblt-model-zoo",
-            "chat",
-            "--model-revision",
-            "release/test-branch",
-            "mobilint/Llama-3.2-1B-Instruct",
-        ],
-        [
-            "mblt-model-zoo",
-            "chat",
-            "--model_revision=release/test-branch",
-            "mobilint/Llama-3.2-1B-Instruct",
-        ],
-    ],
-)
-def test_registers_mobilint_chat_model_with_requested_revision(
-    monkeypatch: pytest.MonkeyPatch,
-    argv: list[str],
-) -> None:
-    """Preserve the requested chat revision when registering Mobilint models."""
-    calls: list[tuple[str, str | None]] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(argv)
-
-    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
-
-
-def test_explicit_chat_revision_overrides_inline_revision(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prefer explicit chat revision flags over inline model revisions during registration."""
-    calls: list[tuple[str, str | None]] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(
-        [
-            "mblt-model-zoo",
-            "chat",
-            "--model-revision",
-            "release/test-branch",
-            "mobilint/Llama-3.2-1B-Instruct@dev",
-        ]
-    )
-
-    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "release/test-branch")]
-
-
-def test_registers_mobilint_chat_model_with_existing_local_path_containing_at(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Preserve existing local chat paths that contain `@`."""
-    calls: list[tuple[str, str | None]] = []
-    local_model_path = tmp_path / "mobilint@2026"
-    local_model_path.mkdir()
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", str(local_model_path)])
-
-    assert calls == [(str(local_model_path), None)]
-
-
-def test_skips_mobilint_chat_registration_for_v5_chat_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Avoid local registration when delegated chat is a client-only v5 command."""
-    calls: list[tuple[str, str | None]] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
-
-    monkeypatch.setattr(
-        transformers_compat,
-        "_has_module",
-        lambda module_name: module_name == "transformers.cli.chat",
-    )
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(["mblt-model-zoo", "chat", "mobilint/demo-model"])
-
-    assert calls == []
-
-
-@pytest.mark.parametrize(
-    ("argv", "expected_model"),
-    [
-        (
-            ["mblt-model-zoo", "chat", "--user", "alice", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--user=alice", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--dtype", "float16", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--max_new_tokens", "128", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--temperature", "0.7", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--model-name-or-path", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            [
-                "mblt-model-zoo",
-                "chat",
-                "--model-name-or-path",
-                "ignored/by-positional",
-                "mobilint/Llama-3.2-1B-Instruct",
-            ],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            [
-                "mblt-model-zoo",
-                "chat",
-                "--model-name-or-path=mobilint/Llama-3.2-1B-Instruct",
-            ],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            [
-                "mblt-model-zoo",
-                "chat",
-                "--model-name-or-path",
-                "mobilint/Llama-3.2-1B-Instruct",
-                "--future-value-option",
-                "custom-template.jinja",
-            ],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            ["mblt-model-zoo", "chat", "--future-boolean-flag", "mobilint/Llama-3.2-1B-Instruct"],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-        (
-            [
-                "mblt-model-zoo",
-                "chat",
-                "--future-boolean-flag",
-                "mobilint/Llama-3.2-1B-Instruct",
-                "max_new_tokens=128",
-            ],
-            "mobilint/Llama-3.2-1B-Instruct",
-        ),
-    ],
-)
-def test_extract_chat_model_name_skips_option_values(argv: list[str], expected_model: str) -> None:
-    """Ignore chat option values while preserving explicit model options as fallback."""
-    assert transformers_compat._extract_chat_model_name(argv[2:]) == expected_model
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["mblt-model-zoo", "chat", "http://localhost:8000", "mobilint/Llama-3.2-1B-Instruct"],
-        ["mblt-model-zoo", "chat", "https://example.invalid/v1", "mobilint/Llama-3.2-1B-Instruct"],
-        ["mblt-model-zoo", "chat", "localhost:8000", "mobilint/Llama-3.2-1B-Instruct"],
-    ],
-)
-def test_skips_mobilint_chat_registration_for_remote_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-    argv: list[str],
-) -> None:
-    """Avoid local model registration when chat connects to a remote endpoint."""
-    calls: list[str] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append(args.model_name_or_path_or_address)
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(argv)
-
-    assert calls == []
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["mblt-model-zoo", "chat", "gpt-4o", "https://api.openai.com/v1"],
-        ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct", "https://api.openai.com/v1"],
-    ],
-)
-def test_skips_mobilint_chat_registration_for_v5_remote_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-    argv: list[str],
-) -> None:
-    """Avoid local model registration when chat uses the v5 model-id then remote-endpoint flow."""
-    calls: list[str] = []
-
-    def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append(args.model_name_or_path_or_address)
-
-    monkeypatch.setattr(transformers_compat, "_should_register_mobilint_chat_model", lambda: True)
-    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
-
-    transformers_compat._maybe_register_mobilint_chat_model(argv)
-
-    assert calls == []
 
 
 def test_install_transformers_serve_registration_hook_wraps_loader_once(
@@ -358,32 +116,66 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
 
 
 @pytest.mark.parametrize(
-    ("argv", "expect_hook"),
+    ("argv", "legacy_chat_backend", "expect_hook"),
     [
-        (["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"], False),
-        (["mblt-model-zoo", "env"], False),
-        (["mblt-model-zoo", "version"], False),
-        (["mblt-model-zoo", "serve", "mobilint/Llama-3.2-1B-Instruct"], True),
+        (["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"], True, True),
+        (["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct", "--help"], True, True),
+        (["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct"], False, False),
+        (["mblt-model-zoo", "env"], False, False),
+        (["mblt-model-zoo", "version"], False, False),
+        (["mblt-model-zoo", "serve", "mobilint/Llama-3.2-1B-Instruct"], False, True),
     ],
 )
-def test_prepare_transformers_cli_installs_serve_hook_only_for_serve(
+def test_prepare_transformers_cli_installs_serve_hook_only_when_model_loading_may_happen(
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str],
+    legacy_chat_backend: bool,
     expect_hook: bool,
 ) -> None:
-    """Only touch the serving stack when delegating the serve subcommand."""
+    """Only touch the serving stack for `serve` and legacy chat backends that may spawn it."""
     install_calls = 0
 
     def _fake_install_hook() -> None:
         nonlocal install_calls
         install_calls += 1
 
-    monkeypatch.setattr(transformers_compat, "_maybe_register_mobilint_chat_model", lambda argv: None)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_chat_uses_transformers_serve_backend",
+        lambda: legacy_chat_backend,
+    )
     monkeypatch.setattr(transformers_compat, "_install_transformers_serve_registration_hook", _fake_install_hook)
 
     transformers_compat._prepare_transformers_cli(argv)
 
     assert install_calls == int(expect_hook)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct", "--help"],
+        ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct", "--bad-option"],
+    ],
+)
+def test_prepare_transformers_cli_does_not_register_chat_models_during_help_or_parse_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    """Preparing delegated chat should not perform model registration before parsing succeeds."""
+    monkeypatch.setattr(transformers_compat, "_chat_uses_transformers_serve_backend", lambda: True)
+    monkeypatch.setattr(
+        transformers_compat,
+        "register_mobilint_models",
+        lambda *args, **kwargs: pytest.fail("chat preparation should not register models directly"),
+    )
+    monkeypatch.setattr(
+        transformers_compat,
+        "_install_transformers_serve_registration_hook",
+        lambda: None,
+    )
+
+    transformers_compat._prepare_transformers_cli(argv)
 
 
 def test_install_transformers_serve_registration_hook_registers_separate_serve_transformers(
