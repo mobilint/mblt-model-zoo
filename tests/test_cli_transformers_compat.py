@@ -44,6 +44,42 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize(
+    ("argv", "expected_model"),
+    [
+        (
+            ["mblt-model-zoo", "chat", "--user", "alice", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            ["mblt-model-zoo", "chat", "--model-name-or-path", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            [
+                "mblt-model-zoo",
+                "chat",
+                "--model-name-or-path",
+                "ignored/by-positional",
+                "mobilint/Llama-3.2-1B-Instruct",
+            ],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
+            [
+                "mblt-model-zoo",
+                "chat",
+                "--model-name-or-path=mobilint/Llama-3.2-1B-Instruct",
+            ],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+    ],
+)
+def test_extract_chat_model_name_skips_option_values(argv: list[str], expected_model: str) -> None:
+    """Ignore chat option values while preserving explicit model options as fallback."""
+    assert transformers_compat._extract_chat_model_name(argv[2:]) == expected_model
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["mblt-model-zoo", "chat", "http://localhost:8000", "mobilint/Llama-3.2-1B-Instruct"],

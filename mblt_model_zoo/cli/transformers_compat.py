@@ -25,6 +25,47 @@ TRANSFORMERS_CLI_COMMANDS = frozenset(
     }
 )
 
+CHAT_OPTIONS_WITH_REQUIRED_VALUE = frozenset(
+    {
+        "--model_name_or_path",
+        "--model-name-or-path",
+        "--user",
+        "--system_prompt",
+        "--system-prompt",
+        "--save_folder",
+        "--save-folder",
+        "--examples_path",
+        "--examples-path",
+        "--generation_config",
+        "--generation-config",
+        "--model_revision",
+        "--model-revision",
+        "--device",
+        "--torch_dtype",
+        "--torch-dtype",
+        "--attn_implementation",
+        "--attn-implementation",
+        "--bnb_4bit_quant_type",
+        "--bnb-4bit-quant-type",
+        "--host",
+        "--port",
+    }
+)
+CHAT_OPTIONS_WITH_OPTIONAL_VALUE = frozenset(
+    {
+        "--verbose",
+        "--trust_remote_code",
+        "--trust-remote-code",
+        "--load_in_8bit",
+        "--load-in-8bit",
+        "--load_in_4bit",
+        "--load-in-4bit",
+        "--use_bnb_nested_quant",
+        "--use-bnb-nested-quant",
+    }
+)
+CHAT_MODEL_OPTIONS = frozenset({"--model_name_or_path", "--model-name-or-path"})
+
 
 def is_transformers_cli_command(argv: Sequence[str]) -> bool:
     """Return whether the argv targets an upstream Transformers CLI command."""
@@ -134,13 +175,40 @@ def _get_transformers_serve_module_name() -> str:
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:
-    for token in argv:
+    index = 0
+    model_name_or_path: str | None = None
+
+    while index < len(argv):
+        token = argv[index]
         if token == "--":
             return None
+        if token.startswith("--"):
+            option_name, has_inline_value, option_value = token.partition("=")
+            if option_name in CHAT_MODEL_OPTIONS and has_inline_value:
+                model_name_or_path = option_value
+                index += 1
+                continue
+            if option_name in CHAT_OPTIONS_WITH_REQUIRED_VALUE:
+                if index + 1 >= len(argv):
+                    return model_name_or_path
+                if option_name in CHAT_MODEL_OPTIONS:
+                    model_name_or_path = argv[index + 1]
+                index += 2
+                continue
+            if option_name in CHAT_OPTIONS_WITH_OPTIONAL_VALUE:
+                if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                    index += 2
+                    continue
+                index += 1
+                continue
+            index += 1
+            continue
         if token.startswith("-"):
+            index += 1
             continue
         return token
-    return None
+
+    return model_name_or_path
 
 
 def _looks_like_remote_endpoint(value: str) -> bool:
