@@ -51,6 +51,10 @@ def test_registers_mobilint_chat_model_for_local_repo(monkeypatch: pytest.Monkey
             "mobilint/Llama-3.2-1B-Instruct",
         ),
         (
+            ["mblt-model-zoo", "chat", "--user=alice", "mobilint/Llama-3.2-1B-Instruct"],
+            "mobilint/Llama-3.2-1B-Instruct",
+        ),
+        (
             ["mblt-model-zoo", "chat", "--model-name-or-path", "mobilint/Llama-3.2-1B-Instruct"],
             "mobilint/Llama-3.2-1B-Instruct",
         ),
@@ -92,6 +96,30 @@ def test_skips_mobilint_chat_registration_for_remote_endpoint(
     argv: list[str],
 ) -> None:
     """Avoid local model registration when chat connects to a remote endpoint."""
+    calls: list[str] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append(args.model_name_or_path_or_address)
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+
+    transformers_compat._maybe_register_mobilint_chat_model(argv)
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["mblt-model-zoo", "chat", "gpt-4o", "https://api.openai.com/v1"],
+        ["mblt-model-zoo", "chat", "mobilint/Llama-3.2-1B-Instruct", "https://api.openai.com/v1"],
+    ],
+)
+def test_skips_mobilint_chat_registration_for_v5_remote_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    """Avoid local model registration when chat uses the v5 model-id then remote-endpoint flow."""
     calls: list[str] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:

@@ -65,6 +65,7 @@ CHAT_OPTIONS_WITH_OPTIONAL_VALUE = frozenset(
     }
 )
 CHAT_MODEL_OPTIONS = frozenset({"--model_name_or_path", "--model-name-or-path"})
+CHAT_BOOLEAN_OPTION_VALUES = frozenset({"0", "1", "false", "true", "no", "yes", "off", "on"})
 
 
 def is_transformers_cli_command(argv: Sequence[str]) -> bool:
@@ -111,8 +112,8 @@ def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
     if len(argv) <= 2 or argv[1] != "chat":
         return
 
-    model_name_or_path_or_address = _extract_chat_model_name(argv[2:])
-    if model_name_or_path_or_address is None or _looks_like_remote_endpoint(model_name_or_path_or_address):
+    model_name_or_path_or_address, is_remote = _extract_chat_model_name_and_remote(argv[2:])
+    if model_name_or_path_or_address is None or is_remote:
         return
 
     register_mobilint_models(
@@ -175,28 +176,41 @@ def _get_transformers_serve_module_name() -> str:
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:
+    return _extract_chat_model_name_and_remote(argv)[0]
+
+
+def _extract_chat_model_name_and_remote(argv: Sequence[str]) -> tuple[str | None, bool]:
     index = 0
     model_name_or_path: str | None = None
+    positional_tokens: list[str] = []
 
     while index < len(argv):
         token = argv[index]
         if token == "--":
-            return None
+            break
         if token.startswith("--"):
-            option_name, has_inline_value, option_value = token.partition("=")
-            if option_name in CHAT_MODEL_OPTIONS and has_inline_value:
+            option_name, separator, option_value = token.partition("=")
+            if option_name in CHAT_MODEL_OPTIONS and separator:
                 model_name_or_path = option_value
+                index += 1
+                continue
+            if option_name in CHAT_OPTIONS_WITH_REQUIRED_VALUE and separator:
+                if option_name in CHAT_MODEL_OPTIONS:
+                    model_name_or_path = option_value
                 index += 1
                 continue
             if option_name in CHAT_OPTIONS_WITH_REQUIRED_VALUE:
                 if index + 1 >= len(argv):
-                    return model_name_or_path
+                    break
                 if option_name in CHAT_MODEL_OPTIONS:
                     model_name_or_path = argv[index + 1]
                 index += 2
                 continue
             if option_name in CHAT_OPTIONS_WITH_OPTIONAL_VALUE:
-                if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                if separator:
+                    index += 1
+                    continue
+                if index + 1 < len(argv) and argv[index + 1].lower() in CHAT_BOOLEAN_OPTION_VALUES:
                     index += 2
                     continue
                 index += 1
@@ -206,9 +220,19 @@ def _extract_chat_model_name(argv: Sequence[str]) -> str | None:
         if token.startswith("-"):
             index += 1
             continue
-        return token
+        positional_tokens.append(token)
+        index += 1
 
-    return model_name_or_path
+    if positional_tokens:
+        model_name_or_path = positional_tokens[0]
+
+    is_remote = False
+    if positional_tokens:
+        is_remote = _looks_like_remote_endpoint(positional_tokens[0])
+    if len(positional_tokens) > 1 and _looks_like_remote_endpoint(positional_tokens[1]):
+        is_remote = True
+
+    return model_name_or_path, is_remote
 
 
 def _looks_like_remote_endpoint(value: str) -> bool:
