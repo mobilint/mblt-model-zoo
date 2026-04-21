@@ -33,7 +33,7 @@ def is_transformers_cli_command(argv: Sequence[str]) -> bool:
 
 def dispatch_transformers_cli(argv: Sequence[str]) -> int:
     """Delegate the active command to the installed Transformers CLI."""
-    _maybe_register_mobilint_chat_model(argv)
+    _prepare_transformers_cli(argv)
 
     module_name = "transformers.cli.transformers" if _has_module("transformers.cli.transformers") else (
         "transformers.commands.transformers_cli"
@@ -60,6 +60,11 @@ def _has_module(module_name: str) -> bool:
     return True
 
 
+def _prepare_transformers_cli(argv: Sequence[str]) -> None:
+    _maybe_register_mobilint_chat_model(argv)
+    _install_transformers_serve_registration_hook()
+
+
 def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
     if len(argv) <= 2 or argv[1] != "chat":
         return
@@ -72,6 +77,30 @@ def _maybe_register_mobilint_chat_model(argv: Sequence[str]) -> None:
         SimpleNamespace(model_name_or_path_or_address=model_name_or_path_or_address),
         transformers,
     )
+
+
+def _install_transformers_serve_registration_hook() -> None:
+    serve_module_name = (
+        "transformers.cli.serve" if _has_module("transformers.cli.serve") else "transformers.commands.serve"
+    )
+    serve_module = importlib.import_module(serve_module_name)
+    serve_cls = serve_module.Serve if hasattr(serve_module, "Serve") else serve_module.ServeCommand
+
+    if getattr(serve_cls, "_mblt_registration_hook_installed", False):
+        return
+
+    original_load = serve_cls._load_model_and_data_processor
+
+    def _wrapped_load_model_and_data_processor(self, model_id_and_revision: str):
+        model_name_or_path_or_address = model_id_and_revision.split("@", 1)[0]
+        register_mobilint_models(
+            SimpleNamespace(model_name_or_path_or_address=model_name_or_path_or_address),
+            transformers,
+        )
+        return original_load(self, model_id_and_revision)
+
+    serve_cls._load_model_and_data_processor = _wrapped_load_model_and_data_processor
+    serve_cls._mblt_registration_hook_installed = True
 
 
 def _extract_chat_model_name(argv: Sequence[str]) -> str | None:
