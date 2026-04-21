@@ -154,6 +154,58 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
     ]
 
 
+def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Register Mobilint architectures for the Transformers 5.5+ serving stack."""
+
+    class _FakeServe:
+        pass
+
+    class _FakeModelManager:
+        _mblt_registration_hook_installed_for_load_model_and_processor = False
+
+        def load_model_and_processor(self, model_id_and_revision: str, *args, **kwargs) -> tuple[str, str]:
+            return ("loaded", model_id_and_revision)
+
+    fake_serve_module = ModuleType("transformers.cli.serve")
+    fake_serve_module.Serve = _FakeServe
+    fake_model_manager_module = ModuleType("transformers.cli.serving.model_manager")
+    fake_model_manager_module.ModelManager = _FakeModelManager
+    fake_model_manager_module.transformers = object()
+
+    calls: list[tuple[str, Any]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append((args.model_name_or_path_or_address, transformers_module))
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_has_module",
+        lambda module_name: module_name in {"transformers.cli.serve", "transformers.cli.serving.model_manager"},
+    )
+
+    def _fake_import_module(module_name: str) -> ModuleType:
+        if module_name == "transformers.cli.serve":
+            return fake_serve_module
+        if module_name == "transformers.cli.serving.model_manager":
+            return fake_model_manager_module
+        raise AssertionError(f"unexpected module import: {module_name}")
+
+    monkeypatch.setattr(transformers_compat.importlib, "import_module", _fake_import_module)
+
+    transformers_compat._install_transformers_serve_registration_hook()
+    manager = _FakeModelManager()
+    result = manager.load_model_and_processor("mobilint/Llama-3.2-1B-Instruct@main")
+
+    assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
+    assert calls == [
+        ("mobilint/Llama-3.2-1B-Instruct", transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", fake_model_manager_module.transformers),
+    ]
+
+
 def test_dispatch_transformers_cli_prefers_v5_entrypoint_and_restores_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
