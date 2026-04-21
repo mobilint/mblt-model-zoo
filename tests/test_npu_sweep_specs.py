@@ -67,7 +67,7 @@ def test_encoder_override_does_not_force_decoder_core_mode():
         explicit_args=("--encoder-core-mode=global8",),
     )
 
-    specs = conftest._build_encoder_decoder_specs(config)
+    specs = conftest.build_encoder_decoder_specs(config)
 
     assert specs == [conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode=None)]
 
@@ -79,7 +79,7 @@ def test_decoder_uses_shared_core_mode_when_explicitly_provided():
         explicit_args=("--core-mode=global4", "--encoder-core-mode=global8"),
     )
 
-    specs = conftest._build_encoder_decoder_specs(config)
+    specs = conftest.build_encoder_decoder_specs(config)
 
     assert specs == [conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="global4")]
 
@@ -90,7 +90,7 @@ def test_vision_override_does_not_force_text_core_mode():
         explicit_args=("--vision-core-mode=global8",),
     )
 
-    specs = conftest._build_vision_text_specs(config)
+    specs = conftest.build_vision_text_specs(config)
 
     assert specs == [conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode=None)]
 
@@ -102,7 +102,7 @@ def test_text_uses_shared_core_mode_when_explicitly_provided():
         explicit_args=("--core-mode=single", "--vision-core-mode=global8"),
     )
 
-    specs = conftest._build_vision_text_specs(config)
+    specs = conftest.build_vision_text_specs(config)
 
     assert specs == [conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="single")]
 
@@ -113,7 +113,7 @@ def test_shared_encoder_decoder_all_stays_pairwise_aligned():
         explicit_args=("--core-mode=all",),
     )
 
-    specs = conftest._build_encoder_decoder_specs(config)
+    specs = conftest.build_encoder_decoder_specs(config)
 
     assert specs == [
         conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="single", decoder_core_mode="single"),
@@ -128,7 +128,7 @@ def test_shared_vision_text_all_stays_pairwise_aligned():
         explicit_args=("--core-mode=all",),
     )
 
-    specs = conftest._build_vision_text_specs(config)
+    specs = conftest.build_vision_text_specs(config)
 
     assert specs == [
         conftest.VisionTextNpuSweepSpec(vision_core_mode="single", text_core_mode="single"),
