@@ -22,6 +22,12 @@ from .modeling_blip_text import MobilintBlipTextLMHeadModel
 
 logger = logging.get_logger(__name__)
 
+try:
+    from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
+except ImportError:
+    AutoModelForVision2Seq = None
+
+
 class MobilintBlipPreTrainedModel(PreTrainedModel):
     config: MobilintBlipConfig
     base_model_prefix = "blip"
@@ -43,7 +49,7 @@ class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
 
         if interpolate_pos_encoding is True:
             logger.warning("interpolate_pos_encoding is not supported.")
-        
+
         last_hidden_state = self.mxq_forward(pixel_values).squeeze(2).permute((0, 2, 1))
 
         return BaseModelOutputWithPooling(
@@ -53,10 +59,10 @@ class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
 
 class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerationMixin, MobilintBlipPreTrainedModel):
     base_model_prefix = "model"
-    
+
     def __init__(self, config: MobilintBlipConfig, *args, **kwargs):
         PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
-        
+
         self.vision_model = MobilintBlipVisionModel(config.vision_config, _internal_call=True)
 
         self.text_decoder = MobilintBlipTextLMHeadModel(config.text_config, _internal_call=True)
@@ -66,7 +72,7 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
 
     def get_cache_mxq_model(self):
         return self.text_decoder.get_mxq_model()
-    
+
     def forward(
         self,
         pixel_values: torch.FloatTensor,
@@ -148,3 +154,5 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
 
 AutoModel.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
+if AutoModelForVision2Seq is not None:
+    AutoModelForVision2Seq.register(MobilintBlipConfig, MobilintBlipForConditionalGeneration)
