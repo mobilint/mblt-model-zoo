@@ -12,7 +12,7 @@ pip install -e ".[transformers]" --group dev
 
 ## Run All Tests
 
-Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`:
+Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`. Batch text-generation suites are the exception and always run with `single` because batched LLM execution does not support other core modes:
 
 ```bash
 pytest tests/transformers
@@ -31,7 +31,7 @@ pytest tests/transformers/text-generation
 Target a specific file to focus on one model family:
 
 ```bash
-pytest tests/transformers/image-text-to-text/test_aya.py
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py
 ```
 
 ## Run a Single Model Case
@@ -39,13 +39,13 @@ pytest tests/transformers/image-text-to-text/test_aya.py
 Many tests are parameterized over multiple `mobilint/*` model IDs. Use `-k` to run just one of those cases, e.g., the smallest Qwen variant inside the causal LM suite:
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
 ```
 
 Or you can just write the part of the model name.
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "0.5B"
 ```
 
 ## Sweep Core Modes
@@ -53,8 +53,10 @@ pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
 If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can sweep all supported runtime modes in one pytest invocation:
 
 ```bash
-pytest tests/transformers/text-generation/test_qwen2.py --core-mode all
+pytest tests/transformers/text-generation/non_batch/test_qwen2.py --core-mode all
 ```
+
+Batch text-generation tests do not participate in this sweep. They always run with `single`. The repository-wide default `--core-mode all` is accepted and folded into `single` for these suites, while explicit `global4` or `global8` values raise a usage error.
 
 Prefix-specific sweeps are also supported for multi-backend models:
 
@@ -71,6 +73,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --dev-no=DEV_NO       NPU device number.
   --core-mode=CORE_MODE
                         NPU core mode (default: all=single/global4/global8).
+                        Batch text-generation tests only accept `single`.
   --target-cores=TARGET_CORES
                         Target cores (e.g., "0:0;0:1;0:2;0:3").
   --target-clusters=TARGET_CLUSTERS

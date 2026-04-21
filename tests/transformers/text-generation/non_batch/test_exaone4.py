@@ -1,3 +1,5 @@
+"""Non-batch tests for EXAONE 4 models."""
+
 import random
 
 import pytest
@@ -27,15 +29,13 @@ def tokenizer(request, revision):
     yield tokenizer
 
 
-def test_exaone4(model, tokenizer):
+def test_exaone4(model, tokenizer) -> None:
+    """Run representative EXAONE 4 generation modes."""
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     print("\n - Non-reasoning mode\n")
 
-    # Choose your prompt
     prompt = "Explain how wonderful you are"
-    # prompt = "Explica lo increíble que eres"
-    # prompt = "너가 얼마나 대단한지 설명해 봐"
 
     messages = [{"role": "user", "content": prompt}]
 

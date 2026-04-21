@@ -354,6 +354,7 @@ For TPS benchmark commands, you can use keyword parameters explained in [Keyword
 
 - Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
   - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
+  - Batch text-generation tests are fixed to `--core-mode single` because batched LLM execution does not support other core modes. The shared default `--core-mode all` is accepted there and folded into `single`.
   - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
 - Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
   - Text-generation and VLM benchmarks default to `--core-mode global8`.
