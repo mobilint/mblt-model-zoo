@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import conftest
 import pytest
-from tests import npu_backend_options
+from tests import conftest, npu_backend_options
 
 
 @dataclass
