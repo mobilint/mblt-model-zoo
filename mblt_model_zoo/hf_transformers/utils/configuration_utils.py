@@ -1,3 +1,5 @@
+import inspect
+from inspect import Parameter, Signature
 from typing import Any, TypeVar, Union
 
 from transformers.configuration_utils import PretrainedConfig
@@ -17,6 +19,40 @@ from ...utils.npu_backend import MobilintNPUBackend
 
 
 class MobilintConfigMixin(PretrainedConfig):
+    _NPU_SIGNATURE_FIELDS = (
+        ("mxq_path", "", str),
+        ("dev_no", 0, int),
+        ("max_batch_size", 1, int),
+        ("core_mode", "single", str),
+        ("target_cores", None, Any),
+        ("target_clusters", None, Any),
+        ("revision", None, Any),
+        ("npu_prefill_chunk_size", None, Any),
+    )
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._augment_init_signature()
+
+    @classmethod
+    def _augment_init_signature(cls) -> None:
+        """Expose Mobilint backend kwargs to upstream config introspection."""
+        init = cls.__init__
+        signature = inspect.signature(init)
+        if any(name in signature.parameters for name, _, _ in cls._NPU_SIGNATURE_FIELDS):
+            return
+
+        parameters = list(signature.parameters.values())
+        insert_at = next(
+            (index for index, parameter in enumerate(parameters) if parameter.kind == Parameter.VAR_KEYWORD),
+            len(parameters),
+        )
+        extra_parameters = [
+            Parameter(name=name, kind=Parameter.KEYWORD_ONLY, default=default, annotation=annotation)
+            for name, default, annotation in cls._NPU_SIGNATURE_FIELDS
+        ]
+        init.__signature__ = Signature(parameters[:insert_at] + extra_parameters + parameters[insert_at:])
+
     def _ensure_npu_backend(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "npu_backend"):
             self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")

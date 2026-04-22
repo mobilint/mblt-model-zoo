@@ -1,3 +1,5 @@
+from functools import wraps
+
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.qwen2_vl.configuration_qwen2_vl import (
     Qwen2VLConfig,
@@ -23,6 +25,7 @@ class MobilintQwen2VLConfig(MobilintVisionTextConfigMixin, Qwen2VLConfig):
     model_type = "mobilint-qwen2_vl"
     sub_configs = {"vision_config": MobilintQwen2VLVisionConfig, "text_config": MobilintQwen2VLTextConfig}
 
+    @wraps(Qwen2VLConfig.__init__)
     def __init__(self, **kwargs):
         Qwen2VLConfig.__init__(self, **kwargs)
 
