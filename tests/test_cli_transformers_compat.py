@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from mblt_model_zoo.cli import chat as chat_cli
 from mblt_model_zoo.cli import transformers_compat
 
 cli_main_module = importlib.import_module("mblt_model_zoo.cli.main")
@@ -72,6 +73,40 @@ def test_split_model_id_and_revision_preserves_path_like_values(
     assert transformers_compat._split_model_id_and_revision(model_id_and_revision) == expected
 
 
+@pytest.mark.parametrize("trust_remote_code", [False, True])
+def test_register_mobilint_models_respects_trust_remote_code(trust_remote_code: bool) -> None:
+    """Pass the active CLI `trust_remote_code` setting into AutoConfig loading."""
+    calls: list[tuple[str, str | None, bool]] = []
+
+    class _FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(model_name_or_path_or_address: str, revision: str | None, trust_remote_code: bool):
+            calls.append((model_name_or_path_or_address, revision, trust_remote_code))
+            return type(
+                "_Config",
+                (),
+                {
+                    "model_type": "llama",
+                    "architectures": ["LlamaForCausalLM"],
+                },
+            )()
+
+    fake_transformers = type("_Transformers", (), {"AutoConfig": _FakeAutoConfig})()
+    args = type(
+        "_Args",
+        (),
+        {
+            "model_name_or_path_or_address": "mobilint/demo-model",
+            "model_revision": "dev",
+            "trust_remote_code": trust_remote_code,
+        },
+    )()
+
+    chat_cli.register_mobilint_models(args, fake_transformers)
+
+    assert calls == [("mobilint/demo-model", "dev", trust_remote_code)]
+
+
 def test_install_transformers_serve_registration_hook_wraps_loader_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -80,16 +115,25 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     class _FakeServe:
         _mblt_registration_hook_installed = False
 
+        def __init__(self) -> None:
+            self.args = type("_Args", (), {"trust_remote_code": False})()
+
         def _load_model_and_data_processor(self, model_id_and_revision: str) -> tuple[str, str]:
             return ("loaded", model_id_and_revision)
 
     fake_serve_module = ModuleType("transformers.cli.serve")
     fake_serve_module.Serve = _FakeServe
 
-    calls: list[tuple[str, str | None]] = []
+    calls: list[tuple[str, str | None, bool]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None)))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -111,8 +155,55 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     result = service._load_model_and_data_processor("mobilint/Llama-3.2-1B-Instruct@main")
 
     assert wrapped_loader is _FakeServe._load_model_and_data_processor
-    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "main")]
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "main", False)]
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
+
+
+def test_install_transformers_serve_registration_hook_respects_serve_trust_remote_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Propagate the active serve instance's `trust_remote_code` flag into Mobilint registration."""
+
+    class _FakeServe:
+        _mblt_registration_hook_installed = False
+
+        def __init__(self) -> None:
+            self.args = type("_Args", (), {"trust_remote_code": True})()
+
+        def _load_model_and_data_processor(self, model_id_and_revision: str) -> tuple[str, str]:
+            return ("loaded", model_id_and_revision)
+
+    fake_serve_module = ModuleType("transformers.cli.serve")
+    fake_serve_module.Serve = _FakeServe
+
+    calls: list[tuple[str, str | None, bool]] = []
+
+    def _fake_register(args: Any, transformers_module: Any) -> None:
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+            )
+        )
+
+    monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_has_module",
+        lambda module_name: module_name == "transformers.cli.serve",
+    )
+    monkeypatch.setattr(
+        transformers_compat.importlib,
+        "import_module",
+        lambda module_name: fake_serve_module,
+    )
+
+    transformers_compat._install_transformers_serve_registration_hook()
+    service = _FakeServe()
+    service._load_model_and_data_processor("mobilint/Llama-3.2-1B-Instruct@main")
+
+    assert calls == [("mobilint/Llama-3.2-1B-Instruct", "main", True)]
 
 
 @pytest.mark.parametrize(
@@ -186,6 +277,9 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
     class _FakeServe:
         _mblt_registration_hook_installed = False
 
+        def __init__(self) -> None:
+            self.args = type("_Args", (), {"trust_remote_code": False})()
+
         def _load_model_and_data_processor(self, model_id_and_revision: str) -> tuple[str, str]:
             return ("loaded", model_id_and_revision)
 
@@ -193,10 +287,17 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
     fake_serve_module.ServeCommand = _FakeServe
     fake_serve_module.transformers = object()
 
-    calls: list[tuple[str, str | None, Any]] = []
+    calls: list[tuple[str, str | None, bool, Any]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+                transformers_module,
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -216,8 +317,8 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", "main", transformers_compat.transformers),
-        ("mobilint/Llama-3.2-1B-Instruct", "main", fake_serve_module.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", False, transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", False, fake_serve_module.transformers),
     ]
 
 
@@ -232,6 +333,9 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
     class _FakeModelManager:
         _mblt_registration_hook_installed_for_load_model_and_processor = False
 
+        def __init__(self) -> None:
+            self.trust_remote_code = True
+
         def load_model_and_processor(self, model_id_and_revision: str, *args, **kwargs) -> tuple[str, str]:
             return ("loaded", model_id_and_revision)
 
@@ -241,10 +345,17 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
     fake_model_manager_module.ModelManager = _FakeModelManager
     fake_model_manager_module.transformers = object()
 
-    calls: list[tuple[str, str | None, Any]] = []
+    calls: list[tuple[str, str | None, bool, Any]] = []
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+                transformers_module,
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
     monkeypatch.setattr(
@@ -268,26 +379,37 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", "main", transformers_compat.transformers),
-        ("mobilint/Llama-3.2-1B-Instruct", "main", fake_model_manager_module.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", True, transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", True, fake_model_manager_module.transformers),
     ]
 
 
 def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the requested revision when registering serve models."""
-    calls: list[tuple[str, str | None, Any]] = []
+    calls: list[tuple[str, str | None, bool, Any]] = []
     extra_transformers = object()
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+                transformers_module,
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
-    transformers_compat._register_mobilint_model_for_modules("mobilint/demo-model@dev", extra_transformers)
+    transformers_compat._register_mobilint_model_for_modules(
+        "mobilint/demo-model@dev",
+        extra_transformers,
+        trust_remote_code=True,
+    )
 
     assert calls == [
-        ("mobilint/demo-model", "dev", transformers_compat.transformers),
-        ("mobilint/demo-model", "dev", extra_transformers),
+        ("mobilint/demo-model", "dev", True, transformers_compat.transformers),
+        ("mobilint/demo-model", "dev", True, extra_transformers),
     ]
 
 
@@ -296,21 +418,28 @@ def test_register_mobilint_model_for_modules_splits_canonicalized_existing_local
     tmp_path: Path,
 ) -> None:
     """Use the existing local path prefix when serve passes `path@revision`."""
-    calls: list[tuple[str, str | None, Any]] = []
+    calls: list[tuple[str, str | None, bool, Any]] = []
     extra_transformers = object()
     local_model_path = tmp_path / "mobilint@2026"
     local_model_path.mkdir()
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+                transformers_module,
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._register_mobilint_model_for_modules(f"{local_model_path}@main", extra_transformers)
 
     assert calls == [
-        (str(local_model_path), "main", transformers_compat.transformers),
-        (str(local_model_path), "main", extra_transformers),
+        (str(local_model_path), "main", False, transformers_compat.transformers),
+        (str(local_model_path), "main", False, extra_transformers),
     ]
 
 
@@ -319,21 +448,28 @@ def test_register_mobilint_model_for_modules_preserves_existing_local_path_with_
     tmp_path: Path,
 ) -> None:
     """Keep `@` in existing local serve paths instead of treating it as a revision."""
-    calls: list[tuple[str, str | None, Any]] = []
+    calls: list[tuple[str, str | None, bool, Any]] = []
     extra_transformers = object()
     local_model_path = tmp_path / "mobilint@2026"
     local_model_path.mkdir()
 
     def _fake_register(args: Any, transformers_module: Any) -> None:
-        calls.append((args.model_name_or_path_or_address, getattr(args, "model_revision", None), transformers_module))
+        calls.append(
+            (
+                args.model_name_or_path_or_address,
+                getattr(args, "model_revision", None),
+                getattr(args, "trust_remote_code", None),
+                transformers_module,
+            )
+        )
 
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
 
     transformers_compat._register_mobilint_model_for_modules(str(local_model_path), extra_transformers)
 
     assert calls == [
-        (str(local_model_path), None, transformers_compat.transformers),
-        (str(local_model_path), None, extra_transformers),
+        (str(local_model_path), None, False, transformers_compat.transformers),
+        (str(local_model_path), None, False, extra_transformers),
     ]
 
 

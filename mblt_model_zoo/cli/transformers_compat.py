@@ -121,18 +121,44 @@ def _install_registration_wrapper(target_cls: type, method_name: str, extra_tran
     original_load = getattr(target_cls, method_name)
 
     def _wrapped_load(self, model_id_and_revision: str, *args, **kwargs):
-        _register_mobilint_model_for_modules(model_id_and_revision, extra_transformers)
+        trust_remote_code = _get_loader_trust_remote_code(self)
+        _register_mobilint_model_for_modules(
+            model_id_and_revision,
+            extra_transformers,
+            trust_remote_code=trust_remote_code,
+        )
         return original_load(self, model_id_and_revision, *args, **kwargs)
 
     setattr(target_cls, method_name, _wrapped_load)
     setattr(target_cls, marker_attr, True)
 
 
-def _register_mobilint_model_for_modules(model_id_and_revision: str, extra_transformers: object) -> None:
+def _get_loader_trust_remote_code(loader_owner: object) -> bool:
+    """Return the effective `trust_remote_code` value for the active serve loader."""
+    candidate_sources = [
+        getattr(loader_owner, "args", None),
+        loader_owner,
+        getattr(loader_owner, "_model_manager", None),
+    ]
+    for source in candidate_sources:
+        if source is None:
+            continue
+        trust_remote_code = getattr(source, "trust_remote_code", None)
+        if isinstance(trust_remote_code, bool):
+            return trust_remote_code
+    return False
+
+
+def _register_mobilint_model_for_modules(
+    model_id_and_revision: str,
+    extra_transformers: object,
+    trust_remote_code: bool = False,
+) -> None:
     model_name_or_path_or_address, model_revision = _split_model_id_and_revision(model_id_and_revision)
     args = SimpleNamespace(
         model_name_or_path_or_address=model_name_or_path_or_address,
         model_revision=model_revision,
+        trust_remote_code=trust_remote_code,
     )
     register_mobilint_models(args, transformers)
     if extra_transformers is not transformers:

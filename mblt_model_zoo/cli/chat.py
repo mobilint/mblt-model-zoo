@@ -2,11 +2,13 @@ from argparse import Namespace
 
 
 def register_mobilint_models(args: Namespace, transformers):
+    """Register Mobilint model classes using the active CLI trust and revision settings."""
     revision = getattr(args, "model_revision", None)
+    trust_remote_code = getattr(args, "trust_remote_code", False)
     config = transformers.AutoConfig.from_pretrained(
         args.model_name_or_path_or_address,
         revision=revision,
-        trust_remote_code=True,
+        trust_remote_code=trust_remote_code,
     )
 
     model_type = getattr(config, "model_type", "")
