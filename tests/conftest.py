@@ -1,5 +1,7 @@
 """Shared pytest fixtures and NPU backend option handling for test suites."""
 
+from types import ModuleType
+
 import pytest
 
 from tests.npu_backend_options import (
@@ -14,6 +16,7 @@ from tests.npu_backend_options import (
     build_encoder_decoder_specs,
     build_vision_text_specs,
     collect_npu_kwargs,
+    full_matrix_enabled,
 )
 
 
@@ -49,6 +52,12 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def pytest_addoption(parser):
     """Register shared CLI options used by tests."""
+    parser.addoption(
+        "--full-matrix",
+        action="store_true",
+        default=False,
+        help="Run the full transformer model/core matrix instead of the quick default subset.",
+    )
     parser.addoption(
         "--mxq-path",
         action="store",
@@ -124,6 +133,101 @@ def pytest_addoption(parser):
         default=None,
         help="Path to custom embedding weights.",
     )
+
+
+def _keyword_filter_was_provided(config: pytest.Config) -> bool:
+    """Return whether the current pytest invocation provided a keyword expression."""
+    args = config.invocation_params.args
+    return any(arg in {"-k", "--keyword"} or arg.startswith("--keyword=") for arg in args)
+
+
+def _is_transformers_test(item: pytest.Item) -> bool:
+    """Return whether a collected item belongs to the transformers test tree."""
+    return "/tests/transformers/" in item.path.as_posix()
+
+
+def _module_model_paths(module: ModuleType) -> tuple[str, ...]:
+    """Return the module's declared model paths in order."""
+    model_paths = getattr(module, "MODEL_PATHS", None)
+    if model_paths:
+        return tuple(model_paths)
+
+    model_paths_and_prompts = getattr(module, "MODEL_PATHS_AND_PROMPTS", None)
+    if model_paths_and_prompts:
+        return tuple(model_path for model_path, _ in model_paths_and_prompts)
+
+    return ()
+
+
+def _extract_model_path(value: object) -> str | None:
+    """Extract a mobilint model path from a parametrized value."""
+    if isinstance(value, str) and value.startswith("mobilint/"):
+        return value
+
+    if isinstance(value, tuple) and value:
+        first = value[0]
+        if isinstance(first, str) and first.startswith("mobilint/"):
+            return first
+
+    return None
+
+
+def _item_uses_nondefault_model(item: pytest.Item) -> bool:
+    """Return whether a collected item targets a non-default model path."""
+    if not hasattr(item, "callspec"):
+        return False
+
+    model_paths = _module_model_paths(item.module)
+    if len(model_paths) <= 1:
+        return False
+
+    first_model_path = model_paths[0]
+    return any(
+        model_path is not None and model_path != first_model_path
+        for model_path in (_extract_model_path(value) for value in item.callspec.params.values())
+    )
+
+
+def _item_uses_non_single_core(item: pytest.Item) -> bool:
+    """Return whether a collected item uses a non-single-core sweep spec."""
+    if not hasattr(item, "callspec"):
+        return False
+
+    for value in item.callspec.params.values():
+        if isinstance(value, BaseNpuSweepSpec):
+            return value.base_core_mode not in {None, "single"}
+        if isinstance(value, EncoderDecoderNpuSweepSpec):
+            return any(mode not in {None, "single"} for mode in (value.encoder_core_mode, value.decoder_core_mode))
+        if isinstance(value, VisionTextNpuSweepSpec):
+            return any(mode not in {None, "single"} for mode in (value.vision_core_mode, value.text_core_mode))
+
+    return False
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Trim the default transformers collection to a quick single-model matrix."""
+    keep_all_models = full_matrix_enabled(config) or _keyword_filter_was_provided(config)
+    kept_items: list[pytest.Item] = []
+    deselected_items: list[pytest.Item] = []
+
+    for item in items:
+        if not _is_transformers_test(item):
+            kept_items.append(item)
+            continue
+
+        uses_nondefault_model = _item_uses_nondefault_model(item)
+        if uses_nondefault_model or _item_uses_non_single_core(item):
+            item.add_marker("full_matrix")
+
+        if uses_nondefault_model and not keep_all_models:
+            deselected_items.append(item)
+            continue
+
+        kept_items.append(item)
+
+    if deselected_items:
+        config.hook.pytest_deselected(items=deselected_items)
+        items[:] = kept_items
 
 
 @pytest.fixture(scope="module")

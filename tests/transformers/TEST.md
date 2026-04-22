@@ -1,3 +1,9 @@
+---
+description: Commands for validating the transformers pytest suite.
+paths:
+  - "tests/transformers/**"
+---
+
 # Test `transformers`
 
 You can validate Mobilint's Transformers integration with [`pytest`](https://docs.pytest.org/en/stable/). The snippets below assume your virtual environment is already activated.
@@ -10,12 +16,20 @@ Install the runtime extras plus the developer tooling (pytest, datasets, torchvi
 pip install -e ".[transformers]" --group dev
 ```
 
-## Run All Tests
+## Run Quick Tests
 
-Execute the entire Transformers test matrix. By default, the shared `--core-mode` option is `all`, so tests using the base NPU backend run each case with `single`, `global4`, and `global8`. Batch text-generation suites are the exception and always run with `single` because batched LLM execution does not support other core modes:
+Execute the quick default suite. Unless you explicitly override model or core options, pytest keeps only the first model in each `MODEL_PATHS` list and runs single-core cases only:
 
 ```bash
 pytest tests/transformers
+```
+
+## Run the Full Matrix
+
+Restore the full architecture matrix, including every model path declared in a test module plus the default core sweeps:
+
+```bash
+pytest tests/transformers --full-matrix
 ```
 
 ## Run a Subdirectory of Tests
@@ -36,7 +50,7 @@ pytest tests/transformers/text-generation/non_batch/test_qwen2.py
 
 ## Run a Single Model Case
 
-Many tests are parameterized over multiple `mobilint/*` model IDs. Use `-k` to run just one of those cases, e.g., the smallest Qwen variant inside the causal LM suite:
+Many tests are parameterized over multiple `mobilint/*` model IDs. The quick default already keeps only the first entry in each `MODEL_PATHS` list, but an explicit `-k` filter takes priority so you can still target a different model directly, e.g., the smallest Qwen variant inside the causal LM suite:
 
 ```bash
 pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
@@ -50,7 +64,7 @@ pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "0.5B"
 
 ## Sweep Core Modes
 
-If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can sweep all supported runtime modes in one pytest invocation:
+Quick mode defaults to single-core execution. If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can opt into the full sweep either by enabling the full matrix or by passing an explicit core-mode override:
 
 ```bash
 pytest tests/transformers/text-generation/non_batch/test_qwen2.py --core-mode all
