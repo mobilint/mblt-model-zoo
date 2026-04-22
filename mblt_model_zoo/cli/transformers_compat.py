@@ -88,7 +88,10 @@ def _chat_uses_transformers_serve_backend() -> bool:
 
 def _has_module_spec(module_name: str) -> bool:
     """Return whether the Python import machinery can resolve the module name."""
-    return importlib.util.find_spec(module_name) is not None
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
 
 
 def _install_transformers_serve_registration_hook() -> None:

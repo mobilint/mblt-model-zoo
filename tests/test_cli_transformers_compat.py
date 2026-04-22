@@ -45,6 +45,17 @@ def test_chat_uses_transformers_serve_backend(
     assert transformers_compat._chat_uses_transformers_serve_backend() is expected
 
 
+def test_has_module_spec_returns_false_when_parent_package_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat missing parent packages in dotted module probes as unresolved modules."""
+
+    def _fake_find_spec(module_name: str) -> None:
+        raise ModuleNotFoundError("No module named 'transformers.cli'")
+
+    monkeypatch.setattr(transformers_compat.importlib.util, "find_spec", _fake_find_spec)
+
+    assert transformers_compat._has_module_spec("transformers.cli.chat") is False
+
+
 def test_split_model_id_and_revision_splits_canonicalized_existing_local_paths(tmp_path: Path) -> None:
     """Split the last `@revision` suffix when the prefix is an existing local path."""
     local_model_path = tmp_path / "mobilint@2026"
