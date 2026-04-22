@@ -7,8 +7,7 @@ from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
 )
-from transformers.modeling_utils import PreTrainedModel
-from transformers.models.blip.modeling_blip_text import BlipTextEmbeddings
+from transformers.models.blip.modeling_blip_text import BlipTextEmbeddings, BlipTextPreTrainedModel
 from transformers.utils.generic import logging
 
 from ...utils.cache_utils import MobilintCache
@@ -18,9 +17,10 @@ from .configuration_blip import MobilintBlipTextConfig
 
 logger = logging.get_logger(__name__)
 
-class MobilintBlipTextPreTrainedModel(PreTrainedModel):
+class MobilintBlipTextPreTrainedModel(BlipTextPreTrainedModel):    
     config: MobilintBlipTextConfig
-    base_model_prefix = "bert"
+    _no_split_modules = []
+    _can_record_outputs = {}
 
 class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel):
     def __init__(self, config: MobilintBlipTextConfig, **kwargs):
@@ -28,7 +28,9 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
         self.config = config
 
         self.embeddings = BlipTextEmbeddings(config)
-    
+        
+        self.post_init()
+     
     def get_input_embeddings(self) -> nn.Module:
         return self.embeddings
     
