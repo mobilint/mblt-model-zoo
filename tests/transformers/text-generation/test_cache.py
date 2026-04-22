@@ -73,6 +73,7 @@ def test_cache(model, tokenizer):
         add_generation_prompt=True,
         enable_thinking=False,
         return_tensors="pt",
+        return_dict=False,
     )
 
     prefix_length = input_ids.shape[1]
@@ -104,6 +105,7 @@ def test_cache(model, tokenizer):
         add_generation_prompt=True,
         enable_thinking=False,
         return_tensors="pt",
+        return_dict=False,
     )
 
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)

@@ -43,7 +43,13 @@ def test_exaone4(model, tokenizer) -> None:
 
     messages = [{"role": "user", "content": prompt}]
 
-    input_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_tensors="pt")
+    input_ids = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=False,
+    )
 
     model.generate(
         input_ids.to(model.device),
@@ -61,6 +67,7 @@ def test_exaone4(model, tokenizer) -> None:
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=False,
         enable_thinking=True,
     )
 
@@ -105,6 +112,7 @@ def test_exaone4(model, tokenizer) -> None:
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=False,
         tools=tools,
     )
 

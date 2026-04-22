@@ -90,7 +90,11 @@ messages = [
 ]
 
 input_ids = tokenizer.apply_chat_template(
-    messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
+    messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt",
+    return_dict=False,
 )
 
 streamer = TextStreamer(tokenizer)
