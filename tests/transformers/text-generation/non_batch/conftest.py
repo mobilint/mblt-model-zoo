@@ -26,7 +26,11 @@ def pipe(request: pytest.FixtureRequest, revision: Optional[str], base_npu_param
     model_path = request.param
     model_kwargs = base_npu_params.base
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        revision=revision,
+        trust_remote_code=True,
+    )
 
     if model_kwargs:
         pipe = pipeline(

@@ -24,13 +24,17 @@ pip install -e .[transformers]
 
 ## Quick Start Guide
 
-**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
+**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes, so `trust_remote_code=True` must be passed to every `transformers` auto loader that touches the Hub (for example, `AutoTokenizer.from_pretrained(...)`, `AutoProcessor.from_pretrained(...)`, `AutoModel.from_pretrained(...)`, and `pipeline(...)`).
 
 ```python
 from transformers import TextStreamer, pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
+tokenizer = AutoTokenizer.from_pretrained(
+    model_path,
+    revision="W8",
+    trust_remote_code=True,
+)
 
 pipe = pipeline(
     "text-generation",
@@ -65,7 +69,11 @@ from transformers import TextStreamer, AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
-tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
+tokenizer = AutoTokenizer.from_pretrained(
+    model_path,
+    revision="W8",
+    trust_remote_code=True,
+)
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
     trust_remote_code=True,
@@ -111,6 +119,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    trust_remote_code=True,
     revision="W8",
     model_kwargs={"embedding_weight": "/path/to/embedding.pt"},
     device="cpu",
@@ -293,7 +302,8 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
 - `trust_remote_code`
 
     Must be set to `True` for our model zoo models, because our `auto_map` proxy code is loaded as remote code from the Hugging Face Hub.
-    This lets you use the standard `transformers` auto classes (`AutoModel`, `AutoConfig`, `pipeline`, etc.) while loading Mobilint-specific implementations.
+    Pass it to every relevant loader call, including `AutoTokenizer.from_pretrained(...)`, `AutoProcessor.from_pretrained(...)`, `AutoConfig.from_pretrained(...)`, `AutoModel.from_pretrained(...)`, and `pipeline(...)`.
+    This lets you use the standard `transformers` auto classes while loading Mobilint-specific implementations.
 
 - `dtype`
 

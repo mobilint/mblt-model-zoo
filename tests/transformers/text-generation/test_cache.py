@@ -44,7 +44,11 @@ def model(model_path, revision, base_npu_params):
 
 @pytest.fixture(scope="module")
 def tokenizer(model_path, revision):
-    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        revision=revision,
+        trust_remote_code=True,
+    )
     yield tokenizer
 
 

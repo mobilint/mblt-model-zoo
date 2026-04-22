@@ -55,7 +55,11 @@ def pipe(
     model_path = request.param
     model_kwargs = base_npu_params.base
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        revision=revision,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "left"
