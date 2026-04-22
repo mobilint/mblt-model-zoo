@@ -1,14 +1,17 @@
-from typing import Optional, Union, cast
+import inspect
+from functools import lru_cache, wraps
+from typing import Union, cast
 
 import torch
 import torch.nn as nn
-from transformers.modeling_outputs import BaseModelOutputWithPast
+from transformers.modeling_outputs import BaseModelOutputWithPast, BaseModelOutputWithPooling
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import (
     AutoModel,
     AutoModelForImageTextToText,
 )
 from transformers.models.qwen2_vl.modeling_qwen2_vl import (
+    Qwen2VLCausalLMOutputWithPast,
     Qwen2VLForConditionalGeneration,
     Qwen2VLModel,
 )
@@ -27,10 +30,32 @@ from .configuration_qwen2_vl import (
 
 logger = logging.get_logger(__name__)
 
+
+@lru_cache(maxsize=1)
+def _upstream_qwen2_vl_uses_structured_vision_outputs() -> bool:
+    """Check whether the installed Transformers expects ``visual()`` to return a model output.
+
+    Returns:
+        ``True`` when the installed upstream ``Qwen2VLModel.get_image_features`` reads
+        ``vision_outputs.pooler_output``. ``False`` for older releases that expect ``visual()`` to
+        return a raw tensor.
+    """
+    get_image_features = inspect.unwrap(Qwen2VLModel.get_image_features)
+    code = getattr(get_image_features, "__code__", None)
+    if code is not None:
+        return "pooler_output" in code.co_names
+
+    try:
+        return "pooler_output" in inspect.getsource(get_image_features)
+    except OSError:
+        return True
+
+
 class MobilintQwen2VLPreTrainedModel(PreTrainedModel):
     config: MobilintQwen2VLConfig
     base_model_prefix = "model"
     input_modalities = ("image", "video", "text")
+
 
 class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, MobilintQwen2VLPreTrainedModel):
     config: MobilintQwen2VLVisionConfig
@@ -45,16 +70,31 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
     def spatial_merge_size(self) -> int:
         """Expose the merge factor expected by upstream Qwen2-VL helpers."""
         return int(self.config.spatial_merge_size)
-    
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> torch.Tensor:
+    ) -> Union[tuple, BaseModelOutputWithPooling]:
+        """Run the compiled vision encoder and adapt to HF's vision output contract.
+
+        Args:
+            hidden_states: Processor-produced image or video patch tensor.
+            grid_thw: Temporal, height, and width grid metadata for each image or video.
+            **kwargs: Additional Transformers kwargs. ``return_dict`` is handled by the decorator.
+
+        Returns:
+            By default, a value matching the installed upstream Qwen2-VL contract:
+            ``BaseModelOutputWithPooling`` on newer Transformers and a raw tensor on older ones.
+            The Mobilint backend does not expose per-patch hidden states or attentions, so those
+            structured fields are returned as ``None`` when present.
+        """
+        return_dict = kwargs.pop("return_dict", None)
+        del kwargs
         gt, gh, gw = grid_thw[0].tolist()
 
-        c  = 3
+        c = 3
         pt = 2
         Mh = 2
         Mw = 2
@@ -79,23 +119,35 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             Mh * Mw * pw,
             pt * c,
         ).squeeze(0)
-                
-        merged_hidden_states = self.mxq_forward(hidden_states)
 
-        return merged_hidden_states.squeeze(0)
+        merged_hidden_states = self.mxq_forward(hidden_states).squeeze(0)
+        structured_outputs = BaseModelOutputWithPooling(
+            last_hidden_state=None,
+            pooler_output=merged_hidden_states,
+            hidden_states=None,
+            attentions=None,
+        )
+        if return_dict is True:
+            return structured_outputs
+        if _upstream_qwen2_vl_uses_structured_vision_outputs():
+            if return_dict is False:
+                return structured_outputs.to_tuple()
+            return structured_outputs
+        return merged_hidden_states
+
 
 class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen2VLPreTrainedModel):
     config: MobilintQwen2VLTextConfig
     input_modalities = ("text",)
-    
+
     def __init__(self, config: MobilintQwen2VLTextConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
-        
+
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
-    
+
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
-    
+
     def forward(
         self,
         input_ids: Union[torch.LongTensor, None] = None,
@@ -127,21 +179,22 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
-        
+
         assert inputs_embeds is not None
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = cast(torch.LongTensor, torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            ))
-        
+            cache_position = cast(
+                torch.LongTensor,
+                torch.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device),
+            )
+
         if output_attentions:
             logger.warning("output_attentions is not supported.")
 
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
-        
+
         logits = self.llm_forward(
             inputs_embeds,
             past_key_values,
@@ -151,9 +204,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         )
 
         if not return_dict:
-            return tuple(
-                v for v in [logits, past_key_values, None, None] if v is not None
-            )
+            return tuple(v for v in [logits, past_key_values, None, None] if v is not None)
         return BaseModelOutputWithPast(
             last_hidden_state=cast(torch.FloatTensor, logits),
             past_key_values=past_key_values,
@@ -161,73 +212,56 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             attentions=None,
         )
 
+
 class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, Qwen2VLModel):
     def __init__(self, config: MobilintQwen2VLConfig, *args, **kwargs):
         MobilintQwen2VLPreTrainedModel.__init__(self, config, *args, **kwargs)
-        self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(config.vision_config, _internal_call=True)
-        self.language_model = MobilintQwen2VLTextModel._from_config(config.text_config, _internal_call=True)
+        self.visual = MobilintQwen2VisionTransformerPretrainedModel._from_config(
+            config.vision_config, _internal_call=True
+        )
+        self.language_model = MobilintQwen2VLTextModel._from_config(
+            config.text_config,
+            _internal_call=True,
+        )
         self.rope_deltas = None  # cache rope_deltas here
 
-class MobilintQwen2VLForConditionalGeneration(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, MobilintGenerationMixin, Qwen2VLForConditionalGeneration):
+        # Initialize weights and apply final processing
+        self.post_init()
+
+
+class MobilintQwen2VLForConditionalGeneration(
+    PretrainedOnlyMixin,
+    MobilintQwen2VLPreTrainedModel,
+    MobilintGenerationMixin,
+    Qwen2VLForConditionalGeneration,
+):
     def __init__(self, config: MobilintQwen2VLConfig, *args, **kwargs):
         PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
-        
+
         self.model = MobilintQwen2VLModel(config, _internal_call=True)
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
-    
+
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        cache_position=None,
-        position_ids=None,
-        use_cache=True,
-        pixel_values=None,
-        pixel_values_videos=None,
-        image_grid_thw=None,
-        video_grid_thw=None,
-        **kwargs,
-    ):
-        """Prepare generation inputs while backfilling missing text position ids.
-
-        The local wrapper exposes a generic ``forward(*args, **kwargs)`` signature, so
-        Transformers' default generation helper does not auto-create ``position_ids``.
-        Upstream Qwen2-VL expects them to exist before it appends vision positions.
-        """
-        if position_ids is None and attention_mask is not None:
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-
-        return super().prepare_inputs_for_generation(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            inputs_embeds=inputs_embeds,
-            cache_position=cache_position,
-            position_ids=position_ids,
-            use_cache=use_cache,
-            pixel_values=pixel_values,
-            pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw,
-            **kwargs,
-        )
-
+    @wraps(Qwen2VLForConditionalGeneration.forward)
     def forward(
         self,
-        *args,
+        *args: object,
         count_npu_time: bool = False,
-        **kwargs,
-    ):
+        **kwargs: object,
+    ) -> Union[tuple, Qwen2VLCausalLMOutputWithPast]:
+        """Forward to upstream while injecting Mobilint decoder timing collection.
+
+        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
+        generation helpers still see Qwen2-VL's real inputs such as ``position_ids`` and
+        ``logits_to_keep``.
+        """
         kwargs["count_npu_time"] = count_npu_time
         return super().forward(*args, **kwargs)
-        
+
+
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
