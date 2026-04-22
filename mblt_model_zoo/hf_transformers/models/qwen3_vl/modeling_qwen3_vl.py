@@ -6,6 +6,7 @@ import torch.nn as nn
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForImageTextToText
 from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+    BaseModelOutputWithDeepstackFeatures,
     Qwen3VLCausalLMOutputWithPast,
     Qwen3VLForConditionalGeneration,
     Qwen3VLModel,
@@ -94,13 +95,11 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         expected_hidden = c * pt * ph * pw
         if hidden_states.shape[0] != expected_tokens:
             raise ValueError(
-                "Unexpected pixel token count for Qwen3-VL vision input: "
-                f"{hidden_states.shape[0]} vs {expected_tokens}"
+                f"Unexpected pixel token count for Qwen3-VL vision input: {hidden_states.shape[0]} vs {expected_tokens}"
             )
         if hidden_states.shape[1] != expected_hidden:
             raise ValueError(
-                "Unexpected pixel hidden size for Qwen3-VL vision input: "
-                f"{hidden_states.shape[1]} vs {expected_hidden}"
+                f"Unexpected pixel hidden size for Qwen3-VL vision input: {hidden_states.shape[1]} vs {expected_hidden}"
             )
 
         hidden_states = hidden_states.view(
@@ -139,7 +138,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 
         # `(1, 6, 1024, 64)` -> `(1024, 64, 6)`
         processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
-        return processed.cpu().numpy().astype(np.float32)
+        return processed.to(torch.float32).cpu().numpy()
 
     def _reorder_encoder_outputs(
         self,
@@ -168,7 +167,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
     def __init__(self, config: MobilintQwen3VLTextConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
-        
+
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.num_deepstack_layers = 0
 
@@ -203,9 +202,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = cast(torch.LongTensor, torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            ))
+            cache_position = cast(
+                torch.LongTensor,
+                torch.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device),
+            )
 
         logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
@@ -347,21 +347,30 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self,
         pixel_values: torch.FloatTensor,
         image_grid_thw: Optional[torch.LongTensor] = None,
-    ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> Union[tuple, BaseModelOutputWithDeepstackFeatures]:
         if image_grid_thw is None:
             raise ValueError("image_grid_thw must not be None.")
 
+        del kwargs
         image_embeds, deepstack_image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
         split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
-        return image_embeds, deepstack_image_embeds
+        return BaseModelOutputWithDeepstackFeatures(
+            last_hidden_state=None,
+            pooler_output=image_embeds,
+            hidden_states=None,
+            attentions=None,
+            deepstack_features=deepstack_image_embeds,
+        )
 
     def get_video_features(
         self,
         pixel_values_videos: torch.FloatTensor,
         video_grid_thw: Optional[torch.LongTensor] = None,
-    ) -> tuple[tuple[torch.Tensor, ...], list[torch.Tensor]]:
-        return self.get_image_features(pixel_values_videos, video_grid_thw)
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> Union[tuple, BaseModelOutputWithDeepstackFeatures]:
+        return self.get_image_features(pixel_values_videos, video_grid_thw, **kwargs)
 
 
 class MobilintQwen3VLForConditionalGeneration(
@@ -372,7 +381,7 @@ class MobilintQwen3VLForConditionalGeneration(
 ):
     def __init__(self, config: MobilintQwen3VLConfig, *args, **kwargs):
         PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
-        
+
         self.model = MobilintQwen3VLModel(config, _internal_call=True)
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
@@ -381,14 +390,75 @@ class MobilintQwen3VLForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        position_ids=None,
+        use_cache=True,
+        pixel_values=None,
+        pixel_values_videos=None,
+        image_grid_thw=None,
+        video_grid_thw=None,
+        mm_token_type_ids=None,
+        is_first_iteration=False,
+        **kwargs,
+    ):
+        return super().prepare_inputs_for_generation(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            inputs_embeds=inputs_embeds,
+            cache_position=cache_position,
+            position_ids=position_ids,
+            use_cache=use_cache,
+            pixel_values=pixel_values,
+            pixel_values_videos=pixel_values_videos,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+            mm_token_type_ids=mm_token_type_ids,
+            is_first_iteration=is_first_iteration,
+            **kwargs,
+        )
+
     def forward(
         self,
-        *args,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[MobilintCache] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.Tensor] = None,
+        pixel_values_videos: Optional[torch.FloatTensor] = None,
+        image_grid_thw: Optional[torch.LongTensor] = None,
+        video_grid_thw: Optional[torch.LongTensor] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        mm_token_type_ids: Optional[torch.IntTensor] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         count_npu_time: bool = False,
-        **kwargs,
+        **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        return super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            pixel_values=pixel_values,
+            pixel_values_videos=pixel_values_videos,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+            cache_position=cache_position,
+            mm_token_type_ids=mm_token_type_ids,
+            logits_to_keep=logits_to_keep,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
 
 
 AutoModel.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)

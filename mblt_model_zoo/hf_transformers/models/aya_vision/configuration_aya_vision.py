@@ -10,21 +10,25 @@ class MobilintAyaVisionConfig(MobilintVisionTextConfigMixin, AyaVisionConfig):
     model_type = "mobilint-aya_vision"
     sub_configs = {"text_config": MobilintCohere2Config, "vision_config": MobilintSiglipVisionConfig}
 
-    def __init__(self, vision_config = None, text_config = None, **kwargs):
+    def __init__(self, vision_config=None, text_config=None, **kwargs):
         if vision_config is None:
-            vision_config = {}
-            vision_config["model_type"] = "mobilint-siglip_vision_model"
+            vision_config = {"model_type": "mobilint-siglip_vision_model"}
+        elif isinstance(vision_config, dict):
+            vision_config = dict(vision_config)
+            vision_config.setdefault("model_type", "mobilint-siglip_vision_model")
 
         if text_config is None:
-            text_config = {}
-            text_config["model_type"] = "mobilint-cohere2"
+            text_config = {"model_type": "mobilint-cohere2"}
+        elif isinstance(text_config, dict):
+            text_config = dict(text_config)
+            text_config.setdefault("model_type", "mobilint-cohere2")
 
-        super().__init__(vision_config, text_config, **kwargs)
+        AyaVisionConfig.__init__(self, vision_config=vision_config, text_config=text_config, **kwargs)
 
         if self.vision_feature_select_strategy != "full":
             raise ValueError(
-                "vision_feature_select_strategy should be 'full'."
-                f"Got: {self.vision_feature_select_strategy}"
+                f"vision_feature_select_strategy should be 'full'. Got: {self.vision_feature_select_strategy}"
             )
+
 
 AutoConfig.register("mobilint-aya_vision", MobilintAyaVisionConfig)
