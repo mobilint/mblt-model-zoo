@@ -59,7 +59,9 @@ class MobilintWhisperEncoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         expected_seq_length = self.config.max_source_positions * self.conv1.stride[0] * self.conv2.stride[0]
         if input_features.shape[-1] != expected_seq_length:
             raise ValueError(
-                f"Whisper expects the mel input features to be of length {expected_seq_length}, but found {input_features.shape[-1]}. Make sure to pad the input mel features to {expected_seq_length}."
+                "Whisper expects the mel input features to be of length "
+                f"{expected_seq_length}, but found {input_features.shape[-1]}. "
+                f"Make sure to pad the input mel features to {expected_seq_length}."
             )
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -317,11 +319,16 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
         )
 
-class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGenerationMixin, MobilintWhisperPreTrainedModel):
+class MobilintWhisperForConditionalGeneration(
+    PretrainedOnlyMixin,
+    MobilintGenerationMixin,
+    WhisperGenerationMixin,
+    MobilintWhisperPreTrainedModel,
+):
     base_model_prefix = "model"
     
     def __init__(self, config: MobilintWhisperConfig, *args, **kwargs):
-        super().__init__(config, *args, **kwargs)
+        PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
         
         self.model = MobilintWhisperModel(config, _internal_call=True)
         self.max_target_positions = config.max_target_positions
@@ -364,7 +371,9 @@ class MobilintWhisperForConditionalGeneration(MobilintGenerationMixin, WhisperGe
         if labels is not None:
             if labels.shape[1] > self.max_target_positions:
                 raise ValueError(
-                    f"Labels' sequence length {labels.shape[1]} cannot exceed the maximum allowed length of {self.max_target_positions} tokens."
+                    "Labels' sequence length "
+                    f"{labels.shape[1]} cannot exceed the maximum allowed length of "
+                    f"{self.max_target_positions} tokens."
                 )
             if decoder_input_ids is None and decoder_inputs_embeds is None:
                 decoder_input_ids = cast(torch.LongTensor, shift_tokens_right(
