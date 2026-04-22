@@ -10,7 +10,6 @@ def pipe(request, revision, vision_text_npu_params):
     model_kwargs = {**vision_text_npu_params.vision, **vision_text_npu_params.text}
     processor = AutoProcessor.from_pretrained(
         model_path,
-        use_fast=True,
         trust_remote_code=True,
         revision=revision,
     )
@@ -55,7 +54,7 @@ def test_qwen2_vl(pipe):
     pipe(
         text=messages,
         generate_kwargs={
-            "max_length": 512,
+            "max_new_tokens": 512,
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )

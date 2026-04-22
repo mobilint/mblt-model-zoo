@@ -115,7 +115,6 @@ model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
 processor = AutoProcessor.from_pretrained(
     model_name,
-    use_fast=True,
     trust_remote_code=True,
     revision="W8",
 )

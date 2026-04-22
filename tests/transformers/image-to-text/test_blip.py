@@ -13,7 +13,6 @@ def pipe(request, revision, vision_text_npu_params):
 
     processor = AutoProcessor.from_pretrained(
         model_path,
-        use_fast=True,
         revision=revision,
     )
     pipe = pipeline(
