@@ -1,9 +1,4 @@
-from typing import Any, Union
-
-from transformers.configuration_utils import (
-    PretrainedConfig,
-    SpecificPretrainedConfigType,
-)
+from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.blip.configuration_blip import (
     BlipConfig,

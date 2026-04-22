@@ -1,9 +1,17 @@
-from typing import Any, Union
+from typing import Any, TypeVar, Union
 
-from transformers.configuration_utils import (
-    PretrainedConfig,
-    SpecificPretrainedConfigType,
-)
+from transformers.configuration_utils import PretrainedConfig
+
+try:
+    from transformers.configuration_utils import SpecificPretrainedConfigType
+except ImportError:
+    try:
+        from transformers.configuration_utils import SpecificPreTrainedConfigType as SpecificPretrainedConfigType
+    except ImportError:
+        SpecificPretrainedConfigType = TypeVar(
+            "SpecificPretrainedConfigType",
+            bound=PretrainedConfig,
+        )
 
 from ...utils.npu_backend import MobilintNPUBackend
 
