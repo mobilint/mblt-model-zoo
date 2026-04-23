@@ -7,9 +7,10 @@ MODEL_PATHS = (
 )
 
 
-def test_llama(pipe) -> None:
+def test_llama(pipe, generation_token_limit: int) -> None:
     """Run a basic prompt against Llama instruct models."""
     pipe.generation_config.max_new_tokens = None
+    pipe.generation_config.max_length = None
 
     messages = [
         {
@@ -19,4 +20,4 @@ def test_llama(pipe) -> None:
         {"role": "user", "content": "Who are you?"},
     ]
 
-    pipe(messages, max_length=512)
+    pipe(messages, max_new_tokens=generation_token_limit)

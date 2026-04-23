@@ -7,8 +7,7 @@ from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
 )
-from transformers.modeling_utils import PreTrainedModel
-from transformers.models.blip.modeling_blip_text import BlipTextEmbeddings
+from transformers.models.blip.modeling_blip_text import BlipTextEmbeddings, BlipTextPreTrainedModel
 from transformers.utils.generic import logging
 
 from ...utils.cache_utils import MobilintCache
@@ -18,9 +17,10 @@ from .configuration_blip import MobilintBlipTextConfig
 
 logger = logging.get_logger(__name__)
 
-class MobilintBlipTextPreTrainedModel(PreTrainedModel):
+class MobilintBlipTextPreTrainedModel(BlipTextPreTrainedModel):    
     config: MobilintBlipTextConfig
-    base_model_prefix = "bert"
+    _no_split_modules = []
+    _can_record_outputs = {}
 
 class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel):
     def __init__(self, config: MobilintBlipTextConfig, **kwargs):
@@ -28,7 +28,9 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
         self.config = config
 
         self.embeddings = BlipTextEmbeddings(config)
-    
+        
+        self.post_init()
+     
     def get_input_embeddings(self) -> nn.Module:
         return self.embeddings
     
@@ -54,7 +56,7 @@ class MobilintBlipTextModel(MobilintModelMixin, MobilintBlipTextPreTrainedModel)
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else self.config.return_dict
 
         if is_decoder:
             use_cache = use_cache if use_cache is not None else self.config.use_cache
@@ -137,7 +139,7 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
         logits_to_keep: Union[int, torch.Tensor] = 0,
         **kwargs,
     ) -> Union[torch.Tensor, tuple[Union[torch.Tensor, MobilintCache], ...], CausalLMOutputWithCrossAttentions]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else self.config.return_dict
         if labels is not None:
             use_cache = False
             

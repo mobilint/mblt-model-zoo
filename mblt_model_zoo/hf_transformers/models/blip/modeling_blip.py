@@ -3,13 +3,13 @@ from typing import Union, cast
 import torch
 from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import BaseModelOutputWithPooling
-from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import (
     AutoModel,
     AutoModelForImageTextToText,
 )
 from transformers.models.blip.modeling_blip import (
     BlipForConditionalGenerationModelOutput,
+    BlipPreTrainedModel,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
@@ -28,15 +28,20 @@ except ImportError:
     AutoModelForVision2Seq = None
 
 
-class MobilintBlipPreTrainedModel(PreTrainedModel):
+class MobilintBlipPreTrainedModel(BlipPreTrainedModel):    
     config: MobilintBlipConfig
-    base_model_prefix = "blip"
-    input_modalities = ("image", "text")
+    supports_gradient_checkpointing = False
 
 class MobilintBlipVisionModel(MobilintModelMixin, MobilintBlipPreTrainedModel):
     main_input_name = "pixel_values"
     input_modalities = ("image",)
     config: MobilintBlipVisionConfig
+    
+    def __init__(self, config: MobilintBlipVisionConfig, **kwargs):
+        super().__init__(config, **kwargs)
+        self.config = config
+
+        self.post_init()
 
     def forward(
         self,
@@ -69,6 +74,9 @@ class MobilintBlipForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerati
 
         self.decoder_input_ids = config.text_config.bos_token_id
         self.decoder_pad_token_id = config.text_config.pad_token_id
+        
+        # Initialize weights and apply final processing
+        self.post_init()
 
     def get_cache_mxq_model(self):
         return self.text_decoder.get_mxq_model()

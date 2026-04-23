@@ -6,9 +6,10 @@ MODEL_PATHS = (
 )
 
 
-def test_exaone(pipe) -> None:
+def test_exaone(pipe, generation_token_limit: int) -> None:
     """Run a basic prompt against EXAONE instruct models."""
     pipe.generation_config.max_new_tokens = None
+    pipe.generation_config.max_length = None
 
     prompt = "너는 어떤 점에서 유용한지 짧게 설명해줘."
 
@@ -20,4 +21,4 @@ def test_exaone(pipe) -> None:
         {"role": "user", "content": prompt},
     ]
 
-    pipe(messages, max_length=512)
+    pipe(messages, max_new_tokens=generation_token_limit)

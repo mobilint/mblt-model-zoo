@@ -186,6 +186,20 @@ def option_value_was_provided(config: pytest.Config, prefix: str, option_name: s
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in args)
 
 
+def full_matrix_enabled(config: pytest.Config) -> bool:
+    """Return whether the caller requested the full test matrix."""
+    return bool(config.getoption("--full-matrix"))
+
+
+def should_expand_core_matrix(config: pytest.Config, *, prefixes: tuple[str, ...] = ()) -> bool:
+    """Return whether core sweeps should expand beyond the quick single-core default."""
+    if full_matrix_enabled(config):
+        return True
+    if option_value_was_provided(config, "", "core_mode"):
+        return True
+    return any(option_value_was_provided(config, prefix, "core_mode") for prefix in prefixes)
+
+
 def collect_provided_prefixes(config: pytest.Config, embedding_weight: str | None) -> set[str]:
     """Collect prefixes that have explicit backend options in the current test run."""
     provided: set[str] = set()
@@ -222,19 +236,30 @@ def warn_unused_prefixes(provided_prefixes: set[str], used_prefixes: set[str]) -
 
 def build_base_specs(config: pytest.Config) -> list[BaseNpuSweepSpec]:
     """Build sweep specs for base-only models."""
+    if not should_expand_core_matrix(config):
+        return [BaseNpuSweepSpec(base_core_mode="single")]
     return [BaseNpuSweepSpec(base_core_mode=mode) for mode in expand_core_modes(config.getoption("--core-mode"))]
 
 
 def build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpuSweepSpec]:
     """Build synchronized sweep specs for encoder-decoder models."""
+    if not should_expand_core_matrix(config, prefixes=("encoder", "decoder")):
+        return [
+            EncoderDecoderNpuSweepSpec(
+                encoder_core_mode="single",
+                decoder_core_mode="single",
+            )
+        ]
+
     encoder_raw = config.getoption("--encoder-core-mode")
     decoder_raw = config.getoption("--decoder-core-mode")
     shared_raw = config.getoption("--core-mode")
     encoder_explicit = option_value_was_provided(config, "encoder", "core_mode")
     decoder_explicit = option_value_was_provided(config, "decoder", "core_mode")
     shared_explicit = option_value_was_provided(config, "", "core_mode")
+    use_shared_defaults = shared_explicit or full_matrix_enabled(config)
 
-    if shared_explicit and not encoder_explicit and not decoder_explicit:
+    if use_shared_defaults and not encoder_explicit and not decoder_explicit:
         return [
             EncoderDecoderNpuSweepSpec(
                 encoder_core_mode=mode,
@@ -243,8 +268,8 @@ def build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpu
             for mode in expand_core_modes(shared_raw)
         ]
 
-    encoder_modes = expand_core_modes(encoder_raw if encoder_explicit else shared_raw if shared_explicit else None)
-    decoder_modes = expand_core_modes(decoder_raw if decoder_explicit else shared_raw if shared_explicit else None)
+    encoder_modes = expand_core_modes(encoder_raw if encoder_explicit else shared_raw if use_shared_defaults else None)
+    decoder_modes = expand_core_modes(decoder_raw if decoder_explicit else shared_raw if use_shared_defaults else None)
     return [
         EncoderDecoderNpuSweepSpec(
             encoder_core_mode=encoder_mode,
@@ -257,14 +282,23 @@ def build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpu
 
 def build_vision_text_specs(config: pytest.Config) -> list[VisionTextNpuSweepSpec]:
     """Build synchronized sweep specs for vision-text models."""
+    if not should_expand_core_matrix(config, prefixes=("vision", "text")):
+        return [
+            VisionTextNpuSweepSpec(
+                vision_core_mode="single",
+                text_core_mode="single",
+            )
+        ]
+
     vision_raw = config.getoption("--vision-core-mode")
     text_raw = config.getoption("--text-core-mode")
     shared_raw = config.getoption("--core-mode")
     vision_explicit = option_value_was_provided(config, "vision", "core_mode")
     text_explicit = option_value_was_provided(config, "text", "core_mode")
     shared_explicit = option_value_was_provided(config, "", "core_mode")
+    use_shared_defaults = shared_explicit or full_matrix_enabled(config)
 
-    if shared_explicit and not vision_explicit and not text_explicit:
+    if use_shared_defaults and not vision_explicit and not text_explicit:
         return [
             VisionTextNpuSweepSpec(
                 vision_core_mode=mode,
@@ -273,8 +307,8 @@ def build_vision_text_specs(config: pytest.Config) -> list[VisionTextNpuSweepSpe
             for mode in expand_core_modes(shared_raw)
         ]
 
-    vision_modes = expand_core_modes(vision_raw if vision_explicit else shared_raw if shared_explicit else None)
-    text_modes = expand_core_modes(text_raw if text_explicit else shared_raw if shared_explicit else None)
+    vision_modes = expand_core_modes(vision_raw if vision_explicit else shared_raw if use_shared_defaults else None)
+    text_modes = expand_core_modes(text_raw if text_explicit else shared_raw if use_shared_defaults else None)
     return [
         VisionTextNpuSweepSpec(
             vision_core_mode=vision_mode,
@@ -307,7 +341,4 @@ def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) ->
     raw_core_mode = config.getoption("--core-mode")
     if raw_core_mode in {None, "", "all", "single"}:
         return
-    raise pytest.UsageError(
-        f"{suite_name} only supports --core-mode single. "
-        f"Received --core-mode={raw_core_mode!r}."
-    )
+    raise pytest.UsageError(f"{suite_name} only supports --core-mode single. Received --core-mode={raw_core_mode!r}.")

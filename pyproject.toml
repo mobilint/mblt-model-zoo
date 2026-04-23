@@ -93,7 +93,6 @@ version = { attr = "mblt_model_zoo.__version__" }
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
-    "pytest-timeout>=2.4.0",
     "datasets>=3.2.0, <=3.6.0",
     "matplotlib",
     "librosa>=0.11.0, <=0.11.0",
@@ -104,6 +103,11 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
 ]
 
 [tool.ruff]
