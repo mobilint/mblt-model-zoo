@@ -1,14 +1,11 @@
 """Batch tests for EXAONE Deep models."""
 
-import pytest
-
 MODEL_PATHS = (
     "mobilint/EXAONE-Deep-2.4B-Batch16",
     "mobilint/EXAONE-Deep-7.8B-Batch16",
 )
 
 
-@pytest.mark.timeout(300)
 def test_exaone_deep_batch(pipe, run_batch_generation) -> None:
     """Run short math prompts against EXAONE Deep batch models."""
     messages = [

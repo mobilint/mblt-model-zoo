@@ -1,8 +1,11 @@
-"""Tests for transformer-only generation token limit policy."""
+"""Tests for transformer-only generation token limit policies."""
 
 from __future__ import annotations
 
-from tests.transformers.conftest import transformers_generation_token_limit
+from tests.transformers.conftest import (
+    transformers_batch_generation_token_limit,
+    transformers_generation_token_limit,
+)
 
 
 class _FakeConfig:
@@ -32,3 +35,19 @@ def test_transformers_generation_token_limit_uses_full_matrix_value():
     limit = transformers_generation_token_limit(config)
 
     assert limit == 512
+
+
+def test_transformers_batch_generation_token_limit_uses_quick_default():
+    config = _FakeConfig(full_matrix=False)
+
+    limit = transformers_batch_generation_token_limit(config)
+
+    assert limit == 32
+
+
+def test_transformers_batch_generation_token_limit_uses_full_matrix_value():
+    config = _FakeConfig(full_matrix=True)
+
+    limit = transformers_batch_generation_token_limit(config)
+
+    assert limit == 256

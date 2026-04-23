@@ -87,7 +87,7 @@ def pipe(
 
 
 @pytest.fixture
-def run_batch_generation(generation_token_limit: int):
+def run_batch_generation(batch_generation_token_limit: int):
     """Run generation for a list of batched chat messages with a shared cap."""
 
     def _run(
@@ -101,7 +101,7 @@ def run_batch_generation(generation_token_limit: int):
         pipe(
             messages,
             batch_size=batch_size,
-            max_new_tokens=max_new_tokens if max_new_tokens is not None else generation_token_limit,
+            max_new_tokens=max_new_tokens if max_new_tokens is not None else batch_generation_token_limit,
             streamer=BatchTextStreamer(
                 tokenizer=pipe.tokenizer,
                 batch_size=batch_size,

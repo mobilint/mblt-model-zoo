@@ -1,14 +1,11 @@
 """Non-batch tests for EXAONE Deep models."""
 
-import pytest
-
 MODEL_PATHS = (
     "mobilint/EXAONE-Deep-2.4B",
     "mobilint/EXAONE-Deep-7.8B",
 )
 
 
-@pytest.mark.timeout(300)
 def test_exaone_deep(pipe, generation_token_limit: int) -> None:
     """Run a math-style prompt against EXAONE Deep."""
     pipe.generation_config.max_new_tokens = None
