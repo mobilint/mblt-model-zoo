@@ -205,6 +205,62 @@ def test_full_matrix_restores_default_base_core_sweep():
     ]
 
 
+def test_full_matrix_restores_default_encoder_decoder_core_sweep():
+    config = _make_config(full_matrix=True)
+
+    specs = conftest.build_encoder_decoder_specs(config)
+
+    assert specs == [
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="single", decoder_core_mode="single"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global4", decoder_core_mode="global4"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="global8"),
+    ]
+
+
+def test_full_matrix_restores_default_vision_text_core_sweep():
+    config = _make_config(full_matrix=True)
+
+    specs = conftest.build_vision_text_specs(config)
+
+    assert specs == [
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="single", text_core_mode="single"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global4", text_core_mode="global4"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="global8"),
+    ]
+
+
+def test_full_matrix_with_explicit_vision_override_keeps_text_default_sweep():
+    config = _make_config(
+        full_matrix=True,
+        vision_core_mode="global8",
+        explicit_args=("--vision-core-mode=global8",),
+    )
+
+    specs = conftest.build_vision_text_specs(config)
+
+    assert specs == [
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="single"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="global4"),
+        conftest.VisionTextNpuSweepSpec(vision_core_mode="global8", text_core_mode="global8"),
+    ]
+
+
+def test_full_matrix_with_explicit_encoder_override_keeps_decoder_default_sweep():
+    config = _make_config(
+        full_matrix=True,
+        encoder_core_mode="global8",
+        explicit_args=("--encoder-core-mode=global8",),
+    )
+
+    specs = conftest.build_encoder_decoder_specs(config)
+
+    assert specs == [
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="single"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="global4"),
+        conftest.EncoderDecoderNpuSweepSpec(encoder_core_mode="global8", decoder_core_mode="global8"),
+    ]
+
+
 def test_build_base_npu_params_can_force_single_mode():
     config = _make_config(
         shared_core_mode="all",
