@@ -22,6 +22,7 @@ from .configuration_aya_vision import MobilintAyaVisionConfig
 
 logger = logging.get_logger(__name__)
 
+
 class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGenerationMixin):
     config: MobilintAyaVisionConfig
     base_model_prefix = "model"
@@ -30,8 +31,14 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
     def __init__(self, config: MobilintAyaVisionConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         
-        self.vision_tower: MobilintSiglipVisionModel = AutoModel.from_config(config.vision_config, _internal_call=True)
-        self.language_model: MobilintCohere2ForCausalLM = AutoModelForCausalLM.from_config(config.text_config, _internal_call=True)
+        self.vision_tower: MobilintSiglipVisionModel = AutoModel.from_config(
+            config.vision_config,
+            _internal_call=True,
+        )
+        self.language_model: MobilintCohere2ForCausalLM = AutoModelForCausalLM.from_config(
+            config.text_config,
+            _internal_call=True,
+        )
     
     def get_cache_mxq_model(self):
         return self.language_model.get_cache_mxq_model()
@@ -137,23 +144,30 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            image_hidden_states=cast(Union[torch.FloatTensor, None], image_features if pixel_values is not None else None),
+            image_hidden_states=cast(
+                Union[torch.FloatTensor, None],
+                image_features if pixel_values is not None else None,
+            ),
         )
     
     def prepare_inputs_for_generation(
         self,
-        input_ids,
-        past_key_values=None,
-        inputs_embeds=None,
-        pixel_values=None,
-        attention_mask=None,
+        input_ids: torch.LongTensor,
+        past_key_values: Union[MobilintCache, None] = None,
+        inputs_embeds: Union[torch.FloatTensor, None] = None,
+        pixel_values: Union[torch.FloatTensor, None] = None,
+        attention_mask: Union[torch.Tensor, None] = None,
         cache_position: Union[torch.LongTensor, None] = None,
-        logits_to_keep=None,
-        is_first_iteration=False,
-        **kwargs,
-    ):
-        model_inputs = MobilintGenerationMixin.prepare_inputs_for_generation(
-            self,
+        logits_to_keep: Union[int, torch.Tensor, None] = None,
+        is_first_iteration: bool = False,
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> dict[str, object]:
+        """Forward image inputs only for the prefill step.
+
+        Returns:
+            Prepared model inputs for the next generation step.
+        """
+        model_inputs = super().prepare_inputs_for_generation(
             input_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
@@ -164,8 +178,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             **kwargs,
         )
 
-        if (cache_position is not None and cache_position[0] == 0 or
-            is_first_iteration or not kwargs.get("use_cache", True)):
+        if is_first_iteration or not kwargs.get("use_cache", True):
             model_inputs["pixel_values"] = pixel_values
 
         return model_inputs
@@ -173,5 +186,3 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         
 AutoModel.register(MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintAyaVisionConfig, MobilintAyaVisionForConditionalGeneration)
-
-
