@@ -1,17 +1,15 @@
+import inspect
+from dataclasses import dataclass
+from functools import lru_cache, wraps
 from typing import Optional, Union, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers.modeling_outputs import BaseModelOutputWithPast
+from transformers.modeling_outputs import BaseModelOutputWithPast, BaseModelOutputWithPooling
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForImageTextToText
-from transformers.models.qwen3_vl.modeling_qwen3_vl import (
-    BaseModelOutputWithDeepstackFeatures,
-    Qwen3VLCausalLMOutputWithPast,
-    Qwen3VLForConditionalGeneration,
-    Qwen3VLModel,
-    Qwen3VLPreTrainedModel,
-)
+from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLCausalLMOutputWithPast, Qwen3VLForConditionalGeneration
+from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLModel, Qwen3VLPreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
@@ -26,6 +24,36 @@ from .configuration_qwen3_vl import (
 )
 
 logger = logging.get_logger(__name__)
+
+try:
+    from transformers.models.qwen3_vl.modeling_qwen3_vl import BaseModelOutputWithDeepstackFeatures
+except ImportError:
+
+    @dataclass
+    class BaseModelOutputWithDeepstackFeatures(BaseModelOutputWithPooling):
+        """Fallback Qwen3-VL vision output used by older Transformers releases."""
+
+        deepstack_features: Optional[list[torch.FloatTensor]] = None
+
+
+@lru_cache(maxsize=1)
+def _upstream_qwen3_vl_uses_structured_vision_outputs() -> bool:
+    """Check whether the installed Transformers expects ``visual()`` to return a model output.
+
+    Returns:
+        ``True`` when the installed upstream ``Qwen3VLModel.get_image_features`` reads structured
+        fields such as ``pooler_output``. ``False`` for older releases that expect
+        ``visual()`` to return ``(image_embeds, deepstack_embeds)`` directly.
+    """
+    get_image_features = inspect.unwrap(Qwen3VLModel.get_image_features)
+    code = getattr(get_image_features, "__code__", None)
+    if code is not None:
+        return "pooler_output" in code.co_names
+
+    try:
+        return "pooler_output" in inspect.getsource(get_image_features)
+    except OSError:
+        return True
 
 
 class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
@@ -60,15 +88,19 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        """Run the NPU vision encoder.
+    ) -> Union[tuple, BaseModelOutputWithDeepstackFeatures]:
+        """Run the NPU vision encoder and adapt to the upstream Qwen3-VL vision contract.
 
         The compiled encoder expects a fixed-shape tensor with the following flow:
 
         1. HF processor output: `(256, 1536)` for a 224x224 image
         2. Runtime repreprocess: `(1, 6, 1024, 64)`
         3. Final MXQ input: `(1024, 64, 6)`
+
+        The Mobilint backend exposes merged image embeds and deepstack features only, so
+        `last_hidden_state`, `hidden_states`, and `attentions` remain unavailable.
         """
+        return_dict = kwargs.pop("return_dict", None)
         del kwargs
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")
@@ -79,6 +111,19 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise RuntimeError("Vision MXQ inference returned None.")
 
         image_embeds, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
+        structured_outputs = BaseModelOutputWithDeepstackFeatures(
+            last_hidden_state=None,
+            pooler_output=image_embeds,
+            hidden_states=None,
+            attentions=None,
+            deepstack_features=deepstack_embeds,
+        )
+        if return_dict is True:
+            return structured_outputs
+        if _upstream_qwen3_vl_uses_structured_vision_outputs():
+            if return_dict is False:
+                return structured_outputs.to_tuple()
+            return structured_outputs
         return image_embeds, deepstack_embeds
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
@@ -343,35 +388,6 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
         self.rope_deltas = None
 
-    def get_image_features(
-        self,
-        pixel_values: torch.FloatTensor,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        **kwargs: Unpack[TransformersKwargs],
-    ) -> Union[tuple, BaseModelOutputWithDeepstackFeatures]:
-        if image_grid_thw is None:
-            raise ValueError("image_grid_thw must not be None.")
-
-        del kwargs
-        image_embeds, deepstack_image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
-        split_sizes = (image_grid_thw.prod(-1) // self.visual.config.spatial_merge_size**2).tolist()
-        image_embeds = torch.split(image_embeds, split_sizes)
-        return BaseModelOutputWithDeepstackFeatures(
-            last_hidden_state=None,
-            pooler_output=image_embeds,
-            hidden_states=None,
-            attentions=None,
-            deepstack_features=deepstack_image_embeds,
-        )
-
-    def get_video_features(
-        self,
-        pixel_values_videos: torch.FloatTensor,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        **kwargs: Unpack[TransformersKwargs],
-    ) -> Union[tuple, BaseModelOutputWithDeepstackFeatures]:
-        return self.get_image_features(pixel_values_videos, video_grid_thw, **kwargs)
-
 
 class MobilintQwen3VLForConditionalGeneration(
     PretrainedOnlyMixin,
@@ -390,75 +406,21 @@ class MobilintQwen3VLForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        cache_position=None,
-        position_ids=None,
-        use_cache=True,
-        pixel_values=None,
-        pixel_values_videos=None,
-        image_grid_thw=None,
-        video_grid_thw=None,
-        mm_token_type_ids=None,
-        is_first_iteration=False,
-        **kwargs,
-    ):
-        return super().prepare_inputs_for_generation(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            inputs_embeds=inputs_embeds,
-            cache_position=cache_position,
-            position_ids=position_ids,
-            use_cache=use_cache,
-            pixel_values=pixel_values,
-            pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw,
-            mm_token_type_ids=mm_token_type_ids,
-            is_first_iteration=is_first_iteration,
-            **kwargs,
-        )
-
+    @wraps(Qwen3VLForConditionalGeneration.forward)
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[MobilintCache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        pixel_values: Optional[torch.Tensor] = None,
-        pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        mm_token_type_ids: Optional[torch.IntTensor] = None,
-        logits_to_keep: Union[int, torch.Tensor] = 0,
+        *args: object,
         count_npu_time: bool = False,
-        **kwargs: Unpack[TransformersKwargs],
+        **kwargs: object,
     ) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
-        return super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            labels=labels,
-            pixel_values=pixel_values,
-            pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw,
-            cache_position=cache_position,
-            mm_token_type_ids=mm_token_type_ids,
-            logits_to_keep=logits_to_keep,
-            count_npu_time=count_npu_time,
-            **kwargs,
-        )
+        """Forward to upstream while injecting Mobilint decoder timing collection.
+
+        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
+        generation helpers still see Qwen3-VL's real inputs such as ``mm_token_type_ids`` and
+        ``logits_to_keep``.
+        """
+        kwargs["count_npu_time"] = count_npu_time
+        return super().forward(*args, **kwargs)
 
 
 AutoModel.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
