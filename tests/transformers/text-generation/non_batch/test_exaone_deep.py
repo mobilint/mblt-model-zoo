@@ -9,9 +9,10 @@ MODEL_PATHS = (
 
 
 @pytest.mark.timeout(300)
-def test_exaone_deep(pipe) -> None:
+def test_exaone_deep(pipe, generation_token_limit: int) -> None:
     """Run a math-style prompt against EXAONE Deep."""
     pipe.generation_config.max_new_tokens = None
+    pipe.generation_config.max_length = None
 
     prompt = (
         r"Question: Let $\{a_n\}$ be a sequence with $a_1 = 2$ and let $\{b_n\}$ "
@@ -28,4 +29,4 @@ def test_exaone_deep(pipe) -> None:
 
     messages = [{"role": "user", "content": prompt}]
 
-    pipe(messages, max_length=512)
+    pipe(messages, max_new_tokens=generation_token_limit)

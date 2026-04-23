@@ -33,8 +33,10 @@ def tokenizer(request, revision):
     yield tokenizer
 
 
-def test_exaone4(model, tokenizer) -> None:
+def test_exaone4(model, tokenizer, generation_token_limit: int) -> None:
     """Run representative EXAONE 4 generation modes."""
+    model.generation_config.max_new_tokens = None
+    model.generation_config.max_length = None
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     print("\n - Non-reasoning mode\n")
@@ -53,7 +55,7 @@ def test_exaone4(model, tokenizer) -> None:
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=False,
         streamer=streamer,
     )
@@ -73,7 +75,7 @@ def test_exaone4(model, tokenizer) -> None:
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -118,7 +120,7 @@ def test_exaone4(model, tokenizer) -> None:
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,

@@ -3,9 +3,10 @@
 MODEL_PATHS = ("mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",)
 
 
-def test_clova(pipe) -> None:
+def test_clova(pipe, generation_token_limit: int) -> None:
     """Run a basic prompt against HyperCLOVA X."""
     pipe.generation_config.max_new_tokens = None
+    pipe.generation_config.max_length = None
 
     messages = [
         {"role": "tool_list", "content": ""},
@@ -19,4 +20,4 @@ def test_clova(pipe) -> None:
         },
     ]
 
-    pipe(messages, max_length=512)
+    pipe(messages, max_new_tokens=generation_token_limit)

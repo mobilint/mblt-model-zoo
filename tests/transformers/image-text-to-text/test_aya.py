@@ -35,8 +35,9 @@ def pipe(request, revision, vision_text_npu_params):
     del pipe
 
 
-def test_aya(pipe):
+def test_aya(pipe, generation_token_limit: int):
     pipe.generation_config.max_new_tokens = None
+    pipe.generation_config.max_length = None
 
     # Format message with the aya-vision chat template
     messages = [
@@ -55,7 +56,7 @@ def test_aya(pipe):
     pipe(
         text=messages,
         generate_kwargs={
-            "max_length": 512,
+            "max_new_tokens": generation_token_limit,
             "streamer": TextStreamer(tokenizer=pipe.tokenizer, skip_prompt=False),
         },
     )

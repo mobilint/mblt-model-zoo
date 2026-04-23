@@ -52,7 +52,9 @@ def tokenizer(model_path, revision):
     yield tokenizer
 
 
-def test_cache(model, tokenizer):
+def test_cache(model, tokenizer, generation_token_limit: int):
+    model.generation_config.max_new_tokens = None
+    model.generation_config.max_length = None
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     messages = [
@@ -84,7 +86,7 @@ def test_cache(model, tokenizer):
         past_key_values=past_key_values,
         do_sample=False,
         streamer=streamer,
-        max_new_tokens=1024,
+        max_new_tokens=generation_token_limit,
     )
 
     assistant_text = tokenizer.decode(output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True)
@@ -116,7 +118,7 @@ def test_cache(model, tokenizer):
         past_key_values=past_key_values,
         do_sample=False,
         streamer=streamer,
-        max_new_tokens=1024,
+        max_new_tokens=generation_token_limit,
     )
     final_message = tokenizer.decode(output_ids[0, input_ids.shape[-1] :], skip_special_tokens=True)
     assert "James" in final_message
