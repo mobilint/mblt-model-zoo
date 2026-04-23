@@ -15,9 +15,15 @@ class _FakeInvocationParams:
 
 
 class _FakeConfig:
-    def __init__(self, options: dict[str, object], args: tuple[str, ...]):
+    def __init__(
+        self,
+        options: dict[str, object],
+        args: tuple[str, ...],
+        selection_args: tuple[str, ...] = (),
+    ):
         self._options = options
         self.invocation_params = _FakeInvocationParams(args=args)
+        self.args = list(selection_args)
         self.hook = SimpleNamespace(pytest_deselected=lambda items: None)
 
     def getoption(self, name: str):
@@ -33,6 +39,7 @@ def _make_config(
     text_core_mode: str | None = None,
     full_matrix: bool = False,
     explicit_args: tuple[str, ...] = (),
+    selection_args: tuple[str, ...] = (),
 ) -> _FakeConfig:
     return _FakeConfig(
         options={
@@ -64,6 +71,7 @@ def _make_config(
             "--text-target-clusters": None,
         },
         args=explicit_args,
+        selection_args=selection_args,
     )
 
 
@@ -73,10 +81,18 @@ class _FakeCallSpec:
 
 
 class _FakeItem:
-    def __init__(self, *, path: str, module: ModuleType, params: dict[str, object]):
+    def __init__(
+        self,
+        *,
+        path: str,
+        module: ModuleType,
+        params: dict[str, object],
+        nodeid: str | None = None,
+    ):
         self.path = Path(path)
         self.module = module
         self.callspec = _FakeCallSpec(params=params)
+        self.nodeid = nodeid or self.path.as_posix()
         self.markers: list[str] = []
 
     def add_marker(self, marker: str) -> None:
@@ -346,3 +362,38 @@ def test_transformers_collection_keeps_nondefault_models_with_keyword_filter():
 
     assert items == [first_item, second_item]
     assert second_item.markers == ["full_matrix"]
+
+
+def test_transformers_collection_keeps_explicit_nondefault_nodeid_selection():
+    selected_nodeid = (
+        "tests/transformers/image-text-to-text/test_qwen3_vl.py::"
+        "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
+    )
+    config = _make_config(
+        explicit_args=(
+            r"C:\repo\tests\transformers\image-text-to-text\test_qwen3_vl.py::"
+            "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]",
+        ),
+        selection_args=(
+            r"C:\repo\tests\transformers\image-text-to-text\test_qwen3_vl.py::"
+            "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]",
+        ),
+    )
+    module = SimpleNamespace(
+        MODEL_PATHS=(
+            "mobilint/Qwen3-VL-4B-Instruct",
+            "mobilint/Qwen3-VL-8B-Instruct",
+        )
+    )
+    selected_item = _FakeItem(
+        path="C:/repo/tests/transformers/image-text-to-text/test_qwen3_vl.py",
+        module=module,
+        params={"pipe": "mobilint/Qwen3-VL-8B-Instruct"},
+        nodeid=selected_nodeid,
+    )
+    items = [selected_item]
+
+    conftest.pytest_collection_modifyitems(config, items)
+
+    assert items == [selected_item]
+    assert selected_item.markers == ["full_matrix"]

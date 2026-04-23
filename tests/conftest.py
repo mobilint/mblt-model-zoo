@@ -141,6 +141,34 @@ def _keyword_filter_was_provided(config: pytest.Config) -> bool:
     return any(arg in {"-k", "--keyword"} or arg.startswith("--keyword=") for arg in args)
 
 
+def _normalize_node_id(value: str) -> str:
+    """Return a node id or selection argument with normalized path separators."""
+    return value.replace("\\", "/")
+
+
+def _item_was_explicitly_selected(config: pytest.Config, item: pytest.Item) -> bool:
+    """Return whether pytest was invoked with this exact collected item node id."""
+    node_id = getattr(item, "nodeid", None)
+    if not isinstance(node_id, str) or "::" not in node_id:
+        return False
+
+    normalized_node_id = _normalize_node_id(node_id)
+    selected_args = getattr(config, "args", ())
+
+    for arg in selected_args:
+        normalized_arg = _normalize_node_id(str(arg))
+        if "::" not in normalized_arg:
+            continue
+        if normalized_arg == normalized_node_id:
+            return True
+        if normalized_arg.endswith(normalized_node_id):
+            prefix = normalized_arg[: -len(normalized_node_id)]
+            if prefix in {"", "./"} or prefix.endswith("/"):
+                return True
+
+    return False
+
+
 def _is_transformers_test(item: pytest.Item) -> bool:
     """Return whether a collected item belongs to the transformers test tree."""
     return "/tests/transformers/" in item.path.as_posix()
@@ -219,7 +247,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if uses_nondefault_model or _item_uses_non_single_core(item):
             item.add_marker("full_matrix")
 
-        if uses_nondefault_model and not keep_all_models:
+        if uses_nondefault_model and not keep_all_models and not _item_was_explicitly_selected(config, item):
             deselected_items.append(item)
             continue
 
