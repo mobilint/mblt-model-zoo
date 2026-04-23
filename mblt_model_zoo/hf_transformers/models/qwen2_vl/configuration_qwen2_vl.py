@@ -20,6 +20,10 @@ class MobilintQwen2VLVisionConfig(MobilintConfigMixin, Qwen2VLVisionConfig):
 class MobilintQwen2VLTextConfig(MobilintConfigMixin, Qwen2VLTextConfig):
     model_type = "mobilint-qwen2_vl_text"
 
+    @wraps(Qwen2VLTextConfig.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
 
 class MobilintQwen2VLConfig(MobilintVisionTextConfigMixin, Qwen2VLConfig):
     model_type = "mobilint-qwen2_vl"

@@ -27,6 +27,7 @@ def test_vlm_text_config_signature_exposes_mobilint_backend_fields(text_config_c
     """Expose Mobilint backend kwargs so upstream VLM flat-config loading can discover them."""
     signature = inspect.signature(text_config_cls.__init__)
 
+    assert "hidden_size" in signature.parameters
     for field_name in ("mxq_path", "dev_no", "core_mode", "target_cores", "target_clusters"):
         assert field_name in signature.parameters
 
