@@ -8,8 +8,12 @@ import torch
 import torch.nn as nn
 from transformers.modeling_outputs import BaseModelOutputWithPast, BaseModelOutputWithPooling
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForImageTextToText
-from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLCausalLMOutputWithPast, Qwen3VLForConditionalGeneration
-from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLModel, Qwen3VLPreTrainedModel
+from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+    Qwen3VLCausalLMOutputWithPast,
+    Qwen3VLForConditionalGeneration,
+    Qwen3VLModel,
+    Qwen3VLPreTrainedModel,
+)
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
@@ -101,6 +105,8 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         `last_hidden_state`, `hidden_states`, and `attentions` remain unavailable.
         """
         return_dict = kwargs.pop("return_dict", None)
+        if return_dict is None and _upstream_qwen3_vl_uses_structured_vision_outputs():
+            return_dict = self.config.return_dict
         del kwargs
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")

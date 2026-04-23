@@ -82,7 +82,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         Args:
             hidden_states: Processor-produced image or video patch tensor.
             grid_thw: Temporal, height, and width grid metadata for each image or video.
-            **kwargs: Additional Transformers kwargs. ``return_dict`` is handled by the decorator.
+            **kwargs: Additional Transformers kwargs. ``return_dict`` falls back to
+                ``self.config.return_dict`` when the installed upstream expects structured outputs.
 
         Returns:
             By default, a value matching the installed upstream Qwen2-VL contract:
@@ -91,6 +92,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             structured fields are returned as ``None`` when present.
         """
         return_dict = kwargs.pop("return_dict", None)
+        if return_dict is None and _upstream_qwen2_vl_uses_structured_vision_outputs():
+            return_dict = self.config.return_dict
         del kwargs
         gt, gh, gw = grid_thw[0].tolist()
 

@@ -116,6 +116,21 @@ def test_qwen3_vl_visual_forward_supports_return_dict_false(monkeypatch: pytest.
     assert len(outputs[1]) == 3
 
 
+def test_qwen3_vl_visual_forward_uses_config_return_dict_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use the vision config default when structured upstream omits ``return_dict``."""
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: True)
+    dummy = DummyQwen3Vision(return_dict=False)
+    pixel_values = torch.zeros((256, 1536), dtype=torch.float32)
+    grid_thw = torch.tensor([[1, 16, 16]], dtype=torch.long)
+
+    outputs = MobilintQwen3VLVisionModel.forward(dummy, pixel_values, grid_thw)
+
+    assert isinstance(outputs, tuple)
+    assert len(outputs) == 2
+    assert outputs[0].shape == (64, 8)
+    assert len(outputs[1]) == 3
+
+
 def test_qwen3_vl_visual_forward_supports_legacy_tuple_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     """Return the legacy tuple form when installed upstream still expects tuple outputs."""
     monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: False)
