@@ -1,3 +1,5 @@
+"""Non-batch tests for EXAONE 4 models."""
+
 import random
 
 import pytest
@@ -23,27 +25,37 @@ def model(request, revision, base_npu_params):
 @pytest.fixture(params=MODEL_PATHS, scope="module")
 def tokenizer(request, revision):
     model_path = request.param
-    tokenizer = AutoTokenizer.from_pretrained(model_path, revision=revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        revision=revision,
+        trust_remote_code=True,
+    )
     yield tokenizer
 
 
-def test_exaone4(model, tokenizer):
+def test_exaone4(model, tokenizer, generation_token_limit: int) -> None:
+    """Run representative EXAONE 4 generation modes."""
+    model.generation_config.max_new_tokens = None
+    model.generation_config.max_length = None
     streamer = TextStreamer(tokenizer=tokenizer, skip_prompt=False)
 
     print("\n - Non-reasoning mode\n")
 
-    # Choose your prompt
     prompt = "Explain how wonderful you are"
-    # prompt = "Explica lo increíble que eres"
-    # prompt = "너가 얼마나 대단한지 설명해 봐"
 
     messages = [{"role": "user", "content": prompt}]
 
-    input_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_tensors="pt")
+    input_ids = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=False,
+    )
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=False,
         streamer=streamer,
     )
@@ -57,12 +69,13 @@ def test_exaone4(model, tokenizer):
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=False,
         enable_thinking=True,
     )
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,
@@ -101,12 +114,13 @@ def test_exaone4(model, tokenizer):
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=False,
         tools=tools,
     )
 
     model.generate(
         input_ids.to(model.device),
-        max_length=512,
+        max_new_tokens=generation_token_limit,
         do_sample=True,
         temperature=0.6,
         top_p=0.95,

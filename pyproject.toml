@@ -59,12 +59,12 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 
 [project.optional-dependencies]
 transformers = [
-    "transformers[serving]>=4.54.0, <=4.57.6",
+    "transformers[serving]>=4.54.0, <=5.5.4",
     "sentencepiece",
     "torchvision",
 ]
 MeloTTS = [
-    "transformers>=4.54.0, <=4.57.6",
+    "transformers>=4.54.0, <=5.5.4",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",
@@ -93,7 +93,6 @@ version = { attr = "mblt_model_zoo.__version__" }
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
-    "pytest-timeout>=2.4.0",
     "datasets>=3.2.0, <=3.6.0",
     "matplotlib",
     "librosa>=0.11.0, <=0.11.0",
@@ -104,6 +103,11 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
 ]
 
 [tool.ruff]

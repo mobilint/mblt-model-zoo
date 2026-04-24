@@ -1,20 +1,17 @@
 from typing import Union, cast
 
 import torch
-import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import (
     BaseModelOutputWithPoolingAndCrossAttentions,
     MaskedLMOutput,
 )
-from transformers.modeling_utils import PreTrainedModel
 from transformers.models.auto.modeling_auto import AutoModel, AutoModelForMaskedLM
 from transformers.models.bert.modeling_bert import (
     BertEmbeddings,
-    BertLMPredictionHead,
     BertOnlyMLMHead,
     BertPooler,
-    load_tf_weights_in_bert,
+    BertPreTrainedModel,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
@@ -25,10 +22,15 @@ from .configuration_bert import MobilintBertConfig
 
 logger = logging.get_logger(__name__)
 
-class MobilintBertPreTrainedModel(PreTrainedModel):
+class MobilintBertPreTrainedModel(BertPreTrainedModel):
     config: MobilintBertConfig
-    load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
+    supports_gradient_checkpointing = False
+    _supports_flash_attn = False
+    _supports_sdpa = False
+    _supports_flex_attn = False
+    _supports_attention_backend = False
+    _can_record_outputs = {}
 
 class MobilintBertModel(MobilintModelMixin, MobilintBertPreTrainedModel):
     _no_split_modules = ["BertEmbeddings", "BertLayer"]

@@ -24,13 +24,17 @@ pip install -e .[transformers]
 
 ## Quick Start Guide
 
-**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes. So, `trust_remote_code=True` option is needed.
+**mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes, so `trust_remote_code=True` must be passed to every `transformers` auto loader that touches the Hub (for example, `AutoTokenizer.from_pretrained(...)`, `AutoProcessor.from_pretrained(...)`, `AutoModel.from_pretrained(...)`, and `pipeline(...)`).
 
 ```python
 from transformers import TextStreamer, pipeline, AutoTokenizer
 
 model_path = "mobilint/Llama-3.2-3B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
+tokenizer = AutoTokenizer.from_pretrained(
+    model_path,
+    revision="W8",
+    trust_remote_code=True,
+)
 
 pipe = pipeline(
     "text-generation",
@@ -65,7 +69,11 @@ from transformers import TextStreamer, AutoModelForCausalLM, AutoTokenizer
 
 model_path = "mobilint/EXAONE-3.5-2.4B-Instruct"
 
-tokenizer = AutoTokenizer.from_pretrained(model_path, revision="W8")
+tokenizer = AutoTokenizer.from_pretrained(
+    model_path,
+    revision="W8",
+    trust_remote_code=True,
+)
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
     trust_remote_code=True,
@@ -82,7 +90,11 @@ messages = [
 ]
 
 input_ids = tokenizer.apply_chat_template(
-    messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
+    messages,
+    tokenize=True,
+    add_generation_prompt=True,
+    return_tensors="pt",
+    return_dict=False,
 )
 
 streamer = TextStreamer(tokenizer)
@@ -103,7 +115,6 @@ model_name = "mobilint/Qwen2-VL-2B-Instruct"
 
 processor = AutoProcessor.from_pretrained(
     model_name,
-    use_fast=True,
     trust_remote_code=True,
     revision="W8",
 )
@@ -111,6 +122,7 @@ pipe = pipeline(
     "image-text-to-text",
     model=model_name,
     processor=processor,
+    trust_remote_code=True,
     revision="W8",
     model_kwargs={"embedding_weight": "/path/to/embedding.pt"},
     device="cpu",
@@ -293,7 +305,8 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
 - `trust_remote_code`
 
     Must be set to `True` for our model zoo models, because our `auto_map` proxy code is loaded as remote code from the Hugging Face Hub.
-    This lets you use the standard `transformers` auto classes (`AutoModel`, `AutoConfig`, `pipeline`, etc.) while loading Mobilint-specific implementations.
+    Pass it to every relevant loader call, including `AutoTokenizer.from_pretrained(...)`, `AutoProcessor.from_pretrained(...)`, `AutoConfig.from_pretrained(...)`, `AutoModel.from_pretrained(...)`, and `pipeline(...)`.
+    This lets you use the standard `transformers` auto classes while loading Mobilint-specific implementations.
 
 - `dtype`
 
@@ -354,6 +367,7 @@ For TPS benchmark commands, you can use keyword parameters explained in [Keyword
 
 - Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
   - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
+  - Batch text-generation tests are fixed to `--core-mode single` because batched LLM execution does not support other core modes. The shared default `--core-mode all` is accepted there and folded into `single`.
   - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
 - Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
   - Text-generation and VLM benchmarks default to `--core-mode global8`.

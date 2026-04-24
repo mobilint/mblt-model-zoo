@@ -31,9 +31,21 @@ class PretrainedOnlyMixin(PreTrainedModel):
             )
             
         super().__init__(*args, **kwargs)
+        self._ensure_transformers_5_runtime_attrs()
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
         kwargs["_internal_call"] = True
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
         return model
+
+    def _ensure_transformers_5_runtime_attrs(self) -> None:
+        """Populate runtime attrs expected by newer Transformers releases."""
+        if getattr(self, "_tp_plan", None) is None:
+            self._tp_plan = {}
+        if getattr(self, "_ep_plan", None) is None:
+            self._ep_plan = {}
+        if getattr(self, "_pp_plan", None) is None:
+            self._pp_plan = {}
+        if not hasattr(self, "all_tied_weights_keys"):
+            self.all_tied_weights_keys = {}

@@ -1,21 +1,69 @@
-from typing import Any, Union
+import inspect
+from inspect import Parameter, Signature
+from typing import Any, TypeVar, Union
 
-from transformers.configuration_utils import (
-    PretrainedConfig,
-    SpecificPretrainedConfigType,
-)
+from transformers.configuration_utils import PretrainedConfig
+
+try:
+    from transformers.configuration_utils import SpecificPretrainedConfigType
+except ImportError:
+    try:
+        from transformers.configuration_utils import SpecificPreTrainedConfigType as SpecificPretrainedConfigType
+    except ImportError:
+        SpecificPretrainedConfigType = TypeVar(
+            "SpecificPretrainedConfigType",
+            bound=PretrainedConfig,
+        )
 
 from ...utils.npu_backend import MobilintNPUBackend
 
 
 class MobilintConfigMixin(PretrainedConfig):
-    def __init__(
-        self,
-        *args,
-        **kwargs
-    ):
-        self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
+    _NPU_SIGNATURE_FIELDS = (
+        ("mxq_path", "", str),
+        ("dev_no", 0, int),
+        ("max_batch_size", 1, int),
+        ("core_mode", "single", str),
+        ("target_cores", None, Any),
+        ("target_clusters", None, Any),
+        ("revision", None, Any),
+        ("npu_prefill_chunk_size", None, Any),
+    )
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._augment_init_signature()
+
+    @classmethod
+    def _augment_init_signature(cls) -> None:
+        """Expose Mobilint backend kwargs to upstream config introspection."""
+        init = cls.__init__
+        signature = inspect.signature(init)
+        if any(name in signature.parameters for name, _, _ in cls._NPU_SIGNATURE_FIELDS):
+            return
+
+        parameters = list(signature.parameters.values())
+        insert_at = next(
+            (index for index, parameter in enumerate(parameters) if parameter.kind == Parameter.VAR_KEYWORD),
+            len(parameters),
+        )
+        extra_parameters = [
+            Parameter(name=name, kind=Parameter.KEYWORD_ONLY, default=default, annotation=annotation)
+            for name, default, annotation in cls._NPU_SIGNATURE_FIELDS
+        ]
+        init.__signature__ = Signature(parameters[:insert_at] + extra_parameters + parameters[insert_at:])
+
+    def _ensure_npu_backend(self, kwargs: dict[str, Any]) -> None:
+        if not hasattr(self, "npu_backend"):
+            self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
+
+    def __init__(self, *args, **kwargs):
+        self._ensure_npu_backend(kwargs)
         super().__init__(*args, **kwargs)
+
+    def __post_init__(self, **kwargs: Any) -> None:
+        self._ensure_npu_backend(kwargs)
+        super().__post_init__(**kwargs)
 
     @property
     def mxq_path(self) -> str:
@@ -40,7 +88,7 @@ class MobilintConfigMixin(PretrainedConfig):
     @core_mode.setter
     def core_mode(self, value: str) -> None:
         self.npu_backend.core_mode = value
-    
+
     @property
     def max_batch_size(self) -> int:
         return self.npu_backend.max_batch_size
@@ -72,7 +120,7 @@ class MobilintConfigMixin(PretrainedConfig):
     @npu_prefill_chunk_size.setter
     def npu_prefill_chunk_size(self, value: Any) -> None:
         self.__dict__["npu_prefill_chunk_size"] = value
-    
+
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
             _ = d.pop("npu_backend", None)
@@ -81,18 +129,26 @@ class MobilintConfigMixin(PretrainedConfig):
 
     def to_dict(self):
         output = super().to_dict()
-        output.update(self.npu_backend.to_dict(prefix=""))
+        if hasattr(self, "npu_backend"):
+            output.update(self.npu_backend.to_dict(prefix=""))
         return output
 
 
 class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
-    def __init__(
-        self,
-        **kwargs
-    ):
-        self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
-        self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
+    def _ensure_encoder_decoder_npu_backends(self, kwargs: dict[str, Any]) -> None:
+        if not hasattr(self, "encoder_npu_backend"):
+            self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
+
+        if not hasattr(self, "decoder_npu_backend"):
+            self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
+
+    def __init__(self, **kwargs):
+        self._ensure_encoder_decoder_npu_backends(kwargs)
         super().__init__(**kwargs)
+
+    def __post_init__(self, **kwargs: Any) -> None:
+        self._ensure_encoder_decoder_npu_backends(kwargs)
+        super().__post_init__(**kwargs)
 
     @property
     def encoder_mxq_path(self) -> str:
@@ -117,7 +173,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @encoder_core_mode.setter
     def encoder_core_mode(self, value: str) -> None:
         self.encoder_npu_backend.core_mode = value
-    
+
     @property
     def encoder_max_batch_size(self) -> int:
         return self.encoder_npu_backend.max_batch_size
@@ -165,7 +221,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_core_mode.setter
     def decoder_core_mode(self, value: str) -> None:
         self.decoder_npu_backend.core_mode = value
-    
+
     @property
     def decoder_max_batch_size(self) -> int:
         return self.decoder_npu_backend.max_batch_size
@@ -189,11 +245,11 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
         self.decoder_npu_backend.target_clusters = values
-        
+
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "encoder_npu_backend"):
             _ = d.pop("encoder_npu_backend", None)
-        
+
         if hasattr(self, "decoder_npu_backend"):
             _ = d.pop("decoder_npu_backend", None)
 
@@ -202,8 +258,10 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     def to_dict(self):
         output = super().to_dict()
 
-        output.update(self.encoder_npu_backend.to_dict(prefix="encoder_"))
-        output.update(self.decoder_npu_backend.to_dict(prefix="decoder_"))
+        if hasattr(self, "encoder_npu_backend"):
+            output.update(self.encoder_npu_backend.to_dict(prefix="encoder_"))
+        if hasattr(self, "decoder_npu_backend"):
+            output.update(self.decoder_npu_backend.to_dict(prefix="decoder_"))
 
         return output
 
@@ -237,7 +295,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     @vision_core_mode.setter
     def vision_core_mode(self, value: str) -> None:
         self.vision_config.core_mode = value
-    
+
     @property
     def vision_max_batch_size(self) -> int:
         return self.vision_config.max_batch_size
@@ -285,7 +343,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     @text_core_mode.setter
     def text_core_mode(self, value: str) -> None:
         self.text_config.core_mode = value
-    
+
     @property
     def text_max_batch_size(self) -> int:
         return self.text_config.max_batch_size
@@ -323,19 +381,19 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
         cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
     ) -> Union["MobilintVisionTextConfigMixin", tuple["MobilintVisionTextConfigMixin", dict[str, Any]]]:
         return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
-        
+
         config: MobilintVisionTextConfigMixin
         unused_kwargs: dict[str, Any]
-        config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs) # type: ignore
-        
+        config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)  # type: ignore
+
         config.text_config.name_or_path = config.name_or_path
         config.vision_config.name_or_path = config.name_or_path
-        
+
         if return_unused_kwargs:
             return config, unused_kwargs
         else:
             return config
-    
+
     @classmethod
     def from_text_vision_configs(
         cls,

@@ -103,6 +103,9 @@ pip install -e ".[transformers]" --group dev
 pip install -e ".[MeloTTS]" --group dev
 ```
 
+If validation fails with `ImportError` or `ModuleNotFoundError`, install the relevant optional
+extras before retrying.
+
 ### Python Checks
 
 ```bash

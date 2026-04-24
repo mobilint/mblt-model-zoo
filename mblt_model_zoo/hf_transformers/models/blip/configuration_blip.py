@@ -1,9 +1,6 @@
-from typing import Any, Union
+from typing import Any
 
-from transformers.configuration_utils import (
-    PretrainedConfig,
-    SpecificPretrainedConfigType,
-)
+from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.blip.configuration_blip import (
     BlipConfig,
@@ -22,10 +19,13 @@ logger = logging.get_logger(__name__)
 class MobilintBlipVisionConfig(MobilintConfigMixin, BlipVisionConfig):
     model_type = "mobilint-blip_vision_model"
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
 class MobilintBlipTextConfig(MobilintConfigMixin, BlipTextConfig):
     model_type = "mobilint-blip_text_model"
     
-    def __init__(self, **kwargs,):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         
         self.tie_word_embeddings = False
@@ -36,14 +36,14 @@ class MobilintBlipConfig(MobilintVisionTextConfigMixin, BlipConfig):
 
     def __init__(
         self,
-        text_config=None,
-        vision_config=None,
-        projection_dim=512,
-        logit_scale_init_value=2.6592,
-        image_text_hidden_size=256,
-        label_smoothing=0.0,
-        **kwargs,
-    ):
+        text_config: Any = None,
+        vision_config: Any = None,
+        projection_dim: int = 512,
+        logit_scale_init_value: float = 2.6592,
+        image_text_hidden_size: int = 256,
+        label_smoothing: float = 0.0,
+        **kwargs: Any,
+    ) -> None:
         PretrainedConfig.__init__(self, **kwargs)
 
         if text_config is None:
