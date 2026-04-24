@@ -59,24 +59,9 @@ class Resize(PreOps):
         """
         # result: np.ndarray (H, W, C)
         if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x).to(self.device)
-        if isinstance(x, torch.Tensor):
-            assert x.ndim() == 3, f"Got unexpected x.shape={x.shape}."
-            x = x.to(self.device)
-            img_h, img_w = x.shape[:2]
-            new_h, new_w = self._compute_resized_output_size(img_h, img_w)
-            if [img_h, img_w] == [new_h, new_w]:
-                return x
-            x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(x, [torch.float32, torch.float64])
-            x = F.interpolate(
-                x[None],
-                size=(new_h, new_w),
-                mode=self.interpolation,
-                align_corners=(False if self.interpolation in ["bilinear", "bicubic"] else None),
-                antialias=self.interpolation in ["bilinear", "bicubic"],
-            )
-            x = self._cast_squeeze_out(x, need_cast, need_squeeze, out_dtype)
-            return x.to(self.device)
+            tensor_x = torch.from_numpy(x).to(self.device)
+        elif isinstance(x, torch.Tensor):
+            tensor_x = x.to(self.device)
         elif isinstance(x, Image.Image):
             img_w, img_h = x.size
             new_h, new_w = self._compute_resized_output_size(img_h, img_w)
@@ -88,6 +73,22 @@ class Resize(PreOps):
             )
         else:
             raise TypeError(f"Got unexpected type for x={type(x)}.")
+
+        assert tensor_x.ndim == 3, f"Got unexpected x.shape={tensor_x.shape}."
+        img_h, img_w = tensor_x.shape[:2]
+        new_h, new_w = self._compute_resized_output_size(img_h, img_w)
+        if [img_h, img_w] == [new_h, new_w]:
+            return tensor_x
+        tensor_x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(tensor_x, [torch.float32, torch.float64])
+        tensor_x = F.interpolate(
+            tensor_x[None],
+            size=(new_h, new_w),
+            mode=self.interpolation,
+            align_corners=(False if self.interpolation in ["bilinear", "bicubic"] else None),
+            antialias=self.interpolation in ["bilinear", "bicubic"],
+        )
+        tensor_x = self._cast_squeeze_out(tensor_x, need_cast, need_squeeze, out_dtype)
+        return tensor_x.to(self.device)
 
     def _compute_resized_output_size(self, img_h: int, img_w: int):
         if isinstance(self.size, int):

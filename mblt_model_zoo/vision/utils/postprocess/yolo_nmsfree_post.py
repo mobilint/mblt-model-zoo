@@ -2,7 +2,7 @@
 YOLO NMS-free postprocessing.
 """
 
-from typing import List
+from typing import List, cast
 
 import torch
 
@@ -25,7 +25,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         if len(x) == 2:
             converted = self.conversion(x)
             return self.filter_conversion(converted), None
-        rearranged = self.rearrange(x)
+        rearranged = cast(List[torch.Tensor], self.rearrange(x))
         return self.decode(rearranged), None
 
     def conversion(self, x: List[torch.Tensor]):
@@ -52,27 +52,30 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
         return [dual_topk(xi.squeeze(0), self.nc, self.n_extra, conf_thres=self.conf_thres) for xi in x_list]
 
-    def process_box_cls(self, box_cls):
-        """
-        Process detection results for a single image.
+    def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
+        """Processes detection results for a single image.
+
         Args:
-            box_cls (torch.Tensor): Raw detections for one image.
+            box_cls: Raw detections for one image.
+
         Returns:
-            torch.Tensor: Decoded and top-k filtered detections.
+            Decoded and top-k filtered detections.
         """
         ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
             return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
+        anchors = self.anchors_as_tensor()
+        stride = self.stride_as_tensor()
         box, scores = torch.split(box_cls[None], [self.reg_max * 4, self.nc], dim=1)  # (1, 64, *), (1, 80, *)
         dbox = (
             dist2bbox(
                 self.dfl(box),
-                self.anchors[:, ic],
+                anchors[:, ic],
                 xywh=False,
                 dim=1,
             )
-            * self.stride[:, ic]
+            * stride[:, ic]
         )
         pre_topk = torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
         return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)

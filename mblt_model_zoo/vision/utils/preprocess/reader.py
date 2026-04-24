@@ -2,6 +2,7 @@
 Image reader preprocessing.
 """
 
+from pathlib import Path
 from typing import Union
 
 import cv2
@@ -32,11 +33,11 @@ class Reader(PreOps):
         ], f"Unsupported style={style} for image reader."
         self.style = style.lower()
 
-    def __call__(self, x: Union[str, TensorLike, Image.Image]) -> Union[np.ndarray, Image.Image]:
+    def __call__(self, x: Union[str, Path, TensorLike, Image.Image]) -> Union[np.ndarray, Image.Image]:
         """Reads/converts the input into an image object.
 
         Args:
-            x (Union[str, TensorLike, Image.Image]): Input image path or image object.
+            x (Union[str, Path, TensorLike, Image.Image]): Input image path or image object.
 
         Returns:
             Union[np.ndarray, Image.Image]: Read image in the specified style.
@@ -46,7 +47,7 @@ class Reader(PreOps):
                 return x
             elif isinstance(x, torch.Tensor):
                 return x.cpu().numpy()
-            elif isinstance(x, str):
+            elif isinstance(x, (str, Path)):
                 x = cv2.imread(x)
                 x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
                 return x
@@ -60,7 +61,7 @@ class Reader(PreOps):
             elif isinstance(x, torch.Tensor):
                 x = x.cpu().numpy()
                 return Image.fromarray(x.astype(np.uint8))
-            elif isinstance(x, str):
+            elif isinstance(x, (str, Path)):
                 return Image.open(x).convert("RGB")
             elif isinstance(x, Image.Image):
                 return x

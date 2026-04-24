@@ -66,9 +66,8 @@ class MBLT_Engine:
             target_clusters = [0, 1]
 
         if isinstance(model_cls, dict):  # direct setting
-            self.file_cfg = model_cls["file_cfg"]
-            self.pre_cfg = model_cls["pre_cfg"]
-            self.post_cfg = model_cls["post_cfg"]
+            model_config_part = model_cls
+            self.file_cfg = model_config_part["file_cfg"]
         else:  # setting via yaml file path or model name
             config_path = model_cls
             if not os.path.isfile(config_path):
@@ -112,7 +111,6 @@ class MBLT_Engine:
             self.file_cfg["target_clusters"] = target_clusters
             self.file_config_cleansing()
 
-        # These assignments are now correctly placed after ensuring model_config_part is a dict
         self.pre_cfg = model_config_part["pre_cfg"]
         self.post_cfg = model_config_part["post_cfg"]
 

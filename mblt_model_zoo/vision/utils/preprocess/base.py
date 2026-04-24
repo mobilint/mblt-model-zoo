@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import Any, List, Union
 
 import torch
 
@@ -19,8 +19,8 @@ class PreOps(ABC):
     @abstractmethod
     def __call__(
         self,
-        x,
-    ):
+        x: Any,
+    ) -> Any:
         """Executes the preprocess operation.
 
         Args:
@@ -79,8 +79,8 @@ class PreBase:
 
     def __call__(
         self,
-        x,
-    ):
+        x: Any,
+    ) -> Any:
         """Applies the sequence of preprocessing operations to the input.
 
         Args:

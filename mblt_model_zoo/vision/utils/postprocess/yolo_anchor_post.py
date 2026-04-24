@@ -21,6 +21,8 @@ class YOLOAnchorPost(YOLOPostBase):
         """
         super().__init__(pre_cfg, post_cfg)
         self.no = self.nc + 5 + self.n_extra
+        self.grid: torch.Tensor
+        self.anchor_grid: torch.Tensor
         self.make_anchor_grid()
 
     def rearrange(self, x: List[torch.Tensor]) -> List[torch.Tensor] | tuple[List[torch.Tensor], torch.Tensor]:
@@ -69,21 +71,23 @@ class YOLOAnchorPost(YOLOPostBase):
         )  # (bs, 25200, 85)
         return [self.process_box_cls(box_cls) for box_cls in batch_box_cls]
 
-    def process_box_cls(self, x):
-        """
-        Process a single image's detection tensor.
+    def process_box_cls(self, x: torch.Tensor) -> torch.Tensor:
+        """Processes a single image's detection tensor.
+
         Args:
-            x (torch.Tensor): Raw detections for one image.
+            x: Raw detections for one image.
+
         Returns:
-            torch.Tensor: Decoded boxes, confidence, and scores.
+            Decoded boxes, confidence, and scores.
         """
         ic = x[:, 4] > self.inv_conf_thres  # candidates
         box_cls = x[ic]  # (n, 85)
         if len(box_cls) == 0:
             return torch.zeros((0, 5 + self.nc + self.n_extra), dtype=torch.float32)
+        stride_tensor = self.stride_as_tensor()
         grid = self.grid[ic, :]  # (n, 2)
         anchor_grid = self.anchor_grid[ic, :]  # (n, 2)
-        stride = self.stride[ic, :]  # (n, 2)
+        stride = stride_tensor[ic, :]  # (n, 2)
         xy, wh, conf, scores, extra = self.chop(box_cls)  # (n, 2), (n, 2), (n, 1), (n, 80), (n, 0 or 32)
         xy = (xy.sigmoid() * 2 - 0.5 + grid) * stride
         wh = (wh.sigmoid() * 2) ** 2 * anchor_grid
@@ -156,7 +160,7 @@ class YOLOAnchorPost(YOLOPostBase):
         if self.nl == 2:
             strides = [strd * 2 for strd in strides]
         out_sizes = [[self.imh // strd, self.imw // strd] for strd in strides]  # (80, 80), (40, 40), (20, 20)
-        for anchr, (ny, nx), strd in zip(self.anchors, out_sizes, strides):
+        for anchr, (ny, nx), strd in zip(self.anchors_as_list(), out_sizes, strides):
             yv, xv = torch.meshgrid(
                 torch.arange(ny, dtype=torch.float32, device=self.device),
                 torch.arange(nx, dtype=torch.float32, device=self.device),

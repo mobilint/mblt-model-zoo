@@ -1,8 +1,6 @@
-"""
-Common postprocessing utility functions.
-"""
+"""Common postprocessing utility functions."""
 
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Union, overload
 
 import numpy as np
 import torch
@@ -12,53 +10,85 @@ from ..datasets import get_coco_inv
 
 
 # --- Box Conversion Utilities ---
-def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]):
+@overload
+def xywh2xyxy(x: np.ndarray) -> np.ndarray:
+    """Converts numpy boxes from ``xywh`` to ``xyxy`` format."""
+
+
+@overload
+def xywh2xyxy(x: torch.Tensor) -> torch.Tensor:
+    """Converts torch boxes from ``xywh`` to ``xyxy`` format."""
+
+
+def xywh2xyxy(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """Converts bounding box coordinates from (cx, cy, w, h) to (x1, y1, x2, y2).
 
     (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
 
     Args:
-        x (Union[np.ndarray, torch.Tensor]): Input bounding boxes in (cx, cy, w, h) format.
+        x: Input bounding boxes in (cx, cy, w, h) format.
 
     Returns:
-        Union[np.ndarray, torch.Tensor]: Bounding boxes in (x1, y1, x2, y2) format.
+        Bounding boxes in (x1, y1, x2, y2) format.
     """
     if isinstance(x, np.ndarray):
         y = np.copy(x)
-    elif isinstance(x, torch.Tensor):
-        y = torch.clone(x).to(x)
-    else:
-        raise ValueError("x should be np.ndarray or torch.Tensor")
-    y[..., 0] = x[..., 0] - x[..., 2] / 2
-    y[..., 1] = x[..., 1] - x[..., 3] / 2
-    y[..., 2] = x[..., 0] + x[..., 2] / 2
-    y[..., 3] = x[..., 1] + x[..., 3] / 2
-    return y
+        y[..., 0] = x[..., 0] - x[..., 2] / 2
+        y[..., 1] = x[..., 1] - x[..., 3] / 2
+        y[..., 2] = x[..., 0] + x[..., 2] / 2
+        y[..., 3] = x[..., 1] + x[..., 3] / 2
+        return y
+
+    if isinstance(x, torch.Tensor):
+        y = torch.clone(x)
+        y[..., 0] = x[..., 0] - x[..., 2] / 2
+        y[..., 1] = x[..., 1] - x[..., 3] / 2
+        y[..., 2] = x[..., 0] + x[..., 2] / 2
+        y[..., 3] = x[..., 1] + x[..., 3] / 2
+        return y
+
+    raise ValueError("x should be np.ndarray or torch.Tensor")
 
 
-def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]):
+@overload
+def xyxy2xywh(x: np.ndarray) -> np.ndarray:
+    """Converts numpy boxes from ``xyxy`` to ``xywh`` format."""
+
+
+@overload
+def xyxy2xywh(x: torch.Tensor) -> torch.Tensor:
+    """Converts torch boxes from ``xyxy`` to ``xywh`` format."""
+
+
+def xyxy2xywh(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """Converts bounding box coordinates from (x1, y1, x2, y2) to (cx, cy, w, h).
 
     (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
     (cx, cy) is the center of the bounding box.
 
     Args:
-        x (Union[np.ndarray, torch.Tensor]): Input bounding boxes in (x1, y1, x2, y2) format.
+        x: Input bounding boxes in (x1, y1, x2, y2) format.
 
     Returns:
-        Union[np.ndarray, torch.Tensor]: Bounding boxes in (cx, cy, w, h) format.
+        Bounding boxes in (cx, cy, w, h) format.
     """
     if isinstance(x, np.ndarray):
         y = np.copy(x)
-    elif isinstance(x, torch.Tensor):
-        y = torch.clone(x).to(x)
-    else:
-        raise ValueError("x should be np.ndarray or torch.Tensor")
-    y[..., 0] = (x[..., 0] + x[..., 2]) / 2
-    y[..., 1] = (x[..., 1] + x[..., 3]) / 2
-    y[..., 2] = x[..., 2] - x[..., 0]
-    y[..., 3] = x[..., 3] - x[..., 1]
-    return y
+        y[..., 0] = (x[..., 0] + x[..., 2]) / 2
+        y[..., 1] = (x[..., 1] + x[..., 3]) / 2
+        y[..., 2] = x[..., 2] - x[..., 0]
+        y[..., 3] = x[..., 3] - x[..., 1]
+        return y
+
+    if isinstance(x, torch.Tensor):
+        y = torch.clone(x)
+        y[..., 0] = (x[..., 0] + x[..., 2]) / 2
+        y[..., 1] = (x[..., 1] + x[..., 3]) / 2
+        y[..., 2] = x[..., 2] - x[..., 0]
+        y[..., 3] = x[..., 3] - x[..., 1]
+        return y
+
+    raise ValueError("x should be np.ndarray or torch.Tensor")
 
 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):

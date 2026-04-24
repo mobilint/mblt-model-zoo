@@ -41,15 +41,17 @@ class CenterCrop(PreOps):
             np.ndarray: Center-cropped image in HWC format.
         """
         if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
+            image = x.cpu().numpy()
         elif isinstance(x, Image.Image):
-            x = np.array(x)
-        H, W = x.shape[:2]
+            image = np.array(x)
+        else:
+            image = x
+        H, W = image.shape[:2]
         if (self.size[0] == H) and (self.size[1] == W):
-            return x
+            return image
         elif (self.size[1] > W) or (self.size[0] > H):
-            x = cv2.copyMakeBorder(
-                x,
+            image = cv2.copyMakeBorder(
+                image,
                 (self.size[0] - H) // 2 if self.size[0] > H else 0,
                 (self.size[0] - H + 1) // 2 if self.size[0] > H else 0,
                 (self.size[1] - W) // 2 if self.size[1] > W else 0,
@@ -57,12 +59,12 @@ class CenterCrop(PreOps):
                 cv2.BORDER_CONSTANT,
                 value=0,
             )
-            H, W = x.shape[:2]
+            H, W = image.shape[:2]
         crop_top = round((H - self.size[0]) / 2.0)
         crop_left = round((W - self.size[1]) / 2.0)
-        x = x[
+        image = image[
             crop_top : crop_top + self.size[0],
             crop_left : crop_left + self.size[1],
             :,
         ]
-        return x.astype(np.uint8)
+        return image.astype(np.uint8)

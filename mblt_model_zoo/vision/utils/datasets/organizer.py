@@ -10,6 +10,30 @@ from tempfile import TemporaryDirectory
 from tqdm import tqdm
 
 
+def _get_object_name(obj: ET.Element, xml_file: str) -> str:
+    """Extracts a non-empty object name from an ImageNet annotation node.
+
+    Args:
+        obj: XML ``object`` element from an annotation file.
+        xml_file: Source XML filename used for error context.
+
+    Returns:
+        The validated object name.
+
+    Raises:
+        ValueError: If the object name node is missing or empty.
+    """
+    name_element = obj.find("name")
+    if name_element is None or name_element.text is None:
+        raise ValueError(f"XML file {xml_file} has an object without a valid name")
+
+    object_name = name_element.text.strip()
+    if not object_name:
+        raise ValueError(f"XML file {xml_file} has an object with an empty name")
+
+    return object_name
+
+
 def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
     """Constructs the ImageNet dataset by organizing images into category folders.
 
@@ -39,7 +63,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
             raise ValueError(f"XML file {xml_file} has no object, but expected at least 1")
 
         # check whether the object names in the XML files are the same
-        object_names = [obj.find("name").text for obj in root.findall("object")]
+        object_names = [_get_object_name(obj, xml_file) for obj in root.findall("object")]
         if len(set(object_names)) != 1:
             raise ValueError(
                 f"Object names in XML file {xml_file} are not the same. "
@@ -54,7 +78,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
         xml_path = os.path.join(xml_dir + "/val", xml_file)
         xml_tree = ET.parse(xml_path)
         root = xml_tree.getroot()
-        object_name = root.findall("object")[0].find("name").text
+        object_name = _get_object_name(root.findall("object")[0], xml_file)
         image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
         assert os.path.exists(image_path), f"Image file not found: {image_path}"
 

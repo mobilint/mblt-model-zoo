@@ -29,7 +29,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
     def rearrange(
         self,
         x: List[torch.Tensor],
-    ) -> List[torch.Tensor]:
+    ) -> List[torch.Tensor] | tuple[List[torch.Tensor], torch.Tensor]:
         """Rearranges raw model output tensors into a standardized format.
 
         Args:
@@ -71,13 +71,14 @@ class YOLOAnchorlessPost(YOLOPostBase):
         batch_box_cls = torch.cat(x, dim=-1)  # (b, 144, 8400)
         return [self.process_box_cls(box_cls) for box_cls in batch_box_cls]
 
-    def process_box_cls(self, box_cls):
-        """
-        Process detection results for a single image.
+    def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
+        """Processes detection results for a single image.
+
         Args:
-            box_cls (torch.Tensor): Raw detections for one image.
+            box_cls: Raw detections for one image.
+
         Returns:
-            torch.Tensor: Decoded boxes, scores, and extra data.
+            Decoded boxes, scores, and extra data.
         """
         if self.n_extra == 0:
             ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
@@ -86,17 +87,19 @@ class YOLOAnchorlessPost(YOLOPostBase):
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
             return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32)  # (0, 84)
+        anchors = self.anchors_as_tensor()
+        stride = self.stride_as_tensor()
         box, scores, extra = torch.split(
             box_cls[None], [self.reg_max * 4, self.nc, self.n_extra], dim=1
         )  # (1, 64, *), (1, 80, *), (1, 32, *)
         dbox = (
             dist2bbox(
                 self.dfl(box),
-                self.anchors[:, ic],
+                anchors[:, ic],
                 xywh=False,
                 dim=1,
             )
-            * self.stride[:, ic]
+            * stride[:, ic]
         )
         return torch.cat([dbox, scores.sigmoid(), extra], dim=1).squeeze(0).transpose(0, 1)
 
@@ -164,16 +167,14 @@ class YOLOAnchorlessPost(YOLOPostBase):
             output.append(xi[i])
         return output
 
-    def dfl(self, x):
-        """
-        Applies Distribution Focal Loss projection.
+    def dfl(self, x: torch.Tensor) -> torch.Tensor:
+        """Applies Distribution Focal Loss projection.
+
         Args:
-            x (Tensor): shape (B, 4 * reg_max, A), where:
-                        - B: batch size
-                        - reg_max: number of bins per coordinate
-                        - A: number of anchor points
+            x: Tensor with shape ``(B, 4 * reg_max, A)``.
+
         Returns:
-            Tensor: shape (B, 4, A), the projected distances.
+            Tensor with shape ``(B, 4, A)`` containing projected distances.
         """
         if self.reg_max == 0:  # skip dfl for yolov6 s, n models
             return x
@@ -303,32 +304,35 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
         ]  # (b, 116, 6400), (b, 116, 1600), (b, 116, 400)
         return y
 
-    def process_box_cls(self, box_cls):
-        """
-        Process pose estimation results for a single image.
+    def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
+        """Processes pose estimation results for a single image.
+
         Args:
-            box_cls (torch.Tensor): Raw detections for one image.
+            box_cls: Raw detections for one image.
+
         Returns:
-            torch.Tensor: Decoded boxes, scores, and keypoints.
+            Decoded boxes, scores, and keypoints.
         """
         ic = torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0) > self.inv_conf_thres
         box_cls = box_cls[:, ic]  # (116, *)
         if box_cls.numel() == 0:
             return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32)  # (0, 56)
+        anchors = self.anchors_as_tensor()
+        stride = self.stride_as_tensor()
         box, scores, keypoints = torch.split(
             box_cls[None], [self.reg_max * 4, self.nc, self.n_extra], dim=1
         )  # (1, 64, *), (1, 1, *), (1, 51, *)
         dbox = (
             dist2bbox(
                 self.dfl(box),
-                self.anchors[:, ic],
+                anchors[:, ic],
                 xywh=False,
                 dim=1,
             )
-            * self.stride[:, ic]
+            * stride[:, ic]
         )
         keypoints = keypoints.view(1, 17, 3, -1)
         key_coord, key_conf = torch.split(keypoints, [2, 1], dim=2)  # (1, 17, 2, 8400), (1, 17, 1, 8400)
-        key_coord = (key_coord * 2 + self.anchors[:, ic] - 0.5) * self.stride[:, ic]  # (1, 17, 2, *)
+        key_coord = (key_coord * 2 + anchors[:, ic] - 0.5) * stride[:, ic]  # (1, 17, 2, *)
         keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(1, self.n_extra, -1)  # (1, 51, *)
         return torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).squeeze(0).transpose(0, 1)  # (*, 56)
