@@ -1,6 +1,6 @@
 from transformers import TextStreamer
 
-from tests.transformers.qwen3_vl_compat import skip_if_transformers_lacks_qwen3_vl_support
+from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transformers_lacks_qwen3_vl_support
 
 skip_if_transformers_lacks_qwen3_vl_support()
 

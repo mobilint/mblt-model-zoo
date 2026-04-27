@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Optional
 
 import pytest
 from transformers import AutoTokenizer, pipeline
-
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from utils import BatchTextStreamer  # noqa: E402
 
 from tests.npu_backend_options import (
     BaseNpuParams,
     build_base_npu_params,
     validate_single_only_core_mode,
 )
+from tests.transformers.text_generation.utils import BatchTextStreamer
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:

@@ -8,7 +8,7 @@ from mblt_model_zoo.hf_transformers.models.qwen2_vl.configuration_qwen2_vl impor
     MobilintQwen2VLConfig,
     MobilintQwen2VLTextConfig,
 )
-from tests.transformers.qwen3_vl_compat import transformers_supports_qwen3_vl
+from tests.transformers.image_text_to_text.qwen3_vl_compat import transformers_supports_qwen3_vl
 
 if transformers_supports_qwen3_vl():
     from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import (

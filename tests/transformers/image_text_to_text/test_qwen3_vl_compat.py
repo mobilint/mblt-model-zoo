@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.transformers import qwen3_vl_compat
+from tests.transformers.image_text_to_text import qwen3_vl_compat
 
 
 def test_transformers_supports_qwen3_vl_returns_true_when_all_modules_exist(

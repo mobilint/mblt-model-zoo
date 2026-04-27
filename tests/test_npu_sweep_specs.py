@@ -321,12 +321,12 @@ def test_transformers_collection_deselects_nondefault_models_by_default():
         )
     )
     first_item = _FakeItem(
-        path="C:/repo/tests/transformers/text-generation/non_batch/test_qwen2.py",
+        path="C:/repo/tests/transformers/text_generation/non_batch/test_qwen2.py",
         module=module,
         params={"pipe": "mobilint/Qwen2.5-0.5B-Instruct"},
     )
     second_item = _FakeItem(
-        path="C:/repo/tests/transformers/text-generation/non_batch/test_qwen2.py",
+        path="C:/repo/tests/transformers/text_generation/non_batch/test_qwen2.py",
         module=module,
         params={"pipe": "mobilint/Qwen2.5-7B-Instruct"},
     )
@@ -347,12 +347,12 @@ def test_transformers_collection_keeps_nondefault_models_with_keyword_filter():
         )
     )
     first_item = _FakeItem(
-        path="C:/repo/tests/transformers/text-generation/non_batch/test_qwen2.py",
+        path="C:/repo/tests/transformers/text_generation/non_batch/test_qwen2.py",
         module=module,
         params={"pipe": "mobilint/Qwen2.5-0.5B-Instruct"},
     )
     second_item = _FakeItem(
-        path="C:/repo/tests/transformers/text-generation/non_batch/test_qwen2.py",
+        path="C:/repo/tests/transformers/text_generation/non_batch/test_qwen2.py",
         module=module,
         params={"pipe": "mobilint/Qwen2.5-7B-Instruct"},
     )
@@ -366,16 +366,16 @@ def test_transformers_collection_keeps_nondefault_models_with_keyword_filter():
 
 def test_transformers_collection_keeps_explicit_nondefault_nodeid_selection():
     selected_nodeid = (
-        "tests/transformers/image-text-to-text/test_qwen3_vl.py::"
+        "tests/transformers/image_text_to_text/test_qwen3_vl.py::"
         "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
     )
     config = _make_config(
         explicit_args=(
-            r"C:\repo\tests\transformers\image-text-to-text\test_qwen3_vl.py::"
+            r"C:\repo\tests\transformers\image_text_to_text\test_qwen3_vl.py::"
             "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]",
         ),
         selection_args=(
-            r"C:\repo\tests\transformers\image-text-to-text\test_qwen3_vl.py::"
+            r"C:\repo\tests\transformers\image_text_to_text\test_qwen3_vl.py::"
             "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]",
         ),
     )
@@ -386,7 +386,7 @@ def test_transformers_collection_keeps_explicit_nondefault_nodeid_selection():
         )
     )
     selected_item = _FakeItem(
-        path="C:/repo/tests/transformers/image-text-to-text/test_qwen3_vl.py",
+        path="C:/repo/tests/transformers/image_text_to_text/test_qwen3_vl.py",
         module=module,
         params={"pipe": "mobilint/Qwen3-VL-8B-Instruct"},
         nodeid=selected_nodeid,
