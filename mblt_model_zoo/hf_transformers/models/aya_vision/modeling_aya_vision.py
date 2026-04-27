@@ -178,7 +178,11 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             **kwargs,
         )
 
-        if is_first_iteration or not kwargs.get("use_cache", True):
+        is_prefill_step = is_first_iteration
+        if cache_position is not None and cache_position.numel() > 0:
+            is_prefill_step = is_prefill_step or cache_position[0].item() == 0
+
+        if is_prefill_step or not kwargs.get("use_cache", True):
             model_inputs["pixel_values"] = pixel_values
 
         return model_inputs
