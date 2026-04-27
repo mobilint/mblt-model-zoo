@@ -6,8 +6,12 @@ import numpy as np
 import pytest
 import torch
 
-from mblt_model_zoo.hf_transformers.models.qwen3_vl import modeling_qwen3_vl
-from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (
+from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transformers_lacks_qwen3_vl_support
+
+skip_if_transformers_lacks_qwen3_vl_support()
+
+from mblt_model_zoo.hf_transformers.models.qwen3_vl import modeling_qwen3_vl  # noqa: E402
+from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
     BaseModelOutputWithDeepstackFeatures,
     MobilintQwen3VLModel,
     MobilintQwen3VLVisionModel,

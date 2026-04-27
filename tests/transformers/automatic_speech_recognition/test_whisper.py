@@ -2,7 +2,14 @@ import pytest
 from datasets import load_dataset
 from transformers import pipeline
 
-MODEL_PATHS = ("mobilint/whisper-small",)
+MODEL_PATHS = (
+    "mobilint/whisper-tiny",
+    "mobilint/whisper-small",
+    "mobilint/whisper-base",
+    "mobilint/whisper-medium",
+    "mobilint/whisper-large-v3",
+    "mobilint/whisper-large-v3-turbo",
+)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")

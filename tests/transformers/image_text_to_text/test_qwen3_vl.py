@@ -1,5 +1,9 @@
 from transformers import TextStreamer
 
+from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transformers_lacks_qwen3_vl_support
+
+skip_if_transformers_lacks_qwen3_vl_support()
+
 MODEL_PATHS = (
     "mobilint/Qwen3-VL-2B-Instruct",
     "mobilint/Qwen3-VL-4B-Instruct",

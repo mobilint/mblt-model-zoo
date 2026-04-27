@@ -8,18 +8,26 @@ from mblt_model_zoo.hf_transformers.models.qwen2_vl.configuration_qwen2_vl impor
     MobilintQwen2VLConfig,
     MobilintQwen2VLTextConfig,
 )
-from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import MobilintQwen3VLTextConfig
+from tests.transformers.image_text_to_text.qwen3_vl_compat import transformers_supports_qwen3_vl
+
+if transformers_supports_qwen3_vl():
+    from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import (
+        MobilintQwen3VLTextConfig,
+    )
 
 
-@pytest.mark.parametrize(
-    "text_config_cls",
-    (MobilintQwen2VLTextConfig, MobilintQwen3VLTextConfig),
-    ids=("qwen2_vl", "qwen3_vl"),
-)
+TEXT_CONFIG_CASES = [pytest.param(MobilintQwen2VLTextConfig, id="qwen2_vl")]
+
+if transformers_supports_qwen3_vl():
+    TEXT_CONFIG_CASES.append(pytest.param(MobilintQwen3VLTextConfig, id="qwen3_vl"))
+
+
+@pytest.mark.parametrize("text_config_cls", TEXT_CONFIG_CASES)
 def test_vlm_text_config_signature_exposes_mobilint_backend_fields(text_config_cls: type) -> None:
     """Expose Mobilint backend kwargs so upstream VLM flat-config loading can discover them."""
     signature = inspect.signature(text_config_cls.__init__)
 
+    assert "hidden_size" in signature.parameters
     for field_name in ("mxq_path", "dev_no", "core_mode", "target_cores", "target_clusters"):
         assert field_name in signature.parameters
 

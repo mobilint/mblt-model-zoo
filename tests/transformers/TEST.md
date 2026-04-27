@@ -37,7 +37,7 @@ pytest tests/transformers --full-matrix
 Limit execution to a test category, e.g., only causal language-model tests:
 
 ```bash
-pytest tests/transformers/text-generation
+pytest tests/transformers/text_generation
 ```
 
 ## Run a Single Test File
@@ -45,7 +45,7 @@ pytest tests/transformers/text-generation
 Target a specific file to focus on one model family:
 
 ```bash
-pytest tests/transformers/text-generation/non_batch/test_qwen2.py
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py
 ```
 
 ## Run a Single Model Case
@@ -53,13 +53,13 @@ pytest tests/transformers/text-generation/non_batch/test_qwen2.py
 Many tests are parameterized over multiple `mobilint/*` model IDs. The quick default already keeps only the first entry in each `MODEL_PATHS` list, but an explicit `-k` filter takes priority so you can still target a different model directly, e.g., the smallest Qwen variant inside the causal LM suite:
 
 ```bash
-pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "Qwen2.5-0.5B-Instruct"
 ```
 
 Or you can just write the part of the model name.
 
 ```bash
-pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "0.5B"
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
 ```
 
 ## Sweep Core Modes
@@ -67,7 +67,7 @@ pytest tests/transformers/text-generation/non_batch/test_qwen2.py -k "0.5B"
 Quick mode defaults to single-core execution. If a model family can run the same `.mxq` across `single`, `global4`, and `global8`, you can opt into the full sweep either by enabling the full matrix or by passing an explicit core-mode override:
 
 ```bash
-pytest tests/transformers/text-generation/non_batch/test_qwen2.py --core-mode all
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py --core-mode all
 ```
 
 Batch text-generation tests do not participate in this sweep. They always run with `single`. The repository-wide default `--core-mode all` is accepted and folded into `single` for these suites, while explicit `global4` or `global8` values raise a usage error.
@@ -75,7 +75,7 @@ Batch text-generation tests do not participate in this sweep. They always run wi
 Prefix-specific sweeps are also supported for multi-backend models:
 
 ```bash
-pytest tests/transformers/image-text-to-text/test_qwen2_vl.py --vision-core-mode all --text-core-mode all
+pytest tests/transformers/image_text_to_text/test_qwen2_vl.py --vision-core-mode all --text-core-mode all
 ```
 
 ## Keyword Parameters
