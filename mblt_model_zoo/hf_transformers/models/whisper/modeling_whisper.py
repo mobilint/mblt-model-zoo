@@ -76,7 +76,11 @@ class MobilintWhisperEncoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
         
-        hidden_states = self.mxq_forward(input_features.permute(0, 2, 1)).unsqueeze(0)
+        hidden_states = self.mxq_forward(input_features.permute(0, 2, 1))
+        if hidden_states.ndim == 2:
+            hidden_states = hidden_states.unsqueeze(0)
+        elif hidden_states.ndim == 4 and hidden_states.shape[1] == 1:
+            hidden_states = hidden_states.squeeze(1)
         
         if not return_dict:
             return tuple(v for v in [hidden_states,] if v is not None)
@@ -289,10 +293,14 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
         assert encoder_outputs is not None, "encoder_outputs is None!"
 
         # decoder outputs consists of (dec_features, past_key_values, dec_hidden, dec_attn)
+        encoder_hidden_states = encoder_outputs[0]
+        if encoder_hidden_states.ndim == 3:
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_outputs[0],
+            encoder_hidden_states=encoder_hidden_states,
             past_key_values=past_key_values,
             inputs_embeds=decoder_inputs_embeds,
             position_ids=decoder_position_ids,
