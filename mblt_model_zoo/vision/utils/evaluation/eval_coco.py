@@ -1,24 +1,39 @@
 """Evaluation script for COCO dataset."""
 
+from __future__ import annotations
+
 import logging
 import math
 import os
 from time import time
+from typing import TYPE_CHECKING, Any
 
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
 from ..datasets import CustomCocodata, get_coco_loader
 
+if TYPE_CHECKING:
+    from ...wrapper import MBLT_Engine
+    from ..results import Results
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
 
 
-def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids, postprocess):
+def format_coco_results(
+    task: str,
+    nms_outs: Results,
+    input_shape: tuple[int, ...],
+    org_shape: tuple[int, ...],
+    idx: list[int],
+    dataset_ids: list[int],
+    postprocess: Any,
+) -> list[dict[str, Any]]:
     """Format the results for COCO evaluation.
     Args:
         task (str): The task to evaluate.
-        nms_outs (MBLT_PostProcessResult): The output of the postprocessing.
+        nms_outs (Results): The output of the postprocessing.
         input_shape (tuple): The shape of the input tensor.
         org_shape (tuple): The original shape of the image.
         idx (list): The indices of the images in the batch.
@@ -83,7 +98,7 @@ def format_coco_results(task, nms_outs, input_shape, org_shape, idx, dataset_ids
     return results
 
 
-def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
+def eval_coco(model: MBLT_Engine, data_path: str, batch_size: int, conf_thres: float, iou_thres: float) -> float:
     """Evaluates a model on the COCO dataset.
 
     Args:
@@ -116,9 +131,9 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
     total_iter = math.ceil(num_data / batch_size)
     pbar = tqdm(dataloader, total=total_iter, desc="Evaluating COCO")
 
-    inference_time = 0
-    infer_post_time = 0
-    total_time = 0
+    inference_time = 0.0
+    infer_post_time = 0.0
+    total_time = 0.0
 
     cum_num_data = 0
 
@@ -149,15 +164,15 @@ def eval_coco(model, data_path, batch_size, conf_thres, iou_thres):
     res = evaluate_predictions_on_coco(dataset.coco, results, model.post_cfg["task"])
 
     print("COCO evaluation completed")
-    return res.stats[0].item()
+    return float(res.stats[0].item())
 
 
-def evaluate_predictions_on_coco(coco_gt, coco_results: dict, task: str):
+def evaluate_predictions_on_coco(coco_gt: COCO, coco_results: list[dict[str, Any]], task: str) -> COCOeval_faster:
     """Evaluates predictions using the COCO API.
 
     Args:
         coco_gt (COCO): Ground truth COCO object.
-        coco_results (dict): Predictions in COCO format.
+        coco_results (list): Predictions in COCO format.
         task (str): Task type ('object_detection', 'instance_segmentation', or 'pose_estimation').
 
     Returns:

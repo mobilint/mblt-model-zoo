@@ -8,9 +8,9 @@ constructor shape while delegating model loading to ``MBLT_Engine``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
-from .wrapper import MBLT_Engine
+from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
 
@@ -51,19 +51,19 @@ def _resolve_yaml_name(class_name: str) -> str:
     raise ValueError(f"Found multiple YAML configs for legacy class '{class_name}': {sorted(normalized_matches)}.")
 
 
-def _build_init(yaml_name: str):
+def _build_init(yaml_name: str) -> Callable[..., None]:
     """Builds a legacy-compatible ``__init__`` implementation."""
 
     def __init__(
         self,
-        local_path: Optional[str] = None,
+        local_path: str | None = None,
         model_type: str = "DEFAULT",
-        infer_mode: str = "global8",
+        infer_mode: CoreMode = "global8",
         product: str = "aries",
         dev_no: int = 0,
-        target_cores: Optional[Sequence[str]] = None,
-        target_clusters: Optional[Sequence[int]] = None,
-        mxq_path: Optional[str] = None,
+        target_cores: Sequence[str] | None = None,
+        target_clusters: Sequence[int] | None = None,
+        mxq_path: str | None = None,
     ) -> None:
         """Initializes a YAML-backed compatibility wrapper.
 
@@ -94,7 +94,7 @@ def _build_init(yaml_name: str):
     return __init__
 
 
-def _build_missing_init(class_name: str, reason: str):
+def _build_missing_init(class_name: str, reason: str) -> Callable[..., None]:
     """Builds an ``__init__`` that fails with a clear compatibility message."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -106,7 +106,7 @@ def _build_missing_init(class_name: str, reason: str):
     return __init__
 
 
-def create_model_class(class_name: str, module_name: str):
+def create_model_class(class_name: str, module_name: str) -> type[MBLT_Engine]:
     """Creates a legacy model class that delegates to ``MBLT_Engine``.
 
     Args:
@@ -144,7 +144,7 @@ def create_model_class(class_name: str, module_name: str):
     )
 
 
-def export_model_classes(namespace: Dict[str, Any], class_names: Iterable[str], module_name: str) -> None:
+def export_model_classes(namespace: dict[str, Any], class_names: Iterable[str], module_name: str) -> None:
     """Populates a module namespace with generated model classes.
 
     Args:

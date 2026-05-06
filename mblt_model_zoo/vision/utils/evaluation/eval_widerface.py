@@ -2,14 +2,17 @@
 Evaluation script for WiderFace dataset.
 """
 
+from __future__ import annotations
+
 import os
+from typing import Any
 
 import numpy as np
 from scipy.io import loadmat
 from tqdm import tqdm
 
 
-def eval_widerface(model):
+def eval_widerface(model: Any) -> None:
     """
     Placeholder for WiderFace evaluation.
     Args:
@@ -18,7 +21,7 @@ def eval_widerface(model):
     raise NotImplementedError("Pending")
 
 
-def bbox_overlaps(boxes, query_boxes):
+def bbox_overlaps(boxes: np.ndarray, query_boxes: np.ndarray) -> np.ndarray:
     """
     Compute IoU (Intersection over Union) between two sets of boxes.
     Parameters
@@ -61,7 +64,7 @@ def bbox_overlaps(boxes, query_boxes):
     return overlaps
 
 
-def get_gt_boxes(gt_dir):
+def get_gt_boxes(gt_dir: str) -> tuple[Any, ...]:
     """gt dir: (wider_face_val.mat, wider_easy_val.mat, wider_medium_val.mat, wider_hard_val.mat)"""
 
     gt_mat = loadmat(os.path.join(gt_dir, "wider_face_val.mat"))
@@ -86,7 +89,7 @@ def get_gt_boxes(gt_dir):
     )
 
 
-def norm_score(pred):
+def norm_score(pred: dict[str, Any]) -> dict[str, Any]:
     """norm score
     pred {key: [[x1,y1,x2,y2,s]]}
     """
@@ -120,7 +123,9 @@ def norm_score(pred):
     return pred
 
 
-def image_eval(pred, gt, ignore, iou_thresh):
+def image_eval(
+    pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray, iou_thresh: float
+) -> tuple[np.ndarray, np.ndarray]:
     """single image evaluation
     pred: Nx5
     gt: Nx4
@@ -156,7 +161,9 @@ def image_eval(pred, gt, ignore, iou_thresh):
     return pred_recall, proposal_list
 
 
-def img_pr_info(thresh_num, pred_info, proposal_list, pred_recall):
+def img_pr_info(
+    thresh_num: int, pred_info: np.ndarray, proposal_list: np.ndarray, pred_recall: np.ndarray
+) -> np.ndarray:
     """
     Compute precision and recall information for a single image.
     Args:
@@ -182,7 +189,7 @@ def img_pr_info(thresh_num, pred_info, proposal_list, pred_recall):
     return pr_info
 
 
-def dataset_pr_info(thresh_num, pr_curve, count_face):
+def dataset_pr_info(thresh_num: int, pr_curve: np.ndarray, count_face: int) -> np.ndarray:
     """
     Compute precision and recall information for the entire dataset.
     Args:
@@ -199,7 +206,7 @@ def dataset_pr_info(thresh_num, pr_curve, count_face):
     return _pr_curve
 
 
-def voc_ap(rec, prec):
+def voc_ap(rec: np.ndarray, prec: np.ndarray) -> float:
     """
     Compute VOC Average Precision (AP).
     Args:
@@ -223,10 +230,10 @@ def voc_ap(rec, prec):
 
     # and sum (\Delta recall) * prec
     ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
-    return ap
+    return float(ap)
 
 
-def evaluation(pred, gt_path, iou_thresh=0.5):
+def evaluation(pred: dict[str, Any], gt_path: str, iou_thresh: float = 0.5) -> list[float]:
     """
     Evaluate predictions against WiderFace ground truth.
     Args:

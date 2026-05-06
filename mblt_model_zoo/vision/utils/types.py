@@ -2,10 +2,12 @@
 Type definitions for MBLT vision models.
 """
 
-from typing import List, Union
+from __future__ import annotations
+
+from typing import TypeAlias
 
 import numpy as np
 import torch
 
-TensorLike = Union[torch.Tensor, np.ndarray]
-ListTensorLike = List[TensorLike]
+TensorLike: TypeAlias = torch.Tensor | np.ndarray
+ListTensorLike: TypeAlias = list[TensorLike]

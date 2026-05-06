@@ -2,7 +2,9 @@
 YOLO NMS-free postprocessing.
 """
 
-from typing import List, cast
+from __future__ import annotations
+
+from typing import cast
 
 import torch
 
@@ -13,25 +15,25 @@ from .yolo_anchorless_post import YOLOAnchorlessPost
 class YOLONMSFreePost(YOLOAnchorlessPost):
     """Postprocessing for YOLO NMS-free models."""
 
-    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
         """Preprocesses inputs for NMS-free models.
 
         Args:
-            x (List[torch.Tensor]): Raw model outputs.
+            x (list[torch.Tensor]): Raw model outputs.
 
         Returns:
             tuple: (processed_detections, None).
         """
         if len(x) == 2:
-            converted = self.conversion(x)
+            converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
-        rearranged = cast(List[torch.Tensor], self.rearrange(x))
+        rearranged = cast(list[torch.Tensor], self.rearrange(x))
         return self.decode(rearranged), None
 
-    def conversion(self, x: List[torch.Tensor]):
+    def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Convert input tensors.
         Args:
-            x (List[torch.Tensor]): Input tensors.
+            x (list[torch.Tensor]): Input tensors.
         Returns:
             torch.Tensor: Converted tensor.
         """
@@ -39,14 +41,14 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
 
-    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
+    def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Filters out low-confidence detections from a single output tensor.
 
         Args:
             x (torch.Tensor): Model output tensor.
 
         Returns:
-            List[torch.Tensor]: Decoded and filtered outputs for each image.
+            list[torch.Tensor]: Decoded and filtered outputs for each image.
         """
         x_list = torch.split(x, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
@@ -82,20 +84,20 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
     def nms(
         self,
-        x: List[torch.Tensor],
+        x: list[torch.Tensor],
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """Perform Non-Maximum Suppression (no-op for NMS-free models).
 
         Args:
-            x (List[torch.Tensor]): Decoded detections.
+            x (list[torch.Tensor]): Decoded detections.
             max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
             max_nms (int, optional): Maximum candidates for NMS. Defaults to 30000.
             max_wh (int, optional): Maximum box width/height. Defaults to 7680.
 
         Returns:
-            List[torch.Tensor]: The input detections unchanged.
+            list[torch.Tensor]: The input detections unchanged.
         """
         return x

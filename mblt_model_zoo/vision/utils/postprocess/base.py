@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple, Union, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -11,17 +13,17 @@ from .common import nmsout2eval, process_mask_upsample
 class PostBase(ABC):
     """Abstract base class for postprocessing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize PostBase."""
         super().__init__()
         self.device = torch.device("cpu")
 
     @abstractmethod
-    def __call__(self, x: Union[TensorLike, ListTensorLike], *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, x: TensorLike | ListTensorLike, *args: Any, **kwargs: Any) -> Any:
         """Executes postprocessing on the model output.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Input tensor or list of tensors from the model.
+            x (TensorLike | ListTensorLike): Input tensor or list of tensors from the model.
             *args (Any): Additional positional arguments depending on the specific task.
             **kwargs (Any): Additional keyword arguments depending on the specific task.
 
@@ -30,10 +32,10 @@ class PostBase(ABC):
         """
         pass
 
-    def to(self, device: Union[str, torch.device]):
+    def to(self, device: str | torch.device) -> None:
         """Move the operations to the specified device.
         Args:
-            device (Union[str, torch.device]): Device to move the operations to.
+            device (str | torch.device): Device to move the operations to.
         """
         if isinstance(device, str):
             self.device = torch.device(device)
@@ -49,7 +51,7 @@ class PostBase(ABC):
 class YOLOPostBase(PostBase):
     """Base class for YOLO postprocessing."""
 
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
+    def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any]) -> None:
         """Initializes the YOLOPostBase.
 
         Args:
@@ -72,10 +74,14 @@ class YOLOPostBase(PostBase):
         if nc is None:
             raise ValueError("nc should be provided in post_cfg")
         self.nc: int = nc
-        self.anchors: Optional[Union[list, torch.Tensor]] = post_cfg.get("anchors", None)  # anchor coordinates
+        self.anchors: list[Any] | torch.Tensor | None = post_cfg.get("anchors", None)  # anchor coordinates
         self.stride: list[int] | torch.Tensor
         self.nl: int
         self.na: int
+        self.conf_thres: float
+        self.iou_thres: float
+        self.inv_conf_thres: float
+
         if self.anchors is None:
             nl = post_cfg.get("nl")
             assert nl is not None, "nl should be provided in post_cfg"
@@ -95,7 +101,7 @@ class YOLOPostBase(PostBase):
             raise ValueError("task should be provided in post_cfg")
         self.task: str = task
 
-    def anchors_as_list(self) -> list:
+    def anchors_as_list(self) -> list[Any]:
         """Return anchors as the configured anchor list."""
         if not isinstance(self.anchors, list):
             raise TypeError("anchors should be a list for anchor-based YOLO postprocessing.")
@@ -113,13 +119,13 @@ class YOLOPostBase(PostBase):
             raise TypeError("stride should be a tensor for anchor-free YOLO postprocessing.")
         return cast(torch.Tensor, self.stride)
 
-    def __call__(self, x: Union[TensorLike, ListTensorLike], conf_thres: float, iou_thres: float):
+    def __call__(self, x: TensorLike | ListTensorLike, conf_thres: float, iou_thres: float) -> list[Any]:
         """Executes YOLO postprocessing.
 
         Includes rearranging, decoding, and NMS.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
+            x (TensorLike | ListTensorLike): Raw model outputs.
             conf_thres (float): Confidence threshold for detection.
             iou_thres (float): IoU threshold for NMS.
 
@@ -137,7 +143,10 @@ class YOLOPostBase(PostBase):
             return self.masking(nms_output, proto_outs)
         return nms_output
 
-    def _pre_process(self, x: List[torch.Tensor]) -> Tuple[List[torch.Tensor], Optional[List[torch.Tensor]]]:
+    def _pre_process(
+        self,
+        x: list[torch.Tensor],
+    ) -> tuple[list[torch.Tensor], torch.Tensor | list[torch.Tensor] | None]:
         """Protected method to preprocess inputs into (predictions, prototypes).
 
         Args:
@@ -157,9 +166,9 @@ class YOLOPostBase(PostBase):
     def nmsout2eval(
         self,
         nms_out: Any,
-        img1_shape: tuple,
-        img0_shape: Union[tuple, List[tuple]],
-    ) -> tuple:
+        img1_shape: tuple[int, int],
+        img0_shape: tuple[int, int] | list[tuple[int, int]],
+    ) -> tuple[Any, ...]:
         """Converts NMS output to evaluation format (labels, boxes, scores).
 
         Args:
@@ -173,9 +182,10 @@ class YOLOPostBase(PostBase):
                 - Segmentation/Pose: (labels_list, boxes_list, scores_list, extra_list)
         """
 
-        return nmsout2eval(nms_out, img1_shape, img0_shape)
+        img0_shapes = [img0_shape] if isinstance(img0_shape, tuple) else img0_shape
+        return nmsout2eval(nms_out, img1_shape, img0_shapes)
 
-    def make_anchors(self, offset=0.5):
+    def make_anchors(self, offset: float = 0.5) -> None:
         """
         Generate anchor points and stride tensors based on image size and strides.
         Args:
@@ -195,7 +205,7 @@ class YOLOPostBase(PostBase):
         self.anchors = torch.cat(anchor_points, dim=0).permute(1, 0)
         self.stride = torch.cat(stride_tensor, dim=0).permute(1, 0)
 
-    def set_threshold(self, conf_thres: Optional[float] = None, iou_thres: Optional[float] = None) -> None:
+    def set_threshold(self, conf_thres: float | None = None, iou_thres: float | None = None) -> None:
         """Set confidence and IoU thresholds.
         Args:
             conf_thres (float, optional): Confidence threshold.
@@ -210,10 +220,10 @@ class YOLOPostBase(PostBase):
         self.iou_thres = iou_thres
         self.inv_conf_thres = -np.log(1 / conf_thres - 1)
 
-    def check_input(self, x: Union[TensorLike, ListTensorLike]) -> List[torch.Tensor]:
+    def check_input(self, x: TensorLike | ListTensorLike) -> list[torch.Tensor]:
         """Check and prepare input tensors.
         Args:
-            x (Union[TensorLike, ListTensorLike]): Input tensor or list of tensors.
+            x (TensorLike | ListTensorLike): Input tensor or list of tensors.
         Returns:
             list[torch.Tensor]: List of tensors on the correct device.
         """
@@ -223,20 +233,20 @@ class YOLOPostBase(PostBase):
             tensors = [x]
         else:
             assert isinstance(x, list), f"Got unexpected type for x={type(x)}."
-            if isinstance(x[0], np.ndarray):
+            if all(isinstance(xi, np.ndarray) for xi in x):
                 tensors = [torch.from_numpy(xi).to(self.device) for xi in x]
-            elif isinstance(x[0], torch.Tensor):
-                tensors = [xi.to(self.device) for xi in x]
+            elif all(isinstance(xi, torch.Tensor) for xi in x):
+                tensors = [cast(torch.Tensor, xi).to(self.device) for xi in x]
             else:
                 raise TypeError(f"Got unexpected element type for x[0]={type(x[0])}.")
         return self.check_dim(tensors)
 
-    def check_dim(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def check_dim(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
         """Check tensor dimensions.
         Args:
-            x (List[torch.Tensor]): List of tensors.
+            x (list[torch.Tensor]): List of tensors.
         Returns:
-            List[torch.Tensor]: List of tensors with corrected dimensions.
+            list[torch.Tensor]: List of tensors with corrected dimensions.
         """
         y = []
         for xi in x:
@@ -250,7 +260,7 @@ class YOLOPostBase(PostBase):
         return y
 
     @abstractmethod
-    def rearrange(self, x: List[torch.Tensor]) -> Any:
+    def rearrange(self, x: list[torch.Tensor]) -> Any:
         """Rearranges raw model outputs into a task-specific intermediate form.
 
         Args:
@@ -261,7 +271,7 @@ class YOLOPostBase(PostBase):
         """
 
     @abstractmethod
-    def decode(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def decode(self, x: Any) -> list[torch.Tensor]:
         """Decodes rearranged outputs into per-image detection tensors.
 
         Args:
@@ -271,7 +281,7 @@ class YOLOPostBase(PostBase):
             Decoded detections for each image in the batch.
         """
 
-    def conversion(self, x: List[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Converts raw outputs into a task-specific intermediate form.
 
         Args:
@@ -285,7 +295,7 @@ class YOLOPostBase(PostBase):
         return x[0]
 
     @abstractmethod
-    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
+    def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Filters converted outputs into per-image detections before NMS.
 
         Args:
@@ -296,7 +306,7 @@ class YOLOPostBase(PostBase):
         """
 
     @abstractmethod
-    def nms(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def nms(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
         """Performs non-maximum suppression on decoded detections.
 
         Args:
@@ -306,7 +316,7 @@ class YOLOPostBase(PostBase):
             Detections after NMS for each image in the batch.
         """
 
-    def masking(self, x: List[torch.Tensor], proto_outs: List[torch.Tensor]):
+    def masking(self, x: list[torch.Tensor], proto_outs: torch.Tensor | list[torch.Tensor]) -> list[list[torch.Tensor]]:
         """Apply masking to detection results.
         Args:
             x: Detection results.

@@ -2,6 +2,8 @@
 Utilities for organizing datasets.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import xml.etree.ElementTree as ET
@@ -34,7 +36,7 @@ def _get_object_name(obj: ET.Element, xml_file: str) -> str:
     return object_name
 
 
-def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
+def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
     """Constructs the ImageNet dataset by organizing images into category folders.
 
     Args:
@@ -105,7 +107,7 @@ def organize_imagenet(
     image_dir: str,
     xml_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
-):
+) -> None:
     """Organizes the ImageNet dataset, unpacking archives if necessary.
 
     Args:
@@ -129,7 +131,7 @@ def organize_imagenet(
         construct_imagenet(image_dir, xml_dir, output_dir)
 
 
-def construct_coco(image_dir: str, annotation_dir: str, output_dir: str):
+def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None:
     """Constructs the COCO dataset by copying images and annotations to a target directory.
 
     Args:
@@ -156,7 +158,7 @@ def organize_coco(
     image_dir: str,
     annotation_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
-):
+) -> None:
     """Organizes the COCO dataset, unpacking archives if necessary.
 
     Args:
@@ -181,7 +183,7 @@ def organize_coco(
         construct_coco(image_dir, annotation_dir, output_dir)
 
 
-def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str):
+def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) -> None:
     """Constructs the WiderFace dataset by copying images and annotations to a target directory.
 
     Args:
@@ -206,7 +208,7 @@ def organize_widerface(
     image_dir: str,
     annotation_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
-):
+) -> None:
     """Organizes the WiderFace dataset, unpacking archives if necessary.
 
     Args:

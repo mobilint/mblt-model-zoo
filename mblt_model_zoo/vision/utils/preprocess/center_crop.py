@@ -2,7 +2,7 @@
 Center crop preprocessing.
 """
 
-from typing import List, Union
+from __future__ import annotations
 
 import cv2
 import numpy as np
@@ -18,11 +18,11 @@ class CenterCrop(PreOps):
     Center crop the image to a specified size.
     """
 
-    def __init__(self, size: Union[int, List[int]]):
+    def __init__(self, size: int | list[int]) -> None:
         """Initializes the CenterCrop operation.
 
         Args:
-            size (Union[int, List[int]]): Target size [h, w]. If int, size is [size, size].
+            size (int | list[int]): Target size [h, w]. If int, size is [size, size].
         """
         super().__init__()
         if isinstance(size, list):
@@ -31,11 +31,11 @@ class CenterCrop(PreOps):
         elif isinstance(size, int):
             self.size = [size, size]
 
-    def __call__(self, x: Union[TensorLike, Image.Image]) -> np.ndarray:
+    def __call__(self, x: TensorLike | Image.Image) -> np.ndarray:
         """Applies center crop to the image.
 
         Args:
-            x (Union[np.ndarray, torch.Tensor, Image.Image]): Input image.
+            x (np.ndarray | torch.Tensor | Image.Image): Input image.
 
         Returns:
             np.ndarray: Center-cropped image in HWC format.

@@ -1,10 +1,63 @@
-# Pre-Trained Vision Models
+# Vision Framework
 
-Here, we give the full list of publicly pre-trained models supported by the Mobilint Model Zoo.
+The Mobilint Model Zoo vision framework provides image classification, object detection, instance
+segmentation, and pose estimation pipelines backed by pre-trained NPU model artifacts.
 
 Further usage examples can be found in the [tests](../../tests/vision) directory.
 
-## Image Classification
+## CLI Usage
+
+The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by
+the Python API. It expects a source image and a model name from the tables below, then infers the
+task from the model configuration.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50
+```
+
+The command saves the plotted result image under `runs/vision/predict/` by default. Use `--output`
+or `--save-path` to choose a specific file.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --output ./result_cat.png
+mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
+mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
+mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
+```
+
+The `predict` command accepts classification and dense prediction options. `--topk` is used for
+image classification models. `--conf-thres` and `--iou-thres` are used for object detection,
+instance segmentation, and pose estimation models.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
+mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --iou-thres 0.5
+```
+
+Common options are available for all vision commands:
+
+```bash
+mblt-model-zoo predict \
+  --source ./cat.png \
+  --model resnet50 \
+  --model-type DEFAULT \
+  --mxq-path /path/to/model.mxq \
+  --core-mode global8 \
+  --dev-no 0
+```
+
+Use `--core-mode single`, `multi`, `global4`, or `global8` to select the NPU execution mode. For
+manual placement, pass semicolon-separated values with `--target-cores`, such as `0:0;0:1`, or
+`--target-clusters`, such as `0;1`.
+
+For backward compatibility, `classify`, `detect`, `pose`, and `segment` are accepted as aliases for
+`predict`.
+
+## Pre-Trained Vision Models
+
+This section lists the publicly pre-trained models supported by the vision framework.
+
+### Image Classification
 
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -142,7 +195,7 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 
 </details>
 
-## Object Detection
+### Object Detection
 
 | Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -201,7 +254,7 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 
 </details>
 
-## Instance Segmentation
+### Instance Segmentation
 
 | Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{mask}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -230,7 +283,7 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 
 </details>
 
-## Pose Estimation
+### Pose Estimation
 
 | Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |

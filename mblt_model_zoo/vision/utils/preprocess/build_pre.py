@@ -2,6 +2,8 @@
 Preprocessing builder.
 """
 
+from __future__ import annotations
+
 from collections import OrderedDict
 
 from .base import PreBase
@@ -15,7 +17,7 @@ from .resize import Resize
 
 def build_preprocess(
     pre_cfg: OrderedDict,
-):
+) -> PreBase:
     """Builds a preprocessing pipeline based on the configuration.
 
     Args:

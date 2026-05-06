@@ -1,4 +1,4 @@
-from typing import List
+from __future__ import annotations
 
 import cv2
 import torch
@@ -16,11 +16,11 @@ class LetterBox(PreOps):
     Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
 
-    def __init__(self, img_size: List[int]):
+    def __init__(self, img_size: list[int]) -> None:
         """Initializes LetterBox with target image size.
 
         Args:
-            img_size (List[int]): Target image size [h, w].
+            img_size (list[int]): Target image size [h, w].
         """
         super().__init__()
         self.img_size = img_size

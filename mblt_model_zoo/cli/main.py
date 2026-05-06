@@ -4,6 +4,7 @@ from transformers import HfArgumentParser
 
 from .melo import add_melo_parser
 from .melo_ui import add_melo_ui_parser
+from .predict import add_predict_parser
 from .tps import add_tps_parser
 from .transformers_compat import dispatch_transformers_cli, is_transformers_cli_command
 
@@ -19,6 +20,7 @@ def build_parser() -> HfArgumentParser:
     )
     commands_parser = parser.add_subparsers(help="mblt-model-zoo command helpers")
 
+    add_predict_parser(commands_parser)
     add_tps_parser(commands_parser)
     add_melo_parser(commands_parser)
     add_melo_ui_parser(commands_parser)

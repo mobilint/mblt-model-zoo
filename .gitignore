@@ -33,6 +33,7 @@
 benchmark/**/results/
 build/
 dist/
+runs/
 tmp/
 uv.lock
 !assets/

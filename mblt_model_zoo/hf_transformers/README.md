@@ -344,6 +344,7 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
 ### VLM synthetic sweep
 
 `vlm-sweep` measures:
+
 - Vision encode latency (`vision_encode_ms`) and FPS (`vision_fps`) per image resolution
 - LLM-phase total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`)
 
@@ -358,6 +359,7 @@ mblt-model-zoo tps vlm-sweep --model mobilint/Qwen2-VL-2B-Instruct \
 ```
 
 Note:
+
 - `vlm-sweep` uses synthetic random image inputs.
 - Some models/backends may enforce a fixed effective input size at runtime.
 

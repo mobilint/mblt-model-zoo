@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, List, Union
+from typing import Any
 
 import torch
 
@@ -11,7 +13,7 @@ class PreOps(ABC):
             device: The torch device where tensors should be placed.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initializes the preprocessing operation."""
         super().__init__()
         self.device = torch.device("cpu")
@@ -32,8 +34,8 @@ class PreOps(ABC):
 
     def to(
         self,
-        device: Union[str, torch.device],
-    ):
+        device: str | torch.device,
+    ) -> None:
         """Move the operation to the specified device.
 
         Args:
@@ -60,8 +62,8 @@ class PreBase:
 
     def __init__(
         self,
-        Ops: List[PreOps],
-    ):
+        Ops: list[PreOps],
+    ) -> None:
         """Initializes the PreBase class with a list of operations.
 
         Args:
@@ -71,7 +73,7 @@ class PreBase:
         self._check_ops()
         self.device = torch.device("cpu")
 
-    def _check_ops(self):
+    def _check_ops(self) -> None:
         """Check if the operations are valid."""
         for op in self.Ops:
             if not isinstance(op, PreOps):
@@ -95,8 +97,8 @@ class PreBase:
 
     def to(
         self,
-        device: Union[str, torch.device],
-    ):
+        device: str | torch.device,
+    ) -> None:
         """Move the operations to the specified device.
 
         Args:

@@ -2,7 +2,7 @@
 Image resizing preprocessing.
 """
 
-from typing import List, Tuple, Union
+from __future__ import annotations
 
 import numpy as np
 import torch
@@ -30,13 +30,13 @@ class Resize(PreOps):
 
     def __init__(
         self,
-        size: Union[int, List[int]],
+        size: int | list[int],
         interpolation: str,
-    ):
+    ) -> None:
         """
         Initialize the Resize operation.
         Args:
-            size (Union[int, List[int]]): Target size. If int, the shorter edge is resized to this size
+            size (int | list[int]): Target size. If int, the shorter edge is resized to this size
                 maintaining aspect ratio. If [h, w], it is resized to exactly this size.
             interpolation (str): Interpolation mode (e.g., "bilinear", "bicubic", "nearest").
         """
@@ -45,14 +45,14 @@ class Resize(PreOps):
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(self, x: Union[TensorLike, Image.Image]) -> Union[torch.Tensor, Image.Image]:
+    def __call__(self, x: TensorLike | Image.Image) -> torch.Tensor | Image.Image:
         """Resizes the input image.
 
         Args:
-            x (Union[TensorLike, Image.Image]): Image to be resized.
+            x (TensorLike | Image.Image): Image to be resized.
 
         Returns:
-            Union[torch.Tensor, Image.Image]: Resized image in the same format as input.
+            torch.Tensor | Image.Image: Resized image in the same format as input.
 
         Raises:
             TypeError: If input type is not supported.
@@ -90,7 +90,7 @@ class Resize(PreOps):
         tensor_x = self._cast_squeeze_out(tensor_x, need_cast, need_squeeze, out_dtype)
         return tensor_x.to(self.device)
 
-    def _compute_resized_output_size(self, img_h: int, img_w: int):
+    def _compute_resized_output_size(self, img_h: int, img_w: int) -> list[int]:
         if isinstance(self.size, int):
             # to match the shortest side to self.size with the same ratio
             ratio = max(self.size / img_h, self.size / img_w)
@@ -103,8 +103,8 @@ class Resize(PreOps):
         return [new_h, new_w]
 
     def _cast_squeeze_in(
-        self, img: torch.Tensor, req_dtypes: List[torch.dtype]
-    ) -> Tuple[torch.Tensor, bool, bool, torch.dtype]:
+        self, img: torch.Tensor, req_dtypes: list[torch.dtype]
+    ) -> tuple[torch.Tensor, bool, bool, torch.dtype]:
         need_squeeze = False
         # make image NCHW
         if img.ndim < 4:

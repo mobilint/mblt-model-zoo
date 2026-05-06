@@ -1,8 +1,10 @@
 """Pose estimation model exports."""
 
+from __future__ import annotations
+
 from .._compat import create_model_class
 
-__all__ = [
+__all__: list[str] = [
     "YOLO11lPose",
     "YOLO11mPose",
     "YOLO11nPose",

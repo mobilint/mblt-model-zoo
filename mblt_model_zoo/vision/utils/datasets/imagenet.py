@@ -2,6 +2,8 @@
 ImageNet dataset constants and utilities.
 """
 
+from __future__ import annotations
+
 
 def get_imagenet_label(idx: int) -> str:
     """Get the descriptive label for an ImageNet class index.
@@ -499,7 +501,7 @@ imagenet1000_clsidx_to_labels = {
     469: "caldron, cauldron",
     470: "candle, taper, wax light",
     471: "cannon",
-    472: "canoe",
+    472: "cannon",
     473: "can opener, tin opener",
     474: "cardigan",
     475: "car mirror",
@@ -547,7 +549,7 @@ imagenet1000_clsidx_to_labels = {
     516: "cradle",
     517: "crane",
     518: "crash helmet",
-    519: "crate",
+    519: "crash helmet",
     520: "crib, cot",
     521: "Crock Pot",
     522: "croquet ball",

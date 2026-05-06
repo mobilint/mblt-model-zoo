@@ -2,6 +2,8 @@
 Datasets utilities and loaders.
 """
 
+from __future__ import annotations
+
 from .coco import (
     get_coco_class_num,
     get_coco_det_palette,
@@ -26,7 +28,7 @@ from .organizer import (
     organize_widerface,
 )
 
-__all__ = [
+__all__: list[str] = [
     "get_coco_class_num",
     "get_coco_det_palette",
     "get_coco_inv",

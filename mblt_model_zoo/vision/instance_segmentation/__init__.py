@@ -1,8 +1,10 @@
 """Instance segmentation model exports."""
 
+from __future__ import annotations
+
 from .._compat import create_model_class
 
-__all__ = [
+__all__: list[str] = [
     "YOLO11lSeg",
     "YOLO11mSeg",
     "YOLO11nSeg",

@@ -2,8 +2,9 @@
 Image reader preprocessing.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Union
 
 import cv2
 import numpy as np
@@ -20,7 +21,7 @@ class Reader(PreOps):
     Supports "pil" and "numpy" reading styles.
     """
 
-    def __init__(self, style: str):
+    def __init__(self, style: str) -> None:
         """Initializes the Reader operation.
 
         Args:
@@ -33,14 +34,14 @@ class Reader(PreOps):
         ], f"Unsupported style={style} for image reader."
         self.style = style.lower()
 
-    def __call__(self, x: Union[str, Path, TensorLike, Image.Image]) -> Union[np.ndarray, Image.Image]:
+    def __call__(self, x: str | Path | TensorLike | Image.Image) -> np.ndarray | Image.Image:
         """Reads/converts the input into an image object.
 
         Args:
-            x (Union[str, Path, TensorLike, Image.Image]): Input image path or image object.
+            x (str | Path | TensorLike | Image.Image): Input image path or image object.
 
         Returns:
-            Union[np.ndarray, Image.Image]: Read image in the specified style.
+            np.ndarray | Image.Image: Read image in the specified style.
         """
         if self.style == "numpy":
             if isinstance(x, np.ndarray):
@@ -48,9 +49,10 @@ class Reader(PreOps):
             elif isinstance(x, torch.Tensor):
                 return x.cpu().numpy()
             elif isinstance(x, (str, Path)):
-                x = cv2.imread(x)
-                x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
-                return x
+                image = cv2.imread(str(x))
+                if image is None:
+                    raise FileNotFoundError(f"Image not found: {x}")
+                return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             elif isinstance(x, Image.Image):
                 return np.array(x)
             else:

@@ -2,14 +2,17 @@
 Wrapper classes for MBLT model execution.
 """
 
-import copy  # Added import
+from __future__ import annotations
+
+import copy
 import os
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Any, Literal, Sequence
 
 import torch
 import yaml
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Cluster, CoreId
 
 from ..utils.npu_backend import MobilintNPUBackend
@@ -20,6 +23,7 @@ from .utils.types import TensorLike
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
+CoreMode = Literal["single", "multi", "global4", "global8"]
 
 
 class MBLT_Engine:
@@ -37,14 +41,14 @@ class MBLT_Engine:
 
     def __init__(
         self,
-        model_cls: Union[str, dict],
+        model_cls: str | dict[str, Any],
         model_type: str = "DEFAULT",
         mxq_path: str = "",
         dev_no: int = 0,
-        core_mode: Literal["single", "multi", "global4", "global8"] = "single",
-        target_cores: Optional[List[Union[str, CoreId]]] = None,
-        target_clusters: Optional[List[Union[int, Cluster]]] = None,
-    ):
+        core_mode: CoreMode = "single",
+        target_cores: Sequence[str | CoreId] | None = None,
+        target_clusters: Sequence[int | Cluster] | None = None,
+    ) -> None:
         """Initializes the MBLT_Engine.
 
         Args:
@@ -76,6 +80,8 @@ class MBLT_Engine:
 
             with open(config_path, "r", encoding="utf-8") as f:
                 full_config = yaml.safe_load(f)
+            if not isinstance(full_config, dict):
+                raise TypeError(f"Model configuration '{config_path}' should define a dictionary.")
 
             model_config_part = full_config.get(model_type)
             if model_config_part is None:
@@ -125,42 +131,59 @@ class MBLT_Engine:
         self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg)
         self.device = torch.device("cpu")
 
-    def file_config_cleansing(self):
+    def file_config_cleansing(self) -> None:
         """Validates and resolves the MXQ model file path in ``self.file_cfg``.
 
-        If ``self.file_cfg["mxq_path"]`` already points to an existing file,
-        the Hub-related keys (``repo_id``, ``filename``, ``revision``) are
-        removed from the config as they are no longer needed.
+        If ``self.file_cfg["mxq_path"]`` is provided and already points to an
+        existing file, the Hub-related keys (``repo_id``, ``filename``,
+        ``revision``) are removed from the config as they are no longer needed.
 
         Otherwise the method downloads the model from HuggingFace Hub using
         those keys and updates ``self.file_cfg["mxq_path"]`` with the local
-        cache path.
+        cache path. Artifacts are resolved from the legacy ``aries/`` layout
+        first, with a fallback to the core-mode-specific ``aries/<core_mode>/``
+        layout.
 
         Raises:
             RuntimeError: If the model cannot be downloaded from HuggingFace
                 Hub, wrapping the original exception for full traceback context.
         """
-        if os.path.exists(self.file_cfg["mxq_path"]):
-            self.file_cfg.pop("repo_id")
-            self.file_cfg.pop("filename")
-            self.file_cfg.pop("revision")
+        mxq_path = self.file_cfg.get("mxq_path", "")
+        if mxq_path and os.path.isfile(mxq_path):
+            self.file_cfg.pop("repo_id", None)
+            self.file_cfg.pop("filename", None)
+            self.file_cfg.pop("revision", None)
         else:
-            try:
-                cached_file = hf_hub_download(
-                    repo_id=self.file_cfg.pop("repo_id"),
-                    filename=self.file_cfg.pop("filename"),
-                    subfolder="aries",
-                    revision=self.file_cfg.pop("revision"),
-                    local_dir=MOBILINT_CACHE_DIR,
-                )
-                self.file_cfg["mxq_path"] = cached_file
-            except Exception as e:
-                raise RuntimeError("Failed to download model from HuggingFace") from e
+            repo_id = self.file_cfg.pop("repo_id")
+            filename = self.file_cfg.pop("filename")
+            revision = self.file_cfg.pop("revision")
+            core_mode = self.file_cfg.get("core_mode")
+            subfolders = ["aries", f"aries/{core_mode}"] if core_mode else ["aries"]
+
+            last_error: Exception | None = None
+            for subfolder in subfolders:
+                try:
+                    cached_file = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        subfolder=subfolder,
+                        revision=revision,
+                        local_dir=MOBILINT_CACHE_DIR,
+                    )
+                    self.file_cfg["mxq_path"] = cached_file
+                    return
+                except EntryNotFoundError as e:
+                    last_error = e
+
+            attempted_paths = ", ".join(f"{subfolder}/{filename}" for subfolder in subfolders)
+            raise RuntimeError(
+                f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
+            ) from last_error
 
     def __call__(
         self,
         x: TensorLike,
-    ):
+    ) -> Any:
         """Runs raw model inference on the input.
 
         Note:
@@ -176,9 +199,9 @@ class MBLT_Engine:
 
     def preprocess(
         self,
-        x,
-        **kwargs,
-    ):
+        x: Any,
+        **kwargs: Any,
+    ) -> Any:
         """Runs preprocessing on the input.
 
         Args:
@@ -192,8 +215,8 @@ class MBLT_Engine:
 
     def postprocess(
         self,
-        x,
-        **kwargs,
+        x: Any,
+        **kwargs: Any,
     ) -> Results:
         """Runs postprocessing on the input.
 
@@ -209,7 +232,7 @@ class MBLT_Engine:
 
     def to(
         self,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ) -> None:
         """Moves the engine and its components to the specified device.
 
@@ -239,7 +262,7 @@ class MBLT_Engine:
 
     def cuda(
         self,
-        device: Union[str, int] = 0,
+        device: str | int = 0,
     ) -> None:
         """Moves the engine to CUDA device.
 
@@ -271,9 +294,12 @@ class MBLT_Engine:
     def model_name_aliasing(self, model_name: str) -> str:
         """Finds the YAML config filename that matches the given model name.
 
-        Matching is case-insensitive and ignores separator characters (``_``,
-        ``-``, and spaces), so inputs like ``resnet50``, ``ResNet50``,
-        ``Resnet_50``, and ``resnet-50`` all resolve to ``ResNet50.yaml``.
+        Matching is case-insensitive and first preserves separator boundaries
+        so names such as ``regnet_x_16gf`` do not collide with
+        ``regnet_x_1_6gf``. A separator-stripped fallback is used only when it
+        resolves to a single unique configuration, so inputs like ``resnet50``,
+        ``ResNet50``, ``Resnet_50``, and ``resnet-50`` all resolve to
+        ``ResNet50.yaml``.
 
         Args:
             model_name: The model identifier provided by the caller.
@@ -287,14 +313,32 @@ class MBLT_Engine:
                 (i.e., multiple files match after normalization).
         """
 
-        def _normalize(name: str) -> str:
-            """Strips separators and lowercases a model name for comparison."""
-            return name.replace("_", "").replace("-", "").replace(" ", "").lower()
+        def _stem(name: str) -> str:
+            """Returns a YAML filename stem when a YAML suffix is present."""
+            return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
 
-        normalized_input = _normalize(model_name)
+        def _normalize_separators(name: str) -> str:
+            """Normalizes separator style while preserving separator boundaries."""
+            return "_".join(part for part in _stem(name).replace("-", "_").replace(" ", "_").lower().split("_") if part)
+
+        def _normalize_compact(name: str) -> str:
+            """Strips separators and lowercases a model name for fallback matching."""
+            return _stem(name).replace("_", "").replace("-", "").replace(" ", "").lower()
 
         candidates = [p.name for p in MODEL_CONFIG_DIR.glob("*.yaml")]
-        matches = [name for name in candidates if _normalize(name[: -len(".yaml")]) == normalized_input]
+        candidate_stems = {name: name[: -len(".yaml")] for name in candidates}
+
+        normalized_separator_input = _normalize_separators(model_name)
+        separator_matches = [
+            name for name, stem in candidate_stems.items() if _normalize_separators(stem) == normalized_separator_input
+        ]
+        if len(separator_matches) == 1:
+            return separator_matches[0]
+
+        normalized_compact_input = _normalize_compact(model_name)
+        matches = [
+            name for name, stem in candidate_stems.items() if _normalize_compact(stem) == normalized_compact_input
+        ]
 
         if len(matches) == 1:
             return matches[0]

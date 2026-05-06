@@ -2,7 +2,7 @@
 Classification postprocessing.
 """
 
-from typing import Union
+from __future__ import annotations
 
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ class ClsPost(PostBase):
     Typically applies softmax to logits and ensures correct output shape.
     """
 
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
+    def __init__(self, pre_cfg: dict, post_cfg: dict) -> None:
         """Initializes the classification post-processing.
 
         Args:
@@ -26,13 +26,13 @@ class ClsPost(PostBase):
         """
         super().__init__()
 
-    def __call__(self, x: Union[TensorLike, ListTensorLike]) -> torch.Tensor:
+    def __call__(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
         """Executes classification post-processing.
 
         Typically applies softmax to convert logits to probabilities.
 
         Args:
-            x (Union[TensorLike, ListTensorLike]): Raw model outputs.
+            x (TensorLike | ListTensorLike): Raw model outputs.
                 Expected to be pre-softmax logits.
 
         Returns:
@@ -43,8 +43,10 @@ class ClsPost(PostBase):
             x = x[0]
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).to(self.device)
-        else:
+        elif isinstance(x, torch.Tensor):
             x = x.to(self.device)
+        else:
+            raise TypeError(f"Got unexpected type for x={type(x)}.")
         if x.ndim == 3:
             x = x.unsqueeze(0)
         assert x.ndim == 4, f"Assume that the result is always in form of NCHW. But the shape is {x.shape}"

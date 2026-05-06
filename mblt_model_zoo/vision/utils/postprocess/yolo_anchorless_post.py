@@ -2,7 +2,7 @@
 YOLO anchorless postprocessing.
 """
 
-from typing import List
+from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
@@ -20,7 +20,7 @@ from .common import (
 class YOLOAnchorlessPost(YOLOPostBase):
     """Postprocessing for YOLO models without anchors."""
 
-    def __init__(self, pre_cfg: dict, post_cfg: dict):
+    def __init__(self, pre_cfg: dict, post_cfg: dict) -> None:
         super().__init__(pre_cfg, post_cfg)
         self.reg_max = post_cfg.get("reg_max", 0)  # DFL channels
         self.no = self.nc + self.reg_max * 4  # number of outputs per anchor (144)
@@ -28,15 +28,15 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
     def rearrange(
         self,
-        x: List[torch.Tensor],
-    ) -> List[torch.Tensor] | tuple[List[torch.Tensor], torch.Tensor]:
+        x: list[torch.Tensor],
+    ) -> list[torch.Tensor] | tuple[list[torch.Tensor], torch.Tensor]:
         """Rearranges raw model output tensors into a standardized format.
 
         Args:
-            x (List[torch.Tensor]): List of raw output tensors from the model detection heads.
+            x (list[torch.Tensor]): List of raw output tensors from the model detection heads.
 
         Returns:
-            List[torch.Tensor]: Rearranged tensors, sorted by size descending.
+            list[torch.Tensor]: Rearranged tensors, sorted by size descending.
         """
         y_det = []
         y_cls = []
@@ -59,14 +59,14 @@ class YOLOAnchorlessPost(YOLOPostBase):
         y = [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for (yi_det, yi_cls) in zip(y_det, y_cls)]
         return y
 
-    def decode(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def decode(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
         """Decodes model outputs into box coordinates and class scores.
 
         Args:
-            x (List[torch.Tensor]): Rearranged output tensors from `rearrange`.
+            x (list[torch.Tensor]): Rearranged output tensors from `rearrange`.
 
         Returns:
-            List[torch.Tensor]: Decoded detections for each image in the batch.
+            list[torch.Tensor]: Decoded detections for each image in the batch.
         """
         batch_box_cls = torch.cat(x, dim=-1)  # (b, 144, 8400)
         return [self.process_box_cls(box_cls) for box_cls in batch_box_cls]
@@ -103,18 +103,18 @@ class YOLOAnchorlessPost(YOLOPostBase):
         )
         return torch.cat([dbox, scores.sigmoid(), extra], dim=1).squeeze(0).transpose(0, 1)
 
-    def filter_conversion(self, x: torch.Tensor) -> List[torch.Tensor]:
+    def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Filters out low-confidence detections from a single concatenated output tensor.
 
         Args:
             x (torch.Tensor): Concatenated output tensor from the model.
 
         Returns:
-            List[torch.Tensor]: Filtered detections for each image in the batch.
+            list[torch.Tensor]: Filtered detections for each image in the batch.
         """
         x_list = torch.split(x.squeeze(1), 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
-        def process_conversion(x):
+        def process_conversion(x: torch.Tensor) -> torch.Tensor:
             x = x.squeeze(0)  # (8400, 84)
             if self.n_extra == 0:
                 ic = torch.amax(x[:, -self.nc :], dim=1) > self.conf_thres
@@ -130,15 +130,15 @@ class YOLOAnchorlessPost(YOLOPostBase):
 
     def nms(
         self,
-        x: List[torch.Tensor],
+        x: list[torch.Tensor],
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """Performs Non-Maximum Suppression (NMS) on the decoded detections.
 
         Args:
-            x (List[torch.Tensor]): Decoded detections for each image.
+            x (list[torch.Tensor]): Decoded detections for each image.
             max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
             max_nms (int, optional): Maximum number of candidates to consider for NMS.
                 Defaults to 30000.
@@ -146,7 +146,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
                 Defaults to 7680.
 
         Returns:
-            List[torch.Tensor]: Post-NMS detections for each image.
+            list[torch.Tensor]: Post-NMS detections for each image.
         """
         output = []
         for xi in x:
@@ -192,11 +192,11 @@ class YOLOAnchorlessPost(YOLOPostBase):
 class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
     """Postprocessing for YOLO segmentation models without anchors."""
 
-    def _pre_process(self, x: List[torch.Tensor]) -> tuple:
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
         Args:
-            x (List[torch.Tensor]): Raw model output tensors.
+            x (list[torch.Tensor]): Raw model output tensors.
 
         Returns:
             tuple: (decoded_detections, prototype_masks).
@@ -207,11 +207,11 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         rearranged, proto_outs = self.rearrange(x)
         return self.decode(rearranged), proto_outs
 
-    def conversion(self, x: List[torch.Tensor]) -> tuple:
+    def conversion(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Converts raw model output tensors into detections and prototypes.
 
         Args:
-            x (List[torch.Tensor]): List of raw output tensors.
+            x (list[torch.Tensor]): List of raw output tensors.
 
         Returns:
             tuple: (detections, prototypes)
@@ -228,7 +228,7 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
             )
         raise ValueError(f"Wrong shape of input: {x[0].shape}, {x[1].shape}")
 
-    def rearrange(self, x):
+    def rearrange(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
         Rearrange model output tensors for segmentation tasks.
         Args:
@@ -236,9 +236,9 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         Returns:
             tuple: (rearranged_detections, prototype_masks)
         """
-        y_det: List[torch.Tensor] = []
-        y_cls: List[torch.Tensor] = []
-        y_ext: List[torch.Tensor] = []
+        y_det: list[torch.Tensor] = []
+        y_cls: list[torch.Tensor] = []
+        y_ext: list[torch.Tensor] = []
         for xi in x:
             if xi.shape[-1] == self.n_extra:
                 y_ext.append(xi.permute(0, 3, 1, 2))  # (b, 32, 160, 160), (b, 32, 80, 80), ...
@@ -264,14 +264,14 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
 class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
     """Postprocessing for YOLO pose estimation models without anchors."""
 
-    def rearrange(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
+    def rearrange(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
         """Rearranges model output tensors for pose estimation tasks.
 
         Args:
-            x (List[torch.Tensor]): Raw output tensors.
+            x (list[torch.Tensor]): Raw output tensors.
 
         Returns:
-            List[torch.Tensor]: Rearranged tensors.
+            list[torch.Tensor]: Rearranged tensors.
         """
         y_det = []
         y_cls = []

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from typing import Dict, Iterable, List, Union
+from typing import Iterable
 
 from .wrapper import MBLT_Engine
 
@@ -17,13 +17,13 @@ TASKS = [
 ]
 
 
-def list_tasks() -> List[str]:
+def list_tasks() -> list[str]:
     """Lists the available vision tasks."""
 
     return TASKS.copy()
 
 
-def list_models(tasks: Union[str, Iterable[str], None] = None) -> Dict[str, List[str]]:
+def list_models(tasks: str | Iterable[str] | None = None) -> dict[str, list[str]]:
     """Lists available models for the selected vision tasks.
 
     Args:
@@ -47,7 +47,7 @@ def list_models(tasks: Union[str, Iterable[str], None] = None) -> Dict[str, List
     if invalid_tasks:
         raise ValueError(f"mblt_model_zoo.vision supports tasks in {TASKS}, got {invalid_tasks}.")
 
-    available_models: Dict[str, List[str]] = {}
+    available_models: dict[str, list[str]] = {}
     for task in task_list:
         module = importlib.import_module(f".{task}", package=__name__.replace("._api", ""))
         available_models[task] = sorted(

@@ -1,6 +1,6 @@
 """Normalization operation for image preprocessing."""
 
-from typing import Union
+from __future__ import annotations
 
 import numpy as np
 import torch
@@ -30,7 +30,7 @@ class Normalize(PreOps):
         std: Array of standard deviation values for normalization.
     """
 
-    def __init__(self, style: str):
+    def __init__(self, style: str) -> None:
         """Initializes the Normalize layer with a specific style.
 
         Args:
@@ -45,14 +45,14 @@ class Normalize(PreOps):
         self.mean = np.array(mean)
         self.std = np.array(std)
 
-    def __call__(self, x: Union[TensorLike, Image.Image]) -> np.ndarray:
+    def __call__(self, x: TensorLike | Image.Image) -> np.ndarray:
         """Applies normalization to the input image or tensor.
 
         Args:
-            x: Input data as a torch.Tensor, PIL Image, or numpy-like array.
+            x (TensorLike | Image.Image): Input data as a torch.Tensor, PIL Image, or numpy-like array.
 
         Returns:
-            The normalized image as a float32 numpy array.
+            np.ndarray: The normalized image as a float32 numpy array.
         """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()

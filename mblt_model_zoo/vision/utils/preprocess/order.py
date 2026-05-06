@@ -2,6 +2,8 @@
 Channel order preprocessing.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 
@@ -12,7 +14,7 @@ from .base import PreOps
 class SetOrder(PreOps):
     """Sets the channel order of the image to either HWC or CHW format."""
 
-    def __init__(self, shape: str = "HWC"):
+    def __init__(self, shape: str = "HWC") -> None:
         """Initializes the SetOrder operation.
 
         Args:
