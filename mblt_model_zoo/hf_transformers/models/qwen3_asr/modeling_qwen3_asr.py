@@ -1,4 +1,3 @@
-import time
 from functools import wraps
 from typing import Optional, Union, cast
 
@@ -207,74 +206,18 @@ class MobilintQwen3ASRTextModel(
                 ),
             )
 
-        logits = self._llm_forward(
+        logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
             cache_position=cache_position,
             prefill_chunk_size=prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=None,
         )
 
         return BaseModelOutputWithPast(
             last_hidden_state=cast(torch.FloatTensor, logits),
             past_key_values=past_key_values,
-        )
-
-    def _llm_forward(
-        self,
-        inputs_embeds: torch.Tensor,
-        past_key_values: Optional[MobilintCache],
-        cache_position: torch.Tensor,
-        prefill_chunk_size: Optional[int] = None,
-        count_npu_time: bool = False,
-    ) -> torch.Tensor:
-        if inputs_embeds.ndim != 3:
-            raise ValueError(
-                f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}"
-            )
-        if inputs_embeds.shape[0] != 1:
-            raise NotImplementedError(
-                "Mobilint Qwen3-ASR text model supports batch=1 only."
-            )
-
-        inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
-        resolved_chunk = self.resolve_prefill_chunk_size(prefill_chunk_size)
-        num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_chunk))
-
-        mxq = self.get_mxq_model()
-        self.npu_time = 0.0 if count_npu_time else None
-        logits_ndarray = None
-
-        for chunk_idx in range(num_chunks):
-            start = chunk_idx * resolved_chunk
-            end   = min(start + resolved_chunk, inputs_np.shape[1])
-            cache_size = (
-                0 if past_key_values is None else past_key_values.get_seq_length()
-            )
-
-            chunk = inputs_np[:, start:end, :]
-
-            if count_npu_time:
-                t0 = time.perf_counter()
-                result = mxq.infer([chunk], None, cache_size)
-                self.npu_time += time.perf_counter() - t0
-            else:
-                result = mxq.infer([chunk], None, cache_size)
-
-            if result is None:
-                raise RuntimeError("Text MXQ inference returned None.")
-            logits_ndarray = result[0]
-
-            if past_key_values is not None:
-                past_key_values.update_cache_position(cache_position[start:end])
-
-        if logits_ndarray is None:
-            raise RuntimeError("Text MXQ inference did not produce logits.")
-
-        return torch.tensor(
-            logits_ndarray,
-            dtype=inputs_embeds.dtype,
-            device=inputs_embeds.device,
         )
 
 
