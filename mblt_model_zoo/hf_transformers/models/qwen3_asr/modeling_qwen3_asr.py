@@ -6,12 +6,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from qwen_asr.core.transformers_backend.modeling_qwen3_asr import (
-    Qwen3ASRForConditionalGeneration,
-    Qwen3ASRPreTrainedModel,
-    Qwen3ASRThinkerCausalLMOutputWithPast,
-    Qwen3ASRThinkerForConditionalGeneration,
-)
 from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPast
 from transformers.models.auto.modeling_auto import (
     AutoModel,
@@ -24,6 +18,15 @@ from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
+from ._errors import guard_qwen_asr_import
+
+with guard_qwen_asr_import():
+    from qwen_asr.core.transformers_backend.modeling_qwen3_asr import (
+        Qwen3ASRForConditionalGeneration,
+        Qwen3ASRPreTrainedModel,
+        Qwen3ASRThinkerCausalLMOutputWithPast,
+        Qwen3ASRThinkerForConditionalGeneration,
+    )
 from .configuration_qwen3_asr import (
     MobilintQwen3ASRAudioEncoderConfig,
     MobilintQwen3ASRConfig,

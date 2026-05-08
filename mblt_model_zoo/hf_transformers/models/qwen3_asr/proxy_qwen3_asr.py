@@ -33,11 +33,14 @@ try:
     from mblt_model_zoo.hf_transformers.models.qwen3_asr.processing_qwen3_asr import (
         MobilintQwen3ASRProcessor,
     )
-except ImportError as exc:
-    raise ImportError(
-        "This model requires 'mblt_model_zoo' to be installed. "
-        'Please run: pip install "mblt_model_zoo[transformers]"'
-    ) from exc
+except ModuleNotFoundError as exc:
+    missing = exc.name or ""
+    if missing == "mblt_model_zoo" or missing.startswith("mblt_model_zoo."):
+        raise ModuleNotFoundError(
+            "This model requires 'mblt_model_zoo' to be installed. "
+            'Please run: pip install "mblt_model_zoo[transformers]"'
+        ) from exc
+    raise
 
 __all__ = [
     "MobilintQwen3ASRConfig",

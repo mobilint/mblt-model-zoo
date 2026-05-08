@@ -1,15 +1,18 @@
 from functools import wraps
 
-from qwen_asr.core.transformers_backend.configuration_qwen3_asr import (
-    Qwen3ASRAudioEncoderConfig,
-    Qwen3ASRConfig,
-    Qwen3ASRTextConfig,
-    Qwen3ASRThinkerConfig,
-)
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 
 from ...utils.configuration_utils import MobilintConfigMixin
+from ._errors import guard_qwen_asr_import
+
+with guard_qwen_asr_import():
+    from qwen_asr.core.transformers_backend.configuration_qwen3_asr import (
+        Qwen3ASRAudioEncoderConfig,
+        Qwen3ASRConfig,
+        Qwen3ASRTextConfig,
+        Qwen3ASRThinkerConfig,
+    )
 
 
 class MobilintQwen3ASRAudioEncoderConfig(MobilintConfigMixin, Qwen3ASRAudioEncoderConfig):
