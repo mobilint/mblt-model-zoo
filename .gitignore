@@ -37,3 +37,4 @@ tmp/
 uv.lock
 !assets/
 !rc/
+.omc
