@@ -40,6 +40,34 @@ logger = logging.get_logger(__name__)
 _MEL_CHUNK_LEN = 100
 
 
+def _qwen3_asr_tail_tokens(tail_frames: int) -> int:
+    """Audio token count upstream Qwen3-ASR emits for a partial tail chunk.
+
+    Mirrors the tail term of
+    ``qwen_asr.core.transformers_backend.modeling_qwen3_asr._get_feat_extract_output_lengths``:
+    three stride-2 conv stages reduce ``tail_frames`` mel frames down to a
+    smaller token count. The NPU encoder always returns 13 tokens because its
+    input is zero-padded to ``_MEL_CHUNK_LEN``, so the last chunk's output must
+    be sliced to this value to keep audio embeddings aligned with the
+    ``audio_token_id`` placeholders the processor pre-allocated in the prompt.
+
+    Args:
+        tail_frames: Valid mel-frame count in the partial last chunk, in
+            ``[0, _MEL_CHUNK_LEN)``. ``0`` means no partial tail (the input
+            length is an exact multiple of ``_MEL_CHUNK_LEN``).
+
+    Returns:
+        Number of audio tokens that correspond to ``tail_frames`` valid mel
+        frames. Returns ``0`` for ``tail_frames <= 0``.
+    """
+    if tail_frames <= 0:
+        return 0
+    n = (tail_frames - 1) // 2 + 1
+    n = (n - 1) // 2 + 1
+    n = (n - 1) // 2 + 1
+    return n
+
+
 class MobilintQwen3ASRPreTrainedModel(Qwen3ASRPreTrainedModel):
     config: MobilintQwen3ASRConfig
     base_model_prefix = "model"
@@ -103,6 +131,14 @@ class MobilintQwen3ASRAudioEncoder(MobilintModelMixin, MobilintQwen3ASRPreTraine
             # (1, 1024, 1, 13) NHWC -> squeeze axis=2 -> (1, 1024, 13) -> (1, 13, 1024).
             emb_np = np.transpose(np.squeeze(result[0], axis=2), (0, 2, 1))
             emb_chunks.append(emb_np)
+
+        # The last chunk was padded to _MEL_CHUNK_LEN, so the encoder still
+        # emits 13 tokens for it. Slice to the count upstream Qwen3-ASR derives
+        # from the real tail length so audio embeddings stay 1:1 with the
+        # processor's audio_token_id placeholders.
+        if tail_frames > 0:
+            valid_tail_tokens = _qwen3_asr_tail_tokens(tail_frames)
+            emb_chunks[-1] = emb_chunks[-1][:, :valid_tail_tokens, :]
 
         audio_embeds_np = np.concatenate(emb_chunks, axis=1)
         audio_embeds = torch.tensor(
