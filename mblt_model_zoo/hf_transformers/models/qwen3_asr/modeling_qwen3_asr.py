@@ -307,11 +307,14 @@ class MobilintQwen3ASRForConditionalGeneration(
             feature_attention_mask=feature_attention_mask,
             **kwargs,
         )
-        if pipeline_invocation and hasattr(result, "sequences"):
-            sequences = self._strip_to_transcription(result.sequences)
-            if not kwargs.get("return_dict_in_generate", False):
-                return sequences
-            result.sequences = sequences
+        if pipeline_invocation:
+            if hasattr(result, "sequences"):
+                sequences = self._strip_to_transcription(result.sequences)
+                if not kwargs.get("return_dict_in_generate", False):
+                    return sequences
+                result.sequences = sequences
+            elif torch.is_tensor(result):
+                return self._strip_to_transcription(result)
         return result
 
     def _strip_to_transcription(self, sequences):
