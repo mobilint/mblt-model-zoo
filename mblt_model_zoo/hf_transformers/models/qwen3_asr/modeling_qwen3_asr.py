@@ -1,4 +1,3 @@
-import time
 from functools import wraps
 from typing import Optional, Union, cast
 
@@ -36,29 +35,23 @@ from .configuration_qwen3_asr import (
 
 logger = logging.get_logger(__name__)
 
-# 1 second of mel = 100 frames -> 13 audio tokens; NPU encoder fixed-input length.
+# NPU audio encoder is compiled for a fixed 1-second window: 100 mel frames
+# -> 13 audio tokens.
+# NPU audio encoder 는 1초 (= 100 mel frame) 고정 입력으로 컴파일되어
+# 13 audio token 을 출력한다.
 _MEL_CHUNK_LEN = 100
 
 
 def _qwen3_asr_tail_tokens(tail_frames: int) -> int:
-    """Audio token count upstream Qwen3-ASR emits for a partial tail chunk.
+    """Token count the upstream encoder would emit for ``tail_frames`` mel frames.
 
-    Mirrors the tail term of
-    ``qwen_asr.core.transformers_backend.modeling_qwen3_asr._get_feat_extract_output_lengths``:
-    three stride-2 conv stages reduce ``tail_frames`` mel frames down to a
-    smaller token count. The NPU encoder always returns 13 tokens because its
-    input is zero-padded to ``_MEL_CHUNK_LEN``, so the last chunk's output must
-    be sliced to this value to keep audio embeddings aligned with the
-    ``audio_token_id`` placeholders the processor pre-allocated in the prompt.
+    Used to trim the zero-padded final chunk so audio embeddings stay aligned
+    with the prompt's ``audio_token_id`` placeholders. Mirrors the three
+    stride-2 conv reductions in upstream ``_get_feat_extract_output_lengths``.
 
-    Args:
-        tail_frames: Valid mel-frame count in the partial last chunk, in
-            ``[0, _MEL_CHUNK_LEN)``. ``0`` means no partial tail (the input
-            length is an exact multiple of ``_MEL_CHUNK_LEN``).
-
-    Returns:
-        Number of audio tokens that correspond to ``tail_frames`` valid mel
-        frames. Returns ``0`` for ``tail_frames <= 0``.
+    ``tail_frames`` 만큼 유효 mel frame 으로부터 upstream encoder 가 출력하는
+    audio token 수. zero-padded 마지막 chunk 를 잘라 audio embedding 이
+    프롬프트의 ``audio_token_id`` placeholder 와 1:1 정렬되도록 한다.
     """
     if tail_frames <= 0:
         return 0
@@ -107,7 +100,8 @@ class MobilintQwen3ASRAudioEncoder(MobilintModelMixin, MobilintQwen3ASRPreTraine
         T_total = input_features.shape[-1]
         T_valid = int(feature_lens[0].item()) if feature_lens is not None else T_total
 
-        # Zero-pad up to the next multiple of _MEL_CHUNK_LEN.
+        # Zero-pad to a multiple of the fixed encoder window length.
+        # encoder 고정 윈도우 길이의 배수가 되도록 zero-pad.
         n_full      = T_valid // _MEL_CHUNK_LEN
         tail_frames = T_valid % _MEL_CHUNK_LEN
         n_chunks    = n_full + (1 if tail_frames > 0 else 0)
@@ -132,10 +126,10 @@ class MobilintQwen3ASRAudioEncoder(MobilintModelMixin, MobilintQwen3ASRPreTraine
             emb_np = np.transpose(np.squeeze(result[0], axis=2), (0, 2, 1))
             emb_chunks.append(emb_np)
 
-        # The last chunk was padded to _MEL_CHUNK_LEN, so the encoder still
-        # emits 13 tokens for it. Slice to the count upstream Qwen3-ASR derives
-        # from the real tail length so audio embeddings stay 1:1 with the
-        # processor's audio_token_id placeholders.
+        # Trim padded tail tokens so audio embeddings match the prompt's
+        # audio_token_id count.
+        # zero-padded 꼬리 청크의 잉여 토큰 제거 - 프롬프트의 audio_token_id
+        # 수와 audio embedding 을 1:1 정렬.
         if tail_frames > 0:
             valid_tail_tokens = _qwen3_asr_tail_tokens(tail_frames)
             emb_chunks[-1] = emb_chunks[-1][:, :valid_tail_tokens, :]
@@ -147,7 +141,8 @@ class MobilintQwen3ASRAudioEncoder(MobilintModelMixin, MobilintQwen3ASRPreTraine
             device=input_features.device,
         )
 
-        # Upstream concatenates over dim=0; return without batch dim.
+        # Upstream concatenates over dim=0, so the caller wants no batch dim.
+        # upstream 이 dim=0 으로 concat 하므로 batch dim 없이 반환.
         return BaseModelOutput(last_hidden_state=audio_embeds.squeeze(0))
 
 
@@ -207,74 +202,18 @@ class MobilintQwen3ASRTextModel(
                 ),
             )
 
-        logits = self._llm_forward(
+        logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
             cache_position=cache_position,
             prefill_chunk_size=prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=None,
         )
 
         return BaseModelOutputWithPast(
             last_hidden_state=cast(torch.FloatTensor, logits),
             past_key_values=past_key_values,
-        )
-
-    def _llm_forward(
-        self,
-        inputs_embeds: torch.Tensor,
-        past_key_values: Optional[MobilintCache],
-        cache_position: torch.Tensor,
-        prefill_chunk_size: Optional[int] = None,
-        count_npu_time: bool = False,
-    ) -> torch.Tensor:
-        if inputs_embeds.ndim != 3:
-            raise ValueError(
-                f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}"
-            )
-        if inputs_embeds.shape[0] != 1:
-            raise NotImplementedError(
-                "Mobilint Qwen3-ASR text model supports batch=1 only."
-            )
-
-        inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
-        resolved_chunk = self.resolve_prefill_chunk_size(prefill_chunk_size)
-        num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_chunk))
-
-        mxq = self.get_mxq_model()
-        self.npu_time = 0.0 if count_npu_time else None
-        logits_ndarray = None
-
-        for chunk_idx in range(num_chunks):
-            start = chunk_idx * resolved_chunk
-            end   = min(start + resolved_chunk, inputs_np.shape[1])
-            cache_size = (
-                0 if past_key_values is None else past_key_values.get_seq_length()
-            )
-
-            chunk = inputs_np[:, start:end, :]
-
-            if count_npu_time:
-                t0 = time.perf_counter()
-                result = mxq.infer([chunk], None, cache_size)
-                self.npu_time += time.perf_counter() - t0
-            else:
-                result = mxq.infer([chunk], None, cache_size)
-
-            if result is None:
-                raise RuntimeError("Text MXQ inference returned None.")
-            logits_ndarray = result[0]
-
-            if past_key_values is not None:
-                past_key_values.update_cache_position(cache_position[start:end])
-
-        if logits_ndarray is None:
-            raise RuntimeError("Text MXQ inference did not produce logits.")
-
-        return torch.tensor(
-            logits_ndarray,
-            dtype=inputs_embeds.dtype,
-            device=inputs_embeds.device,
         )
 
 
@@ -295,7 +234,8 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
         self.model = MobilintQwen3ASRTextModel._from_config(
             config.text_config, _internal_call=True
         )
-        # NPU TextModel returns logits directly; lm_head is a pass-through.
+        # NPU TextModel already emits logits; route lm_head through Identity.
+        # NPU TextModel 이 이미 logits 를 반환하므로 lm_head 는 통과 처리.
         self.lm_head = nn.Identity()
 
         self.vocab_size = config.text_config.vocab_size
@@ -325,8 +265,10 @@ class MobilintQwen3ASRForConditionalGeneration(
     Qwen3ASRForConditionalGeneration,
 ):
     config_class = MobilintQwen3ASRConfig
-    # HF ASR pipeline pops by `model.main_input_name`; default is `input_ids`,
-    # which would raise KeyError for an audio model.
+    # The HF ASR pipeline keys inputs by `main_input_name`; default `input_ids`
+    # would KeyError for an audio model.
+    # HF ASR pipeline 이 `main_input_name` 으로 입력을 키잉하므로 audio
+    # 모델은 default `input_ids` 대신 `input_features` 로 덮어쓴다.
     main_input_name = "input_features"
 
     def __init__(self, config: MobilintQwen3ASRConfig, *args, **kwargs):
@@ -341,8 +283,128 @@ class MobilintQwen3ASRForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.thinker.get_cache_mxq_model()
 
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids=None,
+        input_features=None,
+        attention_mask=None,
+        feature_attention_mask=None,
+        **kwargs,
+    ):
+        pipeline_invocation = input_ids is None and input_features is not None
+        if pipeline_invocation:
+            if feature_attention_mask is None and attention_mask is not None:
+                feature_attention_mask = attention_mask
+                attention_mask = None
+            input_ids, attention_mask = self._build_default_chat_input_ids(
+                input_features, feature_attention_mask,
+            )
+        result = super().generate(
+            input_ids=input_ids,
+            input_features=input_features,
+            attention_mask=attention_mask,
+            feature_attention_mask=feature_attention_mask,
+            **kwargs,
+        )
+        if pipeline_invocation:
+            if hasattr(result, "sequences"):
+                sequences = self._strip_to_transcription(result.sequences)
+                if not kwargs.get("return_dict_in_generate", False):
+                    return sequences
+                result.sequences = sequences
+            elif torch.is_tensor(result):
+                return self._strip_to_transcription(result)
+        return result
+
+    def _strip_to_transcription(self, sequences):
+        """Drop the ``language <Lang><asr_text>`` preface from generated sequences.
+
+        Lets the pipeline's tokenizer decode only the transcription. Rows
+        without the marker pass through unchanged.
+
+        생성 결과 앞의 ``language <Lang><asr_text>`` prefix 제거. pipeline 의
+        decode 가 transcription 본문만 보도록 한다.
+        """
+        marker = self.config.thinker_config.asr_text_token_id
+        trimmed = []
+        for row in sequences:
+            indices = (row == marker).nonzero(as_tuple=True)[0]
+            if indices.numel() > 0:
+                start = int(indices[0].item()) + 1
+                trimmed.append(row[start:])
+            else:
+                trimmed.append(row)
+        max_len = max(t.shape[0] for t in trimmed)
+        pad_id = self.config.thinker_config.text_config.eos_token_id or 0
+        if isinstance(pad_id, list):
+            pad_id = pad_id[0]
+        padded = sequences.new_full((len(trimmed), max_len), pad_id)
+        for i, t in enumerate(trimmed):
+            padded[i, : t.shape[0]] = t
+        return padded
+
+    def _build_default_chat_input_ids(self, input_features, feature_attention_mask):
+        """Fallback chat-template prompt when only audio features are provided.
+
+        Used when the HF ASR pipeline calls ``generate`` without ``input_ids``.
+        Mirrors what ``Qwen3ASRProcessor.apply_chat_template`` would produce.
+
+        audio feature 만 받은 경우의 폴백 chat 프롬프트. HF ASR pipeline 이
+        input_ids 없이 generate 를 호출할 때 사용. processor 가 만들
+        프롬프트를 모델 내부에서 재현.
+        """
+        device = input_features.device
+        if feature_attention_mask is not None:
+            feat_lens = feature_attention_mask.sum(-1)
+        else:
+            feat_lens = torch.tensor([input_features.shape[-1]], device=device, dtype=torch.long)
+        out_lens = (feat_lens - 1) // 2 + 1
+        out_lens = (out_lens - 1) // 2 + 1
+        out_lens = (out_lens - 1) // 2 + 1
+        n_audio = int(out_lens.max().item())
+
+        cfg = self.config.thinker_config
+        # End the prompt at `<|im_start|>assistant\n` so the model continues
+        # with `language <Lang><asr_text><transcription>` like upstream.
+        # `<|im_start|>assistant\n` 으로 프롬프트를 종료 → 모델이 upstream 과
+        # 같은 `language <Lang><asr_text><transcription>` 패턴으로 이어 생성.
+        prompt = [
+            cfg.im_start_token_id, cfg.user_token_id, cfg.newline_token_id,
+            cfg.audio_start_token_id,
+            *([cfg.audio_token_id] * n_audio),
+            cfg.audio_end_token_id,
+            cfg.newline_token_id, cfg.im_end_token_id, cfg.newline_token_id,
+            cfg.im_start_token_id, cfg.assistant_token_id, cfg.newline_token_id,
+        ]
+        input_ids = torch.tensor([prompt], dtype=torch.long, device=device)
+        attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+        return input_ids, attention_mask
+
 
 AutoModel.register(MobilintQwen3ASRConfig, MobilintQwen3ASRForConditionalGeneration)
 AutoModelForSpeechSeq2Seq.register(
     MobilintQwen3ASRConfig, MobilintQwen3ASRForConditionalGeneration
 )
+
+
+# Purpose: expose this model through `transformers.pipeline(
+# "automatic-speech-recognition", ...)` on par with built-in ASR models
+# (Whisper etc.) so users can swap to the Mobilint NPU build without rewriting
+# their pipeline code. transformers 4.57.x does not ship a Qwen3-ASR entry in
+# its seq2seq roster, so we add our class manually; otherwise the pipeline
+# routes to a non-generative path and the model never runs.
+# 목적: `transformers.pipeline("automatic-speech-recognition", ...)` 으로
+# Whisper 같은 내장 ASR 모델과 동일한 방식으로 본 모델을 사용할 수 있게 한다.
+# transformers 4.57.x 의 seq2seq 명단에 Qwen3-ASR 항목이 없어 직접 등록하지
+# 않으면 pipeline 이 비-생성 경로로 빠져 모델이 실행되지 않는다.
+try:
+    from transformers.models.auto.modeling_auto import (  # noqa: E402
+        MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES,
+    )
+
+    MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES.setdefault(
+        "mobilint-qwen3_asr", "MobilintQwen3ASRForConditionalGeneration"
+    )
+except ImportError:
+    pass
