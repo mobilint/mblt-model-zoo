@@ -3,7 +3,7 @@ from datasets import load_dataset
 from transformers import pipeline
 
 MODEL_PATHS = (
-    # "mobilint/Qwen3-ASR-0.6B",
+    "mobilint/Qwen3-ASR-0.6B",
     "mobilint/Qwen3-ASR-1.7B",
 )
 
