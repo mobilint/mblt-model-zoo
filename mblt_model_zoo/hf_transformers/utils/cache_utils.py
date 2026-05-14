@@ -15,6 +15,7 @@ class MobilintLayer(CacheLayerMixin):
         self.cache_id = cache_id
         self._seen_tokens = 0
         self.buffer: List[bytes] = []
+        self.buffer_seq_length: Optional[int] = None
 
     def lazy_initialization(self, key_states: torch.Tensor):
         raise NotImplementedError("lazy_initialization is not implemented")
@@ -37,9 +38,16 @@ class MobilintLayer(CacheLayerMixin):
     def get_max_cache_shape(self) -> Optional[int]:
         return self.mxq_model.get_input_buffer_info()[0].max_cache_size
 
+    def set_seq_length(self, seq_length: int) -> None:
+        """Set the cached sequence length for an in-memory cache snapshot."""
+        if seq_length < 0:
+            raise ValueError(f"seq_length must be non-negative, got {seq_length}")
+        self._seen_tokens = seq_length
+
     def reset(self) -> None:
         self._seen_tokens = 0
         self.buffer = []
+        self.buffer_seq_length = None
 
     def reorder_cache(self, beam_idx: torch.LongTensor):
         raise NotImplementedError("reorder_cache is not implemented")
@@ -52,8 +60,11 @@ class MobilintLayer(CacheLayerMixin):
 
     def dump_cache_memory(self):
         self.buffer = self.mxq_model.dump_cache_memory(self.cache_id)
+        self.buffer_seq_length = self.get_seq_length()
 
     def load_cache_memory(self):
+        if self.buffer_seq_length is not None:
+            self.set_seq_length(self.buffer_seq_length)
         if self.get_seq_length() > 0:
             self.mxq_model.load_cache_memory(self.buffer, self.cache_id)
 
@@ -69,13 +80,14 @@ class MobilintLayer(CacheLayerMixin):
             seq_length = int(seq_path.read_text(encoding="utf-8").strip())
         else:
             seq_length = 0
-        self._seen_tokens = seq_length
+        self.set_seq_length(seq_length)
         self.mxq_model.load_cache_memory_from(cache_dir, self.cache_id)
 
     def copy(self) -> "MobilintLayer":
         copied = MobilintLayer(self.mxq_model, self.cache_id)
         copied._seen_tokens = self._seen_tokens
         copied.buffer = copy.deepcopy(self.buffer)
+        copied.buffer_seq_length = self.buffer_seq_length
         return copied
 
 
@@ -84,7 +96,9 @@ class MobilintCache(Cache):
         self.mxq_model = mxq_model
         self.batch_size = max(1, batch_size)
 
-        self.layers: list[MobilintLayer] = [MobilintLayer(self.mxq_model, cache_id) for cache_id in range(self.batch_size)]
+        self.layers: list[MobilintLayer] = [
+            MobilintLayer(self.mxq_model, cache_id) for cache_id in range(self.batch_size)
+        ]
         self.layer_classes = MobilintLayer
 
         self.num_hidden_layers = 1
@@ -92,6 +106,14 @@ class MobilintCache(Cache):
 
     def get_seq_length(self, index: int = 0) -> int:
         return self.layers[index].get_seq_length()
+
+    def set_seq_length(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
+        """Set cached sequence lengths for one cache entry or a batch of entries."""
+        if isinstance(sequence_lengths, int):
+            self.layers[index].set_seq_length(sequence_lengths)
+            return
+        for cache_id, seq_len in sequence_lengths.items():
+            self.layers[cache_id].set_seq_length(seq_len)
 
     def update_cache_position(self, cache_position: torch.Tensor, index: int = 0):
         self.layers[index].update_cache_position(cache_position)

@@ -29,6 +29,7 @@
 *__pycache__*
 .codex
 .venv
+venv
 .vscode/
 benchmark/**/results/
 build/
@@ -38,3 +39,4 @@ tmp/
 uv.lock
 !assets/
 !rc/
+.omc
