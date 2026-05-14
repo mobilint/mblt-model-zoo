@@ -18,12 +18,6 @@ from mblt_model_zoo.vision.wrapper import MODEL_CONFIG_DIR, MBLT_Engine
         ("resnet50", "ResNet50.yaml"),
         ("resnet-50", "ResNet50.yaml"),
         ("resnet_50", "ResNet50.yaml"),
-        ("DeiT3BasePatch16384", "DeiT3_Base_Patch16_384.yaml"),
-        ("EfficientNetB1.yaml", "EfficientNet_B1.yaml"),
-        ("InceptionV3", "Inception_V3.yaml"),
-        ("ViTB16", "ViT_B_16.yaml"),
-        ("ViTL16", "ViT_L_16.yaml"),
-        ("WideResNet502", "Wide_ResNet50_2.yaml"),
     ],
 )
 def test_model_name_aliasing_resolves_precise_separator_matches(
@@ -47,7 +41,7 @@ def test_model_name_aliasing_reports_compact_ambiguity() -> None:
 
 
 def test_legacy_model_config_aliases_do_not_keep_duplicate_yaml_files() -> None:
-    """Keep legacy config names as aliases instead of duplicate YAML files."""
+    """Keep removed legacy config names out of the YAML registry."""
 
     duplicate_config_names = [
         "DeiT3BasePatch16384.yaml",

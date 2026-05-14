@@ -16,7 +16,6 @@ from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Cluster, CoreId
 
 from ..utils.npu_backend import MobilintNPUBackend
-from ._model_aliases import resolve_model_config_alias, strip_yaml_suffix
 from .utils.postprocess import build_postprocess
 from .utils.preprocess import build_preprocess
 from .utils.results import Results
@@ -314,25 +313,20 @@ class MBLT_Engine:
                 (i.e., multiple files match after normalization).
         """
 
+        def _stem(name: str) -> str:
+            """Returns a YAML filename stem when a YAML suffix is present."""
+            return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
+
         def _normalize_separators(name: str) -> str:
             """Normalizes separator style while preserving separator boundaries."""
-            return "_".join(
-                part for part in strip_yaml_suffix(name).replace("-", "_").replace(" ", "_").lower().split("_") if part
-            )
+            return "_".join(part for part in _stem(name).replace("-", "_").replace(" ", "_").lower().split("_") if part)
 
         def _normalize_compact(name: str) -> str:
             """Strips separators and lowercases a model name for fallback matching."""
-            return strip_yaml_suffix(name).replace("_", "").replace("-", "").replace(" ", "").lower()
+            return _stem(name).replace("_", "").replace("-", "").replace(" ", "").lower()
 
         candidates = [p.name for p in MODEL_CONFIG_DIR.glob("*.yaml")]
         candidate_stems = {name: name[: -len(".yaml")] for name in candidates}
-
-        aliased_stem = resolve_model_config_alias(model_name)
-        if aliased_stem is not None:
-            aliased_name = f"{aliased_stem}.yaml"
-            if aliased_name in candidate_stems:
-                return aliased_name
-            raise ValueError(f"Model alias '{model_name}' points to missing configuration '{aliased_name}'.")
 
         normalized_separator_input = _normalize_separators(model_name)
         separator_matches = [

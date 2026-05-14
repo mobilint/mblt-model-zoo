@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from ._model_aliases import resolve_model_config_alias
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
@@ -40,12 +39,6 @@ def _resolve_yaml_name(class_name: str) -> str:
     exact_matches = [stem for stem in yaml_stems if stem.lower() == class_name.lower()]
     if len(exact_matches) == 1:
         return exact_matches[0]
-
-    aliased_stem = resolve_model_config_alias(class_name)
-    if aliased_stem is not None:
-        if aliased_stem in yaml_stems:
-            return aliased_stem
-        raise ValueError(f"Alias '{class_name}' points to missing YAML config '{aliased_stem}'.")
 
     normalized_name = _normalize_name(class_name)
     normalized_matches = [stem for stem in yaml_stems if _normalize_name(stem) == normalized_name]
