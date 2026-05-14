@@ -44,6 +44,16 @@ class MobilintLayer(CacheLayerMixin):
             raise ValueError(f"seq_length must be non-negative, got {seq_length}")
         self._seen_tokens = seq_length
 
+    def fake_prefill(self, seq_length: int) -> None:
+        """Mark this layer as prefilled without restoring KV cache memory.
+
+        This helper is intended for NPU decode TPS benchmarks where qbruntime
+        receives the requested cache size directly and the actual KV payload is
+        not needed for measuring decode compute cost.
+        """
+        self.reset()
+        self.set_seq_length(seq_length)
+
     def reset(self) -> None:
         self._seen_tokens = 0
         self.buffer = []
@@ -115,6 +125,23 @@ class MobilintCache(Cache):
         for cache_id, seq_len in sequence_lengths.items():
             self.layers[cache_id].set_seq_length(seq_len)
 
+    def fake_prefill(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
+        """Mark one or more cache entries as prefilled without loading cache memory.
+
+        Args:
+            sequence_lengths: Single sequence length or per-cache-id sequence
+                lengths to expose via ``get_seq_length()``.
+            index: Cache entry used when ``sequence_lengths`` is a single int.
+
+        Raises:
+            ValueError: If any sequence length is negative.
+        """
+        if isinstance(sequence_lengths, int):
+            self.layers[index].fake_prefill(sequence_lengths)
+            return
+        for cache_id, seq_len in sequence_lengths.items():
+            self.layers[cache_id].fake_prefill(seq_len)
+
     def update_cache_position(self, cache_position: torch.Tensor, index: int = 0):
         self.layers[index].update_cache_position(cache_position)
 
@@ -143,4 +170,108 @@ class MobilintCache(Cache):
         copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
         for i in range(self.batch_size):
             copied.layers[i] = self.layers[i].copy()
+        return copied
+
+
+class MobilintDeepStackCache(MobilintCache):
+    """Mobilint KV cache carrying Qwen3-VL deepstack decoder inputs.
+
+    Qwen3-VL text MXQ uses token embeddings and a dense deepstack tensor as decoder inputs.
+    This cache keeps the KV sequence length in ``MobilintCache`` while providing the matching
+    deepstack chunk for each decoder invocation. Fake prefill stores only the requested sequence
+    length and lazily serves zero deepstack chunks for synthetic decode TPS measurements.
+    """
+
+    def __init__(
+        self,
+        mxq_model: qbruntime.Model,
+        batch_size: int = 1,
+        num_deepstack_layers: int = 0,
+        hidden_size: int = 0,
+    ) -> None:
+        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        if num_deepstack_layers < 0:
+            raise ValueError(f"num_deepstack_layers must be non-negative, got {num_deepstack_layers}")
+        if hidden_size < 0:
+            raise ValueError(f"hidden_size must be non-negative, got {hidden_size}")
+        self.num_deepstack_layers = int(num_deepstack_layers)
+        self.hidden_size = int(hidden_size)
+        self._deepstack_tensor: Optional[torch.Tensor] = None
+
+    def reset(self) -> None:
+        """Reset KV sequence length and clear any per-call deepstack tensor."""
+        for layer in self.layers:
+            layer.reset()
+        self._deepstack_tensor = None
+
+    def fake_prefill(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
+        """Mark the cache as fake-prefilled and clear real deepstack payloads."""
+        super().fake_prefill(sequence_lengths, index=index)
+        self._deepstack_tensor = None
+
+    def set_deepstack_tensor(self, deepstack_tensor: torch.Tensor) -> None:
+        """Set the deepstack tensor for the current decoder forward call.
+
+        Args:
+            deepstack_tensor: Dense tensor with shape ``(layers, seq_len, hidden_size)``.
+
+        Raises:
+            ValueError: If the tensor rank or configured dimensions do not match.
+        """
+        if deepstack_tensor.ndim != 3:
+            raise ValueError(f"Expected deepstack tensor rank 3, got shape {tuple(deepstack_tensor.shape)}")
+        if int(deepstack_tensor.shape[0]) != self.num_deepstack_layers:
+            raise ValueError(
+                "Deepstack layer count mismatch: "
+                f"{int(deepstack_tensor.shape[0])} vs {self.num_deepstack_layers}"
+            )
+        if int(deepstack_tensor.shape[2]) != self.hidden_size:
+            raise ValueError(
+                f"Deepstack hidden size mismatch: {int(deepstack_tensor.shape[2])} vs {self.hidden_size}"
+            )
+        self._deepstack_tensor = deepstack_tensor
+
+    def get_deepstack_chunk(
+        self,
+        start_index: int,
+        end_index: int,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Return the deepstack input chunk for the current decoder chunk.
+
+        Args:
+            start_index: Inclusive local token offset in the current forward call.
+            end_index: Exclusive local token offset in the current forward call.
+            device: Device for a lazily-created fake chunk.
+            dtype: Dtype for a lazily-created fake chunk.
+
+        Returns:
+            Tensor with shape ``(layers, end_index - start_index, hidden_size)``.
+        """
+        if start_index < 0 or end_index < start_index:
+            raise ValueError(f"Invalid deepstack chunk range: {start_index}:{end_index}")
+
+        if self._deepstack_tensor is not None and end_index <= int(self._deepstack_tensor.shape[1]):
+            return self._deepstack_tensor[:, start_index:end_index, :].to(device=device, dtype=dtype)
+
+        chunk_len = end_index - start_index
+        return torch.zeros(
+            (self.num_deepstack_layers, chunk_len, self.hidden_size),
+            dtype=dtype,
+            device=device,
+        )
+
+    def copy(self) -> "MobilintDeepStackCache":
+        """Return a copy preserving KV state and the current deepstack tensor."""
+        copied = MobilintDeepStackCache(
+            self.mxq_model,
+            batch_size=self.batch_size,
+            num_deepstack_layers=self.num_deepstack_layers,
+            hidden_size=self.hidden_size,
+        )
+        for i in range(self.batch_size):
+            copied.layers[i] = self.layers[i].copy()
+        copied._deepstack_tensor = None if self._deepstack_tensor is None else self._deepstack_tensor.clone()
         return copied

@@ -7,8 +7,11 @@ from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    SingleMeasurement,
+    TPSMeasurer,
     _resolve_config_vocab_size,
     _resolve_image_features_tensor,
+    _supports_fake_decode_prefill,
 )
 
 
@@ -23,6 +26,96 @@ class _DummyConfig:
 class _DummyVisionOutput:
     def __init__(self, pooler_output=None):
         self.pooler_output = pooler_output
+
+
+class _DummyMxqModel:
+    """Minimal cache MXQ marker for fake prefill routing tests."""
+
+
+class _DummyNPUModel:
+    """NPU-backed model marker exposing a cache MXQ model."""
+
+    npu_backend = object()
+
+    def __init__(self) -> None:
+        self.mxq_model = _DummyMxqModel()
+
+    def get_cache_mxq_model(self) -> _DummyMxqModel:
+        """Return a fake MXQ model for MobilintCache construction."""
+        return self.mxq_model
+
+
+class _DummyNonNPUModel:
+    """Non-NPU model marker without Mobilint cache support."""
+
+
+class _DummyVLMContainer:
+    """VLM-like container with a nested language model."""
+
+    def __init__(self, language_model) -> None:
+        self.model = type("NestedModel", (), {"language_model": language_model})()
+
+
+class _RoutingTPSMeasurer(TPSMeasurer):
+    """TPS measurer test double that records real/fake decode routing."""
+
+    def __init__(self, model) -> None:
+        self.model = model
+        self.calls: list[tuple[str, int, int]] = []
+
+    def measure(
+        self,
+        num_prefill=512,
+        num_decode=128,
+        prefill_chunk_size=None,
+        trace_path=None,
+        show_progress: bool = False,
+        progress_desc=None,
+        on_prefill_start=None,
+        on_prefill_end=None,
+        on_decode_start=None,
+        on_decode_end=None,
+    ) -> SingleMeasurement:
+        """Record real-prefill measurements without running generation."""
+        self.calls.append(("real", int(num_prefill), int(num_decode)))
+        return SingleMeasurement(
+            num_prefill=int(num_prefill),
+            num_decode=int(num_decode),
+            prefill_latency=1.0,
+            prefill_tps=float(num_prefill),
+            decode_duration=1.0,
+            decode_tps=float(num_decode),
+            total_time=2.0,
+            avg_total_prefill_token_latency=1.0 / int(num_prefill),
+            avg_npu_prefill_token_latency=None,
+            avg_total_decode_token_latency=1.0 / int(num_decode),
+            avg_npu_decode_token_latency=None,
+        )
+
+    def measure_decode_with_fake_prefill(
+        self,
+        cache_len: int,
+        num_decode: int,
+        trace_path=None,
+        show_progress: bool = False,
+        progress_desc=None,
+    ) -> SingleMeasurement:
+        """Record fake-prefill decode measurements without running generation."""
+        self.calls.append(("fake", int(cache_len), int(num_decode)))
+        return SingleMeasurement(
+            num_prefill=int(cache_len),
+            num_decode=int(num_decode),
+            prefill_latency=0.0,
+            prefill_tps=0.0,
+            decode_duration=1.0,
+            decode_tps=float(num_decode),
+            total_time=1.0,
+            avg_total_prefill_token_latency=0.0,
+            avg_npu_prefill_token_latency=None,
+            avg_total_decode_token_latency=1.0 / int(num_decode),
+            avg_npu_decode_token_latency=None,
+            decode_prefill_mode="fake",
+        )
 
 
 def test_cli_tps_sweep_range_parsing():
@@ -61,6 +154,35 @@ def test_resolve_config_vocab_size_uses_text_config():
 def test_resolve_config_vocab_size_requires_vocab_size():
     with pytest.raises(AttributeError, match="vocab_size"):
         _resolve_config_vocab_size(_DummyConfig())
+
+
+def test_supports_fake_decode_prefill_requires_npu_and_cache_model():
+    assert _supports_fake_decode_prefill(_DummyNPUModel()) is True
+    assert _supports_fake_decode_prefill(_DummyNonNPUModel()) is False
+
+
+def test_supports_fake_decode_prefill_detects_nested_vlm_language_model():
+    assert _supports_fake_decode_prefill(_DummyVLMContainer(_DummyNPUModel())) is True
+
+
+def test_tps_measure_full_uses_fake_decode_prefill_for_npu_models():
+    measurer = _RoutingTPSMeasurer(_DummyNPUModel())
+
+    result = measurer.measure_full(prefill_range=(1, 1, 1), cache_lengths=[4], decode_window=2)
+
+    assert measurer.calls == [("real", 1, 1), ("fake", 4, 2)]
+    assert result.decode_sweep.x_values == [4]
+    assert result.decode_sweep.tps_values == [2.0]
+
+
+def test_tps_measure_full_keeps_real_decode_prefill_for_non_npu_models():
+    measurer = _RoutingTPSMeasurer(_DummyNonNPUModel())
+
+    result = measurer.measure_full(prefill_range=(1, 1, 1), cache_lengths=[4], decode_window=2)
+
+    assert measurer.calls == [("real", 1, 1), ("real", 4, 2)]
+    assert result.decode_sweep.x_values == [4]
+    assert result.decode_sweep.tps_values == [2.0]
 
 
 def test_resolve_image_features_tensor_uses_tensor():

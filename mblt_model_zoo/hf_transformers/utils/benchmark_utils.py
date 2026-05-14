@@ -1,12 +1,62 @@
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, cast
 
 import matplotlib.pyplot as plt
 import torch
 from tqdm.auto import tqdm
 from transformers import TextIteratorStreamer
+
+from .cache_utils import MobilintCache
+
+
+def _call_maybe_getter(obj: object, name: str) -> object | None:
+    """Return an attribute value, calling it when it is a zero-argument getter."""
+    candidate = getattr(obj, name, None)
+    if candidate is None:
+        return None
+    if callable(candidate):
+        try:
+            return candidate()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+    return candidate
+
+
+def _get_language_model_candidate(model: object) -> object | None:
+    """Resolve a nested language model commonly used by VLM wrappers."""
+    nested_model = getattr(model, "model", None)
+    if nested_model is not None:
+        language_model = getattr(nested_model, "language_model", None)
+        if language_model is not None:
+            return language_model
+    return getattr(model, "language_model", None)
+
+
+def _get_cache_mxq_model(model: object) -> object | None:
+    """Resolve the qbruntime model used by ``MobilintCache`` for decode."""
+    for candidate in (model, _get_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        for getter_name in ("get_cache_mxq_model", "get_mxq_model"):
+            mxq_model = _call_maybe_getter(candidate, getter_name)
+            if mxq_model is not None:
+                return mxq_model
+    return None
+
+
+def _is_mobilint_npu_model(model: object) -> bool:
+    """Return whether a model or its language model is Mobilint NPU-backed."""
+    if hasattr(model, "npu_backend"):
+        return True
+    language_model = _get_language_model_candidate(model)
+    return language_model is not None and hasattr(language_model, "npu_backend")
+
+
+def _supports_fake_decode_prefill(model: object) -> bool:
+    """Return whether decode TPS can use fake prefilled Mobilint cache state."""
+    return _is_mobilint_npu_model(model) and _get_cache_mxq_model(model) is not None
 
 
 def _resolve_config_vocab_size(config) -> int:
@@ -155,6 +205,7 @@ class SingleMeasurement:
     decode_j_per_token: Optional[float] = None
     total_tokens_per_j: Optional[float] = None
     total_j_per_token: Optional[float] = None
+    decode_prefill_mode: str = "real"
 
 @dataclass
 class SweepData:
@@ -557,6 +608,118 @@ class TPSMeasurer:
         finally:
             self._stop_trace(trace_handle)
 
+    def measure_decode_with_fake_prefill(
+        self,
+        cache_len: int,
+        num_decode: int,
+        trace_path: Union[str, None] = None,
+        show_progress: bool = False,
+        progress_desc: Union[str, None] = None,
+    ) -> SingleMeasurement:
+        """Measure decode TPS after faking a prefilled Mobilint cache length."""
+        trace_handle = self._start_trace(trace_path)
+        try:
+            assert cache_len > 0, "cache_len should be positive! cache_len: %d" % cache_len
+            assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+
+            mxq_model = _get_cache_mxq_model(self.model)
+            if mxq_model is None:
+                raise RuntimeError("Fake decode prefill requires a Mobilint cache MXQ model.")
+
+            vocab_size = _resolve_config_vocab_size(self.model.config)
+            low = 100 if vocab_size > 100 else 0
+            input_ids = torch.randint(low, vocab_size, (1, 1), device=self.device)
+            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
+            past_key_values.fake_prefill(cache_len)
+
+            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            gen_kwargs = dict(
+                input_ids=input_ids,
+                past_key_values=past_key_values,
+                streamer=streamer,
+                min_new_tokens=num_decode,
+                max_new_tokens=num_decode,
+                do_sample=False,
+                eos_token_id=None,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+            if self._supports_npu_timing():
+                gen_kwargs["count_npu_time"] = True
+
+            thread_error: list[Exception] = []
+
+            def _run_generate():
+                try:
+                    self.model.generate(**gen_kwargs)
+                except Exception as e:
+                    thread_error.append(e)
+                    try:
+                        streamer.end()
+                    except Exception:
+                        pass
+
+            thread = Thread(target=_run_generate)
+            t_start = time.perf_counter()
+            thread.start()
+
+            decoded_tokens = 0
+            npu_decode_time = 0.0
+            has_npu_time = False
+            token_pbar = None
+            if show_progress:
+                token_pbar = tqdm(
+                    total=num_decode,
+                    desc=progress_desc or f"fake decode (cache={cache_len}, window={num_decode})",
+                    leave=False,
+                )
+
+            stream_error: Exception | None = None
+            try:
+                for _ in streamer:
+                    decoded_tokens += 1
+                    if token_pbar is not None:
+                        token_pbar.update(1)
+                    npu_time = getattr(self.model, "npu_time", None)
+                    if npu_time is not None:
+                        has_npu_time = True
+                        npu_decode_time += npu_time
+            except Exception as e:
+                stream_error = e
+            t_end = time.perf_counter()
+            thread.join()
+            if thread_error:
+                raise RuntimeError(f"fake decode generate failed: {thread_error[0]}") from thread_error[0]
+            if stream_error is not None:
+                raise stream_error
+            if token_pbar is not None:
+                token_pbar.close()
+
+            decode_duration = t_end - t_start
+            decode_count = decoded_tokens
+            decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
+            avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+            avg_npu_decode_token_latency = (
+                npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
+            )
+            return SingleMeasurement(
+                num_prefill=cache_len,
+                num_decode=decode_count,
+                prefill_latency=0.0,
+                prefill_tps=0.0,
+                decode_duration=decode_duration,
+                decode_tps=decode_tps,
+                total_time=decode_duration,
+                avg_total_prefill_token_latency=0.0,
+                avg_npu_prefill_token_latency=0.0 if has_npu_time else None,
+                avg_total_decode_token_latency=avg_total_decode_token_latency,
+                avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+                npu_prefill_time=0.0 if has_npu_time else None,
+                npu_decode_time=npu_decode_time if has_npu_time else None,
+                decode_prefill_mode="fake",
+            )
+        finally:
+            self._stop_trace(trace_handle)
+
     def measure_full(
         self,
         prefill_range: Tuple[int, int, int] = (128, 2048, 128),
@@ -612,14 +775,24 @@ class TPSMeasurer:
             decode_iter = resolved_cache_lengths
             if show_progress:
                 decode_iter = tqdm(decode_iter, desc=f"{prefix}decode sweep", leave=False)
+            use_fake_decode_prefill = _supports_fake_decode_prefill(self.model)
             for cache_len in decode_iter:
-                res = self.measure(
-                    num_prefill=cache_len,
-                    num_decode=decode_window,
-                    prefill_chunk_size=prefill_chunk_size,
-                    show_progress=show_progress,
-                    progress_desc=f"{prefix}decode generate (cache={cache_len}, window={decode_window})",
-                )
+                progress_desc = f"{prefix}decode generate (cache={cache_len}, window={decode_window})"
+                if use_fake_decode_prefill:
+                    res = self.measure_decode_with_fake_prefill(
+                        cache_len=cache_len,
+                        num_decode=decode_window,
+                        show_progress=show_progress,
+                        progress_desc=progress_desc,
+                    )
+                else:
+                    res = self.measure(
+                        num_prefill=cache_len,
+                        num_decode=decode_window,
+                        prefill_chunk_size=prefill_chunk_size,
+                        show_progress=show_progress,
+                        progress_desc=progress_desc,
+                    )
                 full_result.decode_sweep.x_values.append(cache_len)
                 full_result.decode_sweep.tps_values.append(res.decode_tps)
                 full_result.decode_sweep.time_values.append(res.decode_duration)
@@ -989,6 +1162,88 @@ class VLMTPSMeasurer:
             npu_decode_time=npu_decode_time if has_npu_time else None,
         )
 
+    def _measure_llm_decode_with_fake_prefill(self, cache_len: int, num_decode: int) -> SingleMeasurement:
+        """Measure VLM language-model decode TPS with fake prefilled cache length."""
+        assert cache_len > 0, "cache_len should be positive! cache_len: %d" % cache_len
+        assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+
+        lm_for_npu = self._get_language_model()
+        gen_model = self.model
+        mxq_model = _get_cache_mxq_model(lm_for_npu)
+        if mxq_model is None:
+            raise RuntimeError("Fake VLM LLM decode prefill requires a Mobilint cache MXQ model.")
+
+        device = getattr(lm_for_npu, "device", self.model.device)
+        vocab_size = _resolve_config_vocab_size(self.model.config)
+        low = 100 if vocab_size > 100 else 0
+        input_ids = torch.randint(low, vocab_size, (1, 1), device=device)
+        inputs_embeds = lm_for_npu.get_input_embeddings()(input_ids)
+        cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
+        if callable(cache_factory):
+            past_key_values = cache_factory("mobilint", 1, cache_len)
+        else:
+            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
+        past_key_values.fake_prefill(cache_len)
+
+        count_npu_time = self._supports_npu_timing(lm_for_npu)
+        t_start = time.perf_counter()
+        decoded_tokens = 0
+        npu_decode_time = 0.0
+        has_npu_time = False
+
+        with torch.no_grad():
+            for decode_idx in range(num_decode):
+                current_cache_len = cache_len + decode_idx
+                attention_mask = torch.ones((1, current_cache_len + 1), dtype=torch.long, device=device)
+                position_ids = torch.full((1, 1), current_cache_len, dtype=torch.long, device=device)
+                cache_position = torch.tensor([current_cache_len], dtype=torch.long, device=device)
+
+                outputs = lm_for_npu(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    cache_position=cache_position,
+                    count_npu_time=count_npu_time,
+                )
+                logits = outputs.last_hidden_state
+                next_token_id = torch.argmax(logits.reshape(-1, logits.shape[-1])[-1], dim=-1).view(1, 1)
+                inputs_embeds = lm_for_npu.get_input_embeddings()(next_token_id.to(device))
+
+            decoded_tokens += 1
+            npu_time = getattr(lm_for_npu, "npu_time", None)
+            if npu_time is not None:
+                has_npu_time = True
+                npu_decode_time += npu_time
+
+        t_end = time.perf_counter()
+
+        decode_duration = t_end - t_start
+        decode_count = decoded_tokens
+        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
+        avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+        avg_npu_decode_token_latency = (
+            npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
+        )
+
+        return SingleMeasurement(
+            num_prefill=cache_len,
+            num_decode=decode_count,
+            prefill_latency=0.0,
+            prefill_tps=0.0,
+            decode_duration=decode_duration,
+            decode_tps=decode_tps,
+            total_time=decode_duration,
+            avg_total_prefill_token_latency=0.0,
+            avg_npu_prefill_token_latency=0.0 if has_npu_time else None,
+            avg_total_decode_token_latency=avg_total_decode_token_latency,
+            avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+            npu_prefill_time=0.0 if has_npu_time else None,
+            npu_decode_time=npu_decode_time if has_npu_time else None,
+            decode_prefill_mode="fake",
+        )
+
     def _build_reference_inputs_embeds(
         self,
         image_resolution: int,
@@ -998,7 +1253,7 @@ class VLMTPSMeasurer:
         _, image_features = self._measure_vision_encode(inputs)
         return self._build_inputs_embeds(inputs, image_features=image_features)
 
-    def _build_text_suffix_ids(self, length: int, device: torch.device) -> torch.LongTensor:
+    def _build_text_suffix_ids(self, length: int, device: torch.device) -> torch.Tensor:
         if length <= 0:
             return torch.empty((1, 0), dtype=torch.long, device=device)
 
@@ -1103,21 +1358,27 @@ class VLMTPSMeasurer:
             decode_iter = tqdm(decode_iter, desc=f"{prefix}vlm llm decode sweep", leave=False)
 
         t_decode_start = time.perf_counter()
+        use_fake_decode_prefill = _supports_fake_decode_prefill(self._get_language_model())
         for cache_len in decode_iter:
-            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
-                inputs=base_inputs,
-                image_features=image_features,
-                total_prefill_len=cache_len,
-            )
-            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
-            if inputs_embeds is None:
-                if show_progress:
-                    tqdm.write(
-                        f"{prefix}skip cache length={cache_len}: "
-                        f"minimum multimodal prefix length is {min_total_len}"
-                    )
-                continue
-            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=decode_window)
+            if use_fake_decode_prefill:
+                res = self._measure_llm_decode_with_fake_prefill(cache_len=cache_len, num_decode=decode_window)
+            else:
+                inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                    inputs=base_inputs,
+                    image_features=image_features,
+                    total_prefill_len=cache_len,
+                )
+                min_total_len_seen = (
+                    min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+                )
+                if inputs_embeds is None:
+                    if show_progress:
+                        tqdm.write(
+                            f"{prefix}skip cache length={cache_len}: "
+                            f"minimum multimodal prefix length is {min_total_len}"
+                        )
+                    continue
+                res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=decode_window)
             full_result.decode_sweep.x_values.append(cache_len)
             full_result.decode_sweep.tps_values.append(res.decode_tps)
             full_result.decode_sweep.time_values.append(res.decode_duration)

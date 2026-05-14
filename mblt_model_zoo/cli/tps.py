@@ -373,8 +373,14 @@ def _enrich_single_run_device(
     run.decode_avg_memory_used_pct = decode_metric.get("avg_memory_used_pct")
     run.decode_p99_memory_used_pct = decode_metric.get("p99_memory_used_pct")
 
-    prefill_t = float(run.prefill_latency)
-    decode_t = float(run.decode_duration)
+    fallback_prefill_t = 0.0
+    if getattr(run, "prefill_sweep", None) and run.prefill_sweep.time_values:
+        fallback_prefill_t = run.prefill_sweep.time_values[-1]
+    fallback_decode_t = 0.0
+    if getattr(run, "decode_sweep", None) and run.decode_sweep.time_values:
+        fallback_decode_t = run.decode_sweep.time_values[-1]
+    prefill_t = float(getattr(run, "prefill_latency", fallback_prefill_t))
+    decode_t = float(getattr(run, "decode_duration", fallback_decode_t))
     run.avg_power_w = _weighted_two(prefill_avg_power, prefill_t, decode_avg_power, decode_t)
     p_p99 = prefill_metric.get("p99_power_w")
     d_p99 = decode_metric.get("p99_power_w")
@@ -424,25 +430,39 @@ def _enrich_single_run_device(
     if avg_power is None:
         return
 
-    prefill_energy = prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
-    decode_energy = decode_avg_power * run.decode_duration if decode_avg_power is not None else None
+    prefill_energy = prefill_avg_power * prefill_t if prefill_avg_power is not None else None
+    decode_energy = decode_avg_power * decode_t if decode_avg_power is not None else None
     total_energy = None
     if prefill_energy is not None and decode_energy is not None:
         total_energy = prefill_energy + decode_energy
 
-    total_tokens = run.num_prefill + run.num_decode
+    num_prefill = int(
+        getattr(
+            run,
+            "num_prefill",
+            run.prefill_sweep.x_values[-1] if getattr(run, "prefill_sweep", None) and run.prefill_sweep.x_values else 0,
+        )
+    )
+    num_decode = int(
+        getattr(
+            run,
+            "num_decode",
+            run.decode_sweep.x_values[-1] if getattr(run, "decode_sweep", None) and run.decode_sweep.x_values else 0,
+        )
+    )
+    total_tokens = num_prefill + num_decode
 
     run.avg_power_w = float(avg_power)
     run.total_energy_j = total_energy
-    run.prefill_tokens_per_j = _safe_div(float(run.num_prefill), prefill_energy) if prefill_energy is not None else None
+    run.prefill_tokens_per_j = _safe_div(float(num_prefill), prefill_energy) if prefill_energy is not None else None
     run.prefill_j_per_token = (
-        _safe_div(prefill_energy, float(run.num_prefill))
-        if prefill_energy is not None and run.num_prefill > 0
+        _safe_div(prefill_energy, float(num_prefill))
+        if prefill_energy is not None and num_prefill > 0
         else None
     )
-    run.decode_tokens_per_j = _safe_div(float(run.num_decode), decode_energy) if decode_energy is not None else None
+    run.decode_tokens_per_j = _safe_div(float(num_decode), decode_energy) if decode_energy is not None else None
     run.decode_j_per_token = (
-        _safe_div(decode_energy, float(run.num_decode)) if decode_energy is not None and run.num_decode > 0 else None
+        _safe_div(decode_energy, float(num_decode)) if decode_energy is not None and num_decode > 0 else None
     )
     run.total_tokens_per_j = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
     run.total_j_per_token = (
