@@ -19,3 +19,4 @@ DEFAULT:
       style: cv
   post_cfg:
     task: image_classification
+    softmax: true

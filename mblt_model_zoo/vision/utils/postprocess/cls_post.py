@@ -25,6 +25,7 @@ class ClsPost(PostBase):
             post_cfg (dict): Postprocessing configuration.
         """
         super().__init__()
+        self.softmax = post_cfg.get("softmax", False)
 
     def __call__(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
         """Executes classification post-processing.
@@ -51,4 +52,6 @@ class ClsPost(PostBase):
             x = x.unsqueeze(0)
         assert x.ndim == 4, f"Assume that the result is always in form of NCHW. But the shape is {x.shape}"
         x = x.flatten(1)  # assume that the shape can be made to (b, 1000)
+        if self.softmax:
+            return x
         return x.softmax(dim=-1)
