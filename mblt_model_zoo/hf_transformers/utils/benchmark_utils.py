@@ -9,6 +9,80 @@ from tqdm.auto import tqdm
 from transformers import TextIteratorStreamer
 
 
+def _resolve_config_vocab_size(config) -> int:
+    """Resolve vocabulary size from text-only or vision-language model configs.
+
+    Args:
+        config: Model configuration object. VLM configs may keep language settings under
+            ``text_config`` instead of exposing them at the top level.
+
+    Returns:
+        Vocabulary size used for synthetic text token generation.
+
+    Raises:
+        AttributeError: If neither ``config.vocab_size`` nor ``config.text_config.vocab_size`` exists.
+        ValueError: If the resolved vocabulary size is not positive.
+    """
+    vocab_size = getattr(config, "vocab_size", None)
+    if vocab_size is None:
+        text_config = getattr(config, "text_config", None)
+        vocab_size = getattr(text_config, "vocab_size", None)
+    if vocab_size is None:
+        raise AttributeError("Model config must define vocab_size or text_config.vocab_size.")
+
+    vocab_size = int(vocab_size)
+    if vocab_size <= 0:
+        raise ValueError(f"Model vocab_size must be positive, got {vocab_size}.")
+    return vocab_size
+
+
+def _resolve_image_features_tensor(image_features) -> torch.Tensor:
+    """Resolve image embeddings from Tensor, tuple, or structured HF vision outputs.
+
+    Args:
+        image_features: Vision encoder output returned by a VLM family.
+
+    Returns:
+        Image feature tensor used to replace image placeholder token embeddings.
+
+    Raises:
+        TypeError: If a tensor image feature cannot be resolved.
+    """
+    if isinstance(image_features, torch.Tensor):
+        return image_features
+
+    def _resolve_tensor_sequence(features: list | tuple) -> torch.Tensor | None:
+        tensors = [feature for feature in features if isinstance(feature, torch.Tensor)]
+        if not tensors:
+            return None
+        if len(tensors) == 1:
+            return tensors[0]
+        return torch.cat(tensors, dim=0)
+
+    pooler_output = getattr(image_features, "pooler_output", None)
+    if isinstance(pooler_output, torch.Tensor):
+        return pooler_output
+    if isinstance(pooler_output, (list, tuple)):
+        tensor = _resolve_tensor_sequence(pooler_output)
+        if tensor is not None:
+            return tensor
+
+    if isinstance(image_features, (list, tuple)):
+        tensor = _resolve_tensor_sequence(image_features)
+        if tensor is not None:
+            return tensor
+        for feature in image_features:
+            pooler_output = getattr(feature, "pooler_output", None)
+            if isinstance(pooler_output, torch.Tensor):
+                return pooler_output
+            if isinstance(pooler_output, (list, tuple)):
+                tensor = _resolve_tensor_sequence(pooler_output)
+                if tensor is not None:
+                    return tensor
+
+    raise TypeError(f"Could not resolve image feature tensor from {type(image_features).__name__}.")
+
+
 class TokenIteratorStreamer(TextIteratorStreamer):
     def put(self, value):
         if len(value.shape) > 1 and value.shape[0] > 1:
@@ -356,7 +430,9 @@ class TPSMeasurer:
             assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
 
             # 1. Synthetic Input
-            input_ids = torch.randint(100, self.model.config.vocab_size, (1, num_prefill))
+            vocab_size = _resolve_config_vocab_size(self.model.config)
+            low = 100 if vocab_size > 100 else 0
+            input_ids = torch.randint(low, vocab_size, (1, num_prefill))
             input_ids = input_ids.to(self.device)
 
             # 2. Setup
@@ -736,12 +812,10 @@ class VLMTPSMeasurer:
                 image_features = self.model.get_image_features(pixel_values=pixel_values)
             t1 = time.perf_counter()
 
-        if isinstance(image_features, (list, tuple)):
-            assert len(image_features) > 0
-            return t1 - t0, image_features[0]
-        return t1 - t0, image_features
+        return t1 - t0, _resolve_image_features_tensor(image_features)
 
     def _build_inputs_embeds(self, inputs: dict, image_features: torch.Tensor) -> torch.Tensor:
+        image_features = _resolve_image_features_tensor(image_features)
         input_ids = inputs["input_ids"].to(self.model.device)
         if hasattr(self.model, "model") and hasattr(self.model.model, "language_model"):
             inputs_embeds = self.model.model.language_model.get_input_embeddings()(input_ids)
@@ -835,7 +909,6 @@ class VLMTPSMeasurer:
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            cache_position=cache_position,
             streamer=streamer,
             min_new_tokens=num_decode + 1,
             max_new_tokens=num_decode + 1,
@@ -929,7 +1002,7 @@ class VLMTPSMeasurer:
         if length <= 0:
             return torch.empty((1, 0), dtype=torch.long, device=device)
 
-        vocab_size = int(self.model.config.vocab_size)
+        vocab_size = _resolve_config_vocab_size(self.model.config)
         low = 100 if vocab_size > 100 else 0
         suffix_ids = torch.randint(low, vocab_size, (1, length), device=device)
 
