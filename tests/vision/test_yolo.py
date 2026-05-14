@@ -65,7 +65,6 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Path to the YOLO11m model file (.mxq)",
-        help="Path to the YOLO11m model file (.mxq)",
     )
     parser.add_argument(
         "--model-type",

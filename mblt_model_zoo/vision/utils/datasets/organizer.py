@@ -230,3 +230,84 @@ def organize_widerface(
             )
     else:
         construct_widerface(image_dir, annotation_dir, output_dir)
+
+
+def _resolve_dotav1_root(dataset_dir: str) -> str:
+    """Resolves a DOTAv1 dataset root from a directory path.
+
+    Args:
+        dataset_dir: Directory containing the DOTAv1 dataset or its parent.
+
+    Returns:
+        Path to the DOTAv1 dataset root.
+    """
+    dotav1_dir = os.path.join(dataset_dir, "DOTAv1")
+    if os.path.isdir(dotav1_dir):
+        return dotav1_dir
+    return dataset_dir
+
+
+def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
+    """Constructs a validation-only DOTAv1 dataset.
+
+    Args:
+        dataset_dir: Directory containing a DOTAv1 dataset or its parent.
+        output_dir: Directory where the organized validation dataset will be stored.
+
+    Raises:
+        ValueError: If no validation files or directories are found.
+    """
+    dataset_root = _resolve_dotav1_root(dataset_dir)
+    print(f"Constructing DOTAv1 validation dataset from {dataset_root} to {output_dir}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    copied_count = 0
+    for root, dirs, files in os.walk(dataset_root):
+        for dir_name in list(dirs):
+            if "val" not in dir_name:
+                continue
+
+            src_dir = os.path.join(root, dir_name)
+            relative_dir = os.path.relpath(src_dir, dataset_root)
+            dst_dir = os.path.join(output_dir, relative_dir)
+            if os.path.abspath(src_dir) != os.path.abspath(dst_dir):
+                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+            copied_count += 1
+            dirs.remove(dir_name)
+
+        for file_name in files:
+            if "val" not in file_name:
+                continue
+
+            src_file = os.path.join(root, file_name)
+            relative_file = os.path.relpath(src_file, dataset_root)
+            dst_file = os.path.join(output_dir, relative_file)
+            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+            if os.path.abspath(src_file) != os.path.abspath(dst_file):
+                shutil.copy2(src_file, dst_file)
+            copied_count += 1
+
+    if copied_count == 0:
+        raise ValueError(f"No DOTAv1 validation files or directories found in {dataset_root}")
+
+    print("Constructing DOTAv1 validation dataset completed")
+
+
+def organize_dotav1(
+    dataset_path: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1"),
+) -> None:
+    """Organizes a validation-only DOTAv1 dataset.
+
+    Args:
+        dataset_path: Path to the DOTAv1 zip file or extracted dataset directory.
+        output_dir: Directory to store the organized dataset.
+    """
+    if dataset_path.endswith(".zip"):
+        with TemporaryDirectory() as temp_dir:
+            print("Unpacking DOTAv1 files to temporary directory...")
+            shutil.unpack_archive(dataset_path, temp_dir)
+            print("Unpacking completed")
+            construct_dotav1(temp_dir, output_dir)
+    else:
+        construct_dotav1(dataset_path, output_dir)

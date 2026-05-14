@@ -191,6 +191,53 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 Pending
 
+## Benchmark with DOTAv1 Dataset
+
+### Download the DOTAv1 Dataset
+
+To download the DOTAv1 dataset, run the following command:
+
+```bash
+wget https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip
+```
+
+### Organize the DOTAv1 Dataset
+
+You can organize the DOTAv1 validation dataset with the following command:
+
+```bash
+python organize_dotav1.py \
+  --dataset-path ./DOTAv1.zip \
+  --output-dir ~/.mblt_model_zoo/datasets/dotav1
+```
+
+This command is intended to run from the repository root. If your current directory is already
+`benchmark/vision`, run `cd /workspace/mblt-model-zoo` first.
+
+This keeps only the validation split and organizes the dataset into the following structure:
+
+```text
+~/.mblt_model_zoo/datasets/dotav1/
+├── images/
+│   └── val/
+│       ├── P0003.png
+│       ├── P0006.png
+│       ├── ...
+├── labels/
+│   ├── val/
+│   │   ├── P0003.txt
+│   │   ├── P0006.txt
+│   │   ├── ...
+│   └── val_original/
+│       ├── P0003.txt
+│       ├── P0006.txt
+│       ├── ...
+```
+
+### Run the DOTAv1 Benchmark
+
+Pending
+
 ## Compare Vision Benchmark Results
 
 You can compare multiple vision benchmark CSV files and generate model-wise charts:
