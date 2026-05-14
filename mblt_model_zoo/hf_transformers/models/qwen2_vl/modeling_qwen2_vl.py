@@ -20,7 +20,7 @@ from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
-from ...utils.generation_utils import MobilintGenerationMixin
+from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen2_vl import (
     MobilintQwen2VLConfig,
@@ -249,7 +249,7 @@ class MobilintQwen2VLForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
-    @wraps(Qwen2VLForConditionalGeneration.forward)
+    @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.forward, "count_npu_time")
     def forward(
         self,
         *args: object,

@@ -1,11 +1,47 @@
 from abc import ABC
-from typing import Dict
+import inspect
+from functools import wraps
+from typing import Callable, Dict
 
 import qbruntime
 from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
 
 from ..utils.cache_utils import MobilintCache
 from ..utils.modeling_utils import MobilintModelMixin
+
+
+def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: str) -> Callable:
+    """Preserve an upstream generation hook signature while adding Mobilint kwargs.
+
+    Args:
+        wrapped: Upstream callable whose public signature should be preserved.
+        *extra_keyword_names: Keyword-only parameters to append before ``**kwargs``.
+
+    Returns:
+        Decorator that applies ``functools.wraps`` and exposes an augmented signature.
+    """
+
+    def decorator(wrapper: Callable) -> Callable:
+        wrapper = wraps(wrapped)(wrapper)
+        signature = inspect.signature(wrapped)
+        parameters = list(signature.parameters.values())
+        existing = set(signature.parameters)
+        insert_at = next(
+            (idx for idx, parameter in enumerate(parameters) if parameter.kind == inspect.Parameter.VAR_KEYWORD),
+            len(parameters),
+        )
+        for name in extra_keyword_names:
+            if name in existing:
+                continue
+            parameters.insert(
+                insert_at,
+                inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=False, annotation=bool),
+            )
+            insert_at += 1
+        wrapper.__signature__ = signature.replace(parameters=parameters)
+        return wrapper
+
+    return decorator
 
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
