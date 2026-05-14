@@ -1,7 +1,7 @@
 DEFAULT: IMAGENET1K_V1
 IMAGENET1K_V1:
   file_cfg:
-    repo_id: mobilint/ViT_L_16
+    repo_id: mobilint/ViT_L_16.tv1_in1k
     filename: vit_l_16_IMAGENET1K_V1.mxq
     revision: main
   pre_cfg:

@@ -1,0 +1,26 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv8s-obb
+    filename: yolov8s-obb.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 1024
+      - 1024
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: obb
+    nc: 15
+    nl: 3
+    n_extra: 1
+    reg_max: 16
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO
