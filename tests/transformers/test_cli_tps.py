@@ -9,6 +9,7 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import Mob
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     SingleMeasurement,
     TPSMeasurer,
+    VLMTPSMeasurer,
     _resolve_config_vocab_size,
     _resolve_image_features_tensor,
     _supports_fake_decode_prefill,
@@ -54,6 +55,84 @@ class _DummyVLMContainer:
 
     def __init__(self, language_model) -> None:
         self.model = type("NestedModel", (), {"language_model": language_model})()
+
+
+class _DummyFakePrefillCache:
+    """Minimal cache object used by VLM fake-prefill decode tests."""
+
+    def __init__(self) -> None:
+        self.prefill_length: int | None = None
+
+    def fake_prefill(self, sequence_length: int) -> None:
+        """Record the fake prefill length requested by the benchmark."""
+        self.prefill_length = sequence_length
+
+
+class _DummyVLMDecodeOutput:
+    """Minimal language-model output carrying logits-like hidden states."""
+
+    def __init__(self, last_hidden_state: torch.Tensor) -> None:
+        self.last_hidden_state = last_hidden_state
+
+
+class _DummyVLMLanguageModel(torch.nn.Module):
+    """Tiny language model double for fake-prefill decode accounting tests."""
+
+    npu_backend = object()
+
+    def __init__(self, vocab_size: int = 16, hidden_size: int = 4) -> None:
+        super().__init__()
+        self.device = torch.device("cpu")
+        self.embedding = torch.nn.Embedding(vocab_size, hidden_size)
+        self.cache = _DummyFakePrefillCache()
+        self.calls = 0
+        self.npu_time: float | None = None
+
+    def get_cache_mxq_model(self) -> _DummyMxqModel:
+        """Return a fake MXQ marker so the benchmark enables fake-prefill decode."""
+        return _DummyMxqModel()
+
+    def get_input_embeddings(self) -> torch.nn.Embedding:
+        """Return token embeddings used by the decode loop."""
+        return self.embedding
+
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int) -> _DummyFakePrefillCache:
+        """Return a fake cache object compatible with the benchmark helper."""
+        del cache_implementation, batch_size, max_cache_len
+        return self.cache
+
+    def forward(self, **kwargs) -> _DummyVLMDecodeOutput:
+        """Simulate one decode step and expose per-step NPU timing."""
+        del kwargs
+        self.calls += 1
+        self.npu_time = 0.25
+        vocab_size = self.embedding.num_embeddings
+        logits = torch.zeros((1, 1, vocab_size), dtype=torch.float32)
+        logits[0, 0, self.calls % vocab_size] = 1.0
+        return _DummyVLMDecodeOutput(logits)
+
+
+class _DummyVLMModel:
+    """Minimal VLM container exposing config and device for the benchmark."""
+
+    def __init__(self, language_model: _DummyVLMLanguageModel) -> None:
+        self.device = torch.device("cpu")
+        self.config = _DummyConfig(vocab_size=language_model.embedding.num_embeddings)
+        self.language_model = language_model
+        self.model = type("NestedModel", (), {"language_model": language_model})()
+
+
+class _DummyVLMTPSMeasurer(VLMTPSMeasurer):
+    """VLM TPS measurer double that bypasses pipeline construction."""
+
+    def __init__(self, language_model: _DummyVLMLanguageModel) -> None:
+        self.model = _DummyVLMModel(language_model)
+        self.tokenizer = object()
+        self.processor = object()
+
+    def _get_language_model(self) -> _DummyVLMLanguageModel:
+        """Return the dummy language model under test."""
+        return self.model.language_model
 
 
 class _RoutingTPSMeasurer(TPSMeasurer):
@@ -183,6 +262,20 @@ def test_tps_measure_full_keeps_real_decode_prefill_for_non_npu_models():
     assert measurer.calls == [("real", 1, 1), ("real", 4, 2)]
     assert result.decode_sweep.x_values == [4]
     assert result.decode_sweep.tps_values == [2.0]
+
+
+def test_vlm_fake_prefill_decode_counts_each_decode_token():
+    language_model = _DummyVLMLanguageModel()
+    measurer = _DummyVLMTPSMeasurer(language_model)
+
+    result = measurer._measure_llm_decode_with_fake_prefill(cache_len=8, num_decode=4)
+
+    assert language_model.cache.prefill_length == 8
+    assert language_model.calls == 4
+    assert result.num_decode == 4
+    assert result.decode_tps > 0.0
+    assert result.npu_decode_time == pytest.approx(1.0)
+    assert result.avg_npu_decode_token_latency == pytest.approx(0.25)
 
 
 def test_resolve_image_features_tensor_uses_tensor():

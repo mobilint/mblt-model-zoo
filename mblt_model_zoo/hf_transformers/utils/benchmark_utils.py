@@ -1211,11 +1211,11 @@ class VLMTPSMeasurer:
                 next_token_id = torch.argmax(logits.reshape(-1, logits.shape[-1])[-1], dim=-1).view(1, 1)
                 inputs_embeds = lm_for_npu.get_input_embeddings()(next_token_id.to(device))
 
-            decoded_tokens += 1
-            npu_time = getattr(lm_for_npu, "npu_time", None)
-            if npu_time is not None:
-                has_npu_time = True
-                npu_decode_time += npu_time
+                decoded_tokens += 1
+                npu_time = getattr(lm_for_npu, "npu_time", None)
+                if npu_time is not None:
+                    has_npu_time = True
+                    npu_decode_time += npu_time
 
         t_end = time.perf_counter()
 
