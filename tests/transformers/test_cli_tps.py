@@ -7,6 +7,7 @@ from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    BenchmarkResult,
     SingleMeasurement,
     TPSMeasurer,
     VLMTPSMeasurer,
@@ -252,6 +253,7 @@ def test_tps_measure_full_uses_fake_decode_prefill_for_npu_models():
     assert measurer.calls == [("real", 1, 1), ("fake", 4, 2)]
     assert result.decode_sweep.x_values == [4]
     assert result.decode_sweep.tps_values == [2.0]
+    assert result.decode_prefill_modes == ["fake"]
 
 
 def test_tps_measure_full_keeps_real_decode_prefill_for_non_npu_models():
@@ -262,6 +264,32 @@ def test_tps_measure_full_keeps_real_decode_prefill_for_non_npu_models():
     assert measurer.calls == [("real", 1, 1), ("real", 4, 2)]
     assert result.decode_sweep.x_values == [4]
     assert result.decode_sweep.tps_values == [2.0]
+    assert result.decode_prefill_modes == ["real"]
+
+
+def test_benchmark_result_iter_rows_includes_decode_prefill_mode():
+    result = BenchmarkResult()
+    result.decode_sweep.x_values.append(4)
+    result.decode_sweep.tps_values.append(2.0)
+    result.decode_sweep.time_values.append(1.0)
+    result.decode_sweep.avg_total_token_latency_values.append(0.5)
+    result.decode_sweep.avg_npu_token_latency_values.append(None)
+    result.decode_prefill_modes.append("fake")
+
+    rows = list(BenchmarkResult.iter_rows("dummy", result))
+
+    assert rows == [
+        {
+            "model": "dummy",
+            "phase": "decode",
+            "tokens": 4,
+            "tps": 2.0,
+            "time_ms": 1000.0,
+            "avg_total_token_latency_ms": 500.0,
+            "avg_npu_token_latency_ms": None,
+            "decode_prefill_mode": "fake",
+        }
+    ]
 
 
 def test_vlm_fake_prefill_decode_counts_each_decode_token():

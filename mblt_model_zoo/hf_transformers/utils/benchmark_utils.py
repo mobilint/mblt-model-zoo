@@ -219,6 +219,7 @@ class SweepData:
 class BenchmarkResult:
     prefill_sweep: SweepData = field(default_factory=SweepData)
     decode_sweep: SweepData = field(default_factory=SweepData)
+    decode_prefill_modes: List[str] = field(default_factory=list)
     prefill_phase_duration_s: Optional[float] = None
     decode_phase_duration_s: Optional[float] = None
 
@@ -240,12 +241,14 @@ class BenchmarkResult:
                 "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
                 "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
             }
-        for x, tps, t, avg_total, avg_npu in zip(
+        decode_prefill_modes = result.decode_prefill_modes or [None] * len(result.decode_sweep.x_values)
+        for x, tps, t, avg_total, avg_npu, prefill_mode in zip(
             result.decode_sweep.x_values,
             result.decode_sweep.tps_values,
             result.decode_sweep.time_values,
             result.decode_sweep.avg_total_token_latency_values,
             result.decode_sweep.avg_npu_token_latency_values,
+            decode_prefill_modes,
         ):
             yield {
                 "model": model_id,
@@ -255,6 +258,7 @@ class BenchmarkResult:
                 "time_ms": t * 1000.0,
                 "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
                 "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+                "decode_prefill_mode": prefill_mode,
             }
 
     @staticmethod
@@ -274,6 +278,7 @@ class BenchmarkResult:
                     "time_ms",
                     "avg_total_token_latency_ms",
                     "avg_npu_token_latency_ms",
+                    "decode_prefill_mode",
                 ],
             )
             writer.writeheader()
@@ -798,6 +803,7 @@ class TPSMeasurer:
                 full_result.decode_sweep.time_values.append(res.decode_duration)
                 full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
                 full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
+                full_result.decode_prefill_modes.append(res.decode_prefill_mode)
             t_decode_end = time.perf_counter()
             if on_decode_end is not None:
                 on_decode_end()
@@ -1384,6 +1390,7 @@ class VLMTPSMeasurer:
             full_result.decode_sweep.time_values.append(res.decode_duration)
             full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
             full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
+            full_result.decode_prefill_modes.append(res.decode_prefill_mode)
         t_decode_end = time.perf_counter()
         full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
 
