@@ -1,57 +1,199 @@
-# Benchmark Scripts (Text Generation)
+# Transformers Benchmark Usage Examples
 
-The `benchmark/` folder contains runnable scripts for text-generation benchmarking.
+The `benchmark/transformers/` directory and the `mblt-model-zoo tps` CLI provide speed measurement
+tools for Hugging Face Transformers-based text-generation and image-text-to-text models. This guide
+collects representative examples for quick single-model checks, model sweeps, result comparison, and
+prefill chunk-size search workflows.
 
-## Benchmark all available models
+## Prerequisites
 
-`benchmark/transformers/benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for every text-generation model returned by `mblt_model_zoo.hf_transformers.utils.list_models`, saves per-model JSON/PNG, and aggregates combined results.
+Install the Transformers integration and development tools:
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py
+pip install -e ".[transformers]" --group dev
 ```
 
-Outputs (created under `benchmark/transformers/results/text_generation/`):
+Model loading may require Hugging Face Hub access, local `.mxq` files, the Mobilint NPU runtime, or
+GPU drivers depending on the benchmark target. The validation commands in this document avoid model
+inference and model downloads.
 
-- `{model}[-{revision}]-{core_mode}.json` and `{model}[-{revision}]-{core_mode}.png` for each model
-- `combined.csv` and `combined.md`
-- `combined_device.csv` (when device metrics are available)
-- metric-wise charts:
-  - `prefill_tps.png`, `decode_tps.png`
-  - `prefill_latency_ms.png`, `decode_duration_ms.png`
-  - `avg_power_w.png`, `total_energy_j.png`
-  - `avg_utilization_pct.png`, `p99_utilization_pct.png`
-  - `avg_memory_used_mb.png`, `p99_memory_used_mb.png`
-  - `avg_memory_used_pct.png`, `p99_memory_used_pct.png`
-  - `prefill_tokens_per_j.png`, `decode_tokens_per_j.png`
-  - `prefill_j_per_token.png`, `decode_j_per_token.png`
+## Common Concepts
 
-Common CLI options:
+- `prefill`: Processes input tokens before generation. Common metrics are prefill TPS and TTFT.
+- `decode`: Generates new tokens using the KV cache. Common metrics are decode TPS and decode duration.
+- `core-mode`: Selects the NPU execution core configuration.
+  - `single`: Uses `target_cores=["0:0"]`.
+  - `global4`: Uses `target_clusters=[0]`.
+  - `global8`: Uses `target_clusters=[0, 1]`.
+  - `all`: Runs `single`, `global4`, and `global8` sequentially in benchmark scripts.
+- `device metrics`: Collects power, energy, utilization, and memory metrics.
+  - `--device-backend npu`: Uses the Mobilint NPU tracker.
+  - `--device-backend gpu`: Uses the GPU tracker.
+  - `--device-backend auto`: Selects a tracker based on the model and device.
+  - `--no-device-metrics`: Disables device metric collection.
 
-- `--device` (default: `None`)
-- `--device-map`, `--dtype`, `--trust-remote-code/--no-trust-remote-code`
-- `--revision` (e.g., `W8`)
-- `--all` (benchmark `W8` and `W4V8` branches only; skips main and adds `-W8`/`-W4V8` suffixes)
-- `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
-- `--prefill-range` (e.g., `128:512:128`)
-- `--cache-lengths` (e.g., `1024,2048,4096,8192`)
-- `--decode-window` (default: `128`)
-- `--prefill-chunk-size` (optional fixed prefill chunk size override)
-- `--core-mode` (`single`, `global4`, `global8`, `all`; default: `global8`) for fixed-core benchmarking
-- `--warmup` (default: `1`)
-- `--original-models` (resolve listed Mobilint models to their parent/base model IDs on HF Hub, then benchmark unique parent IDs)
-- `--device-metrics/--no-device-metrics` (default: `--device-metrics`)
-- `--device-backend` (`none`, `auto`, `gpu`, `npu`; default: `none`)
-- `--device-gpu-id` (e.g., `0` or `0,1`)
-- `--cuda-precheck/--no-cuda-precheck` (best-effort VRAM pre-check before load; default: `--cuda-precheck`)
-- `--cuda-precheck-margin` (default: `1.15`)
-- `--skip-existing` (skip models with existing outputs)
-- `--rebuild-charts` (skip benchmark run and rebuild `combined.csv`/`combined.md`/charts from existing JSON files)
+## Quick CLI Usage
 
-Device auto-selection rule when `--device` is omitted:
-- `--original-models` set: `--device` is auto-set to `cuda:0` and `--device-backend` to `auto`.
-- `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
+Use `mblt-model-zoo tps` when you want to quickly measure one model. The console entry point is
+defined in `pyproject.toml` as `mblt-model-zoo = "mblt_model_zoo.cli:main"`.
 
-Example:
+### Show Help
+
+```bash
+mblt-model-zoo tps --help
+mblt-model-zoo tps measure --help
+mblt-model-zoo tps sweep --help
+mblt-model-zoo tps vlm-sweep --help
+```
+
+### Measure One Text-Generation Case
+
+`measure` runs repeated measurements for one prefill/decode token configuration and prints summary
+statistics.
+
+```bash
+mblt-model-zoo tps measure \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --core-mode global8 \
+  --prefill 512 \
+  --decode 128 \
+  --repeat 3 \
+  --warmup 1 \
+  --device-backend npu \
+  --json benchmark/transformers/results/quick_measure.json
+```
+
+Representative output metrics:
+
+- `prefill_tps`: Input-token processing speed.
+- `decode_tps`: New-token generation speed.
+- `ttft`: Time-to-first-token based on prefill latency.
+- `decode_duration`: Decode phase duration.
+- `avg_power`, `total_energy`, `avg_memory_used`: Device metrics when enabled.
+
+### Sweep Prefill and Decode Cache Lengths
+
+`sweep` measures several prefill lengths and decode cache lengths, then writes JSON, CSV, and PNG
+outputs.
+
+```bash
+mblt-model-zoo tps sweep \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --core-mode global8 \
+  --prefill-range 128:512:128 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
+  --repeat 3 \
+  --warmup 1 \
+  --device-backend npu \
+  --plot benchmark/transformers/results/quick_sweep.png \
+  --json benchmark/transformers/results/quick_sweep.json \
+  --csv benchmark/transformers/results/quick_sweep.csv
+```
+
+Use `--no-plot` when you do not need a PNG plot.
+
+```bash
+mblt-model-zoo tps sweep \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --core-mode global8 \
+  --no-plot \
+  --json benchmark/transformers/results/quick_sweep.json
+```
+
+### Measure with a Local `.mxq` File
+
+Use `--mxq-path` to override the model's `.mxq` artifact during pipeline loading.
+
+```bash
+mblt-model-zoo tps measure \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --mxq-path ./local_mxq/Qwen2.5-1.5B-Instruct-W8.mxq \
+  --device cpu \
+  --core-mode global8 \
+  --prefill 1024 \
+  --decode 128 \
+  --repeat 3 \
+  --device-backend npu
+```
+
+### Fix Prefill Chunk Size
+
+Use `--prefill-chunk-size` to compare a fixed prefill chunk size across measurements.
+
+```bash
+mblt-model-zoo tps sweep \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --core-mode global8 \
+  --prefill-chunk-size 512 \
+  --prefill-range 512:2048:512 \
+  --cache-lengths 1024,2048,4096 \
+  --decode-window 128 \
+  --json benchmark/transformers/results/chunk512_sweep.json \
+  --csv benchmark/transformers/results/chunk512_sweep.csv
+```
+
+### Measure an Original HF Model on GPU
+
+For a non-Mobilint original Hugging Face model, use a CUDA device and the GPU tracker.
+
+```bash
+mblt-model-zoo tps measure \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --device cuda:0 \
+  --dtype float16 \
+  --device-backend gpu \
+  --device-gpu-id 0 \
+  --prefill 512 \
+  --decode 128 \
+  --repeat 3 \
+  --json benchmark/transformers/results/gpu_measure.json
+```
+
+### Sweep Image-Text-to-Text Models
+
+`vlm-sweep` uses synthetic image inputs and measures both the vision encode stage and the LLM
+prefill/decode stage.
+
+```bash
+mblt-model-zoo tps vlm-sweep \
+  --model mobilint/Qwen2-VL-2B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --core-mode global8 \
+  --image-resolutions 224,384,512 \
+  --llm-resolution 384 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096,8192 \
+  --llm-decode-window 128 \
+  --prompt "Describe the image in one sentence." \
+  --repeat 3 \
+  --warmup 1 \
+  --device-backend npu \
+  --json benchmark/transformers/results/vlm_sweep.json \
+  --csv benchmark/transformers/results/vlm_sweep.csv
+```
+
+VLM outputs include `vision_encode_ms`, `vision_fps`, `llm_prefill_tps`, `llm_decode_tps`, and
+`llm_ttft_ms`.
+
+## Benchmark Script Usage
+
+The scripts under `benchmark/transformers/` are intended for multi-model runs, revision sweeps,
+core-mode sweeps, result table generation, and chart generation.
+
+### Benchmark Text-Generation Models
+
+`benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for the
+text-generation models returned by `mblt_model_zoo.hf_transformers.utils.list_models`.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py \
@@ -60,215 +202,223 @@ python benchmark/transformers/benchmark_text_generation_models.py \
   --prefill-range 128:512:128 \
   --cache-lengths 1024,2048,4096,8192 \
   --decode-window 128 \
+  --warmup 1 \
   --skip-existing
 ```
 
-Example (`--all`):
+Default output directory: `benchmark/transformers/results/text_generation/`.
+
+- `{model}[-{revision}]-{core_mode}.json`: Per-model detailed benchmark payload.
+- `{model}[-{revision}]-{core_mode}.png`: Per-model summary chart.
+- `combined.csv`, `combined.md`: Combined model summary tables.
+- `combined_device.csv`: Combined device metric summary.
+- `prefill_tps.png`, `decode_tps.png`, `prefill_latency_ms.png`, `decode_duration_ms.png`: Core metric charts.
+- `avg_power_w.png`, `total_energy_j.png`, `avg_utilization_pct.png`, `avg_memory_used_mb.png`: Device metric charts.
+
+### Benchmark W8 and W4V8 Revisions
+
+`--all` benchmarks only the `W8` and `W4V8` branches and skips the main branch.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py --all --skip-existing
+python benchmark/transformers/benchmark_text_generation_models.py \
+  --all \
+  --core-mode global8 \
+  --skip-existing
 ```
 
-When `--all` or an explicit `--core-mode` is used, results are saved with suffixes in both the output files and table labels. When `--core-mode all` is used, each revision is benchmarked three times (`single`, `global4`, `global8`) against the same model or local `.mxq` file. For example:
+Use `--core-mode all` to compare all fixed core modes.
 
-- `{model}-W8-single.json`, `{model}-W8-single.png`
-- `{model}-W8-global4.json`, `{model}-W8-global4.png`
-- `{model}-W8-global8.json`, `{model}-W8-global8.png`
-- `{model}-W4V8-single.json`, `{model}-W4V8-single.png`
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py \
+  --all \
+  --core-mode all \
+  --skip-existing
+```
 
-Example (`--mxq-dir`):
+This creates output files for each revision and core mode, for example:
+
+```text
+{model}-W8-single.json
+{model}-W8-global4.json
+{model}-W8-global8.json
+{model}-W4V8-single.json
+```
+
+### Benchmark a Local `.mxq` Directory
+
+Use `--mxq-dir` to benchmark only local `.mxq` files in a directory.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py \
   --mxq-dir ./local_mxq \
   --core-mode global8 \
+  --prefill-range 512:2048:512 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --skip-existing
 ```
 
-Notes for `--mxq-dir`:
-- Only files matching `<model_id>-<W8|W4V8>.mxq` are used.
-- `<model_id>` can be a full repo id encoded with `__` instead of `/` (for example, `mobilint__Qwen2.5-1.5B-Instruct-W8.mxq`) or a basename when uniquely resolvable.
-- `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
-- A single local `.mxq` target is reused across every selected core mode. With `--core-mode all`, the script runs `single`, `global4`, and `global8` for each discovered `.mxq`.
+File names must follow the `<model_id>-<W8|W4V8>.mxq` pattern. A full repo id may encode `/` as
+`__`.
 
-## Benchmark image-text-to-text models
-
-`benchmark/transformers/benchmark_image_text_to_text_models.py` benchmarks VLM models for:
-- vision stage: encode latency / FPS across `--image-resolutions`
-- llm stage: total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`, default: first resolution)
-
-```bash
-python benchmark/transformers/benchmark_image_text_to_text_models.py
+```text
+mobilint__Qwen2.5-1.5B-Instruct-W8.mxq
+mobilint__Qwen2.5-1.5B-Instruct-W4V8.mxq
 ```
 
-Common options:
-- `--model` (benchmark a single model id)
-- `--revision`, `--all` (W8/W4V8 sweep)
-- `--mxq-dir` (benchmark only local mxq files in a directory; filename pattern: `<model_id>-<W8|W4V8>.mxq`)
-- `--core-mode` (`single`, `multi`, `global4`, `global8`, `all`; default: `global8`)
-- `--image-resolutions` (default: `224,384,512,768`)
-- `--llm-resolution`, `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`, `--prompt`
-- `--repeat`, `--warmup`
-- `--original-models` (resolve listed Mobilint models to parent/base model IDs)
-- `--device`, `--device-map`, `--dtype`, `--trust-remote-code`
-- `--device-metrics/--no-device-metrics`, `--device-backend`, `--device-gpu-id`
-- `--cuda-precheck/--no-cuda-precheck`, `--cuda-precheck-margin`
-- `--skip-existing`, `--rebuild-charts`, `--results-dir`
+When `--mxq-dir` is set, `--original-models`, `--all`, and `--revision` are ignored. The revision is
+read from the file name suffix.
 
-Device auto-selection rule when `--device` is omitted:
-- `--original-models` set: `--device` is auto-set to `cuda:0` and `--device-backend` to `auto`.
-- `--original-models` not set: `--device` is auto-set to `cpu` and `--device-backend` to `npu`.
+### Benchmark Original HF Models for Comparison
 
-Outputs (default: `benchmark/transformers/results/image_text_to_text/`):
-- `{model}[-{revision}]-{core_mode}.json`: per-model full benchmark payload
-- `{model}[-{revision}]-{core_mode}.csv`: per-run raw rows (`vision`/`llm`)
-- `{model}[-{revision}]-{core_mode}.png`: per-model summary chart
-- `combined.csv`: model-wise integrated summary (LLM + vision)
-- `combined.md`: markdown summary table
-- `combined_device.csv`: model-wise device summary
-- `combined_llm.csv`: model-wise LLM summary
-- `combined_vision.csv`: per-model/resolution vision summary
-- charts: `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`, `vision_encode_ms.png`, `vision_fps.png`
-- efficiency charts: `llm_prefill_tokens_per_j.png`, `llm_decode_tokens_per_j.png`, `llm_prefill_j_per_token.png`, `llm_decode_j_per_token.png`, `vision_img_per_j.png`, `vision_j_per_img.png`
+Use `--original-models` to resolve listed Mobilint model ids to their parent/base model ids on the
+Hugging Face Hub, then benchmark the unique parent ids. If `--device` is omitted, the script defaults
+to `cuda:0` and `--device-backend auto`.
 
-Example:
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py \
+  --original-models mobilint/Qwen2.5-1.5B-Instruct,mobilint/Qwen3-4B \
+  --prefill-range 128:512:128 \
+  --cache-lengths 1024,2048,4096 \
+  --decode-window 128 \
+  --skip-existing
+```
+
+### Benchmark Image-Text-to-Text Models
+
+`benchmark_image_text_to_text_models.py` measures the vision stage and the LLM stage of
+image-text-to-text models.
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
+  --llm-resolution 384 \
   --llm-prefill-range 1024:4096:1024 \
   --llm-cache-lengths 1024,2048,4096,8192 \
   --llm-decode-window 128 \
   --repeat 5 \
+  --warmup 1 \
   --skip-existing
 ```
 
-When `--core-mode all` is used, each target model or discovered local `.mxq` is benchmarked three times with `single`, `global4`, and `global8`, and the output filenames include the core-mode suffix. `multi` is accepted as an explicit `--core-mode multi` value, but it is not included in `all`.
+Specify `--model` to benchmark a single model.
 
-## Compare result folders
+```bash
+python benchmark/transformers/benchmark_image_text_to_text_models.py \
+  --model mobilint/Qwen2-VL-2B-Instruct \
+  --revision W8 \
+  --core-mode global8 \
+  --image-resolutions 224,384,512 \
+  --llm-prefill-range 1024:4096:1024 \
+  --llm-cache-lengths 1024,2048,4096 \
+  --skip-existing
+```
 
-You can compare multiple benchmark result folders and generate the same metric-wise chart set as benchmark output:
+Default output directory: `benchmark/transformers/results/image_text_to_text/`.
+
+- `{model}[-{revision}]-{core_mode}.json`: Per-model full benchmark payload.
+- `{model}[-{revision}]-{core_mode}.csv`: Per-run raw rows for `vision` and `llm`.
+- `{model}[-{revision}]-{core_mode}.png`: Per-model summary chart.
+- `combined.csv`, `combined.md`: Combined summary.
+- `combined_llm.csv`, `combined_vision.csv`, `combined_device.csv`: Stage/device summaries.
+- `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`: LLM charts.
+- `vision_encode_ms.png`, `vision_fps.png`: Vision charts.
+
+### Rebuild Charts from Existing Results
+
+Use `--rebuild-charts` to regenerate combined CSV, Markdown, and chart outputs from existing JSON
+files without running benchmarks again.
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py \
+  --rebuild-charts
+```
+
+```bash
+python benchmark/transformers/benchmark_image_text_to_text_models.py \
+  --rebuild-charts
+```
+
+## Compare Result Folders
+
+`plot_compare_benchmark_results.py` compares multiple benchmark result folders and generates
+model-wise bar charts.
+
+### Compare Text-Generation Results
 
 ```bash
 python benchmark/transformers/plot_compare_benchmark_results.py \
-  <result_folder_1> <result_folder_2> [<result_folder_3> ...] \
-  --output-dir benchmark/transformers/results/charts \
+  benchmark/transformers/results/MLA100/text_generation \
+  benchmark/transformers/results/RTX3090/text_generation \
+  --output-dir benchmark/transformers/results/charts/text_generation_compare \
   --task text-generation
 ```
 
-If `--output-dir` is omitted, charts are saved under:
-`benchmark/transformers/results/charts/<sanitized_folder1_..._sanitized_folderN>/`
-
-Expected per-model file format in each folder: `*.json` with top-level `"model"` and `"benchmark"` payload.
-For backward compatibility, `group_id__model_id.json` is still parsed.
-The script intersects model IDs across all folders, then saves:
-
-- `prefill_tps.png`
-- `decode_tps.png`
-- `prefill_latency_ms.png`
-- `decode_duration_ms.png`
-- `avg_power_w.png`
-- `total_energy_j.png`
-- `prefill_tokens_per_j.png`
-- `decode_tokens_per_j.png`
-- `prefill_j_per_token.png`
-- `decode_j_per_token.png`
-- `avg_utilization_pct.png`
-- `p99_utilization_pct.png`
-- `avg_memory_used_mb.png`
-- `p99_memory_used_mb.png`
-- `avg_memory_used_pct.png`
-- `p99_memory_used_pct.png`
-
-For VLM (`image-text-to-text`) benchmark outputs, set `--task image-text-to-text`:
+### Compare VLM Results
 
 ```bash
 python benchmark/transformers/plot_compare_benchmark_results.py \
-  <result_folder_1> <result_folder_2> [<result_folder_3> ...] \
+  benchmark/transformers/results/MLA100/image_text_to_text \
+  benchmark/transformers/results/RTX3090/image_text_to_text \
+  --output-dir benchmark/transformers/results/charts/vlm_compare \
   --task image-text-to-text
 ```
 
-VLM compare mode saves:
-- `llm_prefill_tps.png`
-- `llm_decode_tps.png`
-- `llm_ttft_ms.png`
-- `llm_decode_duration_ms.png`
-- `vision_encode_ms.png`
-- `vision_fps.png`
-- `vision_img_per_j.png`
-- `vision_j_per_img.png`
-- `llm_prefill_tokens_per_j.png`
-- `llm_decode_tokens_per_j.png`
-- `llm_prefill_j_per_token.png`
-- `llm_decode_j_per_token.png`
-- `avg_power_w.png`
-- `total_energy_j.png`
-- `avg_utilization_pct.png`
-- `p99_utilization_pct.png`
-- `avg_memory_used_mb.png`
-- `p99_memory_used_mb.png`
-- `avg_memory_used_pct.png`
-- `p99_memory_used_pct.png`
+If `--output-dir` is omitted, charts are saved under `benchmark/transformers/results/charts/` using
+a directory name derived from the input folder names.
 
-## Search best prefill chunk size
+## Search Prefill Chunk Size
 
-`benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
-- If `--mxq-dir` is omitted, the script searches public `mobilint/` text-generation models for `W4V8` and `W8` revisions.
-
-Important behavior:
-- Core mode is fixed at model creation time, so the script recreates the model instance for each core mode.
-- Input targets come from `--mxq-dir` and filename pattern: `<model_id_without_group_id>-<W8|W4V8>.mxq`.
-- If filename format is invalid, model base is not found in HF text-generation model list, or mapping is ambiguous, that mxq file is skipped with warning.
-- The script sweeps fixed prefill lengths (`--prefill-lengths`, default: `1024,2048`).
-- For each prefill length, it tests fixed chunk candidates (`--chunk-candidates`, default: `128,256,512,1024,2048`).
-- Candidates where `chunk_size > prefill_length` are skipped automatically.
-- Each `(prefill_length, chunk_size)` pair is measured with repeats and median prefill TPS.
-- Runtime progress is shown with `tqdm` (overall pair progress, warmup, and per-pair search eval progress), plus search-stage logs.
-- Time guard: chunks are tested in ascending order; if a chunk exceeds `--time-guard-sec` (default: `300s`), larger chunks are skipped for that prefill length.
-
-Outputs (default: `benchmark/transformers/results/prefill_chunk_search/`):
-- `records/*.json`: per model/core-mode detailed search history
-- `all_measurements.csv`: all measured rows with `prefill_length`, `chunk_size`, TPS, wall time, and failure flags
-- `best_chunks.csv`: best chunk per `(model, core_mode, prefill_length)`
-- `summary.json`: run summary including skipped mxq files
-- `skipped_mxq_files.csv`: skipped mxq file list and reasons
-- `failed_pairs.csv`: pair-level runtime failures (if any)
-- mode/prefill 2D charts:
-  - `prefill_tps_single_prefill128_W8.png` (and `W4V8`, other prefill lengths)
-  - `prefill_tps_global4_prefill128_W8.png` (and `W4V8`, other prefill lengths)
-  - `prefill_tps_global8_prefill128_W8.png` (and `W4V8`, other prefill lengths)
-  - each chart is revision-separated, and each line is `model_id@revision`
-- best-chunk charts (by prefill length):
-  - `best_chunk_single_W8.png` (and `W4V8`)
-  - `best_chunk_global4_W8.png` (and `W4V8`)
-  - `best_chunk_global8_W8.png` (and `W4V8`)
-
-Example:
+`search_prefill_chunk_size.py` searches candidate chunk sizes and selects the best value by prefill
+TPS.
 
 ```bash
 python benchmark/transformers/search_prefill_chunk_size.py \
-  --mxq-dir . \
+  --mxq-dir ./local_mxq \
+  --core-modes single,global4,global8 \
   --prefill-lengths 1024,2048 \
   --chunk-candidates 128,256,512,1024,2048 \
+  --decode-length 16 \
   --time-guard-sec 300 \
   --repeat 3 \
+  --warmup 1 \
   --skip-existing
 ```
 
-Use `--rebuild-charts` (or the backward-compatible alias `--rebuild-chart`) to rebuild CSV and chart outputs from existing `records/*.json` without model loading:
+If `--mxq-dir` is omitted, the script searches public `mobilint/` text-generation models for `W4V8`
+and `W8` revisions. Default output directory: `benchmark/transformers/results/prefill_chunk_search/`.
+
+- `records/*.json`: Detailed search records per model/core-mode.
+- `all_measurements.csv`: All measured rows.
+- `best_chunks.csv`: Best chunk per `(model, core_mode, prefill_length)`.
+- `summary.json`: Run summary and skipped target information.
+- `skipped_mxq_files.csv`: Skipped `.mxq` files and reasons.
+- `failed_pairs.csv`: Failed measurement pairs.
+
+Rebuild CSV and chart outputs from existing records without model loading:
 
 ```bash
-python benchmark/transformers/search_prefill_chunk_size.py --rebuild-charts
+python benchmark/transformers/search_prefill_chunk_size.py \
+  --rebuild-charts
 ```
 
-## Update prefill chunk-size configs
+## Update Prefill Chunk-Size Configs
 
-`benchmark/transformers/update_prefill_chunk_size_configs.py` reads `prefill_chunk_size.csv`, updates Hugging Face `config.json` values with `npu_prefill_chunk_size`, and runs in dry-run mode by default.
+`update_prefill_chunk_size_configs.py` reads a CSV file and updates `npu_prefill_chunk_size` values in
+Hugging Face `config.json` files. It runs in dry-run mode by default.
 
 ```bash
 python benchmark/transformers/update_prefill_chunk_size_configs.py \
   --csv benchmark/transformers/prefill_chunk_size.csv
+```
+
+Limit the dry run to one model:
+
+```bash
+python benchmark/transformers/update_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/prefill_chunk_size.csv \
+  --model mobilint/Qwen2.5-1.5B-Instruct
 ```
 
 Use `--apply` only when you intend to push config updates:
@@ -279,17 +429,76 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
   --apply
 ```
 
-## Safe validation commands
+## Common Option Summary
 
-The following checks do not run model inference or download models:
+### Pipeline and Model Loading
+
+- `--model`: Model id or local path.
+- `--tokenizer`: Tokenizer id or local path. Defaults to the model when omitted.
+- `--revision`: Hugging Face Hub revision or branch, such as `W8` or `W4V8`.
+- `--mxq-path`: Single local `.mxq` file override.
+- `--mxq-dir`: Local `.mxq` directory for benchmark scripts.
+- `--device`: Transformers pipeline device, such as `cpu` or `cuda:0`.
+- `--device-map`: Transformers `device_map`, such as `auto`.
+- `--dtype`: Data type, such as `auto`, `float16`, or `bfloat16`.
+- `--trust-remote-code` / `--no-trust-remote-code`: Whether to trust HF remote code.
+
+### Measurement Range
+
+- `--prefill`, `--decode`: Single-case token counts for CLI `measure`.
+- `--prefill-range`: Text-generation prefill sweep range in `start:end:step` format.
+- `--cache-lengths`: Cache lengths for decode sweep.
+- `--decode-window`: Decode token window measured at each cache length.
+- `--image-resolutions`: Image resolutions for the VLM vision stage.
+- `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`: VLM LLM-stage sweep ranges.
+- `--repeat`: Number of measured repeats.
+- `--warmup`: Number of warmup runs before measured runs.
+
+### NPU/GPU Execution and Device Metrics
+
+- `--core-mode`: One of `single`, `multi`, `global4`, `global8`, or `all`. Accepted values differ by script.
+- `--target-cores`: Explicit target cores for the CLI, for example `"0:0;0:1;0:2;0:3"`.
+- `--target-clusters`: Explicit target clusters for the CLI, for example `"0;1"`.
+- `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
+- `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
+- `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`.
+
+### Result Management
+
+- `--json`: JSON output path for CLI results.
+- `--csv`: CSV output path for CLI sweep rows.
+- `--plot`: PNG output path for CLI sweep plots.
+- `--no-plot`: Disable CLI sweep plot output.
+- `--results-dir`: Output directory for selected benchmark scripts.
+- `--skip-existing`: Skip models that already have output files.
+- `--rebuild-charts`: Rebuild CSV, Markdown, and chart outputs from existing JSON or record files.
+
+## Safe Validation Commands
+
+The following commands validate syntax and CLI option wiring without running model inference or
+downloading models.
 
 ```bash
-python -m py_compile benchmark/common/chart_utils.py benchmark/common/io_utils.py benchmark/common/argparse_utils.py benchmark/common/runtime_utils.py benchmark/common/math_utils.py benchmark/transformers/benchmark_text_generation_models.py benchmark/transformers/benchmark_image_text_to_text_models.py benchmark/transformers/search_prefill_chunk_size.py benchmark/transformers/plot_compare_benchmark_results.py benchmark/transformers/chart_utils.py
+python -m py_compile \
+  benchmark/common/chart_utils.py \
+  benchmark/common/io_utils.py \
+  benchmark/common/argparse_utils.py \
+  benchmark/common/runtime_utils.py \
+  benchmark/common/math_utils.py \
+  benchmark/transformers/benchmark_text_generation_models.py \
+  benchmark/transformers/benchmark_image_text_to_text_models.py \
+  benchmark/transformers/search_prefill_chunk_size.py \
+  benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/chart_utils.py
 ```
 
 ```bash
-python benchmark/transformers/search_prefill_chunk_size.py --help
 python benchmark/transformers/benchmark_text_generation_models.py --help
 python benchmark/transformers/benchmark_image_text_to_text_models.py --help
+python benchmark/transformers/search_prefill_chunk_size.py --help
 python benchmark/transformers/plot_compare_benchmark_results.py --help
+python benchmark/transformers/update_prefill_chunk_size_configs.py --help
+mblt-model-zoo tps measure --help
+mblt-model-zoo tps sweep --help
+mblt-model-zoo tps vlm-sweep --help
 ```
