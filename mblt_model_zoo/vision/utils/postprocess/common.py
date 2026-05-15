@@ -498,10 +498,14 @@ def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
         torch.Tensor: Cropped masks.
     """
     _, h, w = masks.shape
-    x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)  # x1 shape(n,1,1)
-    r = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]  # rows shape(1,1,w)
-    c = torch.arange(h, device=masks.device, dtype=x1.dtype)[None, :, None]  # cols shape(1,h,1)
-    return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
+    out = torch.zeros_like(masks)
+    boxes_i = torch.ceil(boxes).to(torch.int64)
+    boxes_i[:, [0, 2]] = boxes_i[:, [0, 2]].clamp_(0, w)
+    boxes_i[:, [1, 3]] = boxes_i[:, [1, 3]].clamp_(0, h)
+    for i, (x1, y1, x2, y2) in enumerate(boxes_i.tolist()):
+        if x2 > x1 and y2 > y1:
+            out[i, y1:y2, x1:x2] = masks[i, y1:y2, x1:x2]
+    return out
 
 
 def scale_masks(
@@ -594,22 +598,19 @@ def multi_encode(pixels: torch.Tensor) -> list[list[int]]:
     Returns:
         list[list[int]]: A list of RLE counts for each mask.
     """
-    transitions = pixels[:, 1:] != pixels[:, :-1]
-    row_idx, col_idx = torch.where(transitions)
-    col_idx = col_idx + 1
-
-    # Compute run lengths
+    pixel_rows = pixels.detach().cpu().numpy().astype(np.uint8, copy=False)
+    width = pixel_rows.shape[1]
     counts = []
-    for i in range(pixels.shape[0]):
-        pixel_row = pixels[i]
-        positions = col_idx[row_idx == i]
-        if len(positions):
-            count = torch.diff(positions).tolist()
-            count.insert(0, positions[0].item())
-            count.append(len(pixel_row) - positions[-1].item())
+    for i in range(pixel_rows.shape[0]):
+        pixel_row = pixel_rows[i]
+        positions = np.flatnonzero(pixel_row[1:] != pixel_row[:-1]) + 1
+        if positions.size:
+            count = np.diff(positions).tolist()
+            count.insert(0, int(positions[0]))
+            count.append(int(width - positions[-1]))
         else:
-            count = [len(pixel_row)]
-        if pixel_row[0].item() == 1:
+            count = [width]
+        if pixel_row[0] == 1:
             count = [0, *count]
         counts.append(count)
 

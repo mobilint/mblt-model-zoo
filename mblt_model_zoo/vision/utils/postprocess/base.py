@@ -317,10 +317,12 @@ class YOLOPostBase(PostBase):
         """
 
     def masking(self, x: list[torch.Tensor], proto_outs: torch.Tensor | list[torch.Tensor]) -> list[list[torch.Tensor]]:
-        """Apply masking to detection results.
+        """Apply prototype masks to detection results.
+
         Args:
             x: Detection results.
             proto_outs: Prototype outputs for masks.
+
         Returns:
             list: Detection results with masks.
         """

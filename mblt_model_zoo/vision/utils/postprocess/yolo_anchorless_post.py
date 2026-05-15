@@ -5,7 +5,6 @@ YOLO anchorless postprocessing.
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 
 from .base import YOLOPostBase
 from .common import (
@@ -180,13 +179,8 @@ class YOLOAnchorlessPost(YOLOPostBase):
             return x
         assert x.ndim == 3, "Input must be a 3D tensor (B, 4 * reg_max, A)"
         B, _, A = x.shape
-        # Reshape to (B, 4, reg_max, A)
-        x = x.view(B, 4, self.reg_max, A).permute(0, 2, 1, 3)
-        x = x.softmax(dim=1)
-        # dfl_weight: (1, reg_max, 1, 1)
-        out = F.conv2d(x, self.dfl_weight, bias=None)  # (B, 1, 4, A)
-        # Reshape to (B, 4, A)
-        return out.view(B, 4, A)
+        x = x.view(B, 4, self.reg_max, A).softmax(dim=2)
+        return (x * self.dfl_weight.view(1, 1, self.reg_max, 1)).sum(dim=2)
 
 
 class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
