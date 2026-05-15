@@ -19,6 +19,8 @@ DEFAULT:
     nc: 80
     nl: 3
     dflfree: true
+    conf_thres: 0.7
+    iou_thres: 0.001
 TURBO:
   update: DEFAULT
   file_cfg:
