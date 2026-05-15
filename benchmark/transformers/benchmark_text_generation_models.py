@@ -1,16 +1,30 @@
 import argparse
-import gc
 import json
 import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable, Sequence, Tuple
+from typing import Any, Iterable, Sequence
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from chart_utils import collect_folder_metrics, plot_scalar_chart, plot_token_chart
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
+from benchmark.common.argparse_utils import parse_int_csv as _parse_int_csv_common
+from benchmark.common.argparse_utils import parse_positive_int as _parse_positive_int
+from benchmark.common.argparse_utils import parse_positive_int_optional as _parse_positive_int_optional
+from benchmark.common.argparse_utils import parse_range_arg as _parse_range_arg
+from benchmark.common.io_utils import safe_filename as _safe_filename_common
+from benchmark.common.math_utils import safe_div as _safe_div
+from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
+from benchmark.common.runtime_utils import cuda_device_index as _cuda_device_index
+from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
+from benchmark.common.runtime_utils import is_cuda_oom_error as _is_cuda_oom_error
+from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
@@ -37,12 +51,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    parse_positive_int as _parse_positive_int_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    parse_positive_int_optional as _parse_positive_int_optional_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -55,47 +63,11 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import BenchmarkResult
 
 
 def _safe_filename(model_id: str) -> str:
-    return model_id.replace("/", "__")
-
-
-def _parse_range_arg(raw: str) -> Tuple[int, int, int]:
-    sep = ":" if ":" in raw else ("," if "," in raw else None)
-    if sep is None:
-        raise argparse.ArgumentTypeError("expected format 'start:end:step' or 'start,end,step'")
-    parts = [p.strip() for p in raw.split(sep)]
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError("expected exactly 3 integers: 'start:end:step' or 'start,end,step'")
-    try:
-        start, end, step = (int(p) for p in parts)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError("range values must be integers") from e
-    if start <= 0 or end <= 0 or step <= 0:
-        raise argparse.ArgumentTypeError("range values must be positive integers")
-    if start > end:
-        raise argparse.ArgumentTypeError("range start must be <= end")
-    return start, end, step
-
-
-def _parse_positive_int(raw: str) -> int:
-    return _parse_positive_int_common(raw)
-
-
-def _parse_positive_int_optional(raw: str) -> int | None:
-    return _parse_positive_int_optional_common(raw)
+    return _safe_filename_common(model_id, replace_slash_only=True)
 
 
 def _parse_int_list(raw: str) -> list[int]:
-    values: list[int] = []
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        values.append(int(item))
-    if not values:
-        raise argparse.ArgumentTypeError("expected at least one integer")
-    if any(v <= 0 for v in values):
-        raise argparse.ArgumentTypeError("all values must be positive integers")
-    return values
+    return _parse_int_csv_common(raw, unique_sorted=False)
 
 
 def _build_pipeline(
@@ -134,69 +106,6 @@ def _build_pipeline(
             kwargs["torch_dtype"] = dtype
             return hf_pipeline(**kwargs)
     return hf_pipeline(**kwargs)
-
-
-def _is_cuda_device(device: str | None) -> bool:
-    return isinstance(device, str) and device.strip().lower().startswith("cuda")
-
-
-def _cuda_device_index(device: str | None) -> int | None:
-    if not _is_cuda_device(device):
-        return None
-    text = (device or "").strip().lower()
-    if ":" not in text:
-        return 0
-    try:
-        return int(text.split(":", 1)[1])
-    except ValueError:
-        return None
-
-
-def _is_cuda_oom_error(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return (
-        "cuda out of memory" in msg or ("out of memory" in msg and "cuda" in msg) or "cublas_status_alloc_failed" in msg
-    )
-
-
-def _clear_cuda_memory(device: str | None) -> None:
-    try:
-        import torch
-    except Exception:
-        return
-    if not torch.cuda.is_available():
-        return
-    idx = _cuda_device_index(device)
-    try:
-        if idx is not None:
-            torch.cuda.set_device(idx)
-    except Exception:
-        pass
-    gc.collect()
-    try:
-        torch.cuda.empty_cache()
-    except Exception:
-        pass
-    try:
-        torch.cuda.ipc_collect()
-    except Exception:
-        pass
-
-
-def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
-    if pipeline_obj is not None:
-        try:
-            model_obj = getattr(pipeline_obj, "model", None)
-            if model_obj is not None and hasattr(model_obj, "dispose"):
-                model_obj.dispose()
-            elif hasattr(pipeline_obj, "dispose"):
-                pipeline_obj.dispose()
-        except Exception:
-            pass
-        del pipeline_obj
-    gc.collect()
-    if _is_cuda_device(device):
-        _clear_cuda_memory(device)
 
 
 def _estimate_model_weight_bytes(model_id: str, revision: str | None) -> int | None:
@@ -506,12 +415,6 @@ def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
     return _build_device_tracker_common(args, pipeline)
 
 
-def _safe_div(a: float, b: float) -> float | None:
-    if b == 0:
-        return None
-    return a / b
-
-
 def _extract_device_metric(tracker: Any) -> dict[str, float | None]:
     return _extract_device_metric_common(tracker)
 
@@ -568,61 +471,6 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
         writer.writeheader()
         for row in rows:
             writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
-
-
-def _write_device_combined_markdown(path: str, rows: Sequence[dict[str, float | str | None]]) -> None:
-    if not rows:
-        return
-    lines = [
-        "| model | avg_power_w | p99_power_w | avg_utilization_pct | p99_utilization_pct | "
-        "avg_temperature_c | p99_temperature_c | avg_memory_used_mb | p99_memory_used_mb | "
-        "total_memory_mb | avg_memory_used_pct | "
-        "p99_memory_used_pct | total_energy_j | prefill_tps_last | decode_tps_last | "
-        "prefill_tok_per_j_last | decode_tok_per_j_last | prefill_j_per_tok_last | "
-        "decode_j_per_tok_last |\n",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
-        "---: | ---: | ---: | ---: | ---: | ---: | ---: |\n",
-    ]
-    for row in rows:
-        lines.append(
-            "| {model} | {avg_power_w} | {p99_power_w} | {avg_utilization_pct} | "
-            "{p99_utilization_pct} | {avg_temperature_c} | {p99_temperature_c} | "
-            "{avg_memory_used_mb} | {p99_memory_used_mb} | "
-            "{total_memory_mb} | {avg_memory_used_pct} | {p99_memory_used_pct} | "
-            "{total_energy_j} | {prefill_tps_last} | {decode_tps_last} | "
-            "{prefill_tok_per_j_last} | {decode_tok_per_j_last} | "
-            "{prefill_j_per_tok_last} | {decode_j_per_tok_last} |\n".format(
-                model=row["model"],
-                avg_power_w="" if row["avg_power_w"] is None else f"{row['avg_power_w']:.6f}",
-                p99_power_w="" if row["p99_power_w"] is None else f"{row['p99_power_w']:.6f}",
-                avg_utilization_pct="" if row["avg_utilization_pct"] is None else f"{row['avg_utilization_pct']:.6f}",
-                p99_utilization_pct="" if row["p99_utilization_pct"] is None else f"{row['p99_utilization_pct']:.6f}",
-                avg_temperature_c="" if row["avg_temperature_c"] is None else f"{row['avg_temperature_c']:.6f}",
-                p99_temperature_c="" if row["p99_temperature_c"] is None else f"{row['p99_temperature_c']:.6f}",
-                avg_memory_used_mb="" if row["avg_memory_used_mb"] is None else f"{row['avg_memory_used_mb']:.6f}",
-                p99_memory_used_mb="" if row["p99_memory_used_mb"] is None else f"{row['p99_memory_used_mb']:.6f}",
-                total_memory_mb="" if row["total_memory_mb"] is None else f"{row['total_memory_mb']:.6f}",
-                avg_memory_used_pct="" if row["avg_memory_used_pct"] is None else f"{row['avg_memory_used_pct']:.6f}",
-                p99_memory_used_pct="" if row["p99_memory_used_pct"] is None else f"{row['p99_memory_used_pct']:.6f}",
-                total_energy_j="" if row["total_energy_j"] is None else f"{row['total_energy_j']:.6f}",
-                prefill_tps_last="" if row["prefill_tps_last"] is None else f"{row['prefill_tps_last']:.6f}",
-                decode_tps_last="" if row["decode_tps_last"] is None else f"{row['decode_tps_last']:.6f}",
-                prefill_tok_per_j_last=""
-                if row["prefill_tok_per_j_last"] is None
-                else f"{row['prefill_tok_per_j_last']:.6f}",
-                decode_tok_per_j_last=""
-                if row["decode_tok_per_j_last"] is None
-                else f"{row['decode_tok_per_j_last']:.6f}",
-                prefill_j_per_tok_last=""
-                if row["prefill_j_per_tok_last"] is None
-                else f"{row['prefill_j_per_tok_last']:.6f}",
-                decode_j_per_tok_last=""
-                if row["decode_j_per_tok_last"] is None
-                else f"{row['decode_j_per_tok_last']:.6f}",
-            )
-        )
-    with open(path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
 
 
 def _write_single_combined_markdown(
@@ -769,169 +617,49 @@ def _rebuild_combined_outputs(
         labels = ["benchmark"]
         metrics_by_folder = [folder_metrics]
 
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.prefill_tps,
-            title="Prefill TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=Path(results_dir) / "prefill_tps.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.decode_tps,
-            title="Decode TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=Path(results_dir) / "decode_tps.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.prefill_latency_ms,
-            title="Prefill Latency",
-            x_label="Latency (ms)",
-            output_path=Path(results_dir) / "prefill_latency_ms.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.decode_duration_ms,
-            title="Decode Duration",
-            x_label="Duration (ms)",
-            output_path=Path(results_dir) / "decode_duration_ms.png",
-        )
+        token_specs = [
+            ("prefill_tps.png", "Prefill TPS", "TPS (tokens/sec)", lambda m: m.prefill_tps),
+            ("decode_tps.png", "Decode TPS", "TPS (tokens/sec)", lambda m: m.decode_tps),
+            ("prefill_latency_ms.png", "Prefill Latency", "Latency (ms)", lambda m: m.prefill_latency_ms),
+            ("decode_duration_ms.png", "Decode Duration", "Duration (ms)", lambda m: m.decode_duration_ms),
+        ]
+        for filename, title, x_label, selector in token_specs:
+            plot_token_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                token_selector=selector,
+                title=title,
+                x_label=x_label,
+                output_path=Path(results_dir) / filename,
+            )
 
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_power_w,
-            title="Average Power",
-            x_label="Power (W)",
-            output_path=Path(results_dir) / "avg_power_w.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.total_energy_j,
-            title="Total Energy",
-            x_label="Energy (J)",
-            output_path=Path(results_dir) / "total_energy_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.prefill_tokens_per_j,
-            title="Prefill Tokens/J",
-            x_label="Tokens/J",
-            output_path=Path(results_dir) / "prefill_tokens_per_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.decode_tokens_per_j,
-            title="Decode Tokens/J",
-            x_label="Tokens/J",
-            output_path=Path(results_dir) / "decode_tokens_per_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.prefill_j_per_token,
-            title="Prefill J/Token",
-            x_label="J/Token",
-            output_path=Path(results_dir) / "prefill_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.decode_j_per_token,
-            title="Decode J/Token",
-            x_label="J/Token",
-            output_path=Path(results_dir) / "decode_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_utilization_pct,
-            title="Average Utilization",
-            x_label="Utilization (%)",
-            output_path=Path(results_dir) / "avg_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_utilization_pct,
-            title="P99 Utilization",
-            x_label="Utilization (%)",
-            output_path=Path(results_dir) / "p99_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_temperature_c,
-            title="Average Temperature",
-            x_label="Temperature (C)",
-            output_path=Path(results_dir) / "avg_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_temperature_c,
-            title="P99 Temperature",
-            x_label="Temperature (C)",
-            output_path=Path(results_dir) / "p99_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_mb,
-            title="Average Memory Used",
-            x_label="Memory (MB)",
-            output_path=Path(results_dir) / "avg_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_mb,
-            title="P99 Memory Used",
-            x_label="Memory (MB)",
-            output_path=Path(results_dir) / "p99_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_pct,
-            title="Average Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=Path(results_dir) / "avg_memory_used_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_pct,
-            title="P99 Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=Path(results_dir) / "p99_memory_used_pct.png",
-        )
+        scalar_specs = [
+            ("avg_power_w.png", "Average Power", "Power (W)", lambda m: m.avg_power_w),
+            ("total_energy_j.png", "Total Energy", "Energy (J)", lambda m: m.total_energy_j),
+            ("prefill_tokens_per_j.png", "Prefill Tokens/J", "Tokens/J", lambda m: m.prefill_tokens_per_j),
+            ("decode_tokens_per_j.png", "Decode Tokens/J", "Tokens/J", lambda m: m.decode_tokens_per_j),
+            ("prefill_j_per_token.png", "Prefill J/Token", "J/Token", lambda m: m.prefill_j_per_token),
+            ("decode_j_per_token.png", "Decode J/Token", "J/Token", lambda m: m.decode_j_per_token),
+            ("avg_utilization_pct.png", "Average Utilization", "Utilization (%)", lambda m: m.avg_utilization_pct),
+            ("p99_utilization_pct.png", "P99 Utilization", "Utilization (%)", lambda m: m.p99_utilization_pct),
+            ("avg_temperature_c.png", "Average Temperature", "Temperature (C)", lambda m: m.avg_temperature_c),
+            ("p99_temperature_c.png", "P99 Temperature", "Temperature (C)", lambda m: m.p99_temperature_c),
+            ("avg_memory_used_mb.png", "Average Memory Used", "Memory (MB)", lambda m: m.avg_memory_used_mb),
+            ("p99_memory_used_mb.png", "P99 Memory Used", "Memory (MB)", lambda m: m.p99_memory_used_mb),
+            ("avg_memory_used_pct.png", "Average Memory Used (%)", "Memory Usage (%)", lambda m: m.avg_memory_used_pct),
+            ("p99_memory_used_pct.png", "P99 Memory Used (%)", "Memory Usage (%)", lambda m: m.p99_memory_used_pct),
+        ]
+        for filename, title, x_label, selector in scalar_specs:
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=selector,
+                title=title,
+                x_label=x_label,
+                output_path=Path(results_dir) / filename,
+            )
 
     if combined_device_rows:
         device_csv = os.path.join(results_dir, "combined_device.csv")

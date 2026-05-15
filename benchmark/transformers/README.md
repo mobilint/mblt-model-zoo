@@ -87,7 +87,7 @@ python benchmark/transformers/benchmark_text_generation_models.py \
 
 Notes for `--mxq-dir`:
 - Only files matching `<model_id>-<W8|W4V8>.mxq` are used.
-- `<model_id>` can be full repo id (e.g. `mobilint/Qwen2.5-1.5B-Instruct`) or basename when uniquely resolvable.
+- `<model_id>` can be a full repo id encoded with `__` instead of `/` (for example, `mobilint__Qwen2.5-1.5B-Instruct-W8.mxq`) or a basename when uniquely resolvable.
 - `--original-models`, `--all`, and `--revision` are ignored when `--mxq-dir` is set (revision is taken from filename suffix).
 - A single local `.mxq` target is reused across every selected core mode. With `--core-mode all`, the script runs `single`, `global4`, and `global8` for each discovered `.mxq`.
 
@@ -144,7 +144,7 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py \
   --skip-existing
 ```
 
-When `--core-mode all` is used, each target model or discovered local `.mxq` is benchmarked three times with `single`, `global4`, and `global8`, and the output filenames include the core-mode suffix.
+When `--core-mode all` is used, each target model or discovered local `.mxq` is benchmarked three times with `single`, `global4`, and `global8`, and the output filenames include the core-mode suffix. `multi` is accepted as an explicit `--core-mode multi` value, but it is not included in `all`.
 
 ## Compare result folders
 
@@ -214,6 +214,7 @@ VLM compare mode saves:
 ## Search best prefill chunk size
 
 `benchmark/transformers/search_prefill_chunk_size.py` searches the best `chunk_size` for **prefill TPS** while iterating valid `*.mxq` files in a directory and core mode (`single`, `global4`, `global8`).
+- If `--mxq-dir` is omitted, the script searches public `mobilint/` text-generation models for `W4V8` and `W8` revisions.
 
 Important behavior:
 - Core mode is fixed at model creation time, so the script recreates the model instance for each core mode.
@@ -253,4 +254,42 @@ python benchmark/transformers/search_prefill_chunk_size.py \
   --time-guard-sec 300 \
   --repeat 3 \
   --skip-existing
+```
+
+Use `--rebuild-charts` (or the backward-compatible alias `--rebuild-chart`) to rebuild CSV and chart outputs from existing `records/*.json` without model loading:
+
+```bash
+python benchmark/transformers/search_prefill_chunk_size.py --rebuild-charts
+```
+
+## Update prefill chunk-size configs
+
+`benchmark/transformers/update_prefill_chunk_size_configs.py` reads `prefill_chunk_size.csv`, updates Hugging Face `config.json` values with `npu_prefill_chunk_size`, and runs in dry-run mode by default.
+
+```bash
+python benchmark/transformers/update_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/prefill_chunk_size.csv
+```
+
+Use `--apply` only when you intend to push config updates:
+
+```bash
+python benchmark/transformers/update_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/prefill_chunk_size.csv \
+  --apply
+```
+
+## Safe validation commands
+
+The following checks do not run model inference or download models:
+
+```bash
+python -m py_compile benchmark/common/chart_utils.py benchmark/common/io_utils.py benchmark/common/argparse_utils.py benchmark/common/runtime_utils.py benchmark/common/math_utils.py benchmark/transformers/benchmark_text_generation_models.py benchmark/transformers/benchmark_image_text_to_text_models.py benchmark/transformers/search_prefill_chunk_size.py benchmark/transformers/plot_compare_benchmark_results.py benchmark/transformers/chart_utils.py
+```
+
+```bash
+python benchmark/transformers/search_prefill_chunk_size.py --help
+python benchmark/transformers/benchmark_text_generation_models.py --help
+python benchmark/transformers/benchmark_image_text_to_text_models.py --help
+python benchmark/transformers/plot_compare_benchmark_results.py --help
 ```

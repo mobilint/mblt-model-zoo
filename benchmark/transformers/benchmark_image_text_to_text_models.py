@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import gc
 import json
 import os
 import sys
@@ -10,10 +8,24 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
+from benchmark.common.argparse_utils import parse_int_csv as _parse_int_csv
+from benchmark.common.argparse_utils import parse_range_arg as _parse_range_arg
+from benchmark.common.chart_utils import plot_simple_barh
+from benchmark.common.io_utils import safe_filename as _safe_filename_common
+from benchmark.common.io_utils import write_csv as _write_csv
+from benchmark.common.io_utils import write_json as _write_json
+from benchmark.common.math_utils import safe_div as _safe_div
+from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
+from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
+from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
@@ -73,33 +85,7 @@ except Exception:
 
 
 def _safe_filename(text: str) -> str:
-    return text.replace("/", "__")
-
-
-def _parse_int_csv(raw: str) -> list[int]:
-    parts = [x.strip() for x in str(raw).split(",") if x.strip()]
-    values = [int(x) for x in parts]
-    if not values or any(v <= 0 for v in values):
-        raise argparse.ArgumentTypeError("expected comma-separated positive integers")
-    return sorted(set(values))
-
-
-def _parse_range_arg(raw: str) -> tuple[int, int, int]:
-    sep = ":" if ":" in raw else ("," if "," in raw else None)
-    if sep is None:
-        raise argparse.ArgumentTypeError("expected format 'start:end:step' or 'start,end,step'")
-    parts = [p.strip() for p in raw.split(sep)]
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError("expected exactly 3 integers: 'start:end:step' or 'start,end,step'")
-    try:
-        start, end, step = (int(p) for p in parts)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError("range values must be integers") from e
-    if start <= 0 or end <= 0 or step <= 0:
-        raise argparse.ArgumentTypeError("range values must be positive integers")
-    if start > end:
-        raise argparse.ArgumentTypeError("range start must be <= end")
-    return start, end, step
+    return _safe_filename_common(text, replace_slash_only=True)
 
 
 def _mean(values: list[float]) -> float:
@@ -131,52 +117,6 @@ def _summary(values: list[float]) -> dict[str, float]:
         "p95": _percentile(vals, 0.95),
         "p99": _percentile(vals, 0.99),
     }
-
-
-def _safe_div(a: float, b: float) -> float | None:
-    if b == 0:
-        return None
-    return a / b
-
-
-def _is_cuda_device(device: str | None) -> bool:
-    return isinstance(device, str) and device.strip().lower().startswith("cuda")
-
-
-def _clear_cuda_memory(device: str | None) -> None:
-    if not _is_cuda_device(device):
-        return
-    try:
-        import torch
-    except Exception:
-        return
-    if not torch.cuda.is_available():
-        return
-    gc.collect()
-    try:
-        torch.cuda.empty_cache()
-    except Exception:
-        pass
-    try:
-        torch.cuda.ipc_collect()
-    except Exception:
-        pass
-
-
-def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
-    if pipeline_obj is not None:
-        try:
-            model_obj = getattr(pipeline_obj, "model", None)
-            if model_obj is not None and hasattr(model_obj, "dispose"):
-                model_obj.dispose()
-            elif hasattr(pipeline_obj, "dispose"):
-                pipeline_obj.dispose()
-        except Exception:
-            pass
-        del pipeline_obj
-    gc.collect()
-    if _is_cuda_device(device):
-        _clear_cuda_memory(device)
 
 
 def _build_pipeline(
@@ -618,22 +558,6 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     return payload, csv_rows
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-
-def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _rebuild_combined(results_dir: Path) -> None:
     llm_rows: list[dict[str, Any]] = []
     device_rows: list[dict[str, Any]] = []
@@ -709,150 +633,29 @@ def _rebuild_combined(results_dir: Path) -> None:
     llm_decode_jpt = [float(r.get("llm_decode_j_per_tok_mean") or 0.0) for r in llm_rows]
     vision_img_per_j = [float(r.get("vision_img_per_j_mean") or 0.0) for r in llm_rows]
     vision_j_per_img = [float(r.get("vision_j_per_img_mean") or 0.0) for r in llm_rows]
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    y = range(len(models))
-    ax.barh(list(y), decode)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("tok/s")
-    ax.set_title("LLM Decode TPS (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_decode_tps.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), prefill)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("tok/s")
-    ax.set_title("LLM Prefill TPS (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_prefill_tps.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), ttft)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("ms")
-    ax.set_title("LLM TTFT (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_ttft_ms.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), vision_encode)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("ms")
-    ax.set_title("Vision Encode Latency (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "vision_encode_ms.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), vision_fps)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("fps")
-    ax.set_title("Vision FPS (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "vision_fps.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), avg_temp)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("C")
-    ax.set_title("Average Temperature")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "avg_temperature_c.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), p99_temp)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("C")
-    ax.set_title("P99 Temperature")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "p99_temperature_c.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), llm_prefill_tpj)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("tok/J")
-    ax.set_title("LLM Prefill Tokens/J (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_prefill_tokens_per_j.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), llm_decode_tpj)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("tok/J")
-    ax.set_title("LLM Decode Tokens/J (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_decode_tokens_per_j.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), llm_prefill_jpt)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("J/tok")
-    ax.set_title("LLM Prefill J/Token (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_prefill_j_per_token.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), llm_decode_jpt)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("J/tok")
-    ax.set_title("LLM Decode J/Token (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "llm_decode_j_per_token.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), vision_img_per_j)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("img/J")
-    ax.set_title("Vision Img/J (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "vision_img_per_j.png", dpi=220)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(12, max(4, 0.45 * len(models) + 2)))
-    ax.barh(list(y), vision_j_per_img)
-    ax.set_yticks(list(y))
-    ax.set_yticklabels(models)
-    ax.invert_yaxis()
-    ax.set_xlabel("J/img")
-    ax.set_title("Vision J/Img (mean)")
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(results_dir / "vision_j_per_img.png", dpi=220)
-    plt.close(fig)
+    chart_specs = [
+        ("llm_decode_tps.png", decode, "tok/s", "LLM Decode TPS (mean)"),
+        ("llm_prefill_tps.png", prefill, "tok/s", "LLM Prefill TPS (mean)"),
+        ("llm_ttft_ms.png", ttft, "ms", "LLM TTFT (mean)"),
+        ("vision_encode_ms.png", vision_encode, "ms", "Vision Encode Latency (mean)"),
+        ("vision_fps.png", vision_fps, "fps", "Vision FPS (mean)"),
+        ("avg_temperature_c.png", avg_temp, "C", "Average Temperature"),
+        ("p99_temperature_c.png", p99_temp, "C", "P99 Temperature"),
+        ("llm_prefill_tokens_per_j.png", llm_prefill_tpj, "tok/J", "LLM Prefill Tokens/J (mean)"),
+        ("llm_decode_tokens_per_j.png", llm_decode_tpj, "tok/J", "LLM Decode Tokens/J (mean)"),
+        ("llm_prefill_j_per_token.png", llm_prefill_jpt, "J/tok", "LLM Prefill J/Token (mean)"),
+        ("llm_decode_j_per_token.png", llm_decode_jpt, "J/tok", "LLM Decode J/Token (mean)"),
+        ("vision_img_per_j.png", vision_img_per_j, "img/J", "Vision Img/J (mean)"),
+        ("vision_j_per_img.png", vision_j_per_img, "J/img", "Vision J/Img (mean)"),
+    ]
+    for filename, values, x_label, title in chart_specs:
+        plot_simple_barh(
+            labels=models,
+            values=values,
+            x_label=x_label,
+            title=title,
+            output_path=results_dir / filename,
+        )
 
 
 def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
