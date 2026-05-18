@@ -1612,8 +1612,8 @@ def add_tps_parser(
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
-    p_measure.add_argument("--prefill", type=_parse_positive_int, default=512, help="input token count")
-    p_measure.add_argument("--decode", type=_parse_positive_int, default=128, help="new tokens to generate")
+    p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
+    p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
 
@@ -1622,19 +1622,19 @@ def add_tps_parser(
     p_sweep.add_argument(
         "--prefill-range",
         type=_parse_range,
-        default=(128, 512, 128),
+        default=(512, 2048, 512),
         help="prefill sweep range (start:end:step)",
     )
     p_sweep.add_argument(
         "--cache-lengths",
         type=_parse_int_list,
-        default=[1024, 2048, 4096, 8192],
+        default=[128, 512, 1024, 2048],
         help="comma-separated cache lengths for decode sweep",
     )
     p_sweep.add_argument(
         "--decode-window",
         type=_parse_positive_int,
-        default=128,
+        default=32,
         help="decode token window measured after each cache-length prefill",
     )
     p_sweep.add_argument(

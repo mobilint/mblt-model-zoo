@@ -220,6 +220,37 @@ def test_cli_tps_sweep_range_parsing():
     assert args.device_backend is None
 
 
+def test_cli_tps_measure_defaults():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ]
+    )
+
+    assert args.prefill == 128
+    assert args.decode == 32
+
+
+def test_cli_tps_sweep_defaults():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "sweep",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ]
+    )
+
+    assert args.prefill_range == (512, 2048, 512)
+    assert args.cache_lengths == [128, 512, 1024, 2048]
+    assert args.decode_window == 32
+
+
 def test_cli_tps_sweep_vlm_options_parsing():
     parser = build_parser()
     args = parser.parse_args(
