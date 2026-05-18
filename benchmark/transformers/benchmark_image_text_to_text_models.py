@@ -28,6 +28,9 @@ from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
 from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -56,6 +59,12 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device as _resolve_default_device_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device_backend as _resolve_default_device_backend_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe,
@@ -338,6 +347,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             )
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
+    resolved_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.prefill_chunk_size
     for _ in tqdm(
         range(args.warmup),
         desc=f"{label} llm@{llm_resolution} warmup",
@@ -349,6 +359,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             prefill_range=args.llm_prefill_range,
             cache_lengths=args.llm_cache_lengths,
             decode_window=args.llm_decode_window,
+            prefill_chunk_size=resolved_prefill_chunk_size,
             show_progress=False,
         )
 
@@ -382,6 +393,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 prefill_range=args.llm_prefill_range,
                 cache_lengths=args.llm_cache_lengths,
                 decode_window=args.llm_decode_window,
+                prefill_chunk_size=resolved_prefill_chunk_size,
                 show_progress=False,
             )
         finally:
@@ -716,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--core-mode",
-        choices=["single", "multi", "global4", "global8", "all"],
+        choices=[*list(_CORE_MODE_CHOICES_COMMON), "all"],
         default="global8",
         help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
@@ -745,6 +757,12 @@ def main(argv: list[str] | None = None) -> int:
         help="decode token window for llm cache-length sweep",
     )
     parser.add_argument(
+        "--prefill-chunk-size",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="optional prefill_chunk_size forwarded to the VLM LLM sweep (default: None)",
+    )
+    parser.add_argument(
         "--llm-resolution",
         type=_parse_positive_int_optional,
         default=None,
@@ -754,7 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs"
     )
-    parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="number of repeated runs")
+    parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated runs")
     parser.add_argument(
         "--original-models",
         action="store_true",
@@ -781,19 +799,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not device_explicit and args.device is None:
-        args.device = "cuda:0" if args.original_models else "cpu"
-        print(
-            f"Auto-set --device={args.device} "
-            f"(reason: {'--original-models enabled' if args.original_models else '--original-models disabled'})"
-        )
+    args.device = _resolve_default_device_common(
+        device=args.device,
+        device_explicit=device_explicit,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
+    if not device_explicit:
+        print(f"Auto-set --device={args.device}")
     if not device_backend_explicit:
-        args.device_backend = "auto" if args.original_models else "npu"
-        print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
+        args.device_backend = _resolve_default_device_backend_common(
+            device_backend=args.device_backend,
+            device_backend_explicit=device_backend_explicit,
+            model_id=args.model,
+            mxq_path=args.mxq_path,
+            mxq_dir=args.mxq_dir,
+            original_models=args.original_models,
+        )
+        print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
 
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode).")
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     script_dir = Path(__file__).resolve().parent

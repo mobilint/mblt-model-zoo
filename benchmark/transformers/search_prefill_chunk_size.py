@@ -683,7 +683,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement"
     )
     parser.add_argument("--warmup", type=_parse_positive_int, default=1, help="warmup runs per model/core mode")
-    parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="repeat count per chunk size")
+    parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="repeat count per chunk size")
     parser.add_argument(
         "--time-guard-sec",
         type=float,

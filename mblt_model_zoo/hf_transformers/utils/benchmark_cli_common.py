@@ -6,6 +6,7 @@ from typing import Any, Optional
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
 DEFAULT_DEVICE_BACKEND = "none"
+CORE_MODE_CHOICES = ("single", "global4", "global8")
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
 DEVICE_METRIC_KEYS = (
     "avg_power_w",
@@ -61,6 +62,51 @@ def iter_core_modes(core_mode: str | None) -> list[str | None]:
     return [core_mode]
 
 
+def is_mobilint_target(model_id: str | None, mxq_path: str | None = None, mxq_dir: str | None = None) -> bool:
+    """Return whether a target should use Mobilint-oriented runtime defaults."""
+    if mxq_path or mxq_dir:
+        return True
+    return bool(model_id and str(model_id).strip().startswith("mobilint/"))
+
+
+def resolve_default_device(
+    *,
+    device: str | None,
+    device_explicit: bool,
+    model_id: str | None,
+    mxq_path: str | None = None,
+    mxq_dir: str | None = None,
+    original_models: bool = False,
+) -> str | None:
+    """Resolve a pipeline device while preserving explicit user input."""
+    if device_explicit:
+        return device
+    if original_models:
+        return "cuda:0"
+    if is_mobilint_target(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir):
+        return "cpu"
+    return device if device is not None else "cpu"
+
+
+def resolve_default_device_backend(
+    *,
+    device_backend: str,
+    device_backend_explicit: bool,
+    model_id: str | None,
+    mxq_path: str | None = None,
+    mxq_dir: str | None = None,
+    original_models: bool = False,
+) -> str:
+    """Resolve a device-metric backend while preserving explicit user input."""
+    if device_backend_explicit:
+        return device_backend
+    if original_models:
+        return "auto"
+    if is_mobilint_target(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir):
+        return "npu"
+    return DEFAULT_DEVICE_BACKEND
+
+
 def append_core_mode_suffix(
     label: str,
     base: str,
@@ -75,16 +121,28 @@ def append_core_mode_suffix(
 def apply_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     core_mode: str | None,
+    *,
+    target_cores: list[str] | None = None,
+    target_clusters: list[int] | None = None,
 ) -> dict[str, Any]:
     if not core_mode:
+        if target_cores:
+            model_kwargs["target_cores"] = target_cores
+        if target_clusters:
+            model_kwargs["target_clusters"] = target_clusters
         return model_kwargs
 
     model_kwargs["core_mode"] = core_mode
-    if core_mode == "single":
+    if target_cores:
+        model_kwargs["target_cores"] = target_cores
+    elif core_mode == "single":
         model_kwargs["target_cores"] = ["0:0"]
-    elif core_mode == "global4":
+
+    if target_clusters:
+        model_kwargs["target_clusters"] = target_clusters
+    elif not target_cores and core_mode == "global4":
         model_kwargs["target_clusters"] = [0]
-    elif core_mode == "global8":
+    elif not target_cores and core_mode == "global8":
         model_kwargs["target_clusters"] = [0, 1]
     return model_kwargs
 

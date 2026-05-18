@@ -26,6 +26,9 @@ inference and model downloads.
   - `global4`: Uses `target_clusters=[0]`.
   - `global8`: Uses `target_clusters=[0, 1]`.
   - `all`: Runs `single`, `global4`, and `global8` sequentially in benchmark scripts.
+- Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
+  `--device cpu` and `--device-backend npu` when those options are omitted. Explicit user values
+  always take precedence.
 - `device metrics`: Collects power, energy, utilization, and memory metrics.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
@@ -59,9 +62,8 @@ mblt-model-zoo tps measure \
   --core-mode global8 \
   --prefill 512 \
   --decode 128 \
-  --repeat 3 \
+  --repeat 1 \
   --warmup 1 \
-  --device-backend npu \
   --json benchmark/transformers/results/quick_measure.json
 ```
 
@@ -87,9 +89,8 @@ mblt-model-zoo tps sweep \
   --prefill-range 128:512:128 \
   --cache-lengths 1024,2048,4096,8192 \
   --decode-window 128 \
-  --repeat 3 \
+  --repeat 1 \
   --warmup 1 \
-  --device-backend npu \
   --plot benchmark/transformers/results/quick_sweep.png \
   --json benchmark/transformers/results/quick_sweep.json \
   --csv benchmark/transformers/results/quick_sweep.csv
@@ -119,8 +120,7 @@ mblt-model-zoo tps measure \
   --core-mode global8 \
   --prefill 1024 \
   --decode 128 \
-  --repeat 3 \
-  --device-backend npu
+  --repeat 1
 ```
 
 ### Fix Prefill Chunk Size
@@ -154,7 +154,7 @@ mblt-model-zoo tps measure \
   --device-gpu-id 0 \
   --prefill 512 \
   --decode 128 \
-  --repeat 3 \
+  --repeat 1 \
   --json benchmark/transformers/results/gpu_measure.json
 ```
 
@@ -175,9 +175,8 @@ mblt-model-zoo tps vlm-sweep \
   --llm-cache-lengths 1024,2048,4096,8192 \
   --llm-decode-window 128 \
   --prompt "Describe the image in one sentence." \
-  --repeat 3 \
+  --repeat 1 \
   --warmup 1 \
-  --device-backend npu \
   --json benchmark/transformers/results/vlm_sweep.json \
   --csv benchmark/transformers/results/vlm_sweep.csv
 ```
@@ -197,6 +196,7 @@ text-generation models returned by `mblt_model_zoo.hf_transformers.utils.list_mo
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
   --revision W8 \
   --core-mode global8 \
   --prefill-range 128:512:128 \
@@ -205,6 +205,10 @@ python benchmark/transformers/benchmark_text_generation_models.py \
   --warmup 1 \
   --skip-existing
 ```
+
+`--model` accepts the Hugging Face repo id as-is, including `/` (for example,
+`mobilint/Llama-3.2-1B-Instruct`). It benchmarks only that model when provided; when omitted, all
+listed text-generation models are benchmarked.
 
 Default output directory: `benchmark/transformers/results/text_generation/`.
 
@@ -277,7 +281,8 @@ to `cuda:0` and `--device-backend auto`.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py \
-  --original-models mobilint/Qwen2.5-1.5B-Instruct,mobilint/Qwen3-4B \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --original-models \
   --prefill-range 128:512:128 \
   --cache-lengths 1024,2048,4096 \
   --decode-window 128 \
@@ -297,7 +302,7 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py \
   --llm-prefill-range 1024:4096:1024 \
   --llm-cache-lengths 1024,2048,4096,8192 \
   --llm-decode-window 128 \
-  --repeat 5 \
+  --repeat 1 \
   --warmup 1 \
   --skip-existing
 ```
@@ -310,6 +315,7 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py \
   --revision W8 \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
+  --prefill-chunk-size 512 \
   --llm-prefill-range 1024:4096:1024 \
   --llm-cache-lengths 1024,2048,4096 \
   --skip-existing
@@ -381,7 +387,7 @@ python benchmark/transformers/search_prefill_chunk_size.py \
   --chunk-candidates 128,256,512,1024,2048 \
   --decode-length 16 \
   --time-guard-sec 300 \
-  --repeat 3 \
+  --repeat 1 \
   --warmup 1 \
   --skip-existing
 ```
@@ -456,7 +462,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 
 ### NPU/GPU Execution and Device Metrics
 
-- `--core-mode`: One of `single`, `multi`, `global4`, `global8`, or `all`. Accepted values differ by script.
+- `--core-mode`: One of `single`, `global4`, `global8`, or `all`. `all` is a benchmark-script sweep alias, not a model runtime core mode.
 - `--target-cores`: Explicit target cores for the CLI, for example `"0:0;0:1;0:2;0:3"`.
 - `--target-clusters`: Explicit target clusters for the CLI, for example `"0;1"`.
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.

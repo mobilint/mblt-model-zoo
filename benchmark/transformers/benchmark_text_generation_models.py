@@ -27,6 +27,9 @@ from benchmark.common.runtime_utils import is_cuda_oom_error as _is_cuda_oom_err
 from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -54,6 +57,12 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device as _resolve_default_device_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device_backend as _resolve_default_device_backend_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -72,6 +81,7 @@ def _parse_int_list(raw: str) -> list[int]:
 
 def _build_pipeline(
     model_id: str,
+    tokenizer: str | None = None,
     revision: str | None = None,
     device: str | None = None,
     device_map: str | None = None,
@@ -89,6 +99,8 @@ def _build_pipeline(
         kwargs["device"] = device
     if revision:
         kwargs["revision"] = revision
+    if tokenizer:
+        kwargs["tokenizer"] = tokenizer
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
@@ -306,6 +318,37 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         value = device.get(key)
         out[key] = float(value) if isinstance(value, (int, float)) else None
     return out
+
+
+def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
+    if len(results) == 1:
+        return results[0]
+
+    def _mean_or_none(values: list[float | None]) -> float | None:
+        compact = [float(v) for v in values if v is not None]
+        return (sum(compact) / len(compact)) if compact else None
+
+    def _aggregate_phase(phase: str) -> SweepData:
+        first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
+        out = SweepData(x_values=list(first.x_values))
+        for idx in range(len(first.x_values)):
+            tps_values = []
+            time_values = []
+            total_latency_values = []
+            npu_latency_values = []
+            for result in results:
+                src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
+                tps_values.append(float(src.tps_values[idx]))
+                time_values.append(float(src.time_values[idx]))
+                total_latency_values.append(src.avg_total_token_latency_values[idx])
+                npu_latency_values.append(src.avg_npu_token_latency_values[idx])
+            out.tps_values.append(sum(tps_values) / len(tps_values))
+            out.time_values.append(sum(time_values) / len(time_values))
+            out.avg_total_token_latency_values.append(_mean_or_none(total_latency_values))
+            out.avg_npu_token_latency_values.append(_mean_or_none(npu_latency_values))
+        return out
+
+    return BenchmarkResult(prefill_sweep=_aggregate_phase("prefill"), decode_sweep=_aggregate_phase("decode"))
 
 
 def _revision_exists(model_id: str, revision: str) -> bool | None:
@@ -677,11 +720,14 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
+    parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
+    parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument(
         "--revision",
         default=None,
         help="model revision (e.g., W8)",
     )
+    parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
     parser.add_argument(
         "--all",
         action="store_true",
@@ -721,10 +767,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--core-mode",
-        choices=["single", "global4", "global8", "all"],
+        choices=[*list(_CORE_MODE_CHOICES_COMMON), "all"],
         default="global8",
         help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
+    parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated measured runs")
     parser.add_argument(
         "--skip-existing",
         action="store_true",
@@ -763,17 +810,33 @@ def main(argv: list[str] | None = None) -> int:
         default=1.15,
         help="required free VRAM factor versus estimated model weights (default: 1.15)",
     )
+    parser.add_argument(
+        "--results-dir",
+        default=None,
+        help="output directory (default: benchmark/transformers/results/text_generation)",
+    )
     args = parser.parse_args(argv)
 
-    if not device_explicit and args.device is None:
-        args.device = "cuda:0" if args.original_models else "cpu"
-        print(
-            f"Auto-set --device={args.device} "
-            f"(reason: {'--original-models enabled' if args.original_models else '--original-models disabled'})"
-        )
+    args.device = _resolve_default_device_common(
+        device=args.device,
+        device_explicit=device_explicit,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
+    args.device_backend = _resolve_default_device_backend_common(
+        device_backend=args.device_backend,
+        device_backend_explicit=device_backend_explicit,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
+    if not device_explicit:
+        print(f"Auto-set --device={args.device}")
     if not device_backend_explicit:
-        args.device_backend = "auto" if args.original_models else "npu"
-        print(f"Auto-set --device-backend={args.device_backend} (based on device={args.device})")
+        print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
@@ -786,10 +849,10 @@ def main(argv: list[str] | None = None) -> int:
         print("No text-generation models found.")
         return 0
 
-    results_dir = os.path.join(
-        os.path.dirname(__file__),
-        "results",
-        "text_generation",
+    results_dir = str(
+        Path(args.results_dir).resolve()
+        if args.results_dir
+        else Path(__file__).resolve().parent / "results" / "text_generation"
     )
     os.makedirs(results_dir, exist_ok=True)
 
@@ -797,9 +860,9 @@ def main(argv: list[str] | None = None) -> int:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.original_models or args.all or args.revision:
+        if args.model or args.original_models or args.all or args.revision or args.mxq_path:
             print(
-                "Note: --mxq-dir is set, so --original-models/--all/--revision are ignored "
+                "Note: --mxq-dir is set, so --model/--original-models/--all/--revision/--mxq-path are ignored "
                 "(revision is taken from mxq filename suffix)."
             )
         targets = _iter_targets_from_mxq_dir(
@@ -810,7 +873,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
-        model_ids = available_model_ids
+        model_ids = [str(args.model)] if args.model else available_model_ids
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)
@@ -823,13 +886,9 @@ def main(argv: list[str] | None = None) -> int:
                     "Note: --all/--revision are applied to resolved original model ids "
                     "(requested revisions may not exist)."
                 )
-        targets = list(
-            _iter_targets(
-                model_ids,
-                revision=args.revision,
-                all_revisions=args.all,
-            )
-        )
+        targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
+        if args.mxq_path:
+            targets = [(model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets]
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
     for model_id, revision_candidates, label, base, mxq_path in targets:
@@ -892,6 +951,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 pipeline = _build_pipeline(
                     model_id,
+                    tokenizer=args.tokenizer,
                     revision=revision,
                     device=args.device,
                     device_map=args.device_map,
@@ -925,22 +985,27 @@ def main(argv: list[str] | None = None) -> int:
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
                 )
-            try:
-                result = measurer.measure_full(
-                    prefill_range=args.prefill_range,
-                    cache_lengths=args.cache_lengths,
-                    decode_window=args.decode_window,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
-                    show_progress=True,
-                    progress_prefix=label,
-                    on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
-                    on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
-                    on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
-                    on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
-                )
-            finally:
-                _stop_tracker_safe(tracker_prefill)
-                _stop_tracker_safe(tracker_decode)
+            run_results: list[BenchmarkResult] = []
+            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                try:
+                    run_results.append(
+                        measurer.measure_full(
+                            prefill_range=args.prefill_range,
+                            cache_lengths=args.cache_lengths,
+                            decode_window=args.decode_window,
+                            prefill_chunk_size=resolved_prefill_chunk_size,
+                            show_progress=True,
+                            progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                            on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
+                            on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
+                            on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
+                            on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                        )
+                    )
+                finally:
+                    _stop_tracker_safe(tracker_prefill)
+                    _stop_tracker_safe(tracker_decode)
+            result = _aggregate_benchmark_results(run_results)
         except Exception as e:
             if _is_cuda_oom_error(e):
                 print(f"Skipping (CUDA OOM during benchmark): {e}")

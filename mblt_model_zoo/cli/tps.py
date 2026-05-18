@@ -12,6 +12,12 @@ from tqdm.auto import tqdm
 from transformers import HfArgumentParser
 
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -31,6 +37,12 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device as _resolve_default_device_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device_backend as _resolve_default_device_backend_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
@@ -156,12 +168,12 @@ def _build_pipeline(
         model_kwargs["embedding_weight"] = embedding_weight
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
-    if core_mode:
-        model_kwargs["core_mode"] = core_mode
-    if target_cores:
-        model_kwargs["target_cores"] = target_cores
-    if target_clusters:
-        model_kwargs["target_clusters"] = target_clusters
+    model_kwargs = _apply_core_mode_model_kwargs_common(
+        model_kwargs,
+        core_mode,
+        target_cores=target_cores,
+        target_clusters=target_clusters,
+    )
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -339,6 +351,21 @@ def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
     _print_device_status_common(args, tracker)
 
 
+def _normalize_runtime_defaults(args: argparse.Namespace) -> None:
+    args.device = _resolve_default_device_common(
+        device=args.device,
+        device_explicit=args.device is not None,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+    )
+    args.device_backend = _resolve_default_device_backend_common(
+        device_backend=args.device_backend or "none",
+        device_backend_explicit=args.device_backend is not None,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+    )
+
+
 def _safe_div(a: float, b: float) -> Optional[float]:
     if b == 0:
         return None
@@ -510,6 +537,7 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
 
 def _cmd_measure(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -736,6 +764,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1107,6 +1136,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
 
 def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1505,7 +1535,7 @@ def add_tps_parser(
             default=None,
             help="tokenizer id or local path (defaults to model)",
         )
-        p.add_argument("--device", default="cpu", help="device for pipeline (e.g., cpu, cuda:0)")
+        p.add_argument("--device", default=None, help="device for pipeline (e.g., cpu, cuda:0)")
         p.add_argument(
             "--revision",
             default=None,
@@ -1523,8 +1553,9 @@ def add_tps_parser(
         )
         p.add_argument(
             "--core-mode",
+            choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, multi, global4, global8)",
+            help="NPU core mode (single, global4, global8)",
         )
         p.add_argument(
             "--target-cores",
@@ -1565,6 +1596,7 @@ def add_tps_parser(
             help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
         )
         _add_device_tracking_args(p)
+        p.set_defaults(device_backend=None)
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)

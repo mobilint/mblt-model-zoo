@@ -1065,7 +1065,12 @@ class VLMTPSMeasurer:
         )
         return inputs_embeds.masked_scatter(special_image_mask, image_features)
 
-    def _measure_llm_once(self, inputs_embeds: torch.Tensor, num_decode: int) -> SingleMeasurement:
+    def _measure_llm_once(
+        self,
+        inputs_embeds: torch.Tensor,
+        num_decode: int,
+        prefill_chunk_size: Optional[int] = None,
+    ) -> SingleMeasurement:
         seq_len = int(inputs_embeds.shape[1])
         lm_for_npu = self._get_language_model()
         gen_model = self.model
@@ -1095,6 +1100,8 @@ class VLMTPSMeasurer:
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if prefill_chunk_size is not None:
+            gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
         if self._supports_npu_timing(lm_for_npu) or self._supports_npu_timing(gen_model):
             gen_kwargs["count_npu_time"] = True
 
@@ -1320,6 +1327,7 @@ class VLMTPSMeasurer:
         prefill_range: Tuple[int, int, int] = (128, 2048, 128),
         cache_lengths: Optional[Iterable[int]] = None,
         decode_window: int = 128,
+        prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
     ) -> BenchmarkResult:
@@ -1350,7 +1358,11 @@ class VLMTPSMeasurer:
                         f"minimum multimodal prefix length is {min_total_len}"
                     )
                 continue
-            res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=1)
+            res = self._measure_llm_once(
+                inputs_embeds=inputs_embeds,
+                num_decode=1,
+                prefill_chunk_size=prefill_chunk_size,
+            )
             full_result.prefill_sweep.x_values.append(p_len)
             full_result.prefill_sweep.tps_values.append(res.prefill_tps)
             full_result.prefill_sweep.time_values.append(res.prefill_latency)
@@ -1384,7 +1396,11 @@ class VLMTPSMeasurer:
                             f"minimum multimodal prefix length is {min_total_len}"
                         )
                     continue
-                res = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=decode_window)
+                res = self._measure_llm_once(
+                    inputs_embeds=inputs_embeds,
+                    num_decode=decode_window,
+                    prefill_chunk_size=prefill_chunk_size,
+                )
             full_result.decode_sweep.x_values.append(cache_len)
             full_result.decode_sweep.tps_values.append(res.decode_tps)
             full_result.decode_sweep.time_values.append(res.decode_duration)
