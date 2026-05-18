@@ -52,6 +52,45 @@ class _DummyNPUModel:
         return self.mxq_model
 
 
+class _DummyTokenizer:
+    """Minimal tokenizer object for text TPS streamer construction."""
+
+    eos_token_id = 0
+
+    def decode(self, token_ids, **kwargs) -> str:
+        """Return a deterministic decoded token string."""
+        del token_ids, kwargs
+        return "token"
+
+
+class _DummyGenerateNPUModel(_DummyNPUModel):
+    """NPU-backed model double that records generate kwargs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.config = _DummyConfig(vocab_size=128)
+        self.device = torch.device("cpu")
+        self.generate_kwargs = None
+
+    def eval(self) -> "_DummyGenerateNPUModel":
+        """Match the minimal model API used by TPSMeasurer."""
+        return self
+
+    def generate(self, **kwargs) -> torch.Tensor:
+        """Record generation kwargs and stop the streamer without emitting tokens."""
+        self.generate_kwargs = kwargs
+        kwargs["streamer"].end()
+        return kwargs["input_ids"]
+
+
+class _DummyTextPipeline:
+    """Minimal text-generation pipeline for TPSMeasurer tests."""
+
+    def __init__(self, model: _DummyGenerateNPUModel) -> None:
+        self.model = model
+        self.tokenizer = _DummyTokenizer()
+
+
 class _DummyNonNPUModel:
     """Non-NPU model marker without Mobilint cache support."""
 
@@ -547,6 +586,20 @@ def test_vlm_fake_prefill_decode_counts_each_decode_token():
     assert result.decode_tps > 0.0
     assert result.npu_decode_time == pytest.approx(1.0)
     assert result.avg_npu_decode_token_latency == pytest.approx(0.25)
+
+
+def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
+    model = _DummyGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    result = measurer.measure_decode_with_fake_prefill(cache_len=8, num_decode=4)
+
+    assert model.generate_kwargs is not None
+    assert model.generate_kwargs["input_ids"].shape == (1, 9)
+    assert model.generate_kwargs["past_key_values"].get_seq_length() == 8
+    assert model.generate_kwargs["min_new_tokens"] == 4
+    assert model.generate_kwargs["max_new_tokens"] == 4
+    assert result.decode_prefill_mode == "fake"
 
 
 def test_resolve_image_features_tensor_uses_tensor():

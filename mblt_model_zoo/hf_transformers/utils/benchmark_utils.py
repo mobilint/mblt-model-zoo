@@ -738,7 +738,7 @@ class TPSMeasurer:
 
             vocab_size = _resolve_config_vocab_size(self.model.config)
             low = 100 if vocab_size > 100 else 0
-            input_ids = torch.randint(low, vocab_size, (1, 1), device=self.device)
+            input_ids = torch.randint(low, vocab_size, (1, cache_len + 1), device=self.device)
             past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
             past_key_values.fake_prefill(cache_len)
 
