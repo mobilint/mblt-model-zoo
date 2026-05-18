@@ -763,7 +763,7 @@ def main(argv: list[str] | None = None) -> int:
         "--prefill-chunk-size",
         type=_parse_positive_int_optional,
         default=None,
-        help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
+        help="optional prefill_chunk_size forwarded to model.generate/model.forward",
     )
     parser.add_argument(
         "--core-mode",

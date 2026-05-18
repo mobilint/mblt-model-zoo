@@ -190,7 +190,7 @@ def add_pipeline_device_args(
     parser.add_argument(
         "--device",
         default=device_default,
-        help='pipeline device (default: None; e.g., "cpu", "cuda:0")',
+        help='pipeline device (e.g., "cpu", "cuda:0")',
     )
     parser.add_argument(
         "--device-map",

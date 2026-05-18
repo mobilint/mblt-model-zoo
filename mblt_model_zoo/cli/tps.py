@@ -1593,7 +1593,7 @@ def add_tps_parser(
             "--prefill-chunk-size",
             type=_parse_positive_int_optional,
             default=None,
-            help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
+            help="optional prefill_chunk_size forwarded to model.generate/model.forward",
         )
         _add_device_tracking_args(p)
         p.set_defaults(device_backend=None)

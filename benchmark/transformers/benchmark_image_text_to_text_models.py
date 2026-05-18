@@ -760,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
         "--prefill-chunk-size",
         type=_parse_positive_int_optional,
         default=None,
-        help="optional prefill_chunk_size forwarded to the VLM LLM sweep (default: None)",
+        help="optional prefill_chunk_size forwarded to the VLM LLM sweep",
     )
     parser.add_argument(
         "--llm-resolution",
