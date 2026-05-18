@@ -50,6 +50,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import npu_latency_pct
 
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
@@ -229,6 +230,7 @@ def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
             "time_ms": t * 1000.0,
             "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
             "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+            "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
         }
     for x, tps, t, avg_total, avg_npu in zip(
         result.decode_sweep.x_values,
@@ -244,6 +246,7 @@ def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
             "time_ms": t * 1000.0,
             "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
             "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+            "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
         }
 
 
@@ -258,11 +261,15 @@ def _write_csv(path: str, rows: Sequence[dict[str, Any]]) -> None:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     fieldnames = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+            writer.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in fieldnames})
 
 
 def _percentile(values: Sequence[float], q: float) -> float:
@@ -606,6 +613,21 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     ttft_ms = [r.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.decode_duration * 1000.0 for r in runs]
     total_ms = [r.total_time * 1000.0 for r in runs]
+    prefill_npu_latency_pct = [
+        pct
+        for r in runs
+        if (pct := r.prefill_npu_latency_pct) is not None
+    ]
+    decode_npu_latency_pct = [
+        pct
+        for r in runs
+        if (pct := r.decode_npu_latency_pct) is not None
+    ]
+    total_npu_latency_pct = [
+        pct
+        for r in runs
+        if (pct := r.total_npu_latency_pct) is not None
+    ]
     avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
     p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
     avg_utilization_pct = [r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None]
@@ -672,6 +694,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     _print_summary("ttft", ttft_ms, "ms")
     _print_summary("decode_duration", decode_ms, "ms")
     _print_summary("total", total_ms, "ms")
+    _print_summary("prefill_npu_latency", prefill_npu_latency_pct, "%")
+    _print_summary("decode_npu_latency", decode_npu_latency_pct, "%")
+    _print_summary("total_npu_latency", total_npu_latency_pct, "%")
     if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
@@ -721,6 +746,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "ttft_ms": _summary(ttft_ms),
                 "decode_duration_ms": _summary(decode_ms),
                 "total_ms": _summary(total_ms),
+                "prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
+                "decode_npu_latency_pct": _summary(decode_npu_latency_pct),
+                "total_npu_latency_pct": _summary(total_npu_latency_pct),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
                 "prefill_avg_power_w": _summary(prefill_avg_power_w),
@@ -1014,6 +1042,32 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
 
     prefill_last = [r.prefill_sweep.tps_values[-1] for r in runs if r.prefill_sweep.tps_values]
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]
+    prefill_npu_latency_pct_last = [
+        pct
+        for r in runs
+        if r.prefill_sweep.avg_total_token_latency_values
+        and r.prefill_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
+    decode_npu_latency_pct_last = [
+        pct
+        for r in runs
+        if r.decode_sweep.avg_total_token_latency_values
+        and r.decode_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
     prefill_last_tpj: list[float] = []
     decode_last_tpj: list[float] = []
     prefill_last_jpt: list[float] = []
@@ -1045,6 +1099,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
     if decode_last:
         _print_summary("decode_tps(last_point)", decode_last, "tok/s")
+    _print_summary("prefill_npu_lat(last)", prefill_npu_latency_pct_last, "%")
+    _print_summary("decode_npu_lat(last)", decode_npu_latency_pct_last, "%")
     if args.device_metrics:
         _print_summary("avg_power", run_avg_power, "W")
         _print_summary("p99_power", run_p99_power, "W")
@@ -1092,6 +1148,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             "summary": {
                 "prefill_tps_last": _summary(prefill_last),
                 "decode_tps_last": _summary(decode_last),
+                "prefill_npu_latency_pct_last": _summary(prefill_npu_latency_pct_last),
+                "decode_npu_latency_pct_last": _summary(decode_npu_latency_pct_last),
                 "avg_power_w": _summary(run_avg_power),
                 "p99_power_w": _summary(run_p99_power),
                 "avg_utilization_pct": _summary(run_avg_utilization),
@@ -1292,6 +1350,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "llm_ttft_ms": None,
                     "llm_decode_ms": None,
                     "llm_total_ms": None,
+                    "llm_prefill_npu_latency_pct": None,
+                    "llm_decode_npu_latency_pct": None,
                     "avg_power_w": vision_power_avg[idx - 1] if idx - 1 < len(vision_power_avg) else None,
                     "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
                     "avg_utilization_pct": vision_util_avg[idx - 1] if idx - 1 < len(vision_util_avg) else None,
@@ -1393,6 +1453,32 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
     llm_decode_ms = [r.decode_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.decode_sweep.time_values]
+    llm_prefill_npu_latency_pct = [
+        pct
+        for r in llm_runs
+        if r.prefill_sweep.avg_total_token_latency_values
+        and r.prefill_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
+    llm_decode_npu_latency_pct = [
+        pct
+        for r in llm_runs
+        if r.decode_sweep.avg_total_token_latency_values
+        and r.decode_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
     llm_avg_power_w = [r.avg_power_w for r in llm_runs if getattr(r, "avg_power_w", None) is not None]
     llm_p99_power_w = [r.p99_power_w for r in llm_runs if getattr(r, "p99_power_w", None) is not None]
     llm_avg_utilization_pct = [
@@ -1424,6 +1510,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     _print_summary("llm_decode_tps(last)", llm_decode_tps, "tok/s")
     _print_summary("llm_ttft(last)", llm_ttft_ms, "ms")
     _print_summary("llm_decode_duration(last)", llm_decode_ms, "ms")
+    _print_summary("llm_prefill_npu_lat", llm_prefill_npu_latency_pct, "%")
+    _print_summary("llm_decode_npu_lat", llm_decode_npu_latency_pct, "%")
     if args.device_metrics:
         _print_summary("llm_avg_power", llm_avg_power_w, "W")
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
@@ -1448,6 +1536,18 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         decode_tps = run.decode_sweep.tps_values[-1] if run.decode_sweep.tps_values else None
         ttft_ms = (run.prefill_sweep.time_values[-1] * 1000.0) if run.prefill_sweep.time_values else None
         decode_ms = (run.decode_sweep.time_values[-1] * 1000.0) if run.decode_sweep.time_values else None
+        prefill_npu_pct = None
+        if run.prefill_sweep.avg_total_token_latency_values and run.prefill_sweep.avg_npu_token_latency_values:
+            prefill_npu_pct = npu_latency_pct(
+                run.prefill_sweep.avg_total_token_latency_values[-1],
+                run.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        decode_npu_pct = None
+        if run.decode_sweep.avg_total_token_latency_values and run.decode_sweep.avg_npu_token_latency_values:
+            decode_npu_pct = npu_latency_pct(
+                run.decode_sweep.avg_total_token_latency_values[-1],
+                run.decode_sweep.avg_npu_token_latency_values[-1],
+            )
         csv_rows.append(
             {
                 "type": "llm",
@@ -1462,6 +1562,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "llm_ttft_ms": ttft_ms,
                 "llm_decode_ms": decode_ms,
                 "llm_total_ms": None,
+                "llm_prefill_npu_latency_pct": prefill_npu_pct,
+                "llm_decode_npu_latency_pct": decode_npu_pct,
                 "avg_power_w": getattr(run, "avg_power_w", None),
                 "p99_power_w": getattr(run, "p99_power_w", None),
                 "avg_utilization_pct": getattr(run, "avg_utilization_pct", None),
@@ -1504,6 +1606,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                         "llm_decode_tps_last": _summary(llm_decode_tps),
                         "llm_ttft_ms_last": _summary(llm_ttft_ms),
                         "llm_decode_duration_ms_last": _summary(llm_decode_ms),
+                        "llm_prefill_npu_latency_pct_last": _summary(llm_prefill_npu_latency_pct),
+                        "llm_decode_npu_latency_pct_last": _summary(llm_decode_npu_latency_pct),
                         "avg_power_w": _summary(llm_avg_power_w),
                         "p99_power_w": _summary(llm_p99_power_w),
                         "avg_utilization_pct": _summary(llm_avg_utilization_pct),

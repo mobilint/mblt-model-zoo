@@ -15,6 +15,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     _resolve_config_vocab_size,
     _resolve_image_features_tensor,
     _supports_fake_decode_prefill,
+    npu_latency_pct,
 )
 
 
@@ -368,7 +369,7 @@ def test_benchmark_result_iter_rows_includes_decode_prefill_mode():
     result.decode_sweep.tps_values.append(2.0)
     result.decode_sweep.time_values.append(1.0)
     result.decode_sweep.avg_total_token_latency_values.append(0.5)
-    result.decode_sweep.avg_npu_token_latency_values.append(None)
+    result.decode_sweep.avg_npu_token_latency_values.append(0.25)
     result.decode_prefill_modes.append("fake")
 
     rows = list(BenchmarkResult.iter_rows("dummy", result))
@@ -381,10 +382,80 @@ def test_benchmark_result_iter_rows_includes_decode_prefill_mode():
             "tps": 2.0,
             "time_ms": 1000.0,
             "avg_total_token_latency_ms": 500.0,
-            "avg_npu_token_latency_ms": None,
+            "avg_npu_token_latency_ms": 250.0,
+            "avg_npu_token_latency_pct": 50.0,
             "decode_prefill_mode": "fake",
         }
     ]
+
+
+def test_npu_latency_pct_handles_supported_and_unsupported_values():
+    assert npu_latency_pct(0.5, 0.25) == pytest.approx(50.0)
+    assert npu_latency_pct(0.0, 0.25) is None
+    assert npu_latency_pct(None, 0.25) is None
+    assert npu_latency_pct(0.5, None) is None
+
+
+def test_single_measurement_json_exposes_npu_latency_pct():
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=2.0,
+        decode_duration=1.0,
+        decode_tps=2.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.5,
+        avg_npu_prefill_token_latency=0.25,
+        avg_total_decode_token_latency=0.5,
+        avg_npu_decode_token_latency=0.1,
+        prefill_npu_latency_pct=npu_latency_pct(0.5, 0.25),
+        decode_npu_latency_pct=npu_latency_pct(0.5, 0.1),
+        total_npu_latency_pct=npu_latency_pct(3.0, 1.2),
+    )
+
+    assert measurement.prefill_npu_latency_pct == pytest.approx(50.0)
+    assert measurement.decode_npu_latency_pct == pytest.approx(20.0)
+    assert measurement.total_npu_latency_pct == pytest.approx(40.0)
+
+
+def test_cli_iter_rows_for_csv_includes_npu_latency_pct():
+    result = BenchmarkResult()
+    result.prefill_sweep.x_values.append(8)
+    result.prefill_sweep.tps_values.append(16.0)
+    result.prefill_sweep.time_values.append(0.8)
+    result.prefill_sweep.avg_total_token_latency_values.append(0.1)
+    result.prefill_sweep.avg_npu_token_latency_values.append(0.025)
+
+    rows = list(tps_cli._iter_rows_for_csv(result))
+
+    assert rows == [
+        {
+            "phase": "prefill",
+            "tokens": 8,
+            "tps": 16.0,
+            "time_ms": 800.0,
+            "avg_total_token_latency_ms": 100.0,
+            "avg_npu_token_latency_ms": 25.0,
+            "avg_npu_token_latency_pct": 25.0,
+        }
+    ]
+
+
+def test_cli_write_csv_uses_union_fieldnames(tmp_path):
+    csv_path = tmp_path / "vlm.csv"
+
+    tps_cli._write_csv(
+        str(csv_path),
+        [
+            {"type": "vision", "vision_encode_ms": 1.0},
+            {"type": "llm", "llm_prefill_npu_latency_pct": 50.0},
+        ],
+    )
+
+    content = csv_path.read_text(encoding="utf-8")
+    assert "llm_prefill_npu_latency_pct" in content
+    assert "50.0" in content
 
 
 def test_vlm_fake_prefill_decode_counts_each_decode_token():

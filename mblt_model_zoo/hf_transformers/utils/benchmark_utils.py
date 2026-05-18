@@ -11,6 +11,23 @@ from transformers import TextIteratorStreamer
 from .cache_utils import MobilintCache
 
 
+def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
+    """Return the NPU latency percentage of total latency.
+
+    Args:
+        total_latency: Total latency value in any time unit.
+        npu_latency: NPU latency value in the same time unit as ``total_latency``.
+
+    Returns:
+        NPU latency percentage, or ``None`` when the value cannot be computed.
+    """
+    if total_latency is None or npu_latency is None:
+        return None
+    if total_latency <= 0:
+        return None
+    return (npu_latency / total_latency) * 100.0
+
+
 def _call_maybe_getter(obj: object, name: str) -> object | None:
     """Return an attribute value, calling it when it is a zero-argument getter."""
     candidate = getattr(obj, name, None)
@@ -165,6 +182,9 @@ class SingleMeasurement:
     avg_npu_prefill_token_latency: Optional[float]  # seconds
     avg_total_decode_token_latency: float  # seconds
     avg_npu_decode_token_latency: Optional[float]  # seconds
+    prefill_npu_latency_pct: Optional[float] = None
+    decode_npu_latency_pct: Optional[float] = None
+    total_npu_latency_pct: Optional[float] = None
     npu_prefill_time: Optional[float] = None
     npu_decode_time: Optional[float] = None
     avg_power_w: Optional[float] = None
@@ -240,6 +260,7 @@ class BenchmarkResult:
                 "time_ms": t * 1000.0,
                 "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
                 "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+                "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
             }
         decode_prefill_modes = result.decode_prefill_modes or [None] * len(result.decode_sweep.x_values)
         for x, tps, t, avg_total, avg_npu, prefill_mode in zip(
@@ -258,6 +279,7 @@ class BenchmarkResult:
                 "time_ms": t * 1000.0,
                 "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
                 "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+                "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
                 "decode_prefill_mode": prefill_mode,
             }
 
@@ -278,6 +300,7 @@ class BenchmarkResult:
                     "time_ms",
                     "avg_total_token_latency_ms",
                     "avg_npu_token_latency_ms",
+                    "avg_npu_token_latency_pct",
                     "decode_prefill_mode",
                 ],
             )
@@ -309,6 +332,7 @@ class BenchmarkResult:
         tps_map: dict[tuple[str, str, int], float] = {}
         avg_total_map: dict[tuple[str, str, int], Optional[float]] = {}
         avg_npu_map: dict[tuple[str, str, int], Optional[float]] = {}
+        avg_npu_pct_map: dict[tuple[str, str, int], Optional[float]] = {}
         for row in row_list:
             model = str(row["model"])
             phase = str(row["phase"])
@@ -319,6 +343,8 @@ class BenchmarkResult:
                 tps_map[key] = float(tps_value)
             avg_total_map[key] = row.get("avg_total_token_latency_ms")
             avg_npu_map[key] = row.get("avg_npu_token_latency_ms")
+            avg_npu_pct = row.get("avg_npu_token_latency_pct")
+            avg_npu_pct_map[key] = float(avg_npu_pct) if avg_npu_pct is not None else None
 
         lines = [
             "<table>\n",
@@ -363,8 +389,7 @@ class BenchmarkResult:
                     and avg_total > 0
                     and avg_npu is not None
                 ):
-                    npu_ratio = avg_npu / avg_total
-                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                    cell = f"{tps:.4f} ({npu_latency_pct(avg_total, avg_npu):.1f}%)"
                 elif tps is not None:
                     cell = f"{tps:.4f}"
                 else:
@@ -380,8 +405,7 @@ class BenchmarkResult:
                     and avg_total > 0
                     and avg_npu is not None
                 ):
-                    npu_ratio = avg_npu / avg_total
-                    cell = f"{tps:.4f} ({npu_ratio * 100:.1f}%)"
+                    cell = f"{tps:.4f} ({npu_latency_pct(avg_total, avg_npu):.1f}%)"
                 elif tps is not None:
                     cell = f"{tps:.4f}"
                 else:
@@ -435,8 +459,10 @@ class BenchmarkResult:
 
         _write_avg_table("prefill avg total token latency (ms)", avg_total_map, "prefill", prefill_tokens)
         _write_avg_table("prefill avg npu token latency (ms)", avg_npu_map, "prefill", prefill_tokens)
+        _write_avg_table("prefill avg npu token latency (%)", avg_npu_pct_map, "prefill", prefill_tokens)
         _write_avg_table("decode avg total token latency (ms)", avg_total_map, "decode", decode_tokens)
         _write_avg_table("decode avg npu token latency (ms)", avg_npu_map, "decode", decode_tokens)
+        _write_avg_table("decode avg npu token latency (%)", avg_npu_pct_map, "decode", decode_tokens)
 
 class TPSMeasurer:
     def __init__(self, pipeline):
@@ -594,6 +620,7 @@ class TPSMeasurer:
             avg_npu_decode_token_latency = (
                 npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
             )
+            total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
 
             return SingleMeasurement(
                 num_prefill=num_prefill,
@@ -607,6 +634,15 @@ class TPSMeasurer:
                 avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
                 avg_total_decode_token_latency=avg_total_decode_token_latency,
                 avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+                prefill_npu_latency_pct=npu_latency_pct(
+                    avg_total_prefill_token_latency,
+                    avg_npu_prefill_token_latency,
+                ),
+                decode_npu_latency_pct=npu_latency_pct(
+                    avg_total_decode_token_latency,
+                    avg_npu_decode_token_latency,
+                ),
+                total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
                 npu_prefill_time=npu_prefill_time if has_npu_time else None,
                 npu_decode_time=npu_decode_time if has_npu_time else None,
             )
@@ -706,6 +742,7 @@ class TPSMeasurer:
             avg_npu_decode_token_latency = (
                 npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
             )
+            total_npu_time = npu_decode_time if has_npu_time else None
             return SingleMeasurement(
                 num_prefill=cache_len,
                 num_decode=decode_count,
@@ -718,6 +755,12 @@ class TPSMeasurer:
                 avg_npu_prefill_token_latency=0.0 if has_npu_time else None,
                 avg_total_decode_token_latency=avg_total_decode_token_latency,
                 avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+                prefill_npu_latency_pct=None,
+                decode_npu_latency_pct=npu_latency_pct(
+                    avg_total_decode_token_latency,
+                    avg_npu_decode_token_latency,
+                ),
+                total_npu_latency_pct=npu_latency_pct(decode_duration, total_npu_time),
                 npu_prefill_time=0.0 if has_npu_time else None,
                 npu_decode_time=npu_decode_time if has_npu_time else None,
                 decode_prefill_mode="fake",
@@ -1158,6 +1201,7 @@ class VLMTPSMeasurer:
         avg_npu_decode_token_latency = (
             npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
         )
+        total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
 
         return SingleMeasurement(
             num_prefill=seq_len,
@@ -1171,6 +1215,9 @@ class VLMTPSMeasurer:
             avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
             avg_total_decode_token_latency=avg_total_decode_token_latency,
             avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+            prefill_npu_latency_pct=npu_latency_pct(avg_total_prefill_token_latency, avg_npu_prefill_token_latency),
+            decode_npu_latency_pct=npu_latency_pct(avg_total_decode_token_latency, avg_npu_decode_token_latency),
+            total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
             npu_prefill_time=npu_prefill_time if has_npu_time else None,
             npu_decode_time=npu_decode_time if has_npu_time else None,
         )
@@ -1239,6 +1286,7 @@ class VLMTPSMeasurer:
         avg_npu_decode_token_latency = (
             npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
         )
+        total_npu_time = npu_decode_time if has_npu_time else None
 
         return SingleMeasurement(
             num_prefill=cache_len,
@@ -1252,6 +1300,9 @@ class VLMTPSMeasurer:
             avg_npu_prefill_token_latency=0.0 if has_npu_time else None,
             avg_total_decode_token_latency=avg_total_decode_token_latency,
             avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+            prefill_npu_latency_pct=None,
+            decode_npu_latency_pct=npu_latency_pct(avg_total_decode_token_latency, avg_npu_decode_token_latency),
+            total_npu_latency_pct=npu_latency_pct(decode_duration, total_npu_time),
             npu_prefill_time=0.0 if has_npu_time else None,
             npu_decode_time=npu_decode_time if has_npu_time else None,
             decode_prefill_mode="fake",

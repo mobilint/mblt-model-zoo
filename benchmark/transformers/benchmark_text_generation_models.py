@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+# ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -68,7 +69,12 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import BenchmarkResult, SweepData, TPSMeasurer
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    BenchmarkResult,
+    SweepData,
+    TPSMeasurer,
+    npu_latency_pct,
+)
 
 
 def _safe_filename(model_id: str) -> str:
@@ -532,16 +538,20 @@ def _write_single_combined_markdown(
     )
     tps_map: dict[tuple[str, str, int], float] = {}
     time_map: dict[tuple[str, str, int], float] = {}
+    npu_pct_map: dict[tuple[str, str, int], float] = {}
     for row in tps_rows:
         model = str(row["model"])
         phase = str(row["phase"])
         token = int(row["tokens"])
         tps_val = row.get("tps")
         time_ms_val = row.get("time_ms")
+        npu_pct_val = row.get("avg_npu_token_latency_pct")
         if isinstance(tps_val, (int, float)):
             tps_map[(model, phase, token)] = float(tps_val)
         if isinstance(time_ms_val, (int, float)):
             time_map[(model, phase, token)] = float(time_ms_val)
+        if isinstance(npu_pct_val, (int, float)):
+            npu_pct_map[(model, phase, token)] = float(npu_pct_val)
 
     device_map = {str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)}
     device_cols = [
@@ -570,6 +580,8 @@ def _write_single_combined_markdown(
     headers.extend([f"decode_tps_{t}" for t in decode_tokens])
     headers.extend([f"prefill_latency_ms_{t}" for t in prefill_tokens])
     headers.extend([f"decode_duration_ms_{t}" for t in decode_tokens])
+    headers.extend([f"prefill_npu_latency_pct_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_npu_latency_pct_{t}" for t in decode_tokens])
     headers.extend(device_cols)
 
     lines = [
@@ -589,6 +601,12 @@ def _write_single_combined_markdown(
             values.append("" if v is None else f"{v:.6f}")
         for token in decode_tokens:
             v = time_map.get((model, "decode", token))
+            values.append("" if v is None else f"{v:.6f}")
+        for token in prefill_tokens:
+            v = npu_pct_map.get((model, "prefill", token))
+            values.append("" if v is None else f"{v:.6f}")
+        for token in decode_tokens:
+            v = npu_pct_map.get((model, "decode", token))
             values.append("" if v is None else f"{v:.6f}")
 
         drow = device_map.get(model, {})
@@ -888,7 +906,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
         if args.mxq_path:
-            targets = [(model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets]
+            targets = [
+                (model_id, revisions, label, base, args.mxq_path)
+                for model_id, revisions, label, base, _ in targets
+            ]
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
     for model_id, revision_candidates, label, base, mxq_path in targets:
@@ -1019,12 +1040,22 @@ def main(argv: list[str] | None = None) -> int:
             avg_total = result.prefill_sweep.avg_total_token_latency_values[-1]
             avg_npu = result.prefill_sweep.avg_npu_token_latency_values[-1]
             avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
-            print(f"Avg prefill token latency (last): total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}")
+            npu_pct = npu_latency_pct(avg_total, avg_npu)
+            npu_pct_str = f"{npu_pct:.1f}%" if npu_pct is not None else "n/a"
+            print(
+                "Avg prefill token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str} npu_pct={npu_pct_str}"
+            )
         if result.decode_sweep.avg_total_token_latency_values:
             avg_total = result.decode_sweep.avg_total_token_latency_values[-1]
             avg_npu = result.decode_sweep.avg_npu_token_latency_values[-1]
             avg_npu_str = f"{avg_npu * 1000.0:.3f}ms" if avg_npu is not None else "n/a"
-            print(f"Avg decode token latency (last): total={avg_total * 1000.0:.3f}ms npu={avg_npu_str}")
+            npu_pct = npu_latency_pct(avg_total, avg_npu)
+            npu_pct_str = f"{npu_pct:.1f}%" if npu_pct is not None else "n/a"
+            print(
+                "Avg decode token latency (last): "
+                f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str} npu_pct={npu_pct_str}"
+            )
         device_payload: dict[str, float | None] | None = None
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)

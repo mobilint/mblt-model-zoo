@@ -41,7 +41,7 @@ def write_json(path: Path, payload: Any) -> None:
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
-    """Writes dictionaries to CSV using the first row as the field order.
+    """Writes dictionaries to CSV using the union of row keys as the field order.
 
     Args:
         path: Destination path.
@@ -50,7 +50,13 @@ def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})

@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -69,7 +70,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer, npu_latency_pct
 
 try:
     from benchmark_text_generation_models import (
@@ -326,6 +327,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "llm_prefill_tps": None,
                     "llm_decode_tps": None,
                     "llm_ttft_ms": None,
+                    "llm_prefill_npu_latency_pct": None,
+                    "llm_decode_npu_latency_pct": None,
                     "avg_power_w": power_vals[idx - 1] if idx - 1 < len(power_vals) else None,
                     "p99_power_w": p99_power_vals[idx - 1] if idx - 1 < len(p99_power_vals) else None,
                     "avg_utilization_pct": util_vals[idx - 1] if idx - 1 < len(util_vals) else None,
@@ -429,6 +432,32 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [float(r.prefill_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.prefill_sweep.time_values]
     llm_decode_ms = [float(r.decode_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.decode_sweep.time_values]
+    llm_prefill_npu_pct = [
+        pct
+        for r in llm_runs
+        if r.prefill_sweep.avg_total_token_latency_values
+        and r.prefill_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
+    llm_decode_npu_pct = [
+        pct
+        for r in llm_runs
+        if r.decode_sweep.avg_total_token_latency_values
+        and r.decode_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
     llm_total_ms = [
         float((r.prefill_phase_duration_s or 0.0) + (r.decode_phase_duration_s or 0.0)) * 1000.0 for r in llm_runs
     ]
@@ -459,6 +488,18 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         llm_prefill_tps = float(r.prefill_sweep.tps_values[-1]) if r.prefill_sweep.tps_values else None
         llm_decode_tps = float(r.decode_sweep.tps_values[-1]) if r.decode_sweep.tps_values else None
         llm_ttft_ms = float(r.prefill_sweep.time_values[-1] * 1000.0) if r.prefill_sweep.time_values else None
+        prefill_npu_pct = None
+        if r.prefill_sweep.avg_total_token_latency_values and r.prefill_sweep.avg_npu_token_latency_values:
+            prefill_npu_pct = npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        decode_npu_pct = None
+        if r.decode_sweep.avg_total_token_latency_values and r.decode_sweep.avg_npu_token_latency_values:
+            decode_npu_pct = npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
         csv_rows.append(
             {
                 "type": "llm",
@@ -469,6 +510,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "llm_prefill_tps": llm_prefill_tps,
                 "llm_decode_tps": llm_decode_tps,
                 "llm_ttft_ms": llm_ttft_ms,
+                "llm_prefill_npu_latency_pct": prefill_npu_pct,
+                "llm_decode_npu_latency_pct": decode_npu_pct,
                 "avg_power_w": r.avg_power_w,
                 "p99_power_w": r.p99_power_w,
                 "avg_utilization_pct": r.avg_utilization_pct,
@@ -523,6 +566,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "llm_ttft_ms": _summary(llm_ttft_ms),
                     "llm_decode_duration_ms": _summary(llm_decode_ms),
                     "llm_total_ms": _summary(llm_total_ms),
+                    "llm_prefill_npu_latency_pct": _summary(llm_prefill_npu_pct),
+                    "llm_decode_npu_latency_pct": _summary(llm_decode_npu_pct),
                     "avg_power_w": _summary(llm_avg_power_w),
                     "p99_power_w": _summary(llm_p99_power_w),
                     "avg_utilization_pct": _summary(llm_avg_utilization_pct),
@@ -589,6 +634,8 @@ def _rebuild_combined(results_dir: Path) -> None:
                 "llm_ttft_ms_mean": summ.get("llm_ttft_ms", {}).get("mean"),
                 "llm_decode_duration_ms_mean": summ.get("llm_decode_duration_ms", {}).get("mean"),
                 "llm_total_ms_mean": summ.get("llm_total_ms", {}).get("mean"),
+                "llm_prefill_npu_latency_pct_mean": summ.get("llm_prefill_npu_latency_pct", {}).get("mean"),
+                "llm_decode_npu_latency_pct_mean": summ.get("llm_decode_npu_latency_pct", {}).get("mean"),
                 "llm_prefill_tok_per_j_mean": summ.get("prefill_tok_per_j", {}).get("mean"),
                 "llm_decode_tok_per_j_mean": summ.get("decode_tok_per_j", {}).get("mean"),
                 "llm_prefill_j_per_tok_mean": summ.get("prefill_j_per_tok", {}).get("mean"),
