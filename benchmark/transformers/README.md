@@ -29,15 +29,14 @@ inference and model downloads.
 - Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
   `--device cpu` and `--device-backend npu` when those options are omitted. Explicit user values
   always take precedence.
-- CLI defaults and benchmark-script defaults are intentionally different:
-  - `mblt-model-zoo tps sweep` defaults to `--prefill-range 512:2048:512`,
-    `--cache-lengths 128,512,1024,2048`, `--decode-window 32`, and `--plot tps_benchmark.png`.
-  - `benchmark_text_generation_models.py` defaults to `--prefill-range 128:512:128`,
-    `--cache-lengths 1024,2048,4096,8192`, `--decode-window 128`, and
-    `--core-mode global8`.
-  - `benchmark_image_text_to_text_models.py` uses LLM-specific option names and defaults to
-    `--llm-prefill-range 128:512:128`, `--llm-cache-lengths 1024,2048,4096,8192`,
-    `--llm-decode-window 128`, and `--core-mode global8`.
+- CLI defaults and benchmark-script defaults are aligned for shared TPS parameters.
+  - `measure` defaults to `--prefill 128`, `--decode 32`, `--repeat 1`, and `--warmup 1`;
+    VLM measure also defaults to `--image-resolution 224`.
+  - `sweep` defaults to `--prefill-range 512:2048:512`,
+    `--cache-lengths 128,512,1024,2048`, and `--decode-window 32`; VLM sweep also defaults
+    to `--image-resolutions 224,384,512,768` and `--llm-resolution None`.
+  - Benchmark scripts still support `--core-mode all` as a multi-run convenience; omitted
+    `--core-mode` follows the CLI default of `None`.
 - `device metrics`: Collects power, energy, utilization, and memory metrics.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
@@ -104,9 +103,9 @@ mblt-model-zoo tps sweep \
   --revision W8 \
   --device cpu \
   --core-mode global8 \
-  --prefill-range 128:512:128 \
-  --cache-lengths 1024,2048,4096,8192 \
-  --decode-window 128 \
+  --prefill-range 512:2048:512 \
+  --cache-lengths 128,512,1024,2048 \
+  --decode-window 32 \
   --repeat 1 \
   --warmup 1 \
   --plot benchmark/transformers/results/quick_sweep.png \
@@ -225,18 +224,18 @@ core-mode sweeps, result table generation, and chart generation.
 
 ### Benchmark Text-Generation Models
 
-`benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for the
-text-generation models returned by `mblt_model_zoo.hf_transformers.utils.list_models`. Its sweep
-option names match the TPS CLI, but the script defaults are optimized for multi-model runs.
+`benchmark_text_generation_models.py` requires a `measure` or `sweep` subcommand. `measure` runs a
+fixed prefill/decode case across one or more models, while `sweep` runs a prefill sweep and a
+cache-length decode sweep. Defaults match the TPS CLI.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --model mobilint/Qwen2.5-1.5B-Instruct \
   --revision W8 \
   --core-mode global8 \
-  --prefill-range 128:512:128 \
-  --cache-lengths 1024,2048,4096,8192 \
-  --decode-window 128 \
+  --prefill-range 512:2048:512 \
+  --cache-lengths 128,512,1024,2048 \
+  --decode-window 32 \
   --warmup 1 \
   --skip-existing
 ```
@@ -247,8 +246,11 @@ listed text-generation models are benchmarked.
 
 Default output directory: `benchmark/transformers/results/text_generation/`.
 
-- `{model}[-{revision}]-{core_mode}.json`: Per-model detailed benchmark payload.
-- `{model}[-{revision}]-{core_mode}.png`: Per-model summary chart.
+- `{model}[-{revision}]-{core_mode}.json`: Per-model detailed sweep payload.
+- `{model}[-{revision}]-{core_mode}.png`: Per-model sweep summary chart.
+- `{model}[-{revision}]-{core_mode}_measure.json`: Per-model measure payload.
+- `combined_measure.csv`, `combined_measure.md`: Combined measure summary tables.
+- `measure_prefill_tps.png`, `measure_decode_tps.png`, `measure_ttft_ms.png`: Measure charts.
 - `combined.csv`, `combined.md`: Combined model summary tables.
 - `combined_device.csv`: Combined device metric summary.
 - `prefill_tps.png`, `decode_tps.png`, `prefill_latency_ms.png`, `decode_duration_ms.png`: Core metric charts.
@@ -259,7 +261,7 @@ Default output directory: `benchmark/transformers/results/text_generation/`.
 `--all` benchmarks only the `W8` and `W4V8` branches and skips the main branch.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --all \
   --core-mode global8 \
   --skip-existing
@@ -268,7 +270,7 @@ python benchmark/transformers/benchmark_text_generation_models.py \
 Use `--core-mode all` to compare all fixed core modes.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --all \
   --core-mode all \
   --skip-existing
@@ -288,7 +290,7 @@ This creates output files for each revision and core mode, for example:
 Use `--mxq-dir` to benchmark only local `.mxq` files in a directory.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --mxq-dir ./local_mxq \
   --core-mode global8 \
   --prefill-range 512:2048:512 \
@@ -315,7 +317,7 @@ Hugging Face Hub, then benchmark the unique parent ids. If `--device` is omitted
 to `cuda:0` and `--device-backend auto`.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --model mobilint/Qwen2.5-1.5B-Instruct \
   --original-models \
   --prefill-range 128:512:128 \
@@ -326,18 +328,19 @@ python benchmark/transformers/benchmark_text_generation_models.py \
 
 ### Benchmark Image-Text-to-Text Models
 
-`benchmark_image_text_to_text_models.py` measures the vision stage and the LLM stage of
-image-text-to-text models. Unlike the TPS CLI VLM path, this script uses LLM-prefixed sweep option
-names: `--llm-prefill-range`, `--llm-cache-lengths`, and `--llm-decode-window`.
+`benchmark_image_text_to_text_models.py` requires a `measure` or `sweep` subcommand. `measure` runs
+one image resolution plus one LLM prefill/decode configuration; `sweep` measures the vision stage
+over image resolutions and the LLM stage over prefill/cache ranges. Sweep option names match the TPS
+CLI: `--prefill-range`, `--cache-lengths`, and `--decode-window`.
 
 ```bash
-python benchmark/transformers/benchmark_image_text_to_text_models.py \
+python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
   --llm-resolution 384 \
-  --llm-prefill-range 1024:4096:1024 \
-  --llm-cache-lengths 1024,2048,4096,8192 \
-  --llm-decode-window 128 \
+  --prefill-range 1024:4096:1024 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --repeat 1 \
   --warmup 1 \
   --skip-existing
@@ -346,22 +349,25 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py \
 Specify `--model` to benchmark a single model.
 
 ```bash
-python benchmark/transformers/benchmark_image_text_to_text_models.py \
+python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --model mobilint/Qwen2-VL-2B-Instruct \
   --revision W8 \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
   --prefill-chunk-size 512 \
-  --llm-prefill-range 1024:4096:1024 \
-  --llm-cache-lengths 1024,2048,4096 \
+  --prefill-range 1024:4096:1024 \
+  --cache-lengths 1024,2048,4096 \
   --skip-existing
 ```
 
 Default output directory: `benchmark/transformers/results/image_text_to_text/`.
 
-- `{model}[-{revision}]-{core_mode}.json`: Per-model full benchmark payload.
+- `{model}[-{revision}]-{core_mode}.json`: Per-model full sweep payload.
 - `{model}[-{revision}]-{core_mode}.csv`: Per-run raw rows for `vision` and `llm`.
-- `{model}[-{revision}]-{core_mode}.png`: Per-model summary chart.
+- `{model}[-{revision}]-{core_mode}.png`: Per-model sweep summary chart.
+- `{model}[-{revision}]-{core_mode}_measure.json`: Per-model measure payload.
+- `combined_measure.csv`, `combined_measure.md`: Combined measure summary tables.
+- `measure_vision_encode_ms.png`, `measure_llm_prefill_tps.png`, `measure_llm_decode_tps.png`: Measure charts.
 - `combined.csv`, `combined.md`: Combined summary.
 - `combined_llm.csv`, `combined_vision.csv`, `combined_device.csv`: Stage/device summaries.
 - `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`: LLM charts.
@@ -373,12 +379,12 @@ Use `--rebuild-charts` to regenerate combined CSV, Markdown, and chart outputs f
 files without running benchmarks again.
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py \
+python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --rebuild-charts
 ```
 
 ```bash
-python benchmark/transformers/benchmark_image_text_to_text_models.py \
+python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --rebuild-charts
 ```
 
@@ -494,7 +500,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--decode-window`: Decode token window measured at each cache length. This is also used by the TPS
   CLI VLM path.
 - `--image-resolutions`: Image resolutions for the VLM vision stage.
-- `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`: LLM-stage sweep ranges for
+- `--prefill-range`, `--cache-lengths`, `--decode-window`: LLM-stage sweep ranges for
   `benchmark_image_text_to_text_models.py`.
 - `--repeat`: Number of measured repeats.
 - `--warmup`: Number of warmup runs before measured runs.
@@ -541,7 +547,11 @@ uv run python -m py_compile \
 
 ```bash
 uv run python benchmark/transformers/benchmark_text_generation_models.py --help
+uv run python benchmark/transformers/benchmark_text_generation_models.py measure --help
+uv run python benchmark/transformers/benchmark_text_generation_models.py sweep --help
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py --help
+uv run python benchmark/transformers/benchmark_image_text_to_text_models.py measure --help
+uv run python benchmark/transformers/benchmark_image_text_to_text_models.py sweep --help
 uv run python benchmark/transformers/search_prefill_chunk_size.py --help
 uv run python benchmark/transformers/plot_compare_benchmark_results.py --help
 uv run python benchmark/transformers/update_prefill_chunk_size_configs.py --help

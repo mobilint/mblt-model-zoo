@@ -365,9 +365,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         measurer.measure_llm_full(
             image_resolution=llm_resolution,
             prompt=args.prompt,
-            prefill_range=args.llm_prefill_range,
-            cache_lengths=args.llm_cache_lengths,
-            decode_window=args.llm_decode_window,
+            prefill_range=args.prefill_range,
+            cache_lengths=args.cache_lengths,
+            decode_window=args.decode_window,
             prefill_chunk_size=resolved_prefill_chunk_size,
             show_progress=False,
         )
@@ -400,9 +400,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
                 prompt=args.prompt,
-                prefill_range=args.llm_prefill_range,
-                cache_lengths=args.llm_cache_lengths,
-                decode_window=args.llm_decode_window,
+                prefill_range=args.prefill_range,
+                cache_lengths=args.cache_lengths,
+                decode_window=args.decode_window,
                 prefill_chunk_size=resolved_prefill_chunk_size,
                 show_progress=False,
             )
@@ -544,9 +544,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         "task": "image-text-to-text",
         "benchmark": {
             "prompt": args.prompt,
-            "llm_prefill_range": list(args.llm_prefill_range),
-            "llm_cache_lengths": args.llm_cache_lengths,
-            "llm_decode_window": args.llm_decode_window,
+            "prefill_range": list(args.prefill_range),
+            "cache_lengths": args.cache_lengths,
+            "decode_window": args.decode_window,
             "llm_reference_resolution": llm_resolution,
             "vision_results": vision_results,
             "vision_summary": {
@@ -631,6 +631,8 @@ def _rebuild_combined(results_dir: Path) -> None:
     for path in sorted(results_dir.glob("*.json")):
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
+        if payload.get("benchmark_type") == "measure":
+            continue
         bench = payload.get("benchmark", {})
         summ = bench.get("llm_results", {}).get("summary", {})
         vision_summ = bench.get("vision_summary", {})
@@ -760,16 +762,8 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
     plt.close(fig)
 
 
-def main(argv: list[str] | None = None) -> int:
-    raw_argv = list(argv) if argv is not None else sys.argv[1:]
-
-    def _flag_present(flag: str) -> bool:
-        return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
-
-    device_explicit = _flag_present("--device")
-    device_backend_explicit = _flag_present("--device-backend")
-
-    parser = argparse.ArgumentParser(description="Benchmark image-text-to-text models.")
+def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments shared by image-text-to-text benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     _add_device_tracking_args(parser)
     parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
@@ -785,50 +779,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--core-mode",
         choices=[*list(_CORE_MODE_CHOICES_COMMON), "all"],
-        default="global8",
-        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
-    )
-    parser.add_argument(
-        "--image-resolutions",
-        type=_parse_int_csv,
-        default=_parse_int_csv("224,384,512,768"),
-        help="comma-separated image resolutions (default: 224,384,512,768)",
-    )
-    parser.add_argument(
-        "--llm-prefill-range",
-        type=_parse_range_arg,
-        default=(128, 512, 128),
-        help="llm prefill sweep range by total multimodal prefix length (default: 128:512:128)",
-    )
-    parser.add_argument(
-        "--llm-cache-lengths",
-        type=_parse_int_csv,
-        default=_parse_int_csv("1024,2048,4096,8192"),
-        help="comma-separated llm cache lengths for decode sweep (default: 1024,2048,4096,8192)",
-    )
-    parser.add_argument(
-        "--llm-decode-window",
-        type=_parse_positive_int,
-        default=128,
-        help="decode token window for llm cache-length sweep",
-    )
-    parser.add_argument(
-        "--prefill-chunk-size",
-        type=_parse_positive_int_optional,
         default=None,
-        help="optional prefill_chunk_size forwarded to the VLM LLM sweep",
-    )
-    parser.add_argument(
-        "--llm-resolution",
-        type=_parse_positive_int_optional,
-        default=None,
-        help="reference resolution used for LLM-only benchmark (default: first image resolution)",
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: None)",
     )
     parser.add_argument("--prompt", default="Describe the image in one sentence.")
     parser.add_argument(
         "--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs"
     )
     parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated runs")
+    parser.add_argument(
+        "--prefill-chunk-size",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="optional prefill_chunk_size forwarded to the VLM LLM benchmark",
+    )
     parser.add_argument(
         "--original-models",
         action="store_true",
@@ -853,8 +817,77 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="output directory (default: benchmark/transformers/results/image_text_to_text)",
     )
-    args = parser.parse_args(argv)
 
+
+def _add_measure_args(parser: argparse.ArgumentParser) -> None:
+    """Add TPS measure-aligned VLM fixed measurement arguments."""
+    parser.add_argument(
+        "--image-resolution", type=_parse_positive_int, default=224, help="image resolution (default: 224)"
+    )
+    parser.add_argument(
+        "--prefill", type=_parse_positive_int, default=128, help="LLM prefill token count (default: 128)"
+    )
+    parser.add_argument("--decode", type=_parse_positive_int, default=32, help="LLM decode token count (default: 32)")
+
+
+def _add_sweep_args(parser: argparse.ArgumentParser) -> None:
+    """Add TPS sweep-aligned VLM grid measurement arguments."""
+    parser.add_argument(
+        "--image-resolutions",
+        type=_parse_int_csv,
+        default=_parse_int_csv("224,384,512,768"),
+        help="comma-separated image resolutions (default: 224,384,512,768)",
+    )
+    parser.add_argument(
+        "--llm-resolution",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="reference resolution used for LLM-only benchmark (default: first image resolution)",
+    )
+    parser.add_argument(
+        "--prefill-range",
+        type=_parse_range_arg,
+        default=(512, 2048, 512),
+        help="LLM prefill sweep range by total multimodal prefix length (default: 512:2048:512)",
+    )
+    parser.add_argument(
+        "--cache-lengths",
+        type=_parse_int_csv,
+        default=_parse_int_csv("128,512,1024,2048"),
+        help="comma-separated LLM cache lengths for decode sweep (default: 128,512,1024,2048)",
+    )
+    parser.add_argument(
+        "--decode-window",
+        type=_parse_positive_int,
+        default=32,
+        help="decode token window for LLM cache-length sweep (default: 32)",
+    )
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the image-text-to-text benchmark argument parser."""
+    parser = argparse.ArgumentParser(description="Benchmark image-text-to-text models.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    measure = subparsers.add_parser("measure", help="measure fixed image/prefill/decode TPS")
+    _add_common_benchmark_args(measure)
+    _add_measure_args(measure)
+    measure.set_defaults(_handler=_run_measure)
+    sweep = subparsers.add_parser("sweep", help="run image and LLM TPS sweeps")
+    _add_common_benchmark_args(sweep)
+    _add_sweep_args(sweep)
+    sweep.set_defaults(_handler=_run_sweep)
+    return parser
+
+
+def _flag_present(raw_argv: list[str], flag: str) -> bool:
+    """Return whether a flag appears in raw argv."""
+    return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
+
+
+def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> None:
+    """Apply benchmark runtime defaults that depend on explicit CLI flags."""
+    device_explicit = _flag_present(raw_argv, "--device")
+    device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -876,11 +909,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
 
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the selected image-text-to-text benchmark subcommand."""
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    _resolve_runtime_defaults(args, raw_argv)
+    return args._handler(args)
+
+
+def _run_sweep(args: argparse.Namespace) -> int:
+    """Run multi-model image-text-to-text sweep benchmarks."""
+    os.environ.setdefault("MPLBACKEND", "Agg")
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-
-    os.environ.setdefault("MPLBACKEND", "Agg")
     script_dir = Path(__file__).resolve().parent
     results_dir = (
         Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
@@ -977,6 +1021,216 @@ def main(argv: list[str] | None = None) -> int:
             _release_pipeline(pipeline, args.device)
 
     _rebuild_combined(results_dir)
+    return 0
+
+
+def _collect_vlm_run_targets(
+    args: argparse.Namespace,
+) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None]]]:
+    """Resolve image-text-to-text benchmark targets and core-mode expansion."""
+    script_dir = Path(__file__).resolve().parent
+    results_dir = (
+        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    )
+    results_dir.mkdir(parents=True, exist_ok=True)
+    available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
+    if not available_model_ids:
+        print("No image-text-to-text models found.")
+        return results_dir, False, []
+    targets: list[tuple[str, str | None, str, str, str | None]] = []
+    if args.mxq_dir:
+        mxq_dir = Path(args.mxq_dir).expanduser().resolve()
+        if not mxq_dir.is_dir():
+            raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        for model_id, rev_candidates, label, base, target_mxq_path in _iter_targets_from_mxq_dir(
+            mxq_dir=mxq_dir,
+            available_model_ids=available_model_ids,
+        ):
+            targets.append((model_id, rev_candidates[0] if rev_candidates else None, label, base, target_mxq_path))
+    else:
+        model_ids = [str(args.model)] if args.model else available_model_ids
+        if args.original_models:
+            model_ids = _resolve_original_model_ids(model_ids)
+        for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
+            targets.append((model_id, revision, label, base, args.mxq_path))
+    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None]] = []
+    for model_id, revision, label, base, target_mxq_path in targets:
+        for core_mode in core_modes:
+            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
+            run_targets.append((model_id, revision, mode_label, mode_base, target_mxq_path, core_mode))
+    return results_dir, disable_npu_specific_args, run_targets
+
+
+def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert VLM measure payloads to combined rows."""
+    rows: list[dict[str, Any]] = []
+    for payload in payloads:
+        summary = payload.get("summary", {})
+        device = payload.get("device") or {}
+        rows.append(
+            {
+                "model": payload.get("model"),
+                "image_resolution": payload.get("image_resolution"),
+                "prefill_tokens": payload.get("prefill"),
+                "decode_tokens": payload.get("decode"),
+                "repeat": payload.get("repeat"),
+                "vision_encode_ms_mean": summary.get("vision_encode_ms", {}).get("mean"),
+                "vision_fps_mean": summary.get("vision_fps", {}).get("mean"),
+                "llm_prefill_tps_mean": summary.get("llm_prefill_tps", {}).get("mean"),
+                "llm_decode_tps_mean": summary.get("llm_decode_tps", {}).get("mean"),
+                "llm_ttft_ms_mean": summary.get("llm_ttft_ms", {}).get("mean"),
+                "llm_decode_duration_ms_mean": summary.get("llm_decode_duration_ms", {}).get("mean"),
+                "avg_power_w": device.get("avg_power_w"),
+                "total_energy_j": device.get("total_energy_j"),
+                "vision_img_per_j_mean": device.get("vision_img_per_j"),
+            }
+        )
+    return rows
+
+
+def _write_measure_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write VLM combined measure Markdown."""
+    if not rows:
+        return
+    headers = list(rows[0].keys())
+    with path.open("w", encoding="utf-8") as f:
+        f.write("| " + " | ".join(headers) + " |\n")
+        f.write("| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n")
+        for row in rows:
+            f.write("| " + " | ".join("" if row.get(h) is None else str(row.get(h)) for h in headers) + " |\n")
+
+
+def _rebuild_measure_outputs(results_dir: Path) -> None:
+    """Rebuild VLM measure combined outputs."""
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(results_dir.glob("*_measure.json")):
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if payload.get("benchmark_type") == "measure":
+            payloads.append(payload)
+    if not payloads:
+        print("No measure JSON results found. Nothing to aggregate.")
+        return
+    rows = _collect_measure_rows(payloads)
+    _write_csv(results_dir / "combined_measure.csv", rows)
+    _write_measure_markdown(results_dir / "combined_measure.md", rows)
+    models = [str(row["model"]) for row in rows]
+    chart_specs = [
+        ("measure_vision_encode_ms.png", "vision_encode_ms_mean", "ms", "Vision Encode Latency"),
+        ("measure_vision_fps.png", "vision_fps_mean", "fps", "Vision FPS"),
+        ("measure_llm_prefill_tps.png", "llm_prefill_tps_mean", "tok/s", "LLM Prefill TPS"),
+        ("measure_llm_decode_tps.png", "llm_decode_tps_mean", "tok/s", "LLM Decode TPS"),
+        ("measure_llm_ttft_ms.png", "llm_ttft_ms_mean", "ms", "LLM TTFT"),
+    ]
+    for filename, key, x_label, title in chart_specs:
+        plot_simple_barh(
+            labels=models,
+            values=[float(row.get(key) or 0.0) for row in rows],
+            x_label=x_label,
+            title=title,
+            output_path=results_dir / filename,
+        )
+
+
+def _run_measure(args: argparse.Namespace) -> int:
+    """Run multi-model image-text-to-text fixed image/prefill/decode benchmarks."""
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    results_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
+    if not run_targets:
+        return 0
+    if args.rebuild_charts:
+        _rebuild_measure_outputs(results_dir)
+        return 0
+    for model_id, revision, label, base, target_mxq_path, core_mode in tqdm(
+        run_targets, desc="Measuring VLM models", unit="model-mode"
+    ):
+        if _is_cuda_device(args.device):
+            _clear_cuda_memory(args.device)
+        json_path = results_dir / f"{base}_measure.json"
+        if args.skip_existing and json_path.is_file():
+            print(f"Skipping {label} (measure result exists).")
+            continue
+        pipeline = None
+        try:
+            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
+            measurer = VLMTPSMeasurer(pipeline)
+            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            for _ in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
+                measurer.measure_vision(args.image_resolution, repeat=1, prompt=args.prompt, show_progress=False)
+                measurer.measure_llm_full(
+                    image_resolution=args.image_resolution,
+                    prompt=args.prompt,
+                    prefill_range=(args.prefill, args.prefill, args.prefill),
+                    cache_lengths=[args.prefill],
+                    decode_window=args.decode,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    show_progress=False,
+                )
+            vision_runs: list[dict[str, float]] = []
+            llm_runs: list[dict[str, Any]] = []
+            for _ in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                vision_latency, vision_fps = measurer.measure_vision(
+                    args.image_resolution, repeat=1, prompt=args.prompt, show_progress=False
+                )[0]
+                llm_result = measurer.measure_llm_full(
+                    image_resolution=args.image_resolution,
+                    prompt=args.prompt,
+                    prefill_range=(args.prefill, args.prefill, args.prefill),
+                    cache_lengths=[args.prefill],
+                    decode_window=args.decode,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    show_progress=False,
+                )
+                vision_runs.append({"vision_encode_latency": vision_latency, "vision_fps": vision_fps})
+                llm_runs.append(asdict(llm_result))
+            llm_prefill = [
+                float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
+            ]
+            llm_decode = [
+                float(r["decode_sweep"]["tps_values"][-1]) for r in llm_runs if r["decode_sweep"]["tps_values"]
+            ]
+            llm_ttft = [
+                float(r["prefill_sweep"]["time_values"][-1]) * 1000.0
+                for r in llm_runs
+                if r["prefill_sweep"]["time_values"]
+            ]
+            llm_decode_ms = [
+                float(r["decode_sweep"]["time_values"][-1]) * 1000.0
+                for r in llm_runs
+                if r["decode_sweep"]["time_values"]
+            ]
+            payload = {
+                "model": label,
+                "benchmark_type": "measure",
+                "task": "image-text-to-text",
+                "prompt": args.prompt,
+                "image_resolution": args.image_resolution,
+                "prefill": args.prefill,
+                "decode": args.decode,
+                "repeat": args.repeat,
+                "warmup": args.warmup,
+                "vision_runs": vision_runs,
+                "llm_runs": llm_runs,
+                "summary": {
+                    "vision_encode_ms": _summary([r["vision_encode_latency"] * 1000.0 for r in vision_runs]),
+                    "vision_fps": _summary([r["vision_fps"] for r in vision_runs]),
+                    "llm_prefill_tps": _summary(llm_prefill),
+                    "llm_decode_tps": _summary(llm_decode),
+                    "llm_ttft_ms": _summary(llm_ttft),
+                    "llm_decode_duration_ms": _summary(llm_decode_ms),
+                },
+                "device": None,
+                "device_time_series_runs": [],
+            }
+            _write_json(json_path, payload)
+            print(f"Saved: {json_path.name}")
+        except Exception as e:
+            print(f"Skipping {label} (measure failed): {e}")
+        finally:
+            _release_pipeline(pipeline, args.device)
+    _rebuild_measure_outputs(results_dir)
     return 0
 
 

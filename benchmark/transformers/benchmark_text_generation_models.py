@@ -734,30 +734,14 @@ def _rebuild_combined_outputs(
         _write_device_combined_csv(device_csv, combined_device_rows)
 
 
-def main(argv: list[str] | None = None) -> int:
-    raw_argv = list(argv) if argv is not None else sys.argv[1:]
-
-    def _flag_present(flag: str) -> bool:
-        return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
-
-    device_explicit = _flag_present("--device")
-    device_backend_explicit = _flag_present("--device-backend")
-
-    parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
+def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments shared by text-generation benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
-    parser.add_argument(
-        "--revision",
-        default=None,
-        help="model revision (e.g., W8)",
-    )
+    parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
     parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="benchmark W8 and W4V8 revisions only (skip main)",
-    )
+    parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only (skip main)")
     parser.add_argument(
         "--mxq-dir",
         default=None,
@@ -765,24 +749,6 @@ def main(argv: list[str] | None = None) -> int:
             "directory containing local mxq files. "
             "When set, only files matching <model_id>-<W8|W4V8>.mxq are benchmarked."
         ),
-    )
-    parser.add_argument(
-        "--prefill-range",
-        type=_parse_range_arg,
-        default=(128, 512, 128),
-        help="prefill sweep range as 'start:end:step' (default: 128:512:128)",
-    )
-    parser.add_argument(
-        "--cache-lengths",
-        type=_parse_int_list,
-        default=[1024, 2048, 4096, 8192],
-        help="decode sweep cache lengths as comma-separated integers (default: 1024,2048,4096,8192)",
-    )
-    parser.add_argument(
-        "--decode-window",
-        type=_parse_positive_int,
-        default=128,
-        help="decode token window measured after each cache-length prefill (default: 128)",
     )
     parser.add_argument(
         "--prefill-chunk-size",
@@ -793,19 +759,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--core-mode",
         choices=[*list(_CORE_MODE_CHOICES_COMMON), "all"],
-        default="global8",
-        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
+        default=None,
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: None)",
     )
     parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated measured runs")
-    parser.add_argument(
-        "--skip-existing",
-        action="store_true",
-        help="skip models with existing JSON+PNG outputs",
-    )
+    parser.add_argument("--skip-existing", action="store_true", help="skip models with existing outputs")
     parser.add_argument(
         "--rebuild-charts",
         action="store_true",
-        help="skip benchmarking and rebuild combined CSV/MD/charts from existing JSON files",
+        help="skip benchmarking and rebuild combined outputs from existing JSON files",
     )
     parser.add_argument(
         "--warmup",
@@ -816,18 +778,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--original-models",
         action="store_true",
-        help=(
-            "resolve each Mobilint model to its parent/base model from HF Hub and benchmark the unique parent model ids"
-        ),
+        help="resolve each Mobilint model to its parent/base model from HF Hub and benchmark unique parent ids",
     )
     _add_device_tracking_args(parser)
     parser.add_argument(
         "--cuda-precheck",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "best-effort CUDA VRAM pre-check before loading each model (default: on, disable via --no-cuda-precheck)"
-        ),
+        help="best-effort CUDA VRAM pre-check before loading each model (default: on)",
     )
     parser.add_argument(
         "--cuda-precheck-margin",
@@ -840,8 +798,60 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="output directory (default: benchmark/transformers/results/text_generation)",
     )
-    args = parser.parse_args(argv)
 
+
+def _add_measure_args(parser: argparse.ArgumentParser) -> None:
+    """Add TPS measure-aligned fixed measurement arguments."""
+    parser.add_argument("--prefill", type=_parse_positive_int, default=128, help="prefill token count (default: 128)")
+    parser.add_argument("--decode", type=_parse_positive_int, default=32, help="decode token count (default: 32)")
+
+
+def _add_sweep_args(parser: argparse.ArgumentParser) -> None:
+    """Add TPS sweep-aligned grid measurement arguments."""
+    parser.add_argument(
+        "--prefill-range",
+        type=_parse_range_arg,
+        default=(512, 2048, 512),
+        help="prefill sweep range as 'start:end:step' (default: 512:2048:512)",
+    )
+    parser.add_argument(
+        "--cache-lengths",
+        type=_parse_int_list,
+        default=[128, 512, 1024, 2048],
+        help="decode sweep cache lengths as comma-separated integers (default: 128,512,1024,2048)",
+    )
+    parser.add_argument(
+        "--decode-window",
+        type=_parse_positive_int,
+        default=32,
+        help="decode token window measured after each cache-length prefill (default: 32)",
+    )
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the text-generation benchmark argument parser."""
+    parser = argparse.ArgumentParser(description="Benchmark text-generation models.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    measure = subparsers.add_parser("measure", help="measure fixed prefill/decode TPS")
+    _add_common_benchmark_args(measure)
+    _add_measure_args(measure)
+    measure.set_defaults(_handler=_run_measure)
+    sweep = subparsers.add_parser("sweep", help="run prefill/decode TPS sweeps")
+    _add_common_benchmark_args(sweep)
+    _add_sweep_args(sweep)
+    sweep.set_defaults(_handler=_run_sweep)
+    return parser
+
+
+def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
+    """Return whether a flag appears in raw argv."""
+    return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
+
+
+def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
+    """Apply benchmark runtime defaults that depend on explicit CLI flags."""
+    device_explicit = _flag_present(raw_argv, "--device")
+    device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -863,6 +873,18 @@ def main(argv: list[str] | None = None) -> int:
     if not device_backend_explicit:
         print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
 
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the selected text-generation benchmark subcommand."""
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    _resolve_runtime_defaults(args, raw_argv)
+    return args._handler(args)
+
+
+def _run_sweep(args: argparse.Namespace) -> int:
+    """Run multi-model text-generation sweep benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
@@ -914,8 +936,7 @@ def main(argv: list[str] | None = None) -> int:
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
         if args.mxq_path:
             targets = [
-                (model_id, revisions, label, base, args.mxq_path)
-                for model_id, revisions, label, base, _ in targets
+                (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
@@ -1254,6 +1275,375 @@ def main(argv: list[str] | None = None) -> int:
         ],
     )
 
+    return 0
+
+
+def _summary(values: Sequence[float]) -> dict[str, float]:
+    """Return common summary statistics for measured scalar values."""
+    vals = sorted(float(v) for v in values)
+    if not vals:
+        return {"mean": 0.0, "min": 0.0, "max": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
+
+    def _percentile(q: float) -> float:
+        if len(vals) == 1:
+            return vals[0]
+        idx = (len(vals) - 1) * q
+        lo = int(idx)
+        hi = min(lo + 1, len(vals) - 1)
+        frac = idx - lo
+        return vals[lo] * (1.0 - frac) + vals[hi] * frac
+
+    return {
+        "mean": sum(vals) / len(vals),
+        "min": vals[0],
+        "max": vals[-1],
+        "p50": _percentile(0.50),
+        "p95": _percentile(0.95),
+        "p99": _percentile(0.99),
+    }
+
+
+def _mean_or_none(values: Sequence[float]) -> float | None:
+    """Return a mean value, or None when no values are present."""
+    vals = [float(v) for v in values]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """Build an aggregate device payload from measured run dictionaries."""
+    device_keys = (
+        "avg_power_w",
+        "p99_power_w",
+        "avg_utilization_pct",
+        "p99_utilization_pct",
+        "avg_temperature_c",
+        "p99_temperature_c",
+        "avg_memory_used_mb",
+        "p99_memory_used_mb",
+        "total_memory_mb",
+        "avg_memory_used_pct",
+        "p99_memory_used_pct",
+        "total_energy_j",
+        "prefill_tokens_per_j",
+        "decode_tokens_per_j",
+        "prefill_j_per_token",
+        "decode_j_per_token",
+    )
+    payload: dict[str, Any] = {}
+    for key in device_keys:
+        vals = [float(run[key]) for run in runs if isinstance(run.get(key), (int, float))]
+        if key.startswith("p99_") or key == "total_memory_mb":
+            payload[key] = max(vals) if vals else None
+        elif key == "total_energy_j":
+            payload[key] = sum(vals) if vals else None
+        else:
+            payload[key] = _mean_or_none(vals)
+    payload["prefill_tps_last"] = runs[-1].get("prefill_tps") if runs else None
+    payload["decode_tps_last"] = runs[-1].get("decode_tps") if runs else None
+    return payload if any(v is not None for v in payload.values()) else None
+
+
+def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert per-model measure payloads to combined summary rows."""
+    rows: list[dict[str, Any]] = []
+    for payload in payloads:
+        summary = payload.get("summary", {})
+        device = payload.get("device") or {}
+        rows.append(
+            {
+                "model": payload.get("model"),
+                "prefill_tokens": payload.get("prefill"),
+                "decode_tokens": payload.get("decode"),
+                "repeat": payload.get("repeat"),
+                "prefill_tps_mean": summary.get("prefill_tps", {}).get("mean"),
+                "decode_tps_mean": summary.get("decode_tps", {}).get("mean"),
+                "ttft_ms_mean": summary.get("ttft_ms", {}).get("mean"),
+                "decode_duration_ms_mean": summary.get("decode_duration_ms", {}).get("mean"),
+                "total_time_ms_mean": summary.get("total_time_ms", {}).get("mean"),
+                "prefill_npu_latency_pct_mean": summary.get("prefill_npu_latency_pct", {}).get("mean"),
+                "decode_npu_latency_pct_mean": summary.get("decode_npu_latency_pct", {}).get("mean"),
+                "avg_power_w": device.get("avg_power_w"),
+                "p99_power_w": device.get("p99_power_w"),
+                "avg_utilization_pct": device.get("avg_utilization_pct"),
+                "avg_memory_used_mb": device.get("avg_memory_used_mb"),
+                "total_energy_j": device.get("total_energy_j"),
+                "prefill_tok_per_j_mean": device.get("prefill_tokens_per_j"),
+                "decode_tok_per_j_mean": device.get("decode_tokens_per_j"),
+            }
+        )
+    return rows
+
+
+def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
+    """Write combined measure rows as a Markdown table."""
+    if not rows:
+        return
+    headers = list(rows[0].keys())
+    lines = ["| " + " | ".join(headers) + " |\n", "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n"]
+    for row in rows:
+        lines.append("| " + " | ".join("" if row.get(h) is None else str(row.get(h)) for h in headers) + " |\n")
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
+    """Create combined measure bar charts."""
+    if not rows:
+        return
+    import matplotlib.pyplot as plt
+
+    models = [str(row.get("model")) for row in rows]
+    specs = [
+        ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill TPS", "tok/s"),
+        ("measure_decode_tps.png", "decode_tps_mean", "Decode TPS", "tok/s"),
+        ("measure_ttft_ms.png", "ttft_ms_mean", "TTFT", "ms"),
+        ("measure_decode_duration_ms.png", "decode_duration_ms_mean", "Decode Duration", "ms"),
+    ]
+    for filename, key, title, xlabel in specs:
+        values = [float(row.get(key) or 0.0) for row in rows]
+        height = max(4.0, 0.35 * len(models) + 1.5)
+        fig, ax = plt.subplots(figsize=(10, height))
+        ax.barh(models, values)
+        ax.set_title(title)
+        ax.set_xlabel(xlabel)
+        ax.grid(axis="x", alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(results_dir / filename, dpi=220)
+        plt.close(fig)
+
+
+def _rebuild_measure_outputs(results_dir: str | Path) -> None:
+    """Rebuild combined text-generation measure CSV, Markdown, and charts."""
+    out_dir = Path(results_dir)
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(out_dir.glob("*_measure.json")):
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if payload.get("benchmark_type") == "measure":
+            payloads.append(payload)
+    if not payloads:
+        print("No measure JSON results found. Nothing to aggregate.")
+        return
+    rows = _collect_measure_rows(payloads)
+    import csv
+
+    with (out_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    _write_measure_markdown(out_dir / "combined_measure.md", rows)
+    _plot_measure_charts(out_dir, rows)
+
+
+def _collect_text_run_targets(
+    args: argparse.Namespace,
+) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None]]]:
+    """Resolve text-generation benchmark targets and core-mode expansion."""
+    available = list_models(tasks="text-generation")
+    available_model_ids = available.get("text-generation", [])
+    if not available_model_ids:
+        print("No text-generation models found.")
+        return "", False, []
+    results_dir = str(
+        Path(args.results_dir).resolve()
+        if args.results_dir
+        else Path(__file__).resolve().parent / "results" / "text_generation"
+    )
+    os.makedirs(results_dir, exist_ok=True)
+    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    targets: list[tuple[str, list[str | None], str, str, str | None]]
+    if args.mxq_dir:
+        mxq_dir = Path(args.mxq_dir).expanduser().resolve()
+        if not mxq_dir.is_dir():
+            raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        targets = _iter_targets_from_mxq_dir(mxq_dir=mxq_dir, available_model_ids=available_model_ids)
+        if not targets:
+            raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
+    else:
+        model_ids = [str(args.model)] if args.model else available_model_ids
+        if args.original_models:
+            model_ids = _resolve_original_model_ids(model_ids)
+        targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
+        if args.mxq_path:
+            targets = [
+                (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
+            ]
+    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
+    for model_id, revision_candidates, label, base, mxq_path in targets:
+        for core_mode in core_modes:
+            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
+            run_targets.append((model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode))
+    return results_dir, disable_npu_specific_args, run_targets
+
+
+def _run_measure(args: argparse.Namespace) -> int:
+    """Run multi-model text-generation fixed prefill/decode benchmarks."""
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    results_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
+    if not run_targets:
+        return 0
+    if disable_npu_specific_args:
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
+    if args.rebuild_charts:
+        _rebuild_measure_outputs(results_dir)
+        return 0
+    for model_id, revision_candidates, label, base, mxq_path, core_mode in tqdm(
+        run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
+    ):
+        if _is_cuda_device(args.device):
+            _clear_cuda_memory(args.device)
+        revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
+        if args.all and not args.mxq_dir and revision is None:
+            print(f"Skipping {label} (missing revisions).")
+            continue
+        json_path = Path(results_dir) / f"{base}_measure.json"
+        if args.skip_existing and json_path.is_file():
+            print(f"Skipping {label} (measure result exists).")
+            continue
+        if _should_precheck_cuda(args):
+            estimated = _estimate_model_weight_bytes(model_id, revision)
+            mem_info = _cuda_memory_info(args.device)
+            if estimated is not None and mem_info is not None:
+                free_b, _ = mem_info
+                required = int(float(estimated) * float(args.cuda_precheck_margin))
+                if free_b < required:
+                    print(
+                        f"Skipping {label} (pre-check VRAM insufficient): "
+                        f"free={_format_gib(free_b)} required~={_format_gib(required)}"
+                    )
+                    _clear_cuda_memory(args.device)
+                    continue
+        pipeline = None
+        try:
+            pipeline = _build_pipeline(
+                model_id,
+                tokenizer=args.tokenizer,
+                revision=revision,
+                device=args.device,
+                device_map=args.device_map,
+                dtype=args.dtype,
+                trust_remote_code=args.trust_remote_code,
+                core_mode=core_mode,
+                mxq_path=mxq_path,
+            )
+            measurer = TPSMeasurer(pipeline)
+            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
+                measurer.measure(
+                    num_prefill=args.prefill,
+                    num_decode=args.decode,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    show_progress=True,
+                    progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
+                )
+            runs: list[dict[str, Any]] = []
+            device_time_series_runs: list[dict[str, Any]] = []
+            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
+                try:
+                    run = measurer.measure(
+                        num_prefill=args.prefill,
+                        num_decode=args.decode,
+                        prefill_chunk_size=resolved_prefill_chunk_size,
+                        show_progress=True,
+                        progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                        on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
+                        on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
+                        on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
+                        on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                    )
+                finally:
+                    _stop_tracker_safe(tracker_prefill)
+                    _stop_tracker_safe(tracker_decode)
+                row = asdict(run)
+                if tracker_prefill is not None and tracker_decode is not None:
+                    prefill_metric = _extract_device_metric(tracker_prefill)
+                    decode_metric = _extract_device_metric(tracker_decode)
+                    row["avg_power_w"] = _weighted_two(
+                        prefill_metric.get("avg_power_w"),
+                        run.prefill_latency,
+                        decode_metric.get("avg_power_w"),
+                        run.decode_duration,
+                    )
+                    row["p99_power_w"] = max(
+                        [
+                            v
+                            for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w"))
+                            if v is not None
+                        ],
+                        default=None,
+                    )
+                    row["avg_utilization_pct"] = _weighted_two(
+                        prefill_metric.get("avg_utilization_pct"),
+                        run.prefill_latency,
+                        decode_metric.get("avg_utilization_pct"),
+                        run.decode_duration,
+                    )
+                    row["avg_memory_used_mb"] = _weighted_two(
+                        prefill_metric.get("avg_memory_used_mb"),
+                        run.prefill_latency,
+                        decode_metric.get("avg_memory_used_mb"),
+                        run.decode_duration,
+                    )
+                    row["total_energy_j"] = (
+                        (row["avg_power_w"] * run.total_time) if row.get("avg_power_w") is not None else None
+                    )
+                    row["prefill_tokens_per_j"] = (
+                        _safe_div(run.prefill_tps, prefill_metric.get("avg_power_w"))
+                        if prefill_metric.get("avg_power_w") is not None
+                        else None
+                    )
+                    row["decode_tokens_per_j"] = (
+                        _safe_div(run.decode_tps, decode_metric.get("avg_power_w"))
+                        if decode_metric.get("avg_power_w") is not None
+                        else None
+                    )
+                    row["prefill_j_per_token"] = (
+                        _safe_div(1.0, row["prefill_tokens_per_j"]) if row.get("prefill_tokens_per_j") else None
+                    )
+                    row["decode_j_per_token"] = (
+                        _safe_div(1.0, row["decode_tokens_per_j"]) if row.get("decode_tokens_per_j") else None
+                    )
+                    device_time_series_runs.append(
+                        {
+                            "prefill": _extract_device_time_series(tracker_prefill),
+                            "decode": _extract_device_time_series(tracker_decode),
+                        }
+                    )
+                runs.append(row)
+            payload = {
+                "model": label,
+                "benchmark_type": "measure",
+                "task": "text-generation",
+                "prefill": args.prefill,
+                "decode": args.decode,
+                "repeat": args.repeat,
+                "warmup": args.warmup,
+                "runs": runs,
+                "summary": {
+                    "prefill_tps": _summary([r["prefill_tps"] for r in runs]),
+                    "decode_tps": _summary([r["decode_tps"] for r in runs]),
+                    "ttft_ms": _summary([r["prefill_latency"] * 1000.0 for r in runs]),
+                    "decode_duration_ms": _summary([r["decode_duration"] * 1000.0 for r in runs]),
+                    "total_time_ms": _summary([r["total_time"] * 1000.0 for r in runs]),
+                    "prefill_npu_latency_pct": _summary(
+                        [r["prefill_npu_latency_pct"] for r in runs if r.get("prefill_npu_latency_pct") is not None]
+                    ),
+                    "decode_npu_latency_pct": _summary(
+                        [r["decode_npu_latency_pct"] for r in runs if r.get("decode_npu_latency_pct") is not None]
+                    ),
+                },
+                "device": _measure_device_payload(runs),
+                "device_time_series_runs": device_time_series_runs,
+            }
+            with json_path.open("w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            print(f"Saved: {json_path.name}")
+        except Exception as e:
+            print(f"Skipping {label} (measure failed): {e}")
+        finally:
+            _release_pipeline(pipeline, args.device)
+    _rebuild_measure_outputs(results_dir)
     return 0
 
 

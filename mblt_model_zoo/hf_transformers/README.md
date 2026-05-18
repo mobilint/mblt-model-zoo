@@ -366,8 +366,8 @@ Note:
 - Some models/backends may enforce a fixed effective input size at runtime.
 
 For TPS benchmark commands, you can use keyword parameters explained in [Keyword Parameters](#keyword-parameters).
-CLI `tps sweep` defaults to `--prefill-range 512:2048:512`, `--cache-lengths 128,512,1024,2048`,
-`--decode-window 32`, and `--plot tps_benchmark.png` when those options are omitted.
+CLI `tps sweep` and transformer benchmark `sweep` subcommands default to `--prefill-range 512:2048:512`, `--cache-lengths 128,512,1024,2048`,
+`--decode-window 32`, and the CLI plot default is `tps_benchmark.png` when omitted.
 
 ## Tests And Benchmark Scripts
 
@@ -379,7 +379,7 @@ CLI `tps sweep` defaults to `--prefill-range 512:2048:512`, `--cache-lengths 128
   - Text-generation and VLM benchmarks default to `--core-mode global8`.
   - Passing `--core-mode all` benchmarks `single`, `global4`, and `global8`, and result filenames include the core-mode suffix.
   - When `--mxq-dir` is used, a single discovered `.mxq` target is reused across every selected core mode.
-  - Text-generation scripts use `--prefill-range`, `--cache-lengths`, and `--decode-window`; VLM scripts use `--llm-prefill-range`, `--llm-cache-lengths`, and `--llm-decode-window`.
+  - Text-generation and VLM benchmark scripts use `--prefill-range`, `--cache-lengths`, and `--decode-window` for sweep subcommands.
 
 ## Model List
 
