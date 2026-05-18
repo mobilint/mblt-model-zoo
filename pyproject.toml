@@ -25,7 +25,7 @@ dependencies = [
     "huggingface-hub",
     "scipy",
     "tqdm",
-    "mblt-tracker>=0.1.0",
+    "mblt-tracker>=0.2.3",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
