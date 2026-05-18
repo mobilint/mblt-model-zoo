@@ -159,6 +159,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
+        assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
         mxq_model = self.npu_backend.mxq_model
         
