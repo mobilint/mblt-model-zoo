@@ -520,6 +520,7 @@ python -m py_compile \
   benchmark/transformers/benchmark_image_text_to_text_models.py \
   benchmark/transformers/search_prefill_chunk_size.py \
   benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/update_prefill_chunk_size_configs.py \
   benchmark/transformers/chart_utils.py
 ```
 
