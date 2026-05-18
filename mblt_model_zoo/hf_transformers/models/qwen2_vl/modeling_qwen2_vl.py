@@ -249,6 +249,24 @@ class MobilintQwen2VLForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
+    @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.prepare_inputs_for_generation, "count_npu_time")
+    def prepare_inputs_for_generation(self, *args: object, count_npu_time: bool = False, **kwargs: object):
+        """Prepare generation inputs while preserving Mobilint timing kwargs.
+
+        Args:
+            *args: Positional arguments forwarded to the upstream Qwen2-VL generation helper.
+            count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
+            **kwargs: Keyword arguments forwarded to the upstream Qwen2-VL generation helper.
+
+        Returns:
+            Model inputs for a generation step.
+        """
+        model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
+        model_inputs["count_npu_time"] = count_npu_time
+        if "prefill_chunk_size" in kwargs:
+            model_inputs["prefill_chunk_size"] = kwargs["prefill_chunk_size"]
+        return model_inputs
+
     @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.forward, "count_npu_time")
     def forward(
         self,

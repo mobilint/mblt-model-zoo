@@ -1,4 +1,5 @@
 import inspect
+import importlib
 
 import pytest
 import torch
@@ -6,6 +7,7 @@ from transformers import GenerationMixin
 
 from mblt_model_zoo.cli import tps as tps_cli
 from mblt_model_zoo.cli.main import build_parser
+from mblt_model_zoo.hf_transformers.models.blip.modeling_blip_text import MobilintBlipTextLMHeadModel
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintGenerationMixin
@@ -18,6 +20,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     _resolve_config_vocab_size,
     _resolve_image_features_tensor,
     _supports_fake_decode_prefill,
+    _get_npu_timing_target,
     npu_latency_pct,
 )
 
@@ -100,6 +103,13 @@ class _DummyVLMContainer:
 
     def __init__(self, language_model) -> None:
         self.model = type("NestedModel", (), {"language_model": language_model})()
+
+
+class _DummyNestedTimingModel:
+    """VLM-like model exposing NPU timing only through the nested language model."""
+
+    def __init__(self) -> None:
+        self.model = type("NestedModel", (), {"language_model": _DummyNPUModel()})()
 
 
 class _DummyFakePrefillCache:
@@ -357,6 +367,25 @@ def test_cmd_sweep_routes_vlm_task(monkeypatch):
     assert calls == ["vlm:image-text-to-text", "text:text-generation"]
 
 
+def test_cmd_measure_routes_vlm_task(monkeypatch):
+    calls: list[str] = []
+
+    def fake_vlm_measure(args):
+        calls.append(f"vlm:{args.task}")
+        return 0
+
+    def fake_text_measure(args):
+        calls.append(f"text:{args.task}")
+        return 0
+
+    monkeypatch.setattr(tps_cli, "_run_vlm_measure", fake_vlm_measure)
+    monkeypatch.setattr(tps_cli, "_run_text_measure", fake_text_measure)
+
+    assert tps_cli._cmd_measure(type("Args", (), {"task": "image-text-to-text"})()) == 0
+    assert tps_cli._cmd_measure(type("Args", (), {"task": "text-generation"})()) == 0
+    assert calls == ["vlm:image-text-to-text", "text:text-generation"]
+
+
 def test_resolve_config_vocab_size_uses_top_level_config():
     config = _DummyConfig(vocab_size=128)
 
@@ -381,6 +410,12 @@ def test_supports_fake_decode_prefill_requires_npu_and_cache_model():
 
 def test_supports_fake_decode_prefill_detects_nested_vlm_language_model():
     assert _supports_fake_decode_prefill(_DummyVLMContainer(_DummyNPUModel())) is True
+
+
+def test_npu_timing_target_detects_nested_vlm_language_model():
+    model = _DummyNestedTimingModel()
+
+    assert _get_npu_timing_target(model) is model.model.language_model
 
 
 def test_tps_measure_full_uses_fake_decode_prefill_for_npu_models():
@@ -640,6 +675,7 @@ def test_resolve_image_features_tensor_requires_tensor():
     ("model_cls", "method_name"),
     [
         (MobilintQwen2VLForConditionalGeneration, "forward"),
+        (MobilintQwen2VLForConditionalGeneration, "prepare_inputs_for_generation"),
         (MobilintQwen3VLForConditionalGeneration, "forward"),
         (MobilintQwen3VLForConditionalGeneration, "prepare_inputs_for_generation"),
     ],
@@ -648,6 +684,38 @@ def test_mobilint_generation_hooks_accept_count_npu_time(model_cls, method_name:
     signature = inspect.signature(getattr(model_cls, method_name))
 
     assert "count_npu_time" in signature.parameters
+
+
+@pytest.mark.parametrize(
+    "model_path",
+    [
+        "mblt_model_zoo.hf_transformers.models.cohere2.modeling_cohere2:MobilintCohere2ForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.exaone.modeling_exaone:MobilintExaoneForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.exaone4.modeling_exaone4:MobilintExaone4ForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.llama.modeling_llama:MobilintLlamaForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.qwen2.modeling_qwen2:MobilintQwen2ForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl:MobilintQwen2VLForConditionalGeneration",
+        "mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl:MobilintQwen2VLTextModel",
+        "mblt_model_zoo.hf_transformers.models.qwen3.modeling_qwen3:MobilintQwen3ForCausalLM",
+        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl:MobilintQwen3VLForConditionalGeneration",
+        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl:MobilintQwen3VLTextModel",
+    ],
+)
+def test_mobilint_generation_hooks_expose_inputs_embeds(model_path: str):
+    module_name, class_name = model_path.split(":")
+    model_cls = getattr(importlib.import_module(module_name), class_name)
+
+    forward_signature = inspect.signature(model_cls.forward)
+    prepare_signature = inspect.signature(model_cls.prepare_inputs_for_generation)
+
+    assert "inputs_embeds" in forward_signature.parameters
+    assert "inputs_embeds" in prepare_signature.parameters
+
+
+def test_blip_text_generation_hook_exposes_inputs_embeds():
+    signature = inspect.signature(MobilintBlipTextLMHeadModel.prepare_inputs_for_generation)
+
+    assert "inputs_embeds" in signature.parameters
 
 
 def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytest.MonkeyPatch):

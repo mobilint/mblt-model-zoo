@@ -546,6 +546,13 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
+    """Dispatch a single TPS measurement to the text or VLM measurement path."""
+    if _is_vlm_task(args.task):
+        return _run_vlm_measure(args)
+    return _run_text_measure(args)
+
+
+def _run_text_measure(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
@@ -786,6 +793,168 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "prefill_j_per_tok": _summary(prefill_j_per_tok),
                 "decode_j_per_tok": _summary(decode_j_per_tok),
             },
+        }
+        _write_json(args.json, payload)
+        print(f"wrote: {args.json}")
+
+    return 0
+
+
+def _run_vlm_measure(args: argparse.Namespace) -> int:
+    """Run a single VLM TPS measurement with separate vision and LLM metrics."""
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
+    pipeline = _build_pipeline(
+        task=args.task,
+        model=args.model,
+        tokenizer=args.tokenizer,
+        device=args.device,
+        trust_remote_code=args.trust_remote_code,
+        dtype=args.dtype,
+        device_map=args.device_map,
+        revision=args.revision,
+        embedding_weight=args.embedding_weight,
+        mxq_path=args.mxq_path,
+        core_mode=args.core_mode,
+        target_cores=args.target_cores,
+        target_clusters=args.target_clusters,
+    )
+
+    from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
+
+    measurer = VLMTPSMeasurer(pipeline)
+    tracker = _build_device_tracker(args, pipeline)
+    _print_device_status(args, tracker)
+
+    for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
+        measurer.measure(
+            image_resolution=args.image_resolution,
+            num_decode=args.decode,
+            repeat=1,
+            prompt=args.prompt,
+            show_progress=False,
+        )
+
+    runs = []
+    device_metrics = []
+    for _ in tqdm(range(args.repeat), desc="measure runs", leave=False):
+        if tracker is not None:
+            tracker.start()
+        try:
+            run = measurer.measure(
+                image_resolution=args.image_resolution,
+                num_decode=args.decode,
+                repeat=1,
+                prompt=args.prompt,
+                show_progress=False,
+            )[0]
+        finally:
+            if tracker is not None:
+                tracker.stop()
+        runs.append(run)
+        if tracker is not None:
+            device_metrics.append(_extract_device_metric(tracker))
+
+    vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
+    vision_fps = [r.vision_fps for r in runs]
+    prefill_tps = [r.llm.prefill_tps for r in runs]
+    decode_tps = [r.llm.decode_tps for r in runs]
+    ttft_ms = [r.llm.prefill_latency * 1000.0 for r in runs]
+    decode_ms = [r.llm.decode_duration * 1000.0 for r in runs]
+    total_ms = [(r.vision_encode_latency + r.llm.total_time) * 1000.0 for r in runs]
+    prefill_npu_latency_pct = [
+        pct for r in runs if (pct := r.llm.prefill_npu_latency_pct) is not None
+    ]
+    decode_npu_latency_pct = [
+        pct for r in runs if (pct := r.llm.decode_npu_latency_pct) is not None
+    ]
+    total_npu_latency_pct = [
+        pct for r in runs if (pct := r.llm.total_npu_latency_pct) is not None
+    ]
+
+    avg_power_w = [m["avg_power_w"] for m in device_metrics if m.get("avg_power_w") is not None]
+    p99_power_w = [m["p99_power_w"] for m in device_metrics if m.get("p99_power_w") is not None]
+    avg_utilization_pct = [
+        m["avg_utilization_pct"] for m in device_metrics if m.get("avg_utilization_pct") is not None
+    ]
+    p99_utilization_pct = [
+        m["p99_utilization_pct"] for m in device_metrics if m.get("p99_utilization_pct") is not None
+    ]
+    avg_temperature_c = [m["avg_temperature_c"] for m in device_metrics if m.get("avg_temperature_c") is not None]
+    p99_temperature_c = [m["p99_temperature_c"] for m in device_metrics if m.get("p99_temperature_c") is not None]
+    avg_memory_used_mb = [m["avg_memory_used_mb"] for m in device_metrics if m.get("avg_memory_used_mb") is not None]
+    p99_memory_used_mb = [m["p99_memory_used_mb"] for m in device_metrics if m.get("p99_memory_used_mb") is not None]
+    total_memory_mb = [m["total_memory_mb"] for m in device_metrics if m.get("total_memory_mb") is not None]
+    avg_memory_used_pct = [
+        m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None
+    ]
+    p99_memory_used_pct = [
+        m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None
+    ]
+
+    print(f"warmup: {args.warmup}")
+    print(f"runs: {args.repeat}")
+    print(
+        f"image resolution: {args.image_resolution} | "
+        f"llm prefill tokens: {runs[0].llm.num_prefill} | decode tokens: {runs[0].llm.num_decode}"
+    )
+    _print_summary_header()
+    _print_summary("vision_encode", vision_ms, "ms")
+    _print_summary("vision_fps", vision_fps, "fps")
+    _print_summary("llm_prefill_tps", prefill_tps, "tok/s")
+    _print_summary("llm_decode_tps", decode_tps, "tok/s")
+    _print_summary("llm_ttft", ttft_ms, "ms")
+    _print_summary("llm_decode_duration", decode_ms, "ms")
+    _print_summary("total", total_ms, "ms")
+    _print_summary("llm_prefill_npu_lat", prefill_npu_latency_pct, "%")
+    _print_summary("llm_decode_npu_lat", decode_npu_latency_pct, "%")
+    _print_summary("llm_total_npu_lat", total_npu_latency_pct, "%")
+    if args.device_metrics:
+        _print_summary("avg_power", avg_power_w, "W")
+        _print_summary("p99_power", p99_power_w, "W")
+        _print_summary("avg_utilization", avg_utilization_pct, "%")
+        _print_summary("p99_utilization", p99_utilization_pct, "%")
+        _print_summary("avg_temperature", avg_temperature_c, "C")
+        _print_summary("p99_temperature", p99_temperature_c, "C")
+        _print_summary("avg_memory_used", avg_memory_used_mb, "MB")
+        _print_summary("p99_memory_used", p99_memory_used_mb, "MB")
+        _print_summary("total_memory", total_memory_mb, "MB")
+        _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
+        _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
+    _print_summary_footer()
+
+    if args.json:
+        payload = {
+            "task": args.task,
+            "model": args.model,
+            "prompt": args.prompt,
+            "image_resolution": args.image_resolution,
+            "repeat": args.repeat,
+            "runs": [asdict(r) for r in runs],
+            "summary": {
+                "vision_encode_ms": _summary(vision_ms),
+                "vision_fps": _summary(vision_fps),
+                "llm_prefill_tps": _summary(prefill_tps),
+                "llm_decode_tps": _summary(decode_tps),
+                "llm_ttft_ms": _summary(ttft_ms),
+                "llm_decode_duration_ms": _summary(decode_ms),
+                "total_ms": _summary(total_ms),
+                "llm_prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
+                "llm_decode_npu_latency_pct": _summary(decode_npu_latency_pct),
+                "llm_total_npu_latency_pct": _summary(total_npu_latency_pct),
+                "avg_power_w": _summary(avg_power_w),
+                "p99_power_w": _summary(p99_power_w),
+                "avg_utilization_pct": _summary(avg_utilization_pct),
+                "p99_utilization_pct": _summary(p99_utilization_pct),
+                "avg_temperature_c": _summary(avg_temperature_c),
+                "p99_temperature_c": _summary(p99_temperature_c),
+                "avg_memory_used_mb": _summary(avg_memory_used_mb),
+                "p99_memory_used_mb": _summary(p99_memory_used_mb),
+                "total_memory_mb": _summary(total_memory_mb),
+                "avg_memory_used_pct": _summary(avg_memory_used_pct),
+                "p99_memory_used_pct": _summary(p99_memory_used_pct),
+            },
+            "device_runs": device_metrics,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -1718,6 +1887,17 @@ def add_tps_parser(
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
     p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--image-resolution",
+        type=_parse_positive_int,
+        default=224,
+        help="VLM only: synthetic image resolution for single measurement",
+    )
+    p_measure.add_argument(
+        "--prompt",
+        default="Describe the image in one sentence.",
+        help="VLM only: fixed prompt used for synthetic image-text input",
+    )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
 

@@ -22,6 +22,7 @@ def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: 
     """
 
     def decorator(wrapper: Callable) -> Callable:
+        wrapper_signature = inspect.signature(wrapper)
         wrapper = wraps(wrapped)(wrapper)
         signature = inspect.signature(wrapped)
         parameters = list(signature.parameters.values())
@@ -33,9 +34,12 @@ def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: 
         for name in extra_keyword_names:
             if name in existing:
                 continue
+            extra_parameter = wrapper_signature.parameters.get(name)
+            default = False if extra_parameter is None else extra_parameter.default
+            annotation = bool if extra_parameter is None else extra_parameter.annotation
             parameters.insert(
                 insert_at,
-                inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=False, annotation=bool),
+                inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=annotation),
             )
             insert_at += 1
         wrapper.__signature__ = signature.replace(parameters=parameters)
@@ -45,6 +49,11 @@ def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: 
 
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
+    @with_mobilint_generation_signature(
+        GenerationMixin.prepare_inputs_for_generation,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
     def prepare_inputs_for_generation(
         self,
         *args: Any,

@@ -78,6 +78,35 @@ def _get_cache_mxq_model(model: object) -> object | None:
     return None
 
 
+def _get_npu_timing_target(model: object) -> object | None:
+    """Resolve the Mobilint object that exposes benchmark NPU timing APIs."""
+    for candidate in (model, _get_language_model_candidate(model)):
+        if candidate is not None and hasattr(candidate, "npu_backend"):
+            return candidate
+    return None
+
+
+def _reset_npu_timing(target: object | None) -> None:
+    """Reset aggregate NPU timing counters when the target supports it."""
+    reset_npu_timing = getattr(target, "reset_npu_timing", None)
+    if callable(reset_npu_timing):
+        reset_npu_timing()
+
+
+def _read_aggregate_npu_timing(target: object | None) -> tuple[bool, float, float]:
+    """Return aggregate prefill/decode NPU timing from a Mobilint timing target."""
+    get_npu_timing = getattr(target, "get_npu_timing", None)
+    if not callable(get_npu_timing):
+        return False, 0.0, 0.0
+    timing = get_npu_timing()
+    aggregate_prefill_time = timing.get("prefill_time")
+    aggregate_decode_time = timing.get("decode_time")
+    aggregate_calls = int(timing.get("prefill_calls", 0)) + int(timing.get("decode_calls", 0))
+    if aggregate_calls <= 0:
+        return False, 0.0, 0.0
+    return True, float(aggregate_prefill_time or 0.0), float(aggregate_decode_time or 0.0)
+
+
 def _is_mobilint_npu_model(model: object) -> bool:
     """Return whether a model or its language model is Mobilint NPU-backed."""
     if hasattr(model, "npu_backend"):
@@ -519,7 +548,7 @@ class TPSMeasurer:
         plt.switch_backend('Agg') 
 
     def _supports_npu_timing(self) -> bool:
-        return hasattr(self.model, "npu_backend")
+        return _get_npu_timing_target(self.model) is not None
 
     @staticmethod
     def _start_trace(trace_path: Union[str, None]):
@@ -575,11 +604,10 @@ class TPSMeasurer:
             )
             if prefill_chunk_size is not None:
                 gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
-            if self._supports_npu_timing():
+            npu_timing_target = _get_npu_timing_target(self.model)
+            if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
-                reset_npu_timing = getattr(self.model, "reset_npu_timing", None)
-                if callable(reset_npu_timing):
-                    reset_npu_timing()
+                _reset_npu_timing(npu_timing_target)
 
             # 3. Execution
             thread_error: list[Exception] = []
@@ -627,7 +655,7 @@ class TPSMeasurer:
                     decoded_tokens += 1
                     if token_pbar is not None:
                         token_pbar.update(1)
-                    npu_time = getattr(self.model, "npu_time", None)
+                    npu_time = getattr(npu_timing_target, "npu_time", None)
                     if npu_time is not None:
                         has_npu_time = True
                         if decoded_tokens == 1:
@@ -650,16 +678,13 @@ class TPSMeasurer:
             if first_token_time_ns is None:
                 raise RuntimeError("Generation ended before the first token.")
 
-            get_npu_timing = getattr(self.model, "get_npu_timing", None)
-            if callable(get_npu_timing):
-                timing = get_npu_timing()
-                aggregate_prefill_time = timing.get("prefill_time")
-                aggregate_decode_time = timing.get("decode_time")
-                aggregate_calls = int(timing.get("prefill_calls", 0)) + int(timing.get("decode_calls", 0))
-                if aggregate_calls > 0:
-                    npu_prefill_time = float(aggregate_prefill_time or 0.0)
-                    npu_decode_time = float(aggregate_decode_time or 0.0)
-                    has_npu_time = True
+            has_aggregate_npu_time, aggregate_prefill_time, aggregate_decode_time = _read_aggregate_npu_timing(
+                npu_timing_target
+            )
+            if has_aggregate_npu_time:
+                npu_prefill_time = aggregate_prefill_time
+                npu_decode_time = aggregate_decode_time
+                has_npu_time = True
 
             # 4. Calculation
             prefill_latency_ns = first_token_time_ns - t_start_ns
@@ -755,6 +780,10 @@ class TPSMeasurer:
             )
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
+                npu_timing_target = _get_npu_timing_target(self.model)
+                _reset_npu_timing(npu_timing_target)
+            else:
+                npu_timing_target = None
 
             thread_error: list[Exception] = []
 
@@ -789,7 +818,7 @@ class TPSMeasurer:
                     decoded_tokens += 1
                     if token_pbar is not None:
                         token_pbar.update(1)
-                    npu_time = getattr(self.model, "npu_time", None)
+                    npu_time = getattr(npu_timing_target, "npu_time", None)
                     if npu_time is not None:
                         has_npu_time = True
                         npu_decode_time += npu_time
@@ -803,6 +832,11 @@ class TPSMeasurer:
                 raise stream_error
             if token_pbar is not None:
                 token_pbar.close()
+
+            has_aggregate_npu_time, _, aggregate_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+            if has_aggregate_npu_time:
+                npu_decode_time = aggregate_decode_time
+                has_npu_time = True
 
             decode_duration_ns = t_end_ns - t_start_ns
             decode_duration = _ns_to_seconds(decode_duration_ns)
@@ -1052,7 +1086,7 @@ class VLMTPSMeasurer:
 
     @staticmethod
     def _supports_npu_timing(model) -> bool:
-        return hasattr(model, "npu_backend")
+        return _get_npu_timing_target(model) is not None
 
     def _build_inputs(self, image_resolution: int, prompt: str):
         image = torch.randint(
@@ -1221,8 +1255,10 @@ class VLMTPSMeasurer:
         )
         if prefill_chunk_size is not None:
             gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
-        if self._supports_npu_timing(lm_for_npu) or self._supports_npu_timing(gen_model):
+        npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
+        if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
+            _reset_npu_timing(npu_timing_target)
 
         thread_error: list[Exception] = []
 
@@ -1260,6 +1296,14 @@ class VLMTPSMeasurer:
         if thread_error:
             raise RuntimeError(f"VLM LLM-phase generate failed: {thread_error[0]}") from thread_error[0]
         assert first_token_time_ns is not None
+
+        has_aggregate_npu_time, aggregate_prefill_time, aggregate_decode_time = _read_aggregate_npu_timing(
+            npu_timing_target
+        )
+        if has_aggregate_npu_time:
+            npu_prefill_time = aggregate_prefill_time
+            npu_decode_time = aggregate_decode_time
+            has_npu_time = True
 
         prefill_latency_ns = first_token_time_ns - t_start_ns
         decode_duration_ns = t_end_ns - first_token_time_ns
@@ -1331,7 +1375,9 @@ class VLMTPSMeasurer:
             past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
         past_key_values.fake_prefill(cache_len)
 
-        count_npu_time = self._supports_npu_timing(lm_for_npu)
+        npu_timing_target = _get_npu_timing_target(lm_for_npu)
+        count_npu_time = npu_timing_target is not None
+        _reset_npu_timing(npu_timing_target)
         t_start_ns = time.perf_counter_ns()
         decoded_tokens = 0
         npu_decode_time = 0.0
@@ -1364,6 +1410,11 @@ class VLMTPSMeasurer:
                     npu_decode_time += npu_time
 
         t_end_ns = time.perf_counter_ns()
+
+        has_aggregate_npu_time, _, aggregate_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+        if has_aggregate_npu_time:
+            npu_decode_time = aggregate_decode_time
+            has_npu_time = True
 
         decode_duration_ns = t_end_ns - t_start_ns
         decode_duration = _ns_to_seconds(decode_duration_ns)

@@ -195,13 +195,21 @@ class MobilintBlipTextLMHeadModel(MobilintBlipTextPreTrainedModel, MobilintGener
             cross_attentions=None,
         )
 
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None, **model_kwargs):
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        **model_kwargs,
+    ):
         # Overwrite -- hardcoded key return (`is_decoder=True`)
 
         model_inputs = super().prepare_inputs_for_generation(
             input_ids,
             past_key_values=past_key_values,
             attention_mask=attention_mask,
+            inputs_embeds=inputs_embeds,
             **model_kwargs,
         )
         model_inputs["is_decoder"] = True
