@@ -3,7 +3,7 @@ import importlib
 
 import pytest
 import torch
-from transformers import GenerationMixin
+from transformers import GenerationConfig, GenerationMixin
 
 from mblt_model_zoo.cli import tps as tps_cli
 from mblt_model_zoo.cli.main import build_parser
@@ -21,6 +21,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     _resolve_image_features_tensor,
     _supports_fake_decode_prefill,
     _get_npu_timing_target,
+    _temporarily_sanitize_generation_config,
     npu_latency_pct,
 )
 
@@ -72,8 +73,13 @@ class _DummyGenerateNPUModel(_DummyNPUModel):
     def __init__(self) -> None:
         super().__init__()
         self.config = _DummyConfig(vocab_size=128)
+        self.generation_config = GenerationConfig()
+        self.generation_config.temperature = 0.6
+        self.generation_config.top_p = 0.95
+        self.generation_config.top_k = 20
         self.device = torch.device("cpu")
         self.generate_kwargs = None
+        self.generation_config_during_generate = None
 
     def eval(self) -> "_DummyGenerateNPUModel":
         """Match the minimal model API used by TPSMeasurer."""
@@ -82,6 +88,12 @@ class _DummyGenerateNPUModel(_DummyNPUModel):
     def generate(self, **kwargs) -> torch.Tensor:
         """Record generation kwargs and stop the streamer without emitting tokens."""
         self.generate_kwargs = kwargs
+        self.generation_config_during_generate = {
+            "do_sample": self.generation_config.do_sample,
+            "temperature": self.generation_config.temperature,
+            "top_p": self.generation_config.top_p,
+            "top_k": self.generation_config.top_k,
+        }
         kwargs["streamer"].end()
         return kwargs["input_ids"]
 
@@ -635,6 +647,41 @@ def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
     assert model.generate_kwargs["min_new_tokens"] == 4
     assert model.generate_kwargs["max_new_tokens"] == 4
     assert result.decode_prefill_mode == "fake"
+
+
+def test_temporarily_sanitize_generation_config_restores_sampling_flags():
+    model = _DummyGenerateNPUModel()
+
+    with _temporarily_sanitize_generation_config(model):
+        assert model.generation_config.do_sample is False
+        assert model.generation_config.temperature is None
+        assert model.generation_config.top_p is None
+        assert model.generation_config.top_k is None
+
+    assert model.generation_config.temperature == 0.6
+    assert model.generation_config.top_p == 0.95
+    assert model.generation_config.top_k == 20
+
+
+def test_text_fake_prefill_generate_sanitizes_model_config_without_kwargs():
+    model = _DummyGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    measurer.measure_decode_with_fake_prefill(cache_len=8, num_decode=4)
+
+    assert "generation_config" not in model.generate_kwargs
+    assert "temperature" not in model.generate_kwargs
+    assert "top_p" not in model.generate_kwargs
+    assert "top_k" not in model.generate_kwargs
+    assert model.generation_config_during_generate == {
+        "do_sample": False,
+        "temperature": None,
+        "top_p": None,
+        "top_k": None,
+    }
+    assert model.generation_config.temperature == 0.6
+    assert model.generation_config.top_p == 0.95
+    assert model.generation_config.top_k == 20
 
 
 def test_resolve_image_features_tensor_uses_tensor():

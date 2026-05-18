@@ -1,4 +1,5 @@
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Thread
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, cast
@@ -12,6 +13,7 @@ from .cache_utils import MobilintCache
 
 
 _NS_PER_SECOND = 1_000_000_000
+_SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
 
 
 def _ns_to_seconds(value_ns: int) -> float:
@@ -24,6 +26,35 @@ def _seconds_to_ns(value: Optional[float]) -> Optional[int]:
     if value is None:
         return None
     return int(round(value * _NS_PER_SECOND))
+
+
+@contextmanager
+def _temporarily_sanitize_generation_config(model: object):
+    """Temporarily remove sampling-only flags from a model generation config.
+
+    Args:
+        model: Model whose ``generation_config`` should be sanitized during benchmark generation.
+    """
+    generation_config = getattr(model, "generation_config", None)
+    if generation_config is None:
+        yield
+        return None
+
+    original_values = {
+        flag_name: getattr(generation_config, flag_name)
+        for flag_name in ("do_sample", *_SAMPLING_GENERATION_FLAGS)
+        if hasattr(generation_config, flag_name)
+    }
+    try:
+        if hasattr(generation_config, "do_sample"):
+            setattr(generation_config, "do_sample", False)
+        for flag_name in _SAMPLING_GENERATION_FLAGS:
+            if hasattr(generation_config, flag_name):
+                setattr(generation_config, flag_name, None)
+        yield
+    finally:
+        for flag_name, value in original_values.items():
+            setattr(generation_config, flag_name, value)
 
 
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
@@ -614,7 +645,8 @@ class TPSMeasurer:
 
             def _run_generate():
                 try:
-                    self.model.generate(**gen_kwargs)
+                    with _temporarily_sanitize_generation_config(self.model):
+                        self.model.generate(**gen_kwargs)
                 except Exception as e:
                     thread_error.append(e)
                     try:
@@ -789,7 +821,8 @@ class TPSMeasurer:
 
             def _run_generate():
                 try:
-                    self.model.generate(**gen_kwargs)
+                    with _temporarily_sanitize_generation_config(self.model):
+                        self.model.generate(**gen_kwargs)
                 except Exception as e:
                     thread_error.append(e)
                     try:
@@ -1264,7 +1297,8 @@ class VLMTPSMeasurer:
 
         def _run_generate():
             try:
-                gen_model.generate(**gen_kwargs)
+                with _temporarily_sanitize_generation_config(gen_model):
+                    gen_model.generate(**gen_kwargs)
             except Exception as e:
                 thread_error.append(e)
                 streamer.end()
