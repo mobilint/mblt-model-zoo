@@ -11,6 +11,21 @@ from transformers import TextIteratorStreamer
 from .cache_utils import MobilintCache
 
 
+_NS_PER_SECOND = 1_000_000_000
+
+
+def _ns_to_seconds(value_ns: int) -> float:
+    """Convert nanoseconds to seconds."""
+    return value_ns / _NS_PER_SECOND
+
+
+def _seconds_to_ns(value: Optional[float]) -> Optional[int]:
+    """Convert seconds to integer nanoseconds."""
+    if value is None:
+        return None
+    return int(round(value * _NS_PER_SECOND))
+
+
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
     """Return the NPU latency percentage of total latency.
 
@@ -187,6 +202,15 @@ class SingleMeasurement:
     total_npu_latency_pct: Optional[float] = None
     npu_prefill_time: Optional[float] = None
     npu_decode_time: Optional[float] = None
+    prefill_latency_ns: Optional[int] = None
+    decode_duration_ns: Optional[int] = None
+    total_time_ns: Optional[int] = None
+    avg_total_prefill_token_latency_ns: Optional[int] = None
+    avg_npu_prefill_token_latency_ns: Optional[int] = None
+    avg_total_decode_token_latency_ns: Optional[int] = None
+    avg_npu_decode_token_latency_ns: Optional[int] = None
+    npu_prefill_time_ns: Optional[int] = None
+    npu_decode_time_ns: Optional[int] = None
     avg_power_w: Optional[float] = None
     p99_power_w: Optional[float] = None
     prefill_avg_power_w: Optional[float] = None
@@ -226,6 +250,27 @@ class SingleMeasurement:
     total_tokens_per_j: Optional[float] = None
     total_j_per_token: Optional[float] = None
     decode_prefill_mode: str = "real"
+
+    def __post_init__(self) -> None:
+        """Populate nanosecond timing fields from second-based fields when omitted."""
+        if self.prefill_latency_ns is None:
+            self.prefill_latency_ns = _seconds_to_ns(self.prefill_latency)
+        if self.decode_duration_ns is None:
+            self.decode_duration_ns = _seconds_to_ns(self.decode_duration)
+        if self.total_time_ns is None:
+            self.total_time_ns = _seconds_to_ns(self.total_time)
+        if self.avg_total_prefill_token_latency_ns is None:
+            self.avg_total_prefill_token_latency_ns = _seconds_to_ns(self.avg_total_prefill_token_latency)
+        if self.avg_npu_prefill_token_latency_ns is None:
+            self.avg_npu_prefill_token_latency_ns = _seconds_to_ns(self.avg_npu_prefill_token_latency)
+        if self.avg_total_decode_token_latency_ns is None:
+            self.avg_total_decode_token_latency_ns = _seconds_to_ns(self.avg_total_decode_token_latency)
+        if self.avg_npu_decode_token_latency_ns is None:
+            self.avg_npu_decode_token_latency_ns = _seconds_to_ns(self.avg_npu_decode_token_latency)
+        if self.npu_prefill_time_ns is None:
+            self.npu_prefill_time_ns = _seconds_to_ns(self.npu_prefill_time)
+        if self.npu_decode_time_ns is None:
+            self.npu_decode_time_ns = _seconds_to_ns(self.npu_decode_time)
 
 @dataclass
 class SweepData:
@@ -532,6 +577,9 @@ class TPSMeasurer:
                 gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
             if self._supports_npu_timing():
                 gen_kwargs["count_npu_time"] = True
+                reset_npu_timing = getattr(self.model, "reset_npu_timing", None)
+                if callable(reset_npu_timing):
+                    reset_npu_timing()
 
             # 3. Execution
             thread_error: list[Exception] = []
@@ -548,12 +596,12 @@ class TPSMeasurer:
 
             thread = Thread(target=_run_generate)
             
-            t_start = time.perf_counter()
+            t_start_ns = time.perf_counter_ns()
             if on_prefill_start is not None:
                 on_prefill_start()
             thread.start()
             
-            first_token_time = None
+            first_token_time_ns = None
             decoded_tokens = 0
             npu_prefill_time = 0.0
             npu_decode_time = 0.0
@@ -570,8 +618,8 @@ class TPSMeasurer:
             stream_error: Exception | None = None
             try:
                 for _ in streamer:
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter()
+                    if first_token_time_ns is None:
+                        first_token_time_ns = time.perf_counter_ns()
                         if on_prefill_end is not None:
                             on_prefill_end()
                         if on_decode_start is not None:
@@ -588,7 +636,7 @@ class TPSMeasurer:
                             npu_decode_time += npu_time
             except Exception as e:
                 stream_error = e
-            t_end = time.perf_counter()
+            t_end_ns = time.perf_counter_ns()
             thread.join()
             if thread_error:
                 raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
@@ -599,21 +647,37 @@ class TPSMeasurer:
             if token_pbar is not None:
                 token_pbar.close()
             
-            if first_token_time is None:
+            if first_token_time_ns is None:
                 raise RuntimeError("Generation ended before the first token.")
 
+            get_npu_timing = getattr(self.model, "get_npu_timing", None)
+            if callable(get_npu_timing):
+                timing = get_npu_timing()
+                aggregate_prefill_time = timing.get("prefill_time")
+                aggregate_decode_time = timing.get("decode_time")
+                aggregate_calls = int(timing.get("prefill_calls", 0)) + int(timing.get("decode_calls", 0))
+                if aggregate_calls > 0:
+                    npu_prefill_time = float(aggregate_prefill_time or 0.0)
+                    npu_decode_time = float(aggregate_decode_time or 0.0)
+                    has_npu_time = True
+
             # 4. Calculation
-            prefill_latency = first_token_time - t_start
+            prefill_latency_ns = first_token_time_ns - t_start_ns
+            decode_duration_ns = t_end_ns - first_token_time_ns
+            total_time_ns = t_end_ns - t_start_ns
+            prefill_latency = _ns_to_seconds(prefill_latency_ns)
             prefill_tps = num_prefill / prefill_latency if prefill_latency > 0 else 0
             
-            decode_duration = t_end - first_token_time
+            decode_duration = _ns_to_seconds(decode_duration_ns)
             decode_tps = (decoded_tokens - 1) / decode_duration if decode_duration > 0 else 0
             
-            total_time = t_end - t_start
+            total_time = _ns_to_seconds(total_time_ns)
 
             decode_count = max(decoded_tokens - 1, 0)
             avg_total_prefill_token_latency = prefill_latency / num_prefill if num_prefill > 0 else 0
             avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0
+            avg_total_prefill_token_latency_ns = prefill_latency_ns // num_prefill if num_prefill > 0 else 0
+            avg_total_decode_token_latency_ns = decode_duration_ns // decode_count if decode_count > 0 else 0
             avg_npu_prefill_token_latency = (
                 npu_prefill_time / num_prefill if has_npu_time and num_prefill > 0 else None
             )
@@ -645,6 +709,11 @@ class TPSMeasurer:
                 total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
                 npu_prefill_time=npu_prefill_time if has_npu_time else None,
                 npu_decode_time=npu_decode_time if has_npu_time else None,
+                prefill_latency_ns=prefill_latency_ns,
+                decode_duration_ns=decode_duration_ns,
+                total_time_ns=total_time_ns,
+                avg_total_prefill_token_latency_ns=avg_total_prefill_token_latency_ns,
+                avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
             )
         finally:
             self._stop_trace(trace_handle)
@@ -700,7 +769,7 @@ class TPSMeasurer:
                         pass
 
             thread = Thread(target=_run_generate)
-            t_start = time.perf_counter()
+            t_start_ns = time.perf_counter_ns()
             thread.start()
 
             decoded_tokens = 0
@@ -726,7 +795,7 @@ class TPSMeasurer:
                         npu_decode_time += npu_time
             except Exception as e:
                 stream_error = e
-            t_end = time.perf_counter()
+            t_end_ns = time.perf_counter_ns()
             thread.join()
             if thread_error:
                 raise RuntimeError(f"fake decode generate failed: {thread_error[0]}") from thread_error[0]
@@ -735,10 +804,12 @@ class TPSMeasurer:
             if token_pbar is not None:
                 token_pbar.close()
 
-            decode_duration = t_end - t_start
+            decode_duration_ns = t_end_ns - t_start_ns
+            decode_duration = _ns_to_seconds(decode_duration_ns)
             decode_count = decoded_tokens
             decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
             avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+            avg_total_decode_token_latency_ns = decode_duration_ns // decode_count if decode_count > 0 else 0
             avg_npu_decode_token_latency = (
                 npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
             )
@@ -763,6 +834,11 @@ class TPSMeasurer:
                 total_npu_latency_pct=npu_latency_pct(decode_duration, total_npu_time),
                 npu_prefill_time=0.0 if has_npu_time else None,
                 npu_decode_time=npu_decode_time if has_npu_time else None,
+                prefill_latency_ns=0,
+                decode_duration_ns=decode_duration_ns,
+                total_time_ns=decode_duration_ns,
+                avg_total_prefill_token_latency_ns=0,
+                avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
                 decode_prefill_mode="fake",
             )
         finally:
@@ -1158,18 +1234,18 @@ class VLMTPSMeasurer:
                 streamer.end()
 
         thread = Thread(target=_run_generate)
-        t_start = time.perf_counter()
+        t_start_ns = time.perf_counter_ns()
         thread.start()
 
-        first_token_time = None
+        first_token_time_ns = None
         decoded_tokens = 0
         npu_prefill_time = 0.0
         npu_decode_time = 0.0
         has_npu_time = False
 
         for _ in streamer:
-            if first_token_time is None:
-                first_token_time = time.perf_counter()
+            if first_token_time_ns is None:
+                first_token_time_ns = time.perf_counter_ns()
             decoded_tokens += 1
             npu_time = getattr(lm_for_npu, "npu_time", None)
             if npu_time is not None:
@@ -1179,22 +1255,27 @@ class VLMTPSMeasurer:
                 else:
                     npu_decode_time += npu_time
 
-        t_end = time.perf_counter()
+        t_end_ns = time.perf_counter_ns()
         thread.join()
         if thread_error:
             raise RuntimeError(f"VLM LLM-phase generate failed: {thread_error[0]}") from thread_error[0]
-        assert first_token_time is not None
+        assert first_token_time_ns is not None
 
-        prefill_latency = first_token_time - t_start
+        prefill_latency_ns = first_token_time_ns - t_start_ns
+        decode_duration_ns = t_end_ns - first_token_time_ns
+        total_time_ns = t_end_ns - t_start_ns
+        prefill_latency = _ns_to_seconds(prefill_latency_ns)
         prefill_tps = seq_len / prefill_latency if prefill_latency > 0 else 0.0
 
-        decode_duration = t_end - first_token_time
+        decode_duration = _ns_to_seconds(decode_duration_ns)
         decode_count = max(decoded_tokens - 1, 0)
         decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
-        total_time = t_end - t_start
+        total_time = _ns_to_seconds(total_time_ns)
 
         avg_total_prefill_token_latency = prefill_latency / seq_len if seq_len > 0 else 0.0
         avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+        avg_total_prefill_token_latency_ns = prefill_latency_ns // seq_len if seq_len > 0 else 0
+        avg_total_decode_token_latency_ns = decode_duration_ns // decode_count if decode_count > 0 else 0
         avg_npu_prefill_token_latency = (
             npu_prefill_time / seq_len if has_npu_time and seq_len > 0 else None
         )
@@ -1220,6 +1301,11 @@ class VLMTPSMeasurer:
             total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
             npu_prefill_time=npu_prefill_time if has_npu_time else None,
             npu_decode_time=npu_decode_time if has_npu_time else None,
+            prefill_latency_ns=prefill_latency_ns,
+            decode_duration_ns=decode_duration_ns,
+            total_time_ns=total_time_ns,
+            avg_total_prefill_token_latency_ns=avg_total_prefill_token_latency_ns,
+            avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
         )
 
     def _measure_llm_decode_with_fake_prefill(self, cache_len: int, num_decode: int) -> SingleMeasurement:
@@ -1246,7 +1332,7 @@ class VLMTPSMeasurer:
         past_key_values.fake_prefill(cache_len)
 
         count_npu_time = self._supports_npu_timing(lm_for_npu)
-        t_start = time.perf_counter()
+        t_start_ns = time.perf_counter_ns()
         decoded_tokens = 0
         npu_decode_time = 0.0
         has_npu_time = False
@@ -1277,12 +1363,14 @@ class VLMTPSMeasurer:
                     has_npu_time = True
                     npu_decode_time += npu_time
 
-        t_end = time.perf_counter()
+        t_end_ns = time.perf_counter_ns()
 
-        decode_duration = t_end - t_start
+        decode_duration_ns = t_end_ns - t_start_ns
+        decode_duration = _ns_to_seconds(decode_duration_ns)
         decode_count = decoded_tokens
         decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
         avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
+        avg_total_decode_token_latency_ns = decode_duration_ns // decode_count if decode_count > 0 else 0
         avg_npu_decode_token_latency = (
             npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
         )
@@ -1305,6 +1393,11 @@ class VLMTPSMeasurer:
             total_npu_latency_pct=npu_latency_pct(decode_duration, total_npu_time),
             npu_prefill_time=0.0 if has_npu_time else None,
             npu_decode_time=npu_decode_time if has_npu_time else None,
+            prefill_latency_ns=0,
+            decode_duration_ns=decode_duration_ns,
+            total_time_ns=decode_duration_ns,
+            avg_total_prefill_token_latency_ns=0,
+            avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
             decode_prefill_mode="fake",
         )
 

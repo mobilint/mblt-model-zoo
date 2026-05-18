@@ -2,11 +2,14 @@ import inspect
 
 import pytest
 import torch
+from transformers import GenerationMixin
 
 from mblt_model_zoo.cli import tps as tps_cli
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
+from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
     SingleMeasurement,
@@ -419,6 +422,80 @@ def test_single_measurement_json_exposes_npu_latency_pct():
     assert measurement.total_npu_latency_pct == pytest.approx(40.0)
 
 
+def test_mobilint_model_mixin_aggregates_npu_timing_without_token_records():
+    model = object.__new__(MobilintModelMixin)
+
+    model.reset_npu_timing()
+    model._record_npu_timing("prefill", 0.25)
+    model._record_npu_timing("decode", 0.1)
+    model._record_npu_timing("decode", 0.2)
+
+    timing = model.get_npu_timing()
+
+    assert timing["prefill_time"] == pytest.approx(0.25)
+    assert timing["decode_time"] == pytest.approx(0.3)
+    assert timing["prefill_calls"] == 1
+    assert timing["decode_calls"] == 2
+    assert set(timing) == {"prefill_time", "decode_time", "prefill_calls", "decode_calls"}
+
+
+def test_single_measurement_populates_nanosecond_timings():
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=2.0,
+        decode_duration=1.0,
+        decode_tps=2.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.5,
+        avg_npu_prefill_token_latency=0.25,
+        avg_total_decode_token_latency=0.5,
+        avg_npu_decode_token_latency=0.1,
+        npu_prefill_time=1.0,
+        npu_decode_time=0.2,
+    )
+
+    assert measurement.prefill_latency_ns == 2_000_000_000
+    assert measurement.decode_duration_ns == 1_000_000_000
+    assert measurement.total_time_ns == 3_000_000_000
+    assert measurement.avg_total_prefill_token_latency_ns == 500_000_000
+    assert measurement.avg_npu_prefill_token_latency_ns == 250_000_000
+    assert measurement.avg_total_decode_token_latency_ns == 500_000_000
+    assert measurement.avg_npu_decode_token_latency_ns == 100_000_000
+    assert measurement.npu_prefill_time_ns == 1_000_000_000
+    assert measurement.npu_decode_time_ns == 200_000_000
+
+
+def test_single_measurement_preserves_explicit_nanosecond_timings():
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=2.0,
+        decode_duration=1.0,
+        decode_tps=2.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.5,
+        avg_npu_prefill_token_latency=None,
+        avg_total_decode_token_latency=0.5,
+        avg_npu_decode_token_latency=None,
+        prefill_latency_ns=123,
+        decode_duration_ns=456,
+        total_time_ns=579,
+        avg_total_prefill_token_latency_ns=12,
+        avg_total_decode_token_latency_ns=45,
+    )
+
+    assert measurement.prefill_latency_ns == 123
+    assert measurement.decode_duration_ns == 456
+    assert measurement.total_time_ns == 579
+    assert measurement.avg_total_prefill_token_latency_ns == 12
+    assert measurement.avg_total_decode_token_latency_ns == 45
+    assert measurement.avg_npu_prefill_token_latency_ns is None
+    assert measurement.avg_npu_decode_token_latency_ns is None
+
+
 def test_cli_iter_rows_for_csv_includes_npu_latency_pct():
     result = BenchmarkResult()
     result.prefill_sweep.x_values.append(8)
@@ -518,6 +595,30 @@ def test_mobilint_generation_hooks_accept_count_npu_time(model_cls, method_name:
     signature = inspect.signature(getattr(model_cls, method_name))
 
     assert "count_npu_time" in signature.parameters
+
+
+def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytest.MonkeyPatch):
+    class _DummyGenerationModel(MobilintGenerationMixin):
+        pass
+
+    def _base_prepare_inputs_for_generation(*args, **kwargs):
+        del args, kwargs
+        return {"input_ids": torch.tensor([[1]])}
+
+    monkeypatch.setattr(
+        GenerationMixin,
+        "prepare_inputs_for_generation",
+        _base_prepare_inputs_for_generation,
+    )
+
+    model_inputs = _DummyGenerationModel().prepare_inputs_for_generation(
+        torch.tensor([[1]]),
+        count_npu_time=True,
+        prefill_chunk_size=64,
+    )
+
+    assert model_inputs["count_npu_time"] is True
+    assert model_inputs["prefill_chunk_size"] == 64
 
 
 @pytest.mark.parametrize("spec", ["", "1", "1:2", "1:2:0", "2:1:1", "a:b:c"])

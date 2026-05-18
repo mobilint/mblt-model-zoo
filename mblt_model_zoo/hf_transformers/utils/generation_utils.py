@@ -1,7 +1,7 @@
 from abc import ABC
 import inspect
 from functools import wraps
-from typing import Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 import qbruntime
 from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
@@ -45,6 +45,29 @@ def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: 
 
 
 class MobilintGenerationMixin(ABC, GenerationMixin):
+    def prepare_inputs_for_generation(
+        self,
+        *args: Any,
+        count_npu_time: bool = False,
+        prefill_chunk_size: Optional[int] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Prepare generation inputs while preserving Mobilint benchmark kwargs.
+
+        Args:
+            *args: Positional arguments forwarded to the upstream generation helper.
+            count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
+            prefill_chunk_size: Optional Mobilint prefill chunk size.
+            **kwargs: Keyword arguments forwarded to the upstream generation helper.
+
+        Returns:
+            Prepared model inputs for the next generation step.
+        """
+        model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
+        model_inputs["count_npu_time"] = count_npu_time
+        model_inputs["prefill_chunk_size"] = prefill_chunk_size
+        return model_inputs
+
     def get_cache_mxq_model(self) -> qbruntime.Model:
         if isinstance(self, MobilintModelMixin):
             return self.get_mxq_model()
