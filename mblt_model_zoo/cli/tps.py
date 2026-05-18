@@ -30,6 +30,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    extract_device_time_series as _extract_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -350,6 +353,10 @@ def _extract_device_metric(tracker: Any) -> dict[str, Optional[float]]:
     return _extract_device_metric_common(tracker)
 
 
+def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]]]:
+    return _extract_device_time_series_common(tracker)
+
+
 def _weighted_two(
     a: Optional[float],
     a_weight: float,
@@ -586,6 +593,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
         )
     runs = []
+    run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
@@ -608,6 +616,12 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
+            run_phase_device_time_series.append(
+                {
+                    "prefill": _extract_device_time_series(tracker_prefill),
+                    "decode": _extract_device_time_series(tracker_decode),
+                }
+            )
             _enrich_single_run_device(
                 run=run,
                 prefill_metric=prefill_metric,
@@ -793,6 +807,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "prefill_j_per_tok": _summary(prefill_j_per_tok),
                 "decode_j_per_tok": _summary(decode_j_per_tok),
             },
+            "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -837,6 +852,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 
     runs = []
     device_metrics = []
+    device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
     for _ in tqdm(range(args.repeat), desc="measure runs", leave=False):
         if tracker is not None:
             tracker.start()
@@ -854,6 +870,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         runs.append(run)
         if tracker is not None:
             device_metrics.append(_extract_device_metric(tracker))
+            device_time_series_runs.append(_extract_device_time_series(tracker))
 
     vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
     vision_fps = [r.vision_fps for r in runs]
@@ -955,6 +972,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "p99_memory_used_pct": _summary(p99_memory_used_pct),
             },
             "device_runs": device_metrics,
+            "device_time_series_runs": device_time_series_runs,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -1038,6 +1056,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     run_decode_avg_mem_used_pct: list[float] = []
     run_decode_p99_mem_used_pct: list[float] = []
     run_phase_device: list[dict[str, dict[str, Optional[float]]]] = []
+    run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
@@ -1064,6 +1083,12 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
             run_phase_device.append({"prefill": prefill_metric, "decode": decode_metric})
+            run_phase_device_time_series.append(
+                {
+                    "prefill": _extract_device_time_series(tracker_prefill),
+                    "decode": _extract_device_time_series(tracker_decode),
+                }
+            )
             prefill_dur = float(getattr(runs[-1], "prefill_phase_duration_s", 0.0) or 0.0)
             decode_dur = float(getattr(runs[-1], "decode_phase_duration_s", 0.0) or 0.0)
             avg_power = _weighted_two(
@@ -1357,6 +1382,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                 "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
             "device_runs": run_phase_device,
+            "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -1423,6 +1449,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         vision_energy_j = []
         vision_img_per_j = []
         vision_j_per_img = []
+        vision_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
         for _ in tqdm(range(args.repeat), desc=f"vision@{resolution}", leave=False):
             if tracker is not None:
                 tracker.start()
@@ -1438,7 +1465,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     tracker.stop()
             vision_runs.append(single)
             if tracker is not None:
-                metric = tracker.get_metric()
+                metric = _extract_device_metric(tracker)
+                vision_device_time_series_runs.append(_extract_device_time_series(tracker))
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_utilization = metric.get("avg_utilization_pct")
@@ -1579,6 +1607,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "vision_img_per_j": _summary(vision_img_per_j),
                     "vision_j_per_img": _summary(vision_j_per_img),
                 },
+                "device_time_series_runs": vision_device_time_series_runs,
             }
         )
 
@@ -1593,6 +1622,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             show_progress=False,
         )
     llm_runs = []
+    llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
     for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
         if tracker is not None:
             tracker.start()
@@ -1610,6 +1640,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 tracker.stop()
         if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
             metric = _extract_device_metric(tracker)
+            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
             _enrich_single_run_device(
                 run=run,
                 prefill_metric=metric,
@@ -1770,6 +1801,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "repeat": args.repeat,
                     "aggregate": asdict(llm_result),
                     "runs": [asdict(r) for r in llm_runs],
+                    "device_time_series_runs": llm_device_time_series_runs,
                     "summary": {
                         "llm_prefill_tps_last": _summary(llm_prefill_tps),
                         "llm_decode_tps_last": _summary(llm_decode_tps),

@@ -52,6 +52,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    extract_device_time_series as _extract_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -466,6 +469,10 @@ def _build_device_tracker(args: argparse.Namespace, pipeline: Any):
 
 def _extract_device_metric(tracker: Any) -> dict[str, float | None]:
     return _extract_device_metric_common(tracker)
+
+
+def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]]]:
+    return _extract_device_time_series_common(tracker)
 
 
 def _weighted_two(
@@ -1056,10 +1063,15 @@ def main(argv: list[str] | None = None) -> int:
                 "Avg decode token latency (last): "
                 f"total={avg_total * 1000.0:.3f}ms npu={avg_npu_str} npu_pct={npu_pct_str}"
             )
-        device_payload: dict[str, float | None] | None = None
+        device_payload: dict[str, Any] | None = None
+        device_time_series_payload: dict[str, dict[str, list[dict[str, float]]]] | None = None
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
+            device_time_series_payload = {
+                "prefill": _extract_device_time_series(tracker_prefill),
+                "decode": _extract_device_time_series(tracker_decode),
+            }
             prefill_phase_duration_s = float(getattr(result, "prefill_phase_duration_s", 0.0) or 0.0)
             decode_phase_duration_s = float(getattr(result, "decode_phase_duration_s", 0.0) or 0.0)
             prefill_avg_power = prefill_metric.get("avg_power_w")
@@ -1226,6 +1238,7 @@ def main(argv: list[str] | None = None) -> int:
             "model": label,
             "benchmark": asdict(result),
             "device": device_payload,
+            "device_time_series": device_time_series_payload,
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

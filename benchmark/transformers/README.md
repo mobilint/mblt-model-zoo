@@ -33,7 +33,13 @@ inference and model downloads.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
+  - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
+  - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids.
   - `--no-device-metrics`: Disables device metric collection.
+  - Console summaries show aggregate scalar metrics such as average and p99 power, utilization,
+    temperature, and memory. JSON outputs also include device metric time-series under fields such
+    as `device_time_series`, `device_time_series_runs`, or phase-specific `prefill`/`decode`
+    entries. CSV outputs keep aggregate columns only.
 
 ## Quick CLI Usage
 
@@ -73,6 +79,10 @@ Representative output metrics:
 - `ttft`: Time-to-first-token based on prefill latency.
 - `decode_duration`: Decode phase duration.
 - `avg_power`, `total_energy`, `avg_memory_used`: Device metrics when enabled.
+
+When `--json` is set and device metrics are enabled, the JSON file includes per-run device
+time-series for power, utilization, temperature, and memory. The time-series is not printed in the
+summary table.
 
 ### Sweep Prefill and Decode Cache Lengths
 
@@ -155,6 +165,20 @@ mblt-model-zoo tps measure \
   --decode 128 \
   --repeat 1 \
   --json benchmark/transformers/results/gpu_measure.json
+```
+
+For Mobilint NPU runs, use `--device-npu-id` to restrict tracking to one or more logical NPU cards:
+
+```bash
+mblt-model-zoo tps measure \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --revision W8 \
+  --device cpu \
+  --device-backend npu \
+  --device-npu-id 0 \
+  --prefill 512 \
+  --decode 128 \
+  --json benchmark/transformers/results/npu_measure.json
 ```
 
 ### Sweep Image-Text-to-Text Models

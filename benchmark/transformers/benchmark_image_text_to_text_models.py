@@ -50,6 +50,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    extract_device_time_series as _extract_device_time_series,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -224,6 +227,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         energy_vals: list[float] = []
         img_per_j_vals: list[float] = []
         j_per_img_vals: list[float] = []
+        device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
         for _ in tqdm(
             range(args.repeat),
             desc=f"{label} vision@{resolution} runs",
@@ -240,6 +244,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             runs.append(run)
             if tracker is not None:
                 metric = _extract_device_metric(tracker)
+                device_time_series_runs.append(_extract_device_time_series(tracker))
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_util = metric.get("avg_utilization_pct")
@@ -314,6 +319,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "vision_img_per_j": _summary(img_per_j_vals),
                     "vision_j_per_img": _summary(j_per_img_vals),
                 },
+                "device_time_series_runs": device_time_series_runs,
             }
         )
         for idx, (lat, vfps) in enumerate(runs, start=1):
@@ -382,6 +388,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_decode_tok_per_j: list[float] = []
     llm_prefill_j_per_tok: list[float] = []
     llm_decode_j_per_tok: list[float] = []
+    llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
     for _ in tqdm(
         range(args.repeat),
         desc=f"{label} llm@{llm_resolution} runs",
@@ -403,6 +410,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             _stop_tracker_safe(tracker)
         if tracker is not None:
             metric = _extract_device_metric(tracker)
+            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
             run.avg_power_w = metric.get("avg_power_w")
             run.p99_power_w = metric.get("p99_power_w")
             run.avg_utilization_pct = metric.get("avg_utilization_pct")
@@ -560,6 +568,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             },
             "llm_results": {
                 "runs": [asdict(r) for r in llm_runs],
+                "device_time_series_runs": llm_device_time_series_runs,
                 "summary": {
                     "llm_prefill_tps": _summary(llm_prefill),
                     "llm_decode_tps": _summary(llm_decode),

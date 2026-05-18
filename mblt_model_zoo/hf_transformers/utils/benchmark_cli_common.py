@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, Protocol, TypeAlias
 
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
@@ -21,6 +22,25 @@ DEVICE_METRIC_KEYS = (
     "avg_memory_used_pct",
     "p99_memory_used_pct",
 )
+
+DeviceMetricValue: TypeAlias = float | None
+DeviceMetricMap: TypeAlias = dict[str, DeviceMetricValue]
+DeviceTracePoint: TypeAlias = dict[str, float]
+DeviceTimeSeriesMap: TypeAlias = dict[str, list[DeviceTracePoint]]
+RawDeviceMetricMap: TypeAlias = Mapping[str, object]
+
+
+class DeviceTracker(Protocol):
+    """Runtime protocol for mblt-tracker objects used by benchmark helpers."""
+
+    def start(self) -> None:
+        """Start device metric collection."""
+
+    def stop(self) -> None:
+        """Stop device metric collection."""
+
+    def get_metric(self) -> RawDeviceMetricMap:
+        """Return raw metrics from mblt-tracker."""
 
 
 def parse_positive_int(spec: str) -> int:
@@ -42,18 +62,27 @@ def parse_positive_int_optional(spec: str | None) -> int | None:
     return parse_positive_int(text)
 
 
-def parse_int_list_optional(spec: str | None) -> list[int] | None:
+def parse_non_negative_int_list_optional(spec: str | None, *, name: str = "device id") -> list[int] | None:
+    """Parse a comma-separated list of non-negative integer device IDs."""
     if spec is None:
         return None
     text = spec.strip()
     if not text:
         return None
-    values = [int(x.strip()) for x in text.split(",") if x.strip()]
+    try:
+        values = [int(x.strip()) for x in text.split(",") if x.strip()]
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"{name} values must be integers") from e
     if not values:
         return None
     if any(v < 0 for v in values):
-        raise argparse.ArgumentTypeError("device-gpu-id values must be >= 0")
+        raise argparse.ArgumentTypeError(f"{name} values must be >= 0")
     return values
+
+
+def parse_int_list_optional(spec: str | None) -> list[int] | None:
+    """Parse comma-separated GPU tracker IDs for backward-compatible callers."""
+    return parse_non_negative_int_list_optional(spec, name="device-gpu-id")
 
 
 def iter_core_modes(core_mode: str | None) -> list[str | None]:
@@ -160,6 +189,13 @@ def infer_gpu_ids(device: str | None, device_gpu_id: Optional[list[int]]) -> Opt
     return None
 
 
+def infer_npu_ids(device_npu_id: list[int] | None) -> int | list[int] | None:
+    """Return NPU IDs in the shape accepted by mblt-tracker."""
+    if device_npu_id is None:
+        return None
+    return device_npu_id[0] if len(device_npu_id) == 1 else device_npu_id
+
+
 def add_device_tracking_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--device-metrics",
@@ -178,6 +214,12 @@ def add_device_tracking_args(parser: argparse.ArgumentParser) -> None:
         type=parse_int_list_optional,
         default=None,
         help="comma-separated GPU ids for device tracking (e.g., 0,1)",
+    )
+    parser.add_argument(
+        "--device-npu-id",
+        type=lambda spec: parse_non_negative_int_list_optional(spec, name="device-npu-id"),
+        default=None,
+        help="comma-separated NPU logical card ids for device tracking (e.g., 0,1)",
     )
 
 
@@ -216,7 +258,7 @@ def add_pipeline_device_args(
     )
 
 
-def build_device_tracker(args: argparse.Namespace, pipeline: Any):
+def build_device_tracker(args: argparse.Namespace, pipeline: Any) -> DeviceTracker | None:
     if not args.device_metrics:
         return None
 
@@ -261,8 +303,9 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any):
     if backend == "npu":
         from mblt_tracker import NPUDeviceTracker
 
+        npu_id = infer_npu_ids(getattr(args, "device_npu_id", None))
         try:
-            return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC)
+            return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC, npu_id=npu_id)
         except Exception as e:
             print(f"[device] failed to initialize NPU tracker: {e}")
             return None
@@ -280,13 +323,13 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any):
     return None
 
 
-def build_phase_trackers(args: argparse.Namespace, pipeline: Any) -> tuple[Any, Any]:
+def build_phase_trackers(args: argparse.Namespace, pipeline: Any) -> tuple[DeviceTracker | None, DeviceTracker | None]:
     if not args.device_metrics:
         return None, None
     return build_device_tracker(args, pipeline), build_device_tracker(args, pipeline)
 
 
-def stop_tracker_safe(tracker: Any) -> None:
+def stop_tracker_safe(tracker: DeviceTracker | None) -> None:
     if tracker is None:
         return
     try:
@@ -295,13 +338,58 @@ def stop_tracker_safe(tracker: Any) -> None:
         pass
 
 
-def extract_device_metric(tracker: Any) -> dict[str, float | None]:
+def extract_device_metric(tracker: DeviceTracker) -> DeviceMetricMap:
+    """Normalize raw mblt-tracker metrics to the benchmark scalar schema."""
     metric = tracker.get_metric()
-    out: dict[str, float | None] = {}
+    out: DeviceMetricMap = {}
     for key in DEVICE_METRIC_KEYS:
         val = metric.get(key)
         out[key] = float(val) if isinstance(val, (int, float)) else None
     return out
+
+
+def _normalize_trace(raw_trace: object) -> list[DeviceTracePoint]:
+    """Convert mblt-tracker trace tuples into JSON-safe time-series points."""
+    if not isinstance(raw_trace, list):
+        return []
+    out: list[DeviceTracePoint] = []
+    for item in raw_trace:
+        if not isinstance(item, tuple) or len(item) != 2:
+            continue
+        timestamp_s, value = item
+        if isinstance(timestamp_s, (int, float)) and isinstance(value, (int, float)):
+            out.append({"timestamp_s": float(timestamp_s), "value": float(value)})
+    return out
+
+
+def _trace_from_method(tracker: DeviceTracker, method_name: str) -> list[DeviceTracePoint]:
+    method = getattr(tracker, method_name, None)
+    if not callable(method):
+        return []
+    try:
+        return _normalize_trace(method())
+    except Exception:
+        return []
+
+
+def _trace_from_attr(tracker: DeviceTracker, attr_name: str) -> list[DeviceTracePoint]:
+    return _normalize_trace(getattr(tracker, attr_name, []))
+
+
+def extract_device_time_series(tracker: DeviceTracker) -> DeviceTimeSeriesMap:
+    """Extract JSON-safe device metric time-series from mblt-tracker 0.2.3."""
+    trace_getters: dict[str, Callable[[], list[DeviceTracePoint]]] = {
+        "power_w": lambda: _trace_from_method(tracker, "get_trace"),
+        "utilization_pct": lambda: _trace_from_method(tracker, "get_util_trace"),
+        "temperature_c": lambda: _trace_from_method(tracker, "get_temp_trace"),
+        "memory_used_mb": lambda: _trace_from_attr(tracker, "_mem_used_trace"),
+        "memory_used_pct": lambda: _trace_from_attr(tracker, "_mem_used_pct_trace"),
+        "npu_power_w": lambda: _trace_from_method(tracker, "get_npu_power_trace"),
+        "ddr_power_w": lambda: _trace_from_method(tracker, "get_ddr_power_trace"),
+        "pmic_power_w": lambda: _trace_from_method(tracker, "get_pmic_power_trace"),
+        "goldfinger_power_w": lambda: _trace_from_method(tracker, "get_goldfinger_power_trace"),
+    }
+    return {key: getter() for key, getter in trace_getters.items()}
 
 
 def weighted_two(
@@ -328,7 +416,7 @@ def weighted_two(
     return (values[0] * weights[0] + values[1] * weights[1]) / total_w
 
 
-def print_device_status(args: argparse.Namespace, tracker: Any) -> None:
+def print_device_status(args: argparse.Namespace, tracker: DeviceTracker | None) -> None:
     if not args.device_metrics:
         print("[device] disabled by --no-device-metrics")
         return

@@ -1,5 +1,5 @@
-import inspect
 import importlib
+import inspect
 
 import pytest
 import torch
@@ -10,20 +10,25 @@ from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.hf_transformers.models.blip.modeling_blip_text import MobilintBlipTextLMHeadModel
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
-from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintGenerationMixin
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    DEVICE_METRIC_KEYS,
+    extract_device_metric,
+    extract_device_time_series,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
     SingleMeasurement,
     TPSMeasurer,
     VLMTPSMeasurer,
+    _get_npu_timing_target,
     _resolve_config_vocab_size,
     _resolve_image_features_tensor,
     _supports_fake_decode_prefill,
-    _get_npu_timing_target,
     _temporarily_sanitize_generation_config,
     npu_latency_pct,
 )
+from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintGenerationMixin
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 
 class _DummyConfig:
@@ -820,6 +825,104 @@ def test_cli_tps_device_backend_none_parsing():
         ]
     )
     assert args.device_backend == "none"
+
+
+def test_extract_device_metric_normalizes_tracker_023_shape():
+    class _FakeTracker:
+        def get_metric(self):
+            return {
+                "avg_power_w": 12,
+                "p99_power_w": 15.5,
+                "avg_utilization_pct": 80,
+                "p99_utilization_pct": 95,
+                "avg_temperature_c": "hot",
+                "p99_temperature_c": 70,
+                "avg_memory_used_mb": 1024,
+                "p99_memory_used_mb": 2048,
+                "total_memory_mb": 4096,
+                "avg_memory_used_pct": 25,
+                "p99_memory_used_pct": 50,
+                "samples": 3,
+                "gpu": {0: {"avg_power_w": 12.0}},
+                "npu": {0: {"avg_power_w": 12.0}},
+            }
+
+    metric = extract_device_metric(_FakeTracker())
+
+    assert tuple(metric.keys()) == DEVICE_METRIC_KEYS
+    assert metric["avg_power_w"] == 12.0
+    assert metric["avg_temperature_c"] is None
+    assert all(value is None or isinstance(value, float) for value in metric.values())
+
+
+def test_extract_device_time_series_normalizes_tracker_023_traces():
+    class _FakeTracker:
+        _mem_used_trace = [(1.0, 512), ("bad", 768), (2.0, "bad")]
+        _mem_used_pct_trace = [(1.0, 25.0)]
+
+        def get_trace(self):
+            return [(1, 10.5), (2.0, 11)]
+
+        def get_util_trace(self):
+            return [(1.0, 70.0)]
+
+        def get_temp_trace(self):
+            return [(1.0, 55.0), [2.0, 56.0]]
+
+        def get_npu_power_trace(self):
+            return [(1.0, 8.0)]
+
+        def get_ddr_power_trace(self):
+            return [(1.0, 1.5)]
+
+        def get_pmic_power_trace(self):
+            return [(1.0, 0.5)]
+
+        def get_goldfinger_power_trace(self):
+            return [(1.0, 12.0)]
+
+    series = extract_device_time_series(_FakeTracker())
+
+    assert series["power_w"] == [
+        {"timestamp_s": 1.0, "value": 10.5},
+        {"timestamp_s": 2.0, "value": 11.0},
+    ]
+    assert series["temperature_c"] == [{"timestamp_s": 1.0, "value": 55.0}]
+    assert series["memory_used_mb"] == [{"timestamp_s": 1.0, "value": 512.0}]
+    assert series["goldfinger_power_w"] == [{"timestamp_s": 1.0, "value": 12.0}]
+
+
+def test_cli_tps_device_npu_id_parsing():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--device-npu-id",
+            "0,1",
+        ]
+    )
+
+    assert args.device_npu_id == [0, 1]
+
+
+def test_cli_tps_device_npu_id_rejects_negative_values():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--device-npu-id",
+                "-1",
+            ]
+        )
+
+    assert excinfo.value.code == 2
 
 
 @pytest.mark.parametrize(
