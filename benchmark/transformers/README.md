@@ -29,6 +29,15 @@ inference and model downloads.
 - Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
   `--device cpu` and `--device-backend npu` when those options are omitted. Explicit user values
   always take precedence.
+- CLI defaults and benchmark-script defaults are intentionally different:
+  - `mblt-model-zoo tps sweep` defaults to `--prefill-range 512:2048:512`,
+    `--cache-lengths 128,512,1024,2048`, `--decode-window 32`, and `--plot tps_benchmark.png`.
+  - `benchmark_text_generation_models.py` defaults to `--prefill-range 128:512:128`,
+    `--cache-lengths 1024,2048,4096,8192`, `--decode-window 128`, and
+    `--core-mode global8`.
+  - `benchmark_image_text_to_text_models.py` uses LLM-specific option names and defaults to
+    `--llm-prefill-range 128:512:128`, `--llm-cache-lengths 1024,2048,4096,8192`,
+    `--llm-decode-window 128`, and `--core-mode global8`.
 - `device metrics`: Collects power, energy, utilization, and memory metrics.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
@@ -217,7 +226,8 @@ core-mode sweeps, result table generation, and chart generation.
 ### Benchmark Text-Generation Models
 
 `benchmark_text_generation_models.py` runs a prefill sweep and a cache-length decode sweep for the
-text-generation models returned by `mblt_model_zoo.hf_transformers.utils.list_models`.
+text-generation models returned by `mblt_model_zoo.hf_transformers.utils.list_models`. Its sweep
+option names match the TPS CLI, but the script defaults are optimized for multi-model runs.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py \
@@ -317,7 +327,8 @@ python benchmark/transformers/benchmark_text_generation_models.py \
 ### Benchmark Image-Text-to-Text Models
 
 `benchmark_image_text_to_text_models.py` measures the vision stage and the LLM stage of
-image-text-to-text models.
+image-text-to-text models. Unlike the TPS CLI VLM path, this script uses LLM-prefixed sweep option
+names: `--llm-prefill-range`, `--llm-cache-lengths`, and `--llm-decode-window`.
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py \
@@ -477,11 +488,14 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 ### Measurement Range
 
 - `--prefill`, `--decode`: Single-case token counts for CLI `measure`.
-- `--prefill-range`: Text-generation prefill sweep range in `start:end:step` format.
-- `--cache-lengths`: Cache lengths for decode sweep.
-- `--decode-window`: Decode token window measured at each cache length.
+- `--prefill-range`: Text-generation prefill sweep range in `start:end:step` format. This is also
+  used by `mblt-model-zoo tps sweep --task image-text-to-text` for the VLM LLM-stage sweep.
+- `--cache-lengths`: Cache lengths for decode sweep. This is also used by the TPS CLI VLM path.
+- `--decode-window`: Decode token window measured at each cache length. This is also used by the TPS
+  CLI VLM path.
 - `--image-resolutions`: Image resolutions for the VLM vision stage.
-- `--prefill-range`, `--cache-lengths`, `--decode-window`: Text and VLM LLM-stage sweep ranges.
+- `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`: LLM-stage sweep ranges for
+  `benchmark_image_text_to_text_models.py`.
 - `--repeat`: Number of measured repeats.
 - `--warmup`: Number of warmup runs before measured runs.
 
@@ -493,6 +507,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
 - `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`.
+- `--device-npu-id`: NPU tracker target logical card id, such as `0` or `0,1`.
 
 ### Result Management
 
@@ -507,10 +522,10 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 ## Safe Validation Commands
 
 The following commands validate syntax and CLI option wiring without running model inference or
-downloading models.
+downloading models. In this repository, use the project `uv` environment when available.
 
 ```bash
-python -m py_compile \
+uv run python -m py_compile \
   benchmark/common/chart_utils.py \
   benchmark/common/io_utils.py \
   benchmark/common/argparse_utils.py \
@@ -525,11 +540,11 @@ python -m py_compile \
 ```
 
 ```bash
-python benchmark/transformers/benchmark_text_generation_models.py --help
-python benchmark/transformers/benchmark_image_text_to_text_models.py --help
-python benchmark/transformers/search_prefill_chunk_size.py --help
-python benchmark/transformers/plot_compare_benchmark_results.py --help
-python benchmark/transformers/update_prefill_chunk_size_configs.py --help
-mblt-model-zoo tps measure --help
-mblt-model-zoo tps sweep --help
+uv run python benchmark/transformers/benchmark_text_generation_models.py --help
+uv run python benchmark/transformers/benchmark_image_text_to_text_models.py --help
+uv run python benchmark/transformers/search_prefill_chunk_size.py --help
+uv run python benchmark/transformers/plot_compare_benchmark_results.py --help
+uv run python benchmark/transformers/update_prefill_chunk_size_configs.py --help
+uv run mblt-model-zoo tps measure --help
+uv run mblt-model-zoo tps sweep --help
 ```
