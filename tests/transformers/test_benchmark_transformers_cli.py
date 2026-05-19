@@ -29,7 +29,7 @@ def test_text_benchmark_measure_defaults() -> None:
     assert args.decode == 32
     assert args.repeat == 1
     assert args.warmup == 1
-    assert args.core_mode is None
+    assert args.core_mode == "global8"
     assert args.prefill_chunk_size is None
 
 
@@ -41,7 +41,7 @@ def test_text_benchmark_sweep_defaults() -> None:
     assert args.prefill_range == (512, 2048, 512)
     assert args.cache_lengths == [128, 512, 1024, 2048]
     assert args.decode_window == 32
-    assert args.core_mode is None
+    assert args.core_mode == "global8"
 
 
 def test_vlm_benchmark_requires_subcommand() -> None:
@@ -62,7 +62,7 @@ def test_vlm_benchmark_measure_defaults() -> None:
     assert args.decode == 32
     assert args.repeat == 1
     assert args.warmup == 1
-    assert args.core_mode is None
+    assert args.core_mode == "global8"
     assert args.prompt == "Describe the image in one sentence."
 
 
@@ -92,6 +92,27 @@ def test_benchmark_batch_flags(module, command) -> None:
     assert parser.parse_args([command, "--non-batch"]).batch_mode == "non_batch"
     with pytest.raises(SystemExit):
         parser.parse_args([command, "--batch", "--non-batch"])
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
+    """Verify batch LLM benchmarks default to the only supported single core mode."""
+    args = module._build_arg_parser().parse_args([command, "--batch"])
+
+    module._resolve_runtime_defaults(args, [command, "--batch"])
+
+    assert args.core_mode == "single"
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_batch_rejects_non_single_core_mode(module, command) -> None:
+    """Verify explicit non-single core modes are rejected for batch LLM benchmarks."""
+    args = module._build_arg_parser().parse_args([command, "--batch", "--core-mode", "global8"])
+
+    with pytest.raises(SystemExit, match="only supports --core-mode single"):
+        module._resolve_runtime_defaults(args, [command, "--batch", "--core-mode", "global8"])
 
 
 def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:

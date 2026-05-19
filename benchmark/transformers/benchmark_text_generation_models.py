@@ -968,8 +968,8 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--core-mode",
         choices=[*list(_CORE_MODE_CHOICES_COMMON), "all"],
-        default=None,
-        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: None)",
+        default="global8",
+        help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
     parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated measured runs")
     parser.add_argument("--skip-existing", action="store_true", help="skip models with existing outputs")
@@ -1057,12 +1057,23 @@ def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
+def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bool) -> None:
+    """Apply the single-core constraint for batch LLM benchmarks."""
+    if args.batch_mode != _BATCH_MODE_BATCH:
+        return
+    if core_mode_explicit and args.core_mode != "single":
+        raise SystemExit("--batch only supports --core-mode single for batch LLM benchmarks.")
+    args.core_mode = "single"
+
+
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
+    core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
+    args._core_mode_explicit = core_mode_explicit
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1086,6 +1097,7 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
+    _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
 
 
 def _args_for_target_device_backend(
@@ -1140,6 +1152,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
+    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
 
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
@@ -1716,6 +1729,7 @@ def _collect_text_run_targets(
     )
     os.makedirs(results_dir, exist_ok=True)
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets: list[tuple[str, list[str | None], str, str, str | None]]
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
