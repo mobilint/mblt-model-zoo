@@ -84,7 +84,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     npu_latency_pct,
 )
 
-
 _BATCH_MODE_BATCH = "batch"
 _BATCH_MODE_NON_BATCH = "non_batch"
 
@@ -240,7 +239,7 @@ def _filter_text_targets_by_batch_mode(
             print(f"Skip {label}: max_batch_size is not available for batch-mode filtering.")
             continue
         if not _target_matches_batch_mode(max_batch_size, batch_mode):
-            print(f"Skip {label}: max_batch_size={max_batch_size} does not match --{batch_mode.replace('_', '-') }.")
+            print(f"Skip {label}: max_batch_size={max_batch_size} does not match --{batch_mode.replace('_', '-')}.")
             continue
         filtered.append(
             TextBenchmarkTarget(
@@ -813,17 +812,23 @@ def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = F
     )
 
 
-def _rebuild_combined_outputs(
-    results_dir: str,
-    targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
-) -> None:
+def _rebuild_combined_outputs(results_dir: str | Path) -> None:
+    out_dir = Path(results_dir)
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    for _, _, label, base, _ in targets:
-        json_path = os.path.join(results_dir, f"{base}.json")
-        if not os.path.isfile(json_path):
+    for path in sorted(out_dir.glob("*.json")):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
             continue
+        if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
+            continue
+        label = payload.get("model")
+        if not isinstance(label, str) or not label:
+            continue
+        json_path = str(path)
         result = _load_result(json_path)
         combined_results.append(result)
         combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
@@ -855,10 +860,11 @@ def _rebuild_combined_outputs(
 
     if not combined_results:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
+        _write_text_generation_summary(out_dir)
         return
 
-    combined_csv = os.path.join(results_dir, "combined.csv")
-    combined_md = os.path.join(results_dir, "combined.md")
+    combined_csv = os.path.join(out_dir, "combined.csv")
+    combined_md = os.path.join(out_dir, "combined.md")
     BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
     _write_single_combined_markdown(
         combined_md,
@@ -866,45 +872,58 @@ def _rebuild_combined_outputs(
         device_rows=combined_device_rows,
     )
 
-    folder_metrics = collect_folder_metrics(Path(results_dir))
+    folder_metrics = collect_folder_metrics(out_dir)
     if folder_metrics:
         models = sorted(folder_metrics.keys())
         labels = ["benchmark"]
         metrics_by_folder = [folder_metrics]
 
-        token_specs = [
-            ("prefill_tps.png", "Prefill TPS", "TPS (tokens/sec)", lambda m: m.prefill_tps),
-            ("decode_tps.png", "Decode TPS", "TPS (tokens/sec)", lambda m: m.decode_tps),
-            ("prefill_latency_ms.png", "Prefill Latency", "Latency (ms)", lambda m: m.prefill_latency_ms),
-            ("decode_duration_ms.png", "Decode Duration", "Duration (ms)", lambda m: m.decode_duration_ms),
-        ]
-        for filename, title, x_label, selector in token_specs:
-            plot_token_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                token_selector=selector,
-                title=title,
-                x_label=x_label,
-                output_path=Path(results_dir) / filename,
-            )
-
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.prefill_tps,
+            title="Prefill Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=out_dir / "prefill_tps.png",
+        )
         scalar_specs = [
-            ("avg_power_w.png", "Average Power", "Power (W)", lambda m: m.avg_power_w),
-            ("total_energy_j.png", "Total Energy", "Energy (J)", lambda m: m.total_energy_j),
-            ("prefill_tokens_per_j.png", "Prefill Tokens/J", "Tokens/J", lambda m: m.prefill_tokens_per_j),
-            ("decode_tokens_per_j.png", "Decode Tokens/J", "Tokens/J", lambda m: m.decode_tokens_per_j),
-            ("prefill_j_per_token.png", "Prefill J/Token", "J/Token", lambda m: m.prefill_j_per_token),
-            ("decode_j_per_token.png", "Decode J/Token", "J/Token", lambda m: m.decode_j_per_token),
-            ("avg_utilization_pct.png", "Average Utilization", "Utilization (%)", lambda m: m.avg_utilization_pct),
-            ("p99_utilization_pct.png", "P99 Utilization", "Utilization (%)", lambda m: m.p99_utilization_pct),
-            ("avg_temperature_c.png", "Average Temperature", "Temperature (C)", lambda m: m.avg_temperature_c),
-            ("p99_temperature_c.png", "P99 Temperature", "Temperature (C)", lambda m: m.p99_temperature_c),
-            ("avg_memory_used_mb.png", "Average Memory Used", "Memory (MB)", lambda m: m.avg_memory_used_mb),
-            ("p99_memory_used_mb.png", "P99 Memory Used", "Memory (MB)", lambda m: m.p99_memory_used_mb),
-            ("avg_memory_used_pct.png", "Average Memory Used (%)", "Memory Usage (%)", lambda m: m.avg_memory_used_pct),
-            ("p99_memory_used_pct.png", "P99 Memory Used (%)", "Memory Usage (%)", lambda m: m.p99_memory_used_pct),
+            (
+                "prefill_tokens_per_j.png",
+                "Prefill Tokens Per Joule",
+                "Tokens Per Joule",
+                lambda m: m.prefill_tokens_per_j,
+            ),
         ]
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.decode_tps,
+            title="Decode Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=out_dir / "decode_tps.png",
+        )
+        scalar_specs.extend(
+            [
+                (
+                    "decode_tokens_per_j.png",
+                    "Decode Tokens Per Joule",
+                    "Tokens Per Joule",
+                    lambda m: m.decode_tokens_per_j,
+                ),
+                ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
+                ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
+                ("avg_utilization_pct.png", "Utilization", "Utilization (Percent)", lambda m: m.avg_utilization_pct),
+                (
+                    "avg_memory_used_mb.png",
+                    "Memory Used Megabytes",
+                    "Memory Used (Megabytes)",
+                    lambda m: m.avg_memory_used_mb,
+                ),
+                ("total_energy_j.png", "Total Energy", "Energy (Joules)", lambda m: m.total_energy_j),
+            ]
+        )
         for filename, title, x_label, selector in scalar_specs:
             plot_scalar_chart(
                 models=models,
@@ -913,14 +932,14 @@ def _rebuild_combined_outputs(
                 scalar_selector=selector,
                 title=title,
                 x_label=x_label,
-                output_path=Path(results_dir) / filename,
+                output_path=out_dir / filename,
             )
 
     if combined_device_rows:
-        device_csv = os.path.join(results_dir, "combined_device.csv")
+        device_csv = os.path.join(out_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
 
-    _write_text_generation_summary(results_dir)
+    _write_text_generation_summary(out_dir)
 
 
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -1098,9 +1117,26 @@ def main(argv: list[str] | None = None) -> int:
     return args._handler(args)
 
 
+def _resolve_text_generation_results_dir(args: argparse.Namespace) -> str:
+    """Resolve and create the text-generation benchmark results directory."""
+    results_dir = str(
+        Path(args.results_dir).resolve()
+        if args.results_dir
+        else Path(__file__).resolve().parent / "results" / "text_generation"
+    )
+    os.makedirs(results_dir, exist_ok=True)
+    return results_dir
+
+
 def _run_sweep(args: argparse.Namespace) -> int:
     """Run multi-model text-generation sweep benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
+    results_dir = _resolve_text_generation_results_dir(args)
+    if args.rebuild_charts:
+        print("Rebuilding combined outputs from existing JSON files only...")
+        _rebuild_combined_outputs(results_dir)
+        return 0
+
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
@@ -1111,15 +1147,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         print("No text-generation models found.")
         return 0
 
-    results_dir = str(
-        Path(args.results_dir).resolve()
-        if args.results_dir
-        else Path(__file__).resolve().parent / "results" / "text_generation"
-    )
-    os.makedirs(results_dir, exist_ok=True)
-
-    if not args.rebuild_charts:
-        _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(results_dir)
 
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1174,16 +1202,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 )
             )
 
-    if args.rebuild_charts:
-        print("Rebuilding combined outputs from existing JSON files only...")
-        _rebuild_combined_outputs(
-            results_dir,
-            [
-                (model_id, revision_candidates, label, base, mxq_path)
-                for model_id, revision_candidates, label, base, mxq_path, _, _ in run_targets
-            ],
-        )
-        return 0
 
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets,
@@ -1501,13 +1519,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         _release_pipeline(pipeline, args.device)
 
-    _rebuild_combined_outputs(
-        results_dir,
-        [
-            (model_id, revision_candidates, label, base, mxq_path)
-            for model_id, revision_candidates, label, base, mxq_path, _, _ in run_targets
-        ],
-    )
+    _rebuild_combined_outputs(results_dir)
 
     return 0
 
@@ -1601,6 +1613,7 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
                 "avg_power_w": device.get("avg_power_w"),
                 "p99_power_w": device.get("p99_power_w"),
                 "avg_utilization_pct": device.get("avg_utilization_pct"),
+                "avg_temperature_c": device.get("avg_temperature_c"),
                 "avg_memory_used_mb": device.get("avg_memory_used_mb"),
                 "total_energy_j": device.get("total_energy_j"),
                 "prefill_tok_per_j_mean": device.get("prefill_tokens_per_j"),
@@ -1629,10 +1642,25 @@ def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> N
 
     models = [str(row.get("model")) for row in rows]
     specs = [
-        ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill TPS", "tok/s"),
-        ("measure_decode_tps.png", "decode_tps_mean", "Decode TPS", "tok/s"),
-        ("measure_ttft_ms.png", "ttft_ms_mean", "TTFT", "ms"),
-        ("measure_decode_duration_ms.png", "decode_duration_ms_mean", "Decode Duration", "ms"),
+        ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill Tokens Per Second", "Tokens Per Second"),
+        (
+            "measure_prefill_tokens_per_j.png",
+            "prefill_tok_per_j_mean",
+            "Prefill Tokens Per Joule",
+            "Tokens Per Joule",
+        ),
+        ("measure_decode_tps.png", "decode_tps_mean", "Decode Tokens Per Second", "Tokens Per Second"),
+        (
+            "measure_decode_tokens_per_j.png",
+            "decode_tok_per_j_mean",
+            "Decode Tokens Per Joule",
+            "Tokens Per Joule",
+        ),
+        ("measure_avg_power_w.png", "avg_power_w", "Power", "Power (Watts)"),
+        ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature", "Temperature (Celsius)"),
+        ("measure_avg_utilization_pct.png", "avg_utilization_pct", "Utilization", "Utilization (Percent)"),
+        ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used Megabytes", "Memory Used (Megabytes)"),
+        ("measure_total_energy_j.png", "total_energy_j", "Total Energy", "Energy (Joules)"),
     ]
     for filename, key, title, xlabel in specs:
         values = [float(row.get(key) or 0.0) for row in rows]
@@ -1658,6 +1686,7 @@ def _rebuild_measure_outputs(results_dir: str | Path) -> None:
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
+        _write_text_generation_summary(out_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
     import csv
@@ -1727,14 +1756,14 @@ def _collect_text_run_targets(
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model text-generation fixed prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
+    if args.rebuild_charts:
+        _rebuild_measure_outputs(_resolve_text_generation_results_dir(args))
+        return 0
     results_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
     if not run_targets:
         return 0
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    if args.rebuild_charts:
-        _rebuild_measure_outputs(results_dir)
-        return 0
     _collect_host_pc_info(results_dir)
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"

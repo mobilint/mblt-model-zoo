@@ -664,9 +664,14 @@ def _rebuild_combined(results_dir: Path) -> None:
     device_rows: list[dict[str, Any]] = []
     vision_rows: list[dict[str, Any]] = []
     for path in sorted(results_dir.glob("*.json")):
-        with path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if payload.get("benchmark_type") == "measure":
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
+            continue
+        if not isinstance(payload.get("model"), str) or not isinstance(payload.get("benchmark"), dict):
             continue
         bench = payload.get("benchmark", {})
         summ = bench.get("llm_results", {}).get("summary", {})
@@ -688,8 +693,12 @@ def _rebuild_combined(results_dir: Path) -> None:
                 "llm_decode_tok_per_j_mean": summ.get("decode_tok_per_j", {}).get("mean"),
                 "llm_prefill_j_per_tok_mean": summ.get("prefill_j_per_tok", {}).get("mean"),
                 "llm_decode_j_per_tok_mean": summ.get("decode_j_per_tok", {}).get("mean"),
+                "avg_power_w": payload.get("device", {}).get("avg_power_w"),
+                "avg_utilization_pct": payload.get("device", {}).get("avg_utilization_pct"),
                 "avg_temperature_c": payload.get("device", {}).get("avg_temperature_c"),
                 "p99_temperature_c": payload.get("device", {}).get("p99_temperature_c"),
+                "avg_memory_used_mb": payload.get("device", {}).get("avg_memory_used_mb"),
+                "total_energy_j": payload.get("device", {}).get("total_energy_j"),
                 "vision_encode_ms_mean": vision_summ.get("vision_encode_ms", {}).get("mean"),
                 "vision_fps_mean": vision_summ.get("vision_fps", {}).get("mean"),
                 "vision_img_per_j_mean": vision_summ.get("vision_img_per_j", {}).get("mean"),
@@ -720,6 +729,7 @@ def _rebuild_combined(results_dir: Path) -> None:
     _write_csv(results_dir / "combined_vision.csv", vision_rows)
     _write_csv(results_dir / "combined_device.csv", device_rows)
     if not llm_rows:
+        _write_vlm_summary(results_dir)
         return
     with (results_dir / "combined.md").open("w", encoding="utf-8") as f:
         headers = list(llm_rows[0].keys())
@@ -731,31 +741,23 @@ def _rebuild_combined(results_dir: Path) -> None:
     models = [str(r["model"]) for r in llm_rows]
     prefill = [float(r.get("llm_prefill_tps_mean") or 0.0) for r in llm_rows]
     decode = [float(r.get("llm_decode_tps_mean") or 0.0) for r in llm_rows]
-    ttft = [float(r.get("llm_ttft_ms_mean") or 0.0) for r in llm_rows]
-    vision_encode = [float(r.get("vision_encode_ms_mean") or 0.0) for r in llm_rows]
-    vision_fps = [float(r.get("vision_fps_mean") or 0.0) for r in llm_rows]
+    avg_power = [float(r.get("avg_power_w") or 0.0) for r in llm_rows]
     avg_temp = [float(r.get("avg_temperature_c") or 0.0) for r in llm_rows]
-    p99_temp = [float(r.get("p99_temperature_c") or 0.0) for r in llm_rows]
+    avg_util = [float(r.get("avg_utilization_pct") or 0.0) for r in llm_rows]
+    avg_mem_mb = [float(r.get("avg_memory_used_mb") or 0.0) for r in llm_rows]
+    total_energy = [float(r.get("total_energy_j") or 0.0) for r in llm_rows]
     llm_prefill_tpj = [float(r.get("llm_prefill_tok_per_j_mean") or 0.0) for r in llm_rows]
     llm_decode_tpj = [float(r.get("llm_decode_tok_per_j_mean") or 0.0) for r in llm_rows]
-    llm_prefill_jpt = [float(r.get("llm_prefill_j_per_tok_mean") or 0.0) for r in llm_rows]
-    llm_decode_jpt = [float(r.get("llm_decode_j_per_tok_mean") or 0.0) for r in llm_rows]
-    vision_img_per_j = [float(r.get("vision_img_per_j_mean") or 0.0) for r in llm_rows]
-    vision_j_per_img = [float(r.get("vision_j_per_img_mean") or 0.0) for r in llm_rows]
     chart_specs = [
-        ("llm_decode_tps.png", decode, "tok/s", "LLM Decode TPS (mean)"),
-        ("llm_prefill_tps.png", prefill, "tok/s", "LLM Prefill TPS (mean)"),
-        ("llm_ttft_ms.png", ttft, "ms", "LLM TTFT (mean)"),
-        ("vision_encode_ms.png", vision_encode, "ms", "Vision Encode Latency (mean)"),
-        ("vision_fps.png", vision_fps, "fps", "Vision FPS (mean)"),
-        ("avg_temperature_c.png", avg_temp, "C", "Average Temperature"),
-        ("p99_temperature_c.png", p99_temp, "C", "P99 Temperature"),
-        ("llm_prefill_tokens_per_j.png", llm_prefill_tpj, "tok/J", "LLM Prefill Tokens/J (mean)"),
-        ("llm_decode_tokens_per_j.png", llm_decode_tpj, "tok/J", "LLM Decode Tokens/J (mean)"),
-        ("llm_prefill_j_per_token.png", llm_prefill_jpt, "J/tok", "LLM Prefill J/Token (mean)"),
-        ("llm_decode_j_per_token.png", llm_decode_jpt, "J/tok", "LLM Decode J/Token (mean)"),
-        ("vision_img_per_j.png", vision_img_per_j, "img/J", "Vision Img/J (mean)"),
-        ("vision_j_per_img.png", vision_j_per_img, "J/img", "Vision J/Img (mean)"),
+        ("llm_prefill_tps.png", prefill, "Tokens Per Second", "Prefill Tokens Per Second"),
+        ("llm_prefill_tokens_per_j.png", llm_prefill_tpj, "Tokens Per Joule", "Prefill Tokens Per Joule"),
+        ("llm_decode_tps.png", decode, "Tokens Per Second", "Decode Tokens Per Second"),
+        ("llm_decode_tokens_per_j.png", llm_decode_tpj, "Tokens Per Joule", "Decode Tokens Per Joule"),
+        ("avg_power_w.png", avg_power, "Power (Watts)", "Power"),
+        ("avg_temperature_c.png", avg_temp, "Temperature (Celsius)", "Temperature"),
+        ("avg_utilization_pct.png", avg_util, "Utilization (Percent)", "Utilization"),
+        ("avg_memory_used_mb.png", avg_mem_mb, "Memory Used (Megabytes)", "Memory Used Megabytes"),
+        ("total_energy_j.png", total_energy, "Energy (Joules)", "Total Energy"),
     ]
     for filename, values, x_label, title in chart_specs:
         plot_simple_barh(
@@ -1073,7 +1075,15 @@ def _run_sweep(args: argparse.Namespace) -> int:
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
-                (target.model_id, target.revision, mode_label, mode_base, target.mxq_path, core_mode, target.max_batch_size)
+                (
+                    target.model_id,
+                    target.revision,
+                    mode_label,
+                    mode_base,
+                    target.mxq_path,
+                    core_mode,
+                    target.max_batch_size,
+                )
             )
 
     for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
@@ -1176,7 +1186,15 @@ def _collect_vlm_run_targets(
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
-                (target.model_id, target.revision, mode_label, mode_base, target.mxq_path, core_mode, target.max_batch_size)
+                (
+                    target.model_id,
+                    target.revision,
+                    mode_label,
+                    mode_base,
+                    target.mxq_path,
+                    core_mode,
+                    target.max_batch_size,
+                )
             )
     return results_dir, disable_npu_specific_args, run_targets
 
@@ -1203,7 +1221,12 @@ def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]
                 "llm_ttft_ms_mean": summary.get("llm_ttft_ms", {}).get("mean"),
                 "llm_decode_duration_ms_mean": summary.get("llm_decode_duration_ms", {}).get("mean"),
                 "avg_power_w": device.get("avg_power_w"),
+                "avg_temperature_c": device.get("avg_temperature_c"),
+                "avg_utilization_pct": device.get("avg_utilization_pct"),
+                "avg_memory_used_mb": device.get("avg_memory_used_mb"),
                 "total_energy_j": device.get("total_energy_j"),
+                "llm_prefill_tok_per_j_mean": device.get("llm_prefill_tok_per_j"),
+                "llm_decode_tok_per_j_mean": device.get("llm_decode_tok_per_j"),
                 "vision_img_per_j_mean": device.get("vision_img_per_j"),
             }
         )
@@ -1232,17 +1255,32 @@ def _rebuild_measure_outputs(results_dir: Path) -> None:
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
+        _write_vlm_summary(results_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
     _write_csv(results_dir / "combined_measure.csv", rows)
     _write_measure_markdown(results_dir / "combined_measure.md", rows)
     models = [str(row["model"]) for row in rows]
     chart_specs = [
-        ("measure_vision_encode_ms.png", "vision_encode_ms_mean", "ms", "Vision Encode Latency"),
-        ("measure_vision_fps.png", "vision_fps_mean", "fps", "Vision FPS"),
-        ("measure_llm_prefill_tps.png", "llm_prefill_tps_mean", "tok/s", "LLM Prefill TPS"),
-        ("measure_llm_decode_tps.png", "llm_decode_tps_mean", "tok/s", "LLM Decode TPS"),
-        ("measure_llm_ttft_ms.png", "llm_ttft_ms_mean", "ms", "LLM TTFT"),
+        ("measure_llm_prefill_tps.png", "llm_prefill_tps_mean", "Tokens Per Second", "Prefill Tokens Per Second"),
+        (
+            "measure_llm_prefill_tokens_per_j.png",
+            "llm_prefill_tok_per_j_mean",
+            "Tokens Per Joule",
+            "Prefill Tokens Per Joule",
+        ),
+        ("measure_llm_decode_tps.png", "llm_decode_tps_mean", "Tokens Per Second", "Decode Tokens Per Second"),
+        (
+            "measure_llm_decode_tokens_per_j.png",
+            "llm_decode_tok_per_j_mean",
+            "Tokens Per Joule",
+            "Decode Tokens Per Joule",
+        ),
+        ("measure_avg_power_w.png", "avg_power_w", "Power (Watts)", "Power"),
+        ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature (Celsius)", "Temperature"),
+        ("measure_avg_utilization_pct.png", "avg_utilization_pct", "Utilization (Percent)", "Utilization"),
+        ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used (Megabytes)", "Memory Used Megabytes"),
+        ("measure_total_energy_j.png", "total_energy_j", "Energy (Joules)", "Total Energy"),
     ]
     for filename, key, x_label, title in chart_specs:
         plot_simple_barh(
@@ -1255,14 +1293,24 @@ def _rebuild_measure_outputs(results_dir: Path) -> None:
     _write_vlm_summary(results_dir, measure=True)
 
 
+def _resolve_vlm_results_dir(args: argparse.Namespace) -> Path:
+    """Resolve and create the image-text-to-text benchmark results directory."""
+    script_dir = Path(__file__).resolve().parent
+    results_dir = (
+        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    )
+    results_dir.mkdir(parents=True, exist_ok=True)
+    return results_dir
+
+
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model image-text-to-text fixed image/prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
+    if args.rebuild_charts:
+        _rebuild_measure_outputs(_resolve_vlm_results_dir(args))
+        return 0
     results_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
     if not run_targets:
-        return 0
-    if args.rebuild_charts:
-        _rebuild_measure_outputs(results_dir)
         return 0
     _collect_host_pc_info(results_dir)
     for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
@@ -1305,7 +1353,12 @@ def _run_measure(args: argparse.Namespace) -> int:
             llm_runs: list[dict[str, Any]] = []
             device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
             avg_power_w: list[float] = []
+            avg_temperature_c: list[float] = []
+            avg_utilization_pct: list[float] = []
+            avg_memory_used_mb: list[float] = []
             total_energy_j: list[float] = []
+            llm_prefill_tok_per_j: list[float] = []
+            llm_decode_tok_per_j: list[float] = []
             for _ in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
                 if tracker is not None:
                     tracker.start()
@@ -1335,6 +1388,15 @@ def _run_measure(args: argparse.Namespace) -> int:
                     metric = _extract_device_metric(tracker)
                     device_time_series_runs.append(_extract_device_time_series(tracker))
                     power = metric.get("avg_power_w")
+                    temperature = metric.get("avg_temperature_c")
+                    utilization = metric.get("avg_utilization_pct")
+                    memory_used = metric.get("avg_memory_used_mb")
+                    if temperature is not None:
+                        avg_temperature_c.append(float(temperature))
+                    if utilization is not None:
+                        avg_utilization_pct.append(float(utilization))
+                    if memory_used is not None:
+                        avg_memory_used_mb.append(float(memory_used))
                     if power is not None:
                         total_time = vision_latency + float(llm_result.prefill_phase_duration_s or 0.0)
                         total_time += float(llm_result.decode_phase_duration_s or 0.0)
@@ -1356,6 +1418,10 @@ def _run_measure(args: argparse.Namespace) -> int:
                 for r in llm_runs
                 if r["decode_sweep"]["time_values"]
             ]
+            avg_power = _mean(avg_power_w)
+            if avg_power > 0.0:
+                llm_prefill_tok_per_j = [value / avg_power for value in llm_prefill]
+                llm_decode_tok_per_j = [value / avg_power for value in llm_decode]
             payload = {
                 "model": label,
                 "benchmark_type": "measure",
@@ -1379,8 +1445,13 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "llm_decode_duration_ms": _summary(llm_decode_ms),
                 },
                 "device": {
-                    "avg_power_w": _mean(avg_power_w),
+                    "avg_power_w": avg_power,
+                    "avg_temperature_c": _mean(avg_temperature_c),
+                    "avg_utilization_pct": _mean(avg_utilization_pct),
+                    "avg_memory_used_mb": _mean(avg_memory_used_mb),
                     "total_energy_j": sum(total_energy_j) if total_energy_j else None,
+                    "llm_prefill_tok_per_j": _mean(llm_prefill_tok_per_j),
+                    "llm_decode_tok_per_j": _mean(llm_decode_tok_per_j),
                     "vision_img_per_j": _safe_div(len(vision_runs), sum(total_energy_j)) if total_energy_j else None,
                 }
                 if avg_power_w or total_energy_j
