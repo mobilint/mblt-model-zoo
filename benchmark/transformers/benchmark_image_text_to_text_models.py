@@ -28,6 +28,10 @@ from benchmark.common.math_utils import safe_div as _safe_div
 from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
 from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
 from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
+from benchmark.common.summary_utils import HOST_PC_INFO_FILENAME as _HOST_PC_INFO_FILENAME
+from benchmark.common.summary_utils import collect_host_pc_info as _collect_host_pc_info
+from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
+from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -761,6 +765,22 @@ def _rebuild_combined(results_dir: Path) -> None:
             title=title,
             output_path=results_dir / filename,
         )
+    _write_vlm_summary(results_dir)
+
+
+def _write_vlm_summary(results_dir: Path, *, measure: bool = False) -> None:
+    """Write an image-text-to-text benchmark summary Markdown with host info, plots, and table."""
+    table_name = "combined_measure.md" if measure else "combined.md"
+    summary_name = "summary_measure.md" if measure else "summary.md"
+    title = "Image Text-to-Text Measure Benchmark Summary" if measure else "Image Text-to-Text Benchmark Summary"
+    prefixes = ("measure_",) if measure else None
+    _write_summary_markdown(
+        results_dir / summary_name,
+        title=title,
+        host_info_path=results_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=results_dir / table_name,
+        plot_paths=_existing_png_paths(results_dir, prefixes=prefixes),
+    )
 
 
 def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
@@ -996,6 +1016,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         _rebuild_combined(results_dir)
         return 0
 
+    _collect_host_pc_info(results_dir)
+
     available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
     if not available_model_ids:
         print("No image-text-to-text models found.")
@@ -1230,6 +1252,7 @@ def _rebuild_measure_outputs(results_dir: Path) -> None:
             title=title,
             output_path=results_dir / filename,
         )
+    _write_vlm_summary(results_dir, measure=True)
 
 
 def _run_measure(args: argparse.Namespace) -> int:
@@ -1241,6 +1264,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(results_dir)
         return 0
+    _collect_host_pc_info(results_dir)
     for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):

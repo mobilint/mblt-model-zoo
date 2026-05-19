@@ -27,6 +27,10 @@ from benchmark.common.runtime_utils import cuda_device_index as _cuda_device_ind
 from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
 from benchmark.common.runtime_utils import is_cuda_oom_error as _is_cuda_oom_error
 from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
+from benchmark.common.summary_utils import HOST_PC_INFO_FILENAME as _HOST_PC_INFO_FILENAME
+from benchmark.common.summary_utils import collect_host_pc_info as _collect_host_pc_info
+from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
+from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -793,6 +797,22 @@ def _write_single_combined_markdown(
         f.writelines(lines)
 
 
+def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = False) -> None:
+    """Write a text-generation benchmark summary Markdown with host info, plots, and table."""
+    out_dir = Path(results_dir)
+    table_name = "combined_measure.md" if measure else "combined.md"
+    summary_name = "summary_measure.md" if measure else "summary.md"
+    title = "Text Generation Measure Benchmark Summary" if measure else "Text Generation Benchmark Summary"
+    prefixes = ("measure_",) if measure else None
+    _write_summary_markdown(
+        out_dir / summary_name,
+        title=title,
+        host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=out_dir / table_name,
+        plot_paths=_existing_png_paths(out_dir, prefixes=prefixes),
+    )
+
+
 def _rebuild_combined_outputs(
     results_dir: str,
     targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
@@ -899,6 +919,8 @@ def _rebuild_combined_outputs(
     if combined_device_rows:
         device_csv = os.path.join(results_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
+
+    _write_text_generation_summary(results_dir)
 
 
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -1095,6 +1117,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
     os.makedirs(results_dir, exist_ok=True)
+
+    if not args.rebuild_charts:
+        _collect_host_pc_info(results_dir)
 
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1643,6 +1668,7 @@ def _rebuild_measure_outputs(results_dir: str | Path) -> None:
         writer.writerows(rows)
     _write_measure_markdown(out_dir / "combined_measure.md", rows)
     _plot_measure_charts(out_dir, rows)
+    _write_text_generation_summary(out_dir, measure=True)
 
 
 def _collect_text_run_targets(
@@ -1709,6 +1735,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(results_dir)
         return 0
+    _collect_host_pc_info(results_dir)
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
