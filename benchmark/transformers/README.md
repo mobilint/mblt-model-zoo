@@ -37,6 +37,14 @@ inference and model downloads.
     to `--image-resolutions 224,384,512,768` and `--llm-resolution None`.
   - Benchmark scripts still support `--core-mode all` as a multi-run convenience; omitted
     `--core-mode` follows the CLI default of `None`.
+- Benchmark scripts split Mobilint targets by config batch capability.
+  - `--non-batch` is the default and benchmarks only targets whose config `max_batch_size` is `1`.
+  - `--batch` benchmarks only targets whose config `max_batch_size` is greater than `1`.
+  - Batch runs use the resolved `max_batch_size` exactly as the actual input batch size.
+  - Batch TPS is total throughput across the batch: prefill tokens and decoded tokens are summed
+    across all batch rows before dividing by elapsed time.
+  - Models whose id contains `GGUF`, or whose local/Hub repository contains `.gguf` artifacts, are
+    skipped by the Transformers benchmark scripts.
 - `device metrics`: Collects power, energy, utilization, and memory metrics.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
@@ -230,6 +238,7 @@ cache-length decode sweep. Defaults match the TPS CLI.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py sweep \
+  --non-batch \
   --model mobilint/Qwen2.5-1.5B-Instruct \
   --revision W8 \
   --core-mode global8 \
@@ -238,6 +247,20 @@ python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --decode-window 32 \
   --warmup 1 \
   --skip-existing
+```
+
+To benchmark only batch-capable text-generation targets, pass `--batch`. The script uses each
+target's config `max_batch_size` as the real input batch size and reports total token throughput.
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py measure \
+  --batch \
+  --all \
+  --core-mode global8 \
+  --prefill 512 \
+  --decode 128 \
+  --repeat 1 \
+  --warmup 1
 ```
 
 `--model` accepts the Hugging Face repo id as-is, including `/` (for example,
@@ -335,6 +358,7 @@ CLI: `--prefill-range`, `--cache-lengths`, and `--decode-window`.
 
 ```bash
 python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
+  --non-batch \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
   --llm-resolution 384 \
@@ -344,6 +368,23 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --repeat 1 \
   --warmup 1 \
   --skip-existing
+```
+
+For batch-capable image-text-to-text targets, `--batch` uses config `max_batch_size` for the number
+of synthetic images and text prompts. Vision FPS is reported as total images per second, and LLM
+prefill/decode TPS is total token throughput across the batch.
+
+```bash
+python benchmark/transformers/benchmark_image_text_to_text_models.py measure \
+  --batch \
+  --model mobilint/Qwen2-VL-2B-Instruct \
+  --revision W8 \
+  --core-mode global8 \
+  --image-resolution 384 \
+  --prefill 1024 \
+  --decode 128 \
+  --repeat 1 \
+  --warmup 1
 ```
 
 Specify `--model` to benchmark a single model.
@@ -494,6 +535,9 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 ### Measurement Range
 
 - `--prefill`, `--decode`: Single-case token counts for CLI `measure`.
+- `--batch`, `--non-batch`: Benchmark-script target filters based on config `max_batch_size`.
+  `--non-batch` is the default. `--batch` uses config `max_batch_size` exactly and reports total
+  batch throughput.
 - `--prefill-range`: Text-generation prefill sweep range in `start:end:step` format. This is also
   used by `mblt-model-zoo tps sweep --task image-text-to-text` for the VLM LLM-stage sweep.
 - `--cache-lengths`: Cache lengths for decode sweep. This is also used by the TPS CLI VLM path.

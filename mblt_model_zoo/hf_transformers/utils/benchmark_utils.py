@@ -178,6 +178,14 @@ def _resolve_config_vocab_size(config) -> int:
     return vocab_size
 
 
+def _validate_batch_size(batch_size: int) -> int:
+    """Validate and normalize a benchmark batch size."""
+    batch_size = int(batch_size)
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}.")
+    return batch_size
+
+
 def _resolve_image_features_tensor(image_features) -> torch.Tensor:
     """Resolve image embeddings from Tensor, tuple, or structured HF vision outputs.
 
@@ -598,6 +606,124 @@ class TPSMeasurer:
             return
         handle.stop_tracing_events()
 
+    def _measure_batch_generate(
+        self,
+        *,
+        input_ids: torch.Tensor,
+        num_prefill: int,
+        num_decode: int,
+        prefill_chunk_size: Optional[int],
+        npu_timing_target: object | None,
+        past_key_values: object | None = None,
+        fake_prefill: bool = False,
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
+    ) -> SingleMeasurement:
+        """Measure batched generation without a streamer and report total throughput."""
+        batch_size = _validate_batch_size(int(input_ids.shape[0]))
+        gen_kwargs = dict(
+            input_ids=input_ids,
+            min_new_tokens=num_decode if fake_prefill else num_decode + 1,
+            max_new_tokens=num_decode if fake_prefill else num_decode + 1,
+            do_sample=False,
+            eos_token_id=None,
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+        if past_key_values is not None:
+            gen_kwargs["past_key_values"] = past_key_values
+        if prefill_chunk_size is not None:
+            gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+        if npu_timing_target is not None:
+            gen_kwargs["count_npu_time"] = True
+            _reset_npu_timing(npu_timing_target)
+
+        if on_prefill_start is not None:
+            on_prefill_start()
+        if fake_prefill and on_prefill_end is not None:
+            on_prefill_end()
+        if fake_prefill and on_decode_start is not None:
+            on_decode_start()
+        t_start_ns = time.perf_counter_ns()
+        with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
+            outputs = self.model.generate(**gen_kwargs)
+        t_end_ns = time.perf_counter_ns()
+        if not fake_prefill and on_prefill_end is not None:
+            on_prefill_end()
+        if not fake_prefill and on_decode_start is not None:
+            on_decode_start()
+        if on_decode_end is not None:
+            on_decode_end()
+
+        output_len = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else 0
+        input_len = int(input_ids.shape[1])
+        generated_per_row = max(output_len - input_len, 0) if output_len else num_decode + (0 if fake_prefill else 1)
+        decode_count = max(generated_per_row if fake_prefill else generated_per_row - 1, 0)
+        if decode_count == 0:
+            decode_count = num_decode
+
+        total_time_ns = t_end_ns - t_start_ns
+        total_time = _ns_to_seconds(total_time_ns)
+        has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+        if fake_prefill:
+            prefill_latency = 0.0
+            decode_duration = total_time
+            npu_prefill_time = 0.0 if has_npu_time else 0.0
+        elif has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
+            prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
+            decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+        else:
+            # Without a batch-safe streamer, phase boundary is unavailable. Keep total-throughput
+            # semantics by assigning the same wall time to both phase metrics.
+            prefill_latency = total_time
+            decode_duration = total_time
+
+        prefill_latency_ns = _seconds_to_ns(prefill_latency) or 0
+        decode_duration_ns = _seconds_to_ns(decode_duration) or 0
+        total_prefill_tokens = num_prefill * batch_size
+        total_decode_tokens = decode_count * batch_size
+        prefill_tps = total_prefill_tokens / prefill_latency if prefill_latency > 0 else 0.0
+        decode_tps = total_decode_tokens / decode_duration if decode_duration > 0 else 0.0
+        avg_total_prefill_token_latency = prefill_latency / total_prefill_tokens if total_prefill_tokens > 0 else 0.0
+        avg_total_decode_token_latency = decode_duration / total_decode_tokens if total_decode_tokens > 0 else 0.0
+        avg_npu_prefill_token_latency = (
+            npu_prefill_time / total_prefill_tokens if has_npu_time and total_prefill_tokens > 0 else None
+        )
+        avg_npu_decode_token_latency = (
+            npu_decode_time / total_decode_tokens if has_npu_time and total_decode_tokens > 0 else None
+        )
+        total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
+
+        return SingleMeasurement(
+            num_prefill=num_prefill,
+            num_decode=decode_count,
+            prefill_latency=prefill_latency,
+            prefill_tps=prefill_tps,
+            decode_duration=decode_duration,
+            decode_tps=decode_tps,
+            total_time=total_time,
+            avg_total_prefill_token_latency=avg_total_prefill_token_latency,
+            avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
+            avg_total_decode_token_latency=avg_total_decode_token_latency,
+            avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+            prefill_npu_latency_pct=npu_latency_pct(avg_total_prefill_token_latency, avg_npu_prefill_token_latency),
+            decode_npu_latency_pct=npu_latency_pct(avg_total_decode_token_latency, avg_npu_decode_token_latency),
+            total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
+            npu_prefill_time=npu_prefill_time if has_npu_time else None,
+            npu_decode_time=npu_decode_time if has_npu_time else None,
+            prefill_latency_ns=prefill_latency_ns,
+            decode_duration_ns=decode_duration_ns,
+            total_time_ns=total_time_ns,
+            avg_total_prefill_token_latency_ns=prefill_latency_ns // total_prefill_tokens
+            if total_prefill_tokens > 0
+            else 0,
+            avg_total_decode_token_latency_ns=decode_duration_ns // total_decode_tokens
+            if total_decode_tokens > 0
+            else 0,
+            decode_prefill_mode="fake" if fake_prefill else "real",
+        )
+
     def measure(
         self,
         num_prefill=512,
@@ -610,17 +736,32 @@ class TPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        batch_size: int = 1,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
             assert num_prefill > 0, "num_prefill should be positive! num_prefill: %d" % num_prefill
             assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+            batch_size = _validate_batch_size(batch_size)
 
             # 1. Synthetic Input
             vocab_size = _resolve_config_vocab_size(self.model.config)
             low = 100 if vocab_size > 100 else 0
-            input_ids = torch.randint(low, vocab_size, (1, num_prefill))
+            input_ids = torch.randint(low, vocab_size, (batch_size, num_prefill))
             input_ids = input_ids.to(self.device)
+
+            if batch_size > 1:
+                return self._measure_batch_generate(
+                    input_ids=input_ids,
+                    num_prefill=num_prefill,
+                    num_decode=num_decode,
+                    prefill_chunk_size=prefill_chunk_size,
+                    npu_timing_target=_get_npu_timing_target(self.model),
+                    on_prefill_start=on_prefill_start,
+                    on_prefill_end=on_prefill_end,
+                    on_decode_start=on_decode_start,
+                    on_decode_end=on_decode_end,
+                )
 
             # 2. Setup
             streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
@@ -782,12 +923,14 @@ class TPSMeasurer:
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
+        batch_size: int = 1,
     ) -> SingleMeasurement:
         """Measure decode TPS after faking a prefilled Mobilint cache length."""
         trace_handle = self._start_trace(trace_path)
         try:
             assert cache_len > 0, "cache_len should be positive! cache_len: %d" % cache_len
             assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+            batch_size = _validate_batch_size(batch_size)
 
             mxq_model = _get_cache_mxq_model(self.model)
             if mxq_model is None:
@@ -795,9 +938,20 @@ class TPSMeasurer:
 
             vocab_size = _resolve_config_vocab_size(self.model.config)
             low = 100 if vocab_size > 100 else 0
-            input_ids = torch.randint(low, vocab_size, (1, cache_len + 1), device=self.device)
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
+            input_ids = torch.randint(low, vocab_size, (batch_size, cache_len + 1), device=self.device)
+            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
             past_key_values.fake_prefill(cache_len)
+
+            if batch_size > 1:
+                return self._measure_batch_generate(
+                    input_ids=input_ids,
+                    num_prefill=cache_len,
+                    num_decode=num_decode,
+                    prefill_chunk_size=None,
+                    npu_timing_target=_get_npu_timing_target(self.model),
+                    past_key_values=past_key_values,
+                    fake_prefill=True,
+                )
 
             streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
             gen_kwargs = dict(
@@ -924,10 +1078,12 @@ class TPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        batch_size: int = 1,
     ) -> BenchmarkResult:
         trace_handle = self._start_trace(trace_path)
         try:
             full_result = BenchmarkResult()
+            batch_size = _validate_batch_size(batch_size)
             prefix = f"{progress_prefix} " if progress_prefix else ""
             resolved_cache_lengths = list(cache_lengths or [1024, 2048, 4096, 8192])
             t_prefill_start = time.perf_counter()
@@ -945,6 +1101,7 @@ class TPSMeasurer:
                     num_prefill=p_len,
                     num_decode=1,
                     prefill_chunk_size=prefill_chunk_size,
+                    batch_size=batch_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}prefill generate ({p_len})",
                 )
@@ -975,12 +1132,14 @@ class TPSMeasurer:
                         num_decode=decode_window,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
+                        batch_size=batch_size,
                     )
                 else:
                     res = self.measure(
                         num_prefill=cache_len,
                         num_decode=decode_window,
                         prefill_chunk_size=prefill_chunk_size,
+                        batch_size=batch_size,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
                     )
@@ -1121,11 +1280,12 @@ class VLMTPSMeasurer:
     def _supports_npu_timing(model) -> bool:
         return _get_npu_timing_target(model) is not None
 
-    def _build_inputs(self, image_resolution: int, prompt: str):
+    def _build_inputs(self, image_resolution: int, prompt: str, batch_size: int = 1):
+        batch_size = _validate_batch_size(batch_size)
         image = torch.randint(
             low=0,
             high=256,
-            size=(3, image_resolution, image_resolution),
+            size=(batch_size, 3, image_resolution, image_resolution),
             dtype=torch.uint8,
         )
 
@@ -1134,10 +1294,11 @@ class VLMTPSMeasurer:
         if isinstance(image_token, str) and image_token:
             if image_token not in text:
                 text = f"{image_token}\n{text}"
+        texts = [text for _ in range(batch_size)] if batch_size > 1 else text
 
         processor_kwargs = dict(
             images=image,
-            text=text,
+            text=texts,
             return_tensors="pt",
         )
         try:
@@ -1147,8 +1308,13 @@ class VLMTPSMeasurer:
             if "placeholder" not in msg or "image" not in msg:
                 raise
             image_token = getattr(self.processor, "image_token", "<image>")
-            if image_token not in processor_kwargs["text"]:
-                processor_kwargs["text"] = f"{image_token}\n{processor_kwargs['text']}"
+            raw_text = processor_kwargs["text"]
+            if isinstance(raw_text, list):
+                processor_kwargs["text"] = [
+                    item if image_token in item else f"{image_token}\n{item}" for item in raw_text
+                ]
+            elif image_token not in raw_text:
+                processor_kwargs["text"] = f"{image_token}\n{raw_text}"
             return self.processor(**processor_kwargs)
 
     def _get_language_model(self):
@@ -1260,6 +1426,83 @@ class VLMTPSMeasurer:
         seq_len = int(inputs_embeds.shape[1])
         lm_for_npu = self._get_language_model()
         gen_model = self.model
+        batch_size = _validate_batch_size(int(inputs_embeds.shape[0]))
+
+        if batch_size > 1:
+            attention_mask = torch.ones(
+                (batch_size, seq_len),
+                dtype=torch.long,
+                device=inputs_embeds.device,
+            )
+            cache_position = torch.arange(seq_len, device=inputs_embeds.device)
+            position_ids = cache_position.view(1, -1).expand(batch_size, -1)
+            gen_kwargs = dict(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                min_new_tokens=num_decode + 1,
+                max_new_tokens=num_decode + 1,
+                do_sample=False,
+                eos_token_id=None,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+            if prefill_chunk_size is not None:
+                gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+            npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
+            if npu_timing_target is not None:
+                gen_kwargs["count_npu_time"] = True
+                _reset_npu_timing(npu_timing_target)
+            t_start_ns = time.perf_counter_ns()
+            with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
+                outputs = gen_model.generate(**gen_kwargs)
+            t_end_ns = time.perf_counter_ns()
+            generated_per_row = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else num_decode + 1
+            decode_count = max(generated_per_row - 1, num_decode)
+            total_time_ns = t_end_ns - t_start_ns
+            total_time = _ns_to_seconds(total_time_ns)
+            has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+            if has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
+                prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
+                decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+            else:
+                prefill_latency = total_time
+                decode_duration = total_time
+            total_prefill_tokens = seq_len * batch_size
+            total_decode_tokens = decode_count * batch_size
+            avg_total_prefill_token_latency = prefill_latency / total_prefill_tokens if total_prefill_tokens > 0 else 0.0
+            avg_total_decode_token_latency = decode_duration / total_decode_tokens if total_decode_tokens > 0 else 0.0
+            avg_npu_prefill_token_latency = (
+                npu_prefill_time / total_prefill_tokens if has_npu_time and total_prefill_tokens > 0 else None
+            )
+            avg_npu_decode_token_latency = (
+                npu_decode_time / total_decode_tokens if has_npu_time and total_decode_tokens > 0 else None
+            )
+            prefill_latency_ns = _seconds_to_ns(prefill_latency) or 0
+            decode_duration_ns = _seconds_to_ns(decode_duration) or 0
+            total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
+            return SingleMeasurement(
+                num_prefill=seq_len,
+                num_decode=decode_count,
+                prefill_latency=prefill_latency,
+                prefill_tps=total_prefill_tokens / prefill_latency if prefill_latency > 0 else 0.0,
+                decode_duration=decode_duration,
+                decode_tps=total_decode_tokens / decode_duration if decode_duration > 0 else 0.0,
+                total_time=total_time,
+                avg_total_prefill_token_latency=avg_total_prefill_token_latency,
+                avg_npu_prefill_token_latency=avg_npu_prefill_token_latency,
+                avg_total_decode_token_latency=avg_total_decode_token_latency,
+                avg_npu_decode_token_latency=avg_npu_decode_token_latency,
+                prefill_npu_latency_pct=npu_latency_pct(avg_total_prefill_token_latency, avg_npu_prefill_token_latency),
+                decode_npu_latency_pct=npu_latency_pct(avg_total_decode_token_latency, avg_npu_decode_token_latency),
+                total_npu_latency_pct=npu_latency_pct(total_time, total_npu_time),
+                npu_prefill_time=npu_prefill_time if has_npu_time else None,
+                npu_decode_time=npu_decode_time if has_npu_time else None,
+                prefill_latency_ns=prefill_latency_ns,
+                decode_duration_ns=decode_duration_ns,
+                total_time_ns=total_time_ns,
+                avg_total_prefill_token_latency_ns=prefill_latency_ns // total_prefill_tokens if total_prefill_tokens > 0 else 0,
+                avg_total_decode_token_latency_ns=decode_duration_ns // total_decode_tokens if total_decode_tokens > 0 else 0,
+            )
 
         streamer = TokenIteratorStreamer(
             self.tokenizer,
@@ -1386,10 +1629,16 @@ class VLMTPSMeasurer:
             avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
         )
 
-    def _measure_llm_decode_with_fake_prefill(self, cache_len: int, num_decode: int) -> SingleMeasurement:
+    def _measure_llm_decode_with_fake_prefill(
+        self,
+        cache_len: int,
+        num_decode: int,
+        batch_size: int = 1,
+    ) -> SingleMeasurement:
         """Measure VLM language-model decode TPS with fake prefilled cache length."""
         assert cache_len > 0, "cache_len should be positive! cache_len: %d" % cache_len
         assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
+        batch_size = _validate_batch_size(batch_size)
 
         lm_for_npu = self._get_language_model()
         gen_model = self.model
@@ -1400,13 +1649,13 @@ class VLMTPSMeasurer:
         device = getattr(lm_for_npu, "device", self.model.device)
         vocab_size = _resolve_config_vocab_size(self.model.config)
         low = 100 if vocab_size > 100 else 0
-        input_ids = torch.randint(low, vocab_size, (1, 1), device=device)
+        input_ids = torch.randint(low, vocab_size, (batch_size, 1), device=device)
         inputs_embeds = lm_for_npu.get_input_embeddings()(input_ids)
         cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
         if callable(cache_factory):
-            past_key_values = cache_factory("mobilint", 1, cache_len)
+            past_key_values = cache_factory("mobilint", batch_size, cache_len)
         else:
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=1)
+            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
         past_key_values.fake_prefill(cache_len)
 
         npu_timing_target = _get_npu_timing_target(lm_for_npu)
@@ -1420,8 +1669,8 @@ class VLMTPSMeasurer:
         with torch.no_grad():
             for decode_idx in range(num_decode):
                 current_cache_len = cache_len + decode_idx
-                attention_mask = torch.ones((1, current_cache_len + 1), dtype=torch.long, device=device)
-                position_ids = torch.full((1, 1), current_cache_len, dtype=torch.long, device=device)
+                attention_mask = torch.ones((batch_size, current_cache_len + 1), dtype=torch.long, device=device)
+                position_ids = torch.full((batch_size, 1), current_cache_len, dtype=torch.long, device=device)
                 cache_position = torch.tensor([current_cache_len], dtype=torch.long, device=device)
 
                 outputs = lm_for_npu(
@@ -1434,7 +1683,7 @@ class VLMTPSMeasurer:
                     count_npu_time=count_npu_time,
                 )
                 logits = outputs.last_hidden_state
-                next_token_id = torch.argmax(logits.reshape(-1, logits.shape[-1])[-1], dim=-1).view(1, 1)
+                next_token_id = torch.argmax(logits[:, -1, :], dim=-1).view(batch_size, 1)
                 inputs_embeds = lm_for_npu.get_input_embeddings()(next_token_id.to(device))
 
                 decoded_tokens += 1
@@ -1453,11 +1702,12 @@ class VLMTPSMeasurer:
         decode_duration_ns = t_end_ns - t_start_ns
         decode_duration = _ns_to_seconds(decode_duration_ns)
         decode_count = decoded_tokens
-        decode_tps = decode_count / decode_duration if decode_duration > 0 else 0.0
-        avg_total_decode_token_latency = decode_duration / decode_count if decode_count > 0 else 0.0
-        avg_total_decode_token_latency_ns = decode_duration_ns // decode_count if decode_count > 0 else 0
+        total_decode_tokens = decode_count * batch_size
+        decode_tps = total_decode_tokens / decode_duration if decode_duration > 0 else 0.0
+        avg_total_decode_token_latency = decode_duration / total_decode_tokens if total_decode_tokens > 0 else 0.0
+        avg_total_decode_token_latency_ns = decode_duration_ns // total_decode_tokens if total_decode_tokens > 0 else 0
         avg_npu_decode_token_latency = (
-            npu_decode_time / decode_count if has_npu_time and decode_count > 0 else None
+            npu_decode_time / total_decode_tokens if has_npu_time and total_decode_tokens > 0 else None
         )
         total_npu_time = npu_decode_time if has_npu_time else None
 
@@ -1490,18 +1740,20 @@ class VLMTPSMeasurer:
         self,
         image_resolution: int,
         prompt: str,
+        batch_size: int = 1,
     ) -> torch.Tensor:
-        inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+        inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
         _, image_features = self._measure_vision_encode(inputs)
         return self._build_inputs_embeds(inputs, image_features=image_features)
 
-    def _build_text_suffix_ids(self, length: int, device: torch.device) -> torch.Tensor:
+    def _build_text_suffix_ids(self, length: int, device: torch.device, batch_size: int = 1) -> torch.Tensor:
+        batch_size = _validate_batch_size(batch_size)
         if length <= 0:
-            return torch.empty((1, 0), dtype=torch.long, device=device)
+            return torch.empty((batch_size, 0), dtype=torch.long, device=device)
 
         vocab_size = _resolve_config_vocab_size(self.model.config)
         low = 100 if vocab_size > 100 else 0
-        suffix_ids = torch.randint(low, vocab_size, (1, length), device=device)
+        suffix_ids = torch.randint(low, vocab_size, (batch_size, length), device=device)
 
         blocked_ids = {
             int(x)
@@ -1533,7 +1785,11 @@ class VLMTPSMeasurer:
 
         extra_len = total_prefill_len - base_total_len
         if extra_len > 0:
-            suffix_ids = self._build_text_suffix_ids(extra_len, device=input_ids.device)
+            suffix_ids = self._build_text_suffix_ids(
+                extra_len,
+                device=input_ids.device,
+                batch_size=int(input_ids.shape[0]),
+            )
             input_ids = torch.cat((input_ids, suffix_ids), dim=1)
 
         adjusted_inputs = dict(inputs)
@@ -1559,11 +1815,13 @@ class VLMTPSMeasurer:
         prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
+        batch_size: int = 1,
     ) -> BenchmarkResult:
         full_result = BenchmarkResult()
+        batch_size = _validate_batch_size(batch_size)
         prefix = f"{progress_prefix} " if progress_prefix else ""
         resolved_cache_lengths = list(cache_lengths or [1024, 2048, 4096, 8192])
-        base_inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+        base_inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
         _, image_features = self._measure_vision_encode(base_inputs)
 
         p_start, p_end, p_step = prefill_range
@@ -1608,7 +1866,11 @@ class VLMTPSMeasurer:
         use_fake_decode_prefill = _supports_fake_decode_prefill(self._get_language_model())
         for cache_len in decode_iter:
             if use_fake_decode_prefill:
-                res = self._measure_llm_decode_with_fake_prefill(cache_len=cache_len, num_decode=decode_window)
+                res = self._measure_llm_decode_with_fake_prefill(
+                    cache_len=cache_len,
+                    num_decode=decode_window,
+                    batch_size=batch_size,
+                )
             else:
                 inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
                     inputs=base_inputs,
@@ -1657,18 +1919,21 @@ class VLMTPSMeasurer:
         image_resolution: int,
         repeat: int,
         prompt: str,
+        batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[tuple[float, float]]:
         assert repeat > 0, "repeat must be > 0"
+        batch_size = _validate_batch_size(batch_size)
         results: list[tuple[float, float]] = []
         for idx in range(repeat):
             if show_progress:
                 print(
-                    f"[vlm][vision] resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
+                    f"[vlm][vision] resolution={image_resolution} batch={batch_size} "
+                    f"run={idx + 1}/{repeat}: measuring..."
                 )
-            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
             vision_encode_latency, _ = self._measure_vision_encode(inputs)
-            vision_fps = (1.0 / vision_encode_latency) if vision_encode_latency > 0 else 0.0
+            vision_fps = (batch_size / vision_encode_latency) if vision_encode_latency > 0 else 0.0
             results.append((vision_encode_latency, vision_fps))
             if show_progress:
                 print(
@@ -1683,12 +1948,15 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
+        batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[SingleMeasurement]:
         assert repeat > 0, "repeat must be > 0"
+        batch_size = _validate_batch_size(batch_size)
         inputs_embeds = self._build_reference_inputs_embeds(
             image_resolution=image_resolution,
             prompt=prompt,
+            batch_size=batch_size,
         )
         results: list[SingleMeasurement] = []
         for idx in range(repeat):
@@ -1711,16 +1979,18 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
+        batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[VLMSingleMeasurement]:
         assert repeat > 0, "repeat must be > 0"
+        batch_size = _validate_batch_size(batch_size)
         results: list[VLMSingleMeasurement] = []
         for idx in range(repeat):
             if show_progress:
                 print(
                     f"[vlm] resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
                 )
-            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt)
+            inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
             vision_encode_latency, image_features = self._measure_vision_encode(inputs)
             inputs_embeds = self._build_inputs_embeds(inputs, image_features=image_features)
             llm = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=num_decode)
@@ -1728,7 +1998,7 @@ class VLMTPSMeasurer:
                 VLMSingleMeasurement(
                     image_resolution=image_resolution,
                     vision_encode_latency=vision_encode_latency,
-                    vision_fps=(1.0 / vision_encode_latency) if vision_encode_latency > 0 else 0.0,
+                    vision_fps=(batch_size / vision_encode_latency) if vision_encode_latency > 0 else 0.0,
                     llm=llm,
                 )
             )

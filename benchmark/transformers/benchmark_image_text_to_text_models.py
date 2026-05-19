@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -77,8 +78,10 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer,
 
 try:
     from benchmark_text_generation_models import (
+        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
+        _filter_text_targets_by_batch_mode,
         _format_gib,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
@@ -87,14 +90,28 @@ try:
     )
 except Exception:
     from .benchmark_text_generation_models import (
+        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
+        _filter_text_targets_by_batch_mode,
         _format_gib,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _resolve_original_model_ids,
         _should_precheck_cuda,
     )
+
+
+@dataclass(frozen=True)
+class VLMBenchmarkTarget:
+    """Resolved image-text-to-text benchmark target with batch metadata."""
+
+    model_id: str
+    revision: str | None
+    label: str
+    base: str
+    mxq_path: str | None
+    max_batch_size: int
 
 
 def _safe_filename(text: str) -> str:
@@ -212,7 +229,13 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             desc=f"{label} vision@{resolution} warmup",
             leave=False,
         ):
-            measurer.measure_vision(image_resolution=resolution, repeat=1, prompt=args.prompt, show_progress=False)
+            measurer.measure_vision(
+                image_resolution=resolution,
+                repeat=1,
+                prompt=args.prompt,
+                batch_size=args.batch_size,
+                show_progress=False,
+            )
         runs = []
         power_vals: list[float] = []
         p99_power_vals: list[float] = []
@@ -237,7 +260,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 tracker.start()
             try:
                 run = measurer.measure_vision(
-                    image_resolution=resolution, repeat=1, prompt=args.prompt, show_progress=False
+                    image_resolution=resolution,
+                    repeat=1,
+                    prompt=args.prompt,
+                    batch_size=args.batch_size,
+                    show_progress=False,
                 )[0]
             finally:
                 _stop_tracker_safe(tracker)
@@ -369,6 +396,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             cache_lengths=args.cache_lengths,
             decode_window=args.decode_window,
             prefill_chunk_size=resolved_prefill_chunk_size,
+            batch_size=args.batch_size,
             show_progress=False,
         )
 
@@ -404,6 +432,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 cache_lengths=args.cache_lengths,
                 decode_window=args.decode_window,
                 prefill_chunk_size=resolved_prefill_chunk_size,
+                batch_size=args.batch_size,
                 show_progress=False,
             )
         finally:
@@ -542,6 +571,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     payload = {
         "model": label,
         "task": "image-text-to-text",
+        "batch_mode": args.batch_mode,
+        "batch_size": args.batch_size,
         "benchmark": {
             "prompt": args.prompt,
             "prefill_range": list(args.prefill_range),
@@ -639,6 +670,8 @@ def _rebuild_combined(results_dir: Path) -> None:
         llm_rows.append(
             {
                 "model": payload.get("model"),
+                "batch_mode": payload.get("batch_mode"),
+                "batch_size": payload.get("batch_size"),
                 "llm_reference_resolution": bench.get("llm_reference_resolution"),
                 "llm_prefill_tps_mean": summ.get("llm_prefill_tps", {}).get("mean"),
                 "llm_decode_tps_mean": summ.get("llm_decode_tps", {}).get("mean"),
@@ -669,6 +702,8 @@ def _rebuild_combined(results_dir: Path) -> None:
             vision_rows.append(
                 {
                     "model": payload.get("model"),
+                    "batch_mode": payload.get("batch_mode"),
+                    "batch_size": payload.get("batch_size"),
                     "image_resolution": row.get("image_resolution"),
                     "vision_encode_ms_mean": s.get("vision_encode_ms", {}).get("mean"),
                     "vision_fps_mean": s.get("vision_fps", {}).get("mean"),
@@ -765,6 +800,7 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by image-text-to-text benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
+    _add_batch_selection_args(parser)
     _add_device_tracking_args(parser)
     parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
@@ -888,6 +924,8 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
+    args._device_backend_explicit = device_backend_explicit
+    args._device_backend_requested = args.device_backend
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -898,16 +936,39 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     )
     if not device_explicit:
         print(f"Auto-set --device={args.device}")
+    args.device_backend = _resolve_default_device_backend_common(
+        device_backend=args.device_backend,
+        device_backend_explicit=device_backend_explicit,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
     if not device_backend_explicit:
-        args.device_backend = _resolve_default_device_backend_common(
-            device_backend=args.device_backend,
-            device_backend_explicit=device_backend_explicit,
-            model_id=args.model,
-            mxq_path=args.mxq_path,
-            mxq_dir=args.mxq_dir,
-            original_models=args.original_models,
-        )
-        print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
+        if args.model or args.mxq_path or args.mxq_dir:
+            print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
+        else:
+            print("Auto-set --device-backend per target (based on target/device policy)")
+
+
+def _args_for_target_device_backend(
+    args: argparse.Namespace,
+    *,
+    model_id: str,
+    mxq_path: str | None = None,
+) -> argparse.Namespace:
+    """Return an args copy with a device backend resolved for one benchmark target."""
+    resolved = copy.copy(args)
+    requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
+    resolved.device_backend = _resolve_default_device_backend_common(
+        device_backend=requested_backend,
+        device_backend_explicit=bool(getattr(args, "_device_backend_explicit", False)),
+        model_id=model_id,
+        mxq_path=mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
+    return resolved
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -939,7 +1000,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     if not available_model_ids:
         print("No image-text-to-text models found.")
         return 0
-    targets: list[tuple[str, str | None, str, str, str | None]] = []
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
@@ -953,8 +1014,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             mxq_dir=mxq_dir,
             available_model_ids=available_model_ids,
         ):
-            revision = rev_candidates[0] if rev_candidates else None
-            targets.append((model_id, revision, label, base, target_mxq_path))
+            raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
         if args.model:
             model_ids = [str(args.model)]
@@ -968,20 +1028,38 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 f"(from {original_count} listed models)."
             )
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
-            targets.append((model_id, revision, label, base, args.mxq_path))
+            raw_targets.append((model_id, [revision], label, base, args.mxq_path))
 
+    targets = [
+        VLMBenchmarkTarget(
+            model_id=target.model_id,
+            revision=target.revision_candidates[0] if target.revision_candidates else None,
+            label=target.label,
+            base=target.base,
+            mxq_path=target.mxq_path,
+            max_batch_size=target.max_batch_size,
+        )
+        for target in _filter_text_targets_by_batch_mode(
+            raw_targets,
+            batch_mode=args.batch_mode,
+            task="image-text-to-text",
+        )
+    ]
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None]] = []
-    for model_id, revision, label, base, target_mxq_path in targets:
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    for target in targets:
         for core_mode in core_modes:
-            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append((model_id, revision, mode_label, mode_base, target_mxq_path, core_mode))
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            run_targets.append(
+                (target.model_id, target.revision, mode_label, mode_base, target.mxq_path, core_mode, target.max_batch_size)
+            )
 
-    for model_id, revision, label, base, target_mxq_path, core_mode in tqdm(
+    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
         run_targets,
         desc="Benchmarking VLM models",
         unit="model-mode",
     ):
+        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         json_path = results_dir / f"{base}.json"
@@ -1007,7 +1085,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         pipeline = None
         try:
             pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
-            payload, rows = _run_model(args, label, pipeline)
+            target_args.batch_size = batch_size
+            payload, rows = _run_model(target_args, label, pipeline)
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
             _plot_model(payload, png_path)
@@ -1026,7 +1105,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
 def _collect_vlm_run_targets(
     args: argparse.Namespace,
-) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None]]]:
+) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int]]]:
     """Resolve image-text-to-text benchmark targets and core-mode expansion."""
     script_dir = Path(__file__).resolve().parent
     results_dir = (
@@ -1037,7 +1116,7 @@ def _collect_vlm_run_targets(
     if not available_model_ids:
         print("No image-text-to-text models found.")
         return results_dir, False, []
-    targets: list[tuple[str, str | None, str, str, str | None]] = []
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
@@ -1046,20 +1125,37 @@ def _collect_vlm_run_targets(
             mxq_dir=mxq_dir,
             available_model_ids=available_model_ids,
         ):
-            targets.append((model_id, rev_candidates[0] if rev_candidates else None, label, base, target_mxq_path))
+            raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
         model_ids = [str(args.model)] if args.model else available_model_ids
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
-            targets.append((model_id, revision, label, base, args.mxq_path))
+            raw_targets.append((model_id, [revision], label, base, args.mxq_path))
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    targets = [
+        VLMBenchmarkTarget(
+            model_id=target.model_id,
+            revision=target.revision_candidates[0] if target.revision_candidates else None,
+            label=target.label,
+            base=target.base,
+            mxq_path=target.mxq_path,
+            max_batch_size=target.max_batch_size,
+        )
+        for target in _filter_text_targets_by_batch_mode(
+            raw_targets,
+            batch_mode=args.batch_mode,
+            task="image-text-to-text",
+        )
+    ]
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None]] = []
-    for model_id, revision, label, base, target_mxq_path in targets:
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    for target in targets:
         for core_mode in core_modes:
-            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append((model_id, revision, mode_label, mode_base, target_mxq_path, core_mode))
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            run_targets.append(
+                (target.model_id, target.revision, mode_label, mode_base, target.mxq_path, core_mode, target.max_batch_size)
+            )
     return results_dir, disable_npu_specific_args, run_targets
 
 
@@ -1072,6 +1168,8 @@ def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]
         rows.append(
             {
                 "model": payload.get("model"),
+                "batch_mode": payload.get("batch_mode"),
+                "batch_size": payload.get("batch_size"),
                 "image_resolution": payload.get("image_resolution"),
                 "prefill_tokens": payload.get("prefill"),
                 "decode_tokens": payload.get("decode"),
@@ -1143,9 +1241,11 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(results_dir)
         return 0
-    for model_id, revision, label, base, target_mxq_path, core_mode in tqdm(
+    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):
+        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
+        target_args.batch_size = batch_size
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         json_path = results_dir / f"{base}_measure.json"
@@ -1156,9 +1256,17 @@ def _run_measure(args: argparse.Namespace) -> int:
         try:
             pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
             measurer = VLMTPSMeasurer(pipeline)
+            tracker = _build_device_tracker(target_args, pipeline)
+            _print_device_status(target_args, tracker)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
             for _ in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
-                measurer.measure_vision(args.image_resolution, repeat=1, prompt=args.prompt, show_progress=False)
+                measurer.measure_vision(
+                    args.image_resolution,
+                    repeat=1,
+                    prompt=args.prompt,
+                    batch_size=batch_size,
+                    show_progress=False,
+                )
                 measurer.measure_llm_full(
                     image_resolution=args.image_resolution,
                     prompt=args.prompt,
@@ -1166,25 +1274,48 @@ def _run_measure(args: argparse.Namespace) -> int:
                     cache_lengths=[args.prefill],
                     decode_window=args.decode,
                     prefill_chunk_size=resolved_prefill_chunk_size,
+                    batch_size=batch_size,
                     show_progress=False,
                 )
             vision_runs: list[dict[str, float]] = []
             llm_runs: list[dict[str, Any]] = []
+            device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+            avg_power_w: list[float] = []
+            total_energy_j: list[float] = []
             for _ in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                if tracker is not None:
+                    tracker.start()
                 vision_latency, vision_fps = measurer.measure_vision(
-                    args.image_resolution, repeat=1, prompt=args.prompt, show_progress=False
-                )[0]
-                llm_result = measurer.measure_llm_full(
-                    image_resolution=args.image_resolution,
+                    args.image_resolution,
+                    repeat=1,
                     prompt=args.prompt,
-                    prefill_range=(args.prefill, args.prefill, args.prefill),
-                    cache_lengths=[args.prefill],
-                    decode_window=args.decode,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    batch_size=batch_size,
                     show_progress=False,
-                )
+                )[0]
+                try:
+                    llm_result = measurer.measure_llm_full(
+                        image_resolution=args.image_resolution,
+                        prompt=args.prompt,
+                        prefill_range=(args.prefill, args.prefill, args.prefill),
+                        cache_lengths=[args.prefill],
+                        decode_window=args.decode,
+                        prefill_chunk_size=resolved_prefill_chunk_size,
+                        batch_size=batch_size,
+                        show_progress=False,
+                    )
+                finally:
+                    _stop_tracker_safe(tracker)
                 vision_runs.append({"vision_encode_latency": vision_latency, "vision_fps": vision_fps})
                 llm_runs.append(asdict(llm_result))
+                if tracker is not None:
+                    metric = _extract_device_metric(tracker)
+                    device_time_series_runs.append(_extract_device_time_series(tracker))
+                    power = metric.get("avg_power_w")
+                    if power is not None:
+                        total_time = vision_latency + float(llm_result.prefill_phase_duration_s or 0.0)
+                        total_time += float(llm_result.decode_phase_duration_s or 0.0)
+                        avg_power_w.append(float(power))
+                        total_energy_j.append(float(power) * total_time)
             llm_prefill = [
                 float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
             ]
@@ -1205,6 +1336,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "image-text-to-text",
+                "batch_mode": args.batch_mode,
+                "batch_size": batch_size,
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
                 "prefill": args.prefill,
@@ -1221,8 +1354,14 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "llm_ttft_ms": _summary(llm_ttft),
                     "llm_decode_duration_ms": _summary(llm_decode_ms),
                 },
-                "device": None,
-                "device_time_series_runs": [],
+                "device": {
+                    "avg_power_w": _mean(avg_power_w),
+                    "total_energy_j": sum(total_energy_j) if total_energy_j else None,
+                    "vision_img_per_j": _safe_div(len(vision_runs), sum(total_energy_j)) if total_energy_j else None,
+                }
+                if avg_power_w or total_energy_j
+                else None,
+                "device_time_series_runs": device_time_series_runs,
             }
             _write_json(json_path, payload)
             print(f"Saved: {json_path.name}")

@@ -1,8 +1,9 @@
 import argparse
+import copy
 import json
 import os
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -80,8 +81,174 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
 )
 
 
+_BATCH_MODE_BATCH = "batch"
+_BATCH_MODE_NON_BATCH = "non_batch"
+
+
+@dataclass(frozen=True)
+class TextBenchmarkTarget:
+    """Resolved text-generation benchmark target with batch metadata."""
+
+    model_id: str
+    revision_candidates: list[str | None]
+    label: str
+    base: str
+    mxq_path: str | None
+    max_batch_size: int
+
+
 def _safe_filename(model_id: str) -> str:
     return _safe_filename_common(model_id, replace_slash_only=True)
+
+
+def _add_batch_selection_args(parser: argparse.ArgumentParser) -> None:
+    """Add mutually exclusive batch target selection flags."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_BATCH,
+        default=_BATCH_MODE_NON_BATCH,
+        help="benchmark only targets whose config max_batch_size is greater than 1",
+    )
+    group.add_argument(
+        "--non-batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_NON_BATCH,
+        help="benchmark only targets whose config max_batch_size is 1 (default)",
+    )
+
+
+def _is_gguf_model_id(model_id: str) -> bool:
+    """Return whether a model id refers to a GGUF/Llama.cpp artifact."""
+    return "gguf" in model_id.lower()
+
+
+def _has_gguf_artifact(model_id: str, revision: str | None) -> bool:
+    """Return whether a local or Hub model repository contains GGUF artifacts."""
+    local_path = Path(model_id).expanduser()
+    if local_path.is_dir():
+        return any(path.suffix.lower() == ".gguf" for path in local_path.rglob("*"))
+    if local_path.is_file():
+        return local_path.suffix.lower() == ".gguf"
+
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(model_id, revision=revision, files_metadata=False)
+    except Exception:
+        return False
+
+    siblings = getattr(info, "siblings", None) or []
+    return any(str(getattr(sibling, "rfilename", "") or "").lower().endswith(".gguf") for sibling in siblings)
+
+
+def _normalize_max_batch_size(value: Any) -> int | None:
+    """Normalize a raw max batch size value from config metadata."""
+    try:
+        max_batch_size = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(1, max_batch_size)
+
+
+def _read_raw_config(model_id: str, revision: str | None) -> dict[str, Any] | None:
+    """Read raw config JSON from a local path or Hugging Face Hub/cache."""
+    local_path = Path(model_id).expanduser()
+    config_path = local_path / "config.json" if local_path.is_dir() else local_path
+    if config_path.is_file():
+        try:
+            with config_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            return payload if isinstance(payload, dict) else None
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        downloaded = hf_hub_download(repo_id=model_id, filename="config.json", revision=revision)
+        with open(downloaded, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _extract_config_max_batch_size(payload: dict[str, Any], *, task: str) -> int | None:
+    """Extract a normalized max batch size from raw model config metadata."""
+    candidates: list[Any] = [payload.get("max_batch_size")]
+    if task == "image-text-to-text":
+        text_config = payload.get("text_config")
+        vision_config = payload.get("vision_config")
+        if isinstance(text_config, dict):
+            candidates.append(text_config.get("max_batch_size"))
+        if isinstance(vision_config, dict):
+            candidates.append(vision_config.get("max_batch_size"))
+    for candidate in candidates:
+        max_batch_size = _normalize_max_batch_size(candidate)
+        if max_batch_size is not None:
+            return max_batch_size
+    return None
+
+
+def _resolve_config_max_batch_size(model_id: str, revision: str | None, *, task: str) -> int | None:
+    """Resolve config max_batch_size for batch/non-batch target selection."""
+    payload = _read_raw_config(model_id, revision)
+    if payload is None:
+        return None
+    return _extract_config_max_batch_size(payload, task=task)
+
+
+def _target_matches_batch_mode(max_batch_size: int, batch_mode: str) -> bool:
+    """Return whether a resolved batch size belongs to the requested mode."""
+    if batch_mode == _BATCH_MODE_BATCH:
+        return max_batch_size > 1
+    if batch_mode == _BATCH_MODE_NON_BATCH:
+        return max_batch_size == 1
+    raise ValueError(f"Unsupported batch mode: {batch_mode}")
+
+
+def _target_filter_revision(model_id: str, revision_candidates: list[str | None], mxq_path: str | None) -> str | None:
+    """Pick the revision used for best-effort config filtering."""
+    if mxq_path:
+        return revision_candidates[0] if revision_candidates else None
+    return _select_revision(model_id, revision_candidates)
+
+
+def _filter_text_targets_by_batch_mode(
+    targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
+    *,
+    batch_mode: str,
+    task: str = "text-generation",
+) -> list[TextBenchmarkTarget]:
+    """Filter text-generation targets by GGUF status and config max_batch_size."""
+    filtered: list[TextBenchmarkTarget] = []
+    for model_id, revision_candidates, label, base, mxq_path in targets:
+        revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
+        if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
+            print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
+            continue
+        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
+        if max_batch_size is None:
+            print(f"Skip {label}: max_batch_size is not available for batch-mode filtering.")
+            continue
+        if not _target_matches_batch_mode(max_batch_size, batch_mode):
+            print(f"Skip {label}: max_batch_size={max_batch_size} does not match --{batch_mode.replace('_', '-') }.")
+            continue
+        filtered.append(
+            TextBenchmarkTarget(
+                model_id=model_id,
+                revision_candidates=list(revision_candidates),
+                label=label,
+                base=base,
+                mxq_path=mxq_path,
+                max_batch_size=max_batch_size,
+            )
+        )
+    return filtered
 
 
 def _parse_int_list(raw: str) -> list[int]:
@@ -199,12 +366,12 @@ def _extract_parent_model_id(info: Any) -> str | None:
     payload: dict[str, Any] | None = None
     if isinstance(card_data, dict):
         payload = card_data
-    elif hasattr(card_data, "to_dict"):
+    elif card_data is not None and hasattr(card_data, "to_dict"):
         try:
             payload = card_data.to_dict()
         except Exception:
             payload = None
-    elif hasattr(card_data, "__dict__"):
+    elif card_data is not None and hasattr(card_data, "__dict__"):
         payload = dict(card_data.__dict__)
 
     if not payload:
@@ -384,7 +551,7 @@ def _iter_targets(
             yield model_id, [revision], label, base, None
         return
 
-    revision_map = [
+    revision_map: list[tuple[list[str | None], str]] = [
         (["W8"], "-W8"),
         (["W4V8"], "-W4V8"),
     ]
@@ -737,6 +904,7 @@ def _rebuild_combined_outputs(
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by text-generation benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
+    _add_batch_selection_args(parser)
     parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
@@ -852,6 +1020,8 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
+    args._device_backend_explicit = device_backend_explicit
+    args._device_backend_requested = args.device_backend
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -871,7 +1041,30 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     if not device_explicit:
         print(f"Auto-set --device={args.device}")
     if not device_backend_explicit:
-        print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
+        if args.model or args.mxq_path or args.mxq_dir:
+            print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
+        else:
+            print("Auto-set --device-backend per target (based on target/device policy)")
+
+
+def _args_for_target_device_backend(
+    args: argparse.Namespace,
+    *,
+    model_id: str,
+    mxq_path: str | None = None,
+) -> argparse.Namespace:
+    """Return an args copy with a device backend resolved for one benchmark target."""
+    resolved = copy.copy(args)
+    requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
+    resolved.device_backend = _resolve_default_device_backend_common(
+        device_backend=requested_backend,
+        device_backend_explicit=bool(getattr(args, "_device_backend_explicit", False)),
+        model_id=model_id,
+        mxq_path=mxq_path,
+        mxq_dir=args.mxq_dir,
+        original_models=args.original_models,
+    )
+    return resolved
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -938,12 +1131,23 @@ def _run_sweep(args: argparse.Namespace) -> int:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
+    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
-    for model_id, revision_candidates, label, base, mxq_path in targets:
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    for target in filtered_targets:
         for core_mode in core_modes:
-            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append((model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode))
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            run_targets.append(
+                (
+                    target.model_id,
+                    target.revision_candidates,
+                    mode_label,
+                    mode_base,
+                    target.mxq_path,
+                    core_mode,
+                    target.max_batch_size,
+                )
+            )
 
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
@@ -951,17 +1155,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
             results_dir,
             [
                 (model_id, revision_candidates, label, base, mxq_path)
-                for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+                for model_id, revision_candidates, label, base, mxq_path, _, _ in run_targets
             ],
         )
         return 0
 
-    for model_id, revision_candidates, label, base, mxq_path, core_mode in tqdm(
+    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets,
         desc="Benchmarking models",
         total=len(run_targets),
         unit="model-mode",
     ):
+        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
         # Ensure pre-check sees memory state after releasing previous model.
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
@@ -1021,14 +1226,15 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 continue
 
             measurer = TPSMeasurer(pipeline)
-            tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
-            _print_device_status(args, tracker_prefill)
+            tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
+            _print_device_status(target_args, tracker_prefill)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
             warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=warmup_prefill,
                     num_decode=args.decode_window,
+                    batch_size=batch_size,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     trace_path=None,
                     show_progress=True,
@@ -1042,6 +1248,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                             prefill_range=args.prefill_range,
                             cache_lengths=args.cache_lengths,
                             decode_window=args.decode_window,
+                            batch_size=batch_size,
                             prefill_chunk_size=resolved_prefill_chunk_size,
                             show_progress=True,
                             progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
@@ -1257,6 +1464,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         payload: dict[str, Any] = {
             "model": label,
+            "batch_mode": args.batch_mode,
+            "batch_size": batch_size,
             "benchmark": asdict(result),
             "device": device_payload,
             "device_time_series": device_time_series_payload,
@@ -1271,7 +1480,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         results_dir,
         [
             (model_id, revision_candidates, label, base, mxq_path)
-            for model_id, revision_candidates, label, base, mxq_path, _ in run_targets
+            for model_id, revision_candidates, label, base, mxq_path, _, _ in run_targets
         ],
     )
 
@@ -1352,6 +1561,8 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
         rows.append(
             {
                 "model": payload.get("model"),
+                "batch_mode": payload.get("batch_mode"),
+                "batch_size": payload.get("batch_size"),
                 "prefill_tokens": payload.get("prefill"),
                 "decode_tokens": payload.get("decode"),
                 "repeat": payload.get("repeat"),
@@ -1436,7 +1647,7 @@ def _rebuild_measure_outputs(results_dir: str | Path) -> None:
 
 def _collect_text_run_targets(
     args: argparse.Namespace,
-) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None]]]:
+) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int]]]:
     """Resolve text-generation benchmark targets and core-mode expansion."""
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
@@ -1467,12 +1678,23 @@ def _collect_text_run_targets(
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
+    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
     core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None]] = []
-    for model_id, revision_candidates, label, base, mxq_path in targets:
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    for target in filtered_targets:
         for core_mode in core_modes:
-            mode_label, mode_base = _append_core_mode_suffix_common(label, base, core_mode)
-            run_targets.append((model_id, revision_candidates, mode_label, mode_base, mxq_path, core_mode))
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            run_targets.append(
+                (
+                    target.model_id,
+                    target.revision_candidates,
+                    mode_label,
+                    mode_base,
+                    target.mxq_path,
+                    core_mode,
+                    target.max_batch_size,
+                )
+            )
     return results_dir, disable_npu_specific_args, run_targets
 
 
@@ -1487,9 +1709,10 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(results_dir)
         return 0
-    for model_id, revision_candidates, label, base, mxq_path, core_mode in tqdm(
+    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
+        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
@@ -1532,6 +1755,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 measurer.measure(
                     num_prefill=args.prefill,
                     num_decode=args.decode,
+                    batch_size=batch_size,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
@@ -1539,11 +1763,12 @@ def _run_measure(args: argparse.Namespace) -> int:
             runs: list[dict[str, Any]] = []
             device_time_series_runs: list[dict[str, Any]] = []
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
-                tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
+                tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
                 try:
                     run = measurer.measure(
                         num_prefill=args.prefill,
                         num_decode=args.decode,
+                        batch_size=batch_size,
                         prefill_chunk_size=resolved_prefill_chunk_size,
                         show_progress=True,
                         progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",
@@ -1586,23 +1811,29 @@ def _run_measure(args: argparse.Namespace) -> int:
                         run.decode_duration,
                     )
                     row["total_energy_j"] = (
-                        (row["avg_power_w"] * run.total_time) if row.get("avg_power_w") is not None else None
+                        (float(row["avg_power_w"]) * run.total_time)
+                        if isinstance(row.get("avg_power_w"), (int, float))
+                        else None
                     )
                     row["prefill_tokens_per_j"] = (
-                        _safe_div(run.prefill_tps, prefill_metric.get("avg_power_w"))
-                        if prefill_metric.get("avg_power_w") is not None
+                        _safe_div(run.prefill_tps, float(prefill_metric["avg_power_w"]))
+                        if isinstance(prefill_metric.get("avg_power_w"), (int, float))
                         else None
                     )
                     row["decode_tokens_per_j"] = (
-                        _safe_div(run.decode_tps, decode_metric.get("avg_power_w"))
-                        if decode_metric.get("avg_power_w") is not None
+                        _safe_div(run.decode_tps, float(decode_metric["avg_power_w"]))
+                        if isinstance(decode_metric.get("avg_power_w"), (int, float))
                         else None
                     )
                     row["prefill_j_per_token"] = (
-                        _safe_div(1.0, row["prefill_tokens_per_j"]) if row.get("prefill_tokens_per_j") else None
+                        _safe_div(1.0, float(row["prefill_tokens_per_j"]))
+                        if isinstance(row.get("prefill_tokens_per_j"), (int, float))
+                        else None
                     )
                     row["decode_j_per_token"] = (
-                        _safe_div(1.0, row["decode_tokens_per_j"]) if row.get("decode_tokens_per_j") else None
+                        _safe_div(1.0, float(row["decode_tokens_per_j"]))
+                        if isinstance(row.get("decode_tokens_per_j"), (int, float))
+                        else None
                     )
                     device_time_series_runs.append(
                         {
@@ -1615,6 +1846,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "text-generation",
+                "batch_mode": args.batch_mode,
+                "batch_size": batch_size,
                 "prefill": args.prefill,
                 "decode": args.decode,
                 "repeat": args.repeat,
