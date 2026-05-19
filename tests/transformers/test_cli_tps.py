@@ -1,5 +1,7 @@
 import importlib
 import inspect
+import argparse
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -32,11 +34,15 @@ from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMix
 
 
 class _DummyConfig:
-    def __init__(self, vocab_size: int | None = None, text_config=None):
+    def __init__(self, vocab_size: int | None = None, text_config=None, max_batch_size=None, vision_config=None):
         if vocab_size is not None:
             self.vocab_size = vocab_size
         if text_config is not None:
             self.text_config = text_config
+        if max_batch_size is not None:
+            self.max_batch_size = max_batch_size
+        if vision_config is not None:
+            self.vision_config = vision_config
 
 
 class _DummyVisionOutput:
@@ -226,8 +232,10 @@ class _RoutingTPSMeasurer(TPSMeasurer):
         on_prefill_end=None,
         on_decode_start=None,
         on_decode_end=None,
+        batch_size: int = 1,
     ) -> SingleMeasurement:
         """Record real-prefill measurements without running generation."""
+        del batch_size
         self.calls.append(("real", int(num_prefill), int(num_decode)))
         return SingleMeasurement(
             num_prefill=int(num_prefill),
@@ -250,8 +258,10 @@ class _RoutingTPSMeasurer(TPSMeasurer):
         trace_path=None,
         show_progress: bool = False,
         progress_desc=None,
+        batch_size: int = 1,
     ) -> SingleMeasurement:
         """Record fake-prefill decode measurements without running generation."""
+        del batch_size
         self.calls.append(("fake", int(cache_len), int(num_decode)))
         return SingleMeasurement(
             num_prefill=int(cache_len),
@@ -303,6 +313,23 @@ def test_cli_tps_measure_defaults():
 
     assert args.prefill == 128
     assert args.decode == 32
+    assert args.batch_size is None
+
+
+def test_cli_tps_measure_batch_size_override():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--batch-size",
+            "4",
+        ]
+    )
+
+    assert args.batch_size == 4
 
 
 def test_cli_tps_sweep_defaults():
@@ -319,6 +346,211 @@ def test_cli_tps_sweep_defaults():
     assert args.prefill_range == (512, 2048, 512)
     assert args.cache_lengths == [128, 512, 1024, 2048]
     assert args.decode_window == 32
+    assert args.batch_size is None
+
+
+def test_cli_tps_batch_size_rejects_non_positive_values():
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--batch-size",
+                "0",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
+def test_cli_resolve_model_max_batch_size_uses_top_level_config():
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=4)))
+
+    assert tps_cli._resolve_model_max_batch_size(pipeline, task="text-generation") == 4
+
+
+def test_cli_resolve_model_max_batch_size_uses_text_config():
+    config = _DummyConfig(text_config=_DummyConfig(max_batch_size=8))
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=config))
+
+    assert tps_cli._resolve_model_max_batch_size(pipeline, task="text-generation") == 8
+
+
+def test_cli_resolve_model_max_batch_size_uses_vlm_vision_config():
+    config = _DummyConfig(vision_config=_DummyConfig(max_batch_size=2))
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=config))
+
+    assert tps_cli._resolve_model_max_batch_size(pipeline, task="image-text-to-text") == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("bad", None),
+        (None, None),
+        (0, 1),
+        (-3, 1),
+        ("5", 5),
+    ],
+)
+def test_cli_normalize_max_batch_size(value, expected):
+    assert tps_cli._normalize_max_batch_size(value) == expected
+
+
+def test_cli_resolve_cli_batch_size_prefers_explicit_override():
+    args = argparse.Namespace(task="text-generation", batch_size=6)
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=3)))
+
+    assert tps_cli._resolve_cli_batch_size(args, pipeline) == 6
+
+
+def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    calls: list[int] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=4)))
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            calls.append(kwargs["batch_size"])
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=1.0,
+                decode_duration=1.0,
+                decode_tps=1.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=1,
+        repeat=1,
+        prefill=8,
+        decode=2,
+        prefill_chunk_size=None,
+        trace=None,
+        device_metrics=False,
+        json=None,
+        device_backend="none",
+    )
+
+    assert tps_cli._run_text_measure(args) == 0
+    assert calls == [4, 4]
+
+
+def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    measure_calls: list[int] = []
+    full_calls: list[int] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=3)))
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            measure_calls.append(kwargs["batch_size"])
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=1.0,
+                decode_duration=1.0,
+                decode_tps=1.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+        def measure_full(self, **kwargs) -> BenchmarkResult:
+            full_calls.append(kwargs["batch_size"])
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(8)
+            result.prefill_sweep.tps_values.append(1.0)
+            result.prefill_sweep.time_values.append(1.0)
+            result.prefill_sweep.avg_total_token_latency_values.append(1.0)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(4)
+            result.decode_sweep.tps_values.append(1.0)
+            result.decode_sweep.time_values.append(1.0)
+            result.decode_sweep.avg_total_token_latency_values.append(1.0)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
+
+        def plot_and_save(self, result, save_path) -> None:
+            del result, save_path
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=1,
+        repeat=1,
+        prefill_range=(8, 8, 1),
+        cache_lengths=[4],
+        decode_window=2,
+        prefill_chunk_size=None,
+        trace=None,
+        device_metrics=False,
+        json=None,
+        csv=None,
+        plot=None,
+        device_backend="none",
+    )
+
+    assert tps_cli._run_text_sweep(args) == 0
+    assert measure_calls == [3]
+    assert full_calls == [3]
 
 
 def test_cli_tps_sweep_vlm_options_parsing():

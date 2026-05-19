@@ -128,6 +128,77 @@ def _is_vlm_task(task: str) -> bool:
     return task in {"image-text-to-text", "image-to-text"}
 
 
+def _normalize_max_batch_size(value: Any) -> int | None:
+    """Normalize a model config max batch size value.
+
+    Args:
+        value: Candidate value read from a model config.
+
+    Returns:
+        A positive batch size when the candidate can be converted to an integer, otherwise ``None``.
+    """
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_max_batch_sizes(config: Any, *, task: str) -> Iterable[Any]:
+    """Yield task-specific max batch size candidates from a model config.
+
+    Args:
+        config: Model config object that may expose top-level or nested max batch size attributes.
+        task: Transformers pipeline task used to decide VLM-specific candidates.
+
+    Yields:
+        Candidate max batch size values in priority order.
+    """
+    yield getattr(config, "max_batch_size", None)
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        yield getattr(text_config, "max_batch_size", None)
+    if _is_vlm_task(task):
+        vision_config = getattr(config, "vision_config", None)
+        if vision_config is not None:
+            yield getattr(vision_config, "max_batch_size", None)
+
+
+def _resolve_model_max_batch_size(pipeline: Any, *, task: str) -> int:
+    """Resolve the automatic CLI batch size from a loaded pipeline.
+
+    Args:
+        pipeline: Loaded transformers pipeline.
+        task: Transformers pipeline task.
+
+    Returns:
+        The first valid model max batch size candidate, or ``1`` when unavailable.
+    """
+    model = getattr(pipeline, "model", None)
+    config = getattr(model, "config", None)
+    if config is None:
+        return 1
+    for candidate in _candidate_max_batch_sizes(config, task=task):
+        batch_size = _normalize_max_batch_size(candidate)
+        if batch_size is not None:
+            return batch_size
+    return 1
+
+
+def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
+    """Resolve the effective TPS measurement batch size.
+
+    Args:
+        args: Parsed CLI arguments.
+        pipeline: Loaded transformers pipeline.
+
+    Returns:
+        Explicit CLI batch size when provided, otherwise the model config batch size fallback.
+    """
+    if args.batch_size is not None:
+        return int(args.batch_size)
+    return _resolve_model_max_batch_size(pipeline, task=args.task)
+
+
 def _require_transformers_deps() -> None:
     try:
         import transformers  # noqa: F401
@@ -577,6 +648,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
@@ -591,6 +663,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
+            batch_size=batch_size,
         )
     runs = []
     run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
@@ -609,6 +682,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
                 on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
                 on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                batch_size=batch_size,
             )
         finally:
             _stop_tracker_safe(tracker_prefill)
@@ -708,6 +782,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
     print(f"prefill tokens: {runs[0].num_prefill} | decode tokens: {runs[0].num_decode}")
     _print_summary_header()
     _print_summary("prefill_tps", prefill_tps, "tok/s")
@@ -760,6 +835,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "repeat": args.repeat,
+            "batch_size": batch_size,
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "prefill_tps": _summary(prefill_tps),
@@ -834,6 +910,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
 
@@ -848,6 +925,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             repeat=1,
             prompt=args.prompt,
             show_progress=False,
+            batch_size=batch_size,
         )
 
     runs = []
@@ -863,6 +941,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 repeat=1,
                 prompt=args.prompt,
                 show_progress=False,
+                batch_size=batch_size,
             )[0]
         finally:
             if tracker is not None:
@@ -911,6 +990,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
     print(
         f"image resolution: {args.image_resolution} | "
         f"llm prefill tokens: {runs[0].llm.num_prefill} | decode tokens: {runs[0].llm.num_decode}"
@@ -947,6 +1027,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             "prompt": args.prompt,
             "image_resolution": args.image_resolution,
             "repeat": args.repeat,
+            "batch_size": batch_size,
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "vision_encode_ms": _summary(vision_ms),
@@ -1006,6 +1087,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
@@ -1021,6 +1103,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
+            batch_size=batch_size,
         )
     runs = []
     run_avg_power: list[float] = []
@@ -1074,6 +1157,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                     on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
                     on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
                     on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                    batch_size=batch_size,
                 )
             )
         finally:
@@ -1288,6 +1372,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             decode_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
     _print_summary_header()
     if prefill_last:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
@@ -1337,6 +1422,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "repeat": args.repeat,
+            "batch_size": batch_size,
             "aggregate": asdict(result),
             "runs": [asdict(r) for r in runs],
             "summary": {
@@ -1389,6 +1475,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
 
     if args.csv:
         rows = list(_iter_rows_for_csv(result))
+        for row in rows:
+            row["batch_size"] = batch_size
         _write_csv(args.csv, rows)
         print(f"wrote: {args.csv}")
 
@@ -1417,6 +1505,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
 
@@ -1433,6 +1522,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 repeat=1,
                 prompt=args.prompt,
                 show_progress=False,
+                batch_size=batch_size,
             )
         vision_runs = []
         vision_power_avg = []
@@ -1459,6 +1549,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     repeat=1,
                     prompt=args.prompt,
                     show_progress=False,
+                    batch_size=batch_size,
                 )[0]
             finally:
                 if tracker is not None:
@@ -1509,7 +1600,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
         vision_fps = [fps for _, fps in vision_runs]
 
-        print(f"\nresolution={resolution} warmup={args.warmup} runs={args.repeat}")
+        print(f"\nresolution={resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}")
         _print_summary_header()
         _print_summary("vision_encode", vision_ms, "ms")
         _print_summary("vision_fps", vision_fps, "fps")
@@ -1536,6 +1627,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             csv_rows.append(
                 {
                     "type": "vision",
+                    "batch_size": batch_size,
                     "image_resolution": resolution,
                     "repeat_index": idx,
                     "vision_encode_ms": latency * 1000.0,
@@ -1582,6 +1674,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             {
                 "image_resolution": resolution,
                 "repeat": args.repeat,
+                "batch_size": batch_size,
                 "runs": [
                     {
                         "vision_encode_latency": latency,
@@ -1620,6 +1713,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             cache_lengths=args.cache_lengths,
             decode_window=args.decode_window,
             show_progress=False,
+            batch_size=batch_size,
         )
     llm_runs = []
     llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
@@ -1634,6 +1728,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 cache_lengths=args.cache_lengths,
                 decode_window=args.decode_window,
                 show_progress=False,
+                batch_size=batch_size,
             )
         finally:
             if tracker is not None:
@@ -1704,7 +1799,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
 
-    print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}")
+    print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}")
     _print_summary_header()
     _print_summary("llm_prefill_tps(last)", llm_prefill_tps, "tok/s")
     _print_summary("llm_decode_tps(last)", llm_decode_tps, "tok/s")
@@ -1751,6 +1846,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         csv_rows.append(
             {
                 "type": "llm",
+                "batch_size": batch_size,
                 "image_resolution": llm_resolution,
                 "repeat_index": idx,
                 "vision_encode_ms": None,
@@ -1795,10 +1891,12 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "prefill_range": list(args.prefill_range),
                 "cache_lengths": args.cache_lengths,
                 "decode_window": args.decode_window,
+                "batch_size": batch_size,
                 "vision_results": resolution_payloads,
                 "llm_reference_resolution": llm_resolution,
                 "llm_results": {
                     "repeat": args.repeat,
+                    "batch_size": batch_size,
                     "aggregate": asdict(llm_result),
                     "runs": [asdict(r) for r in llm_runs],
                     "device_time_series_runs": llm_device_time_series_runs,
@@ -1911,6 +2009,12 @@ def add_tps_parser(
             type=_parse_positive_int_optional,
             default=None,
             help="optional prefill_chunk_size forwarded to model.generate/model.forward",
+        )
+        p.add_argument(
+            "--batch-size",
+            type=_parse_positive_int,
+            default=None,
+            help="batch size for synthetic inputs; defaults to model max_batch_size when available",
         )
         _add_device_tracking_args(p)
         p.set_defaults(device_backend=None)
