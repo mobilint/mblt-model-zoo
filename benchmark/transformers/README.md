@@ -41,6 +41,8 @@ inference and model downloads.
   - `--non-batch` is the default and benchmarks only targets whose config `max_batch_size` is `1`.
   - `--batch` benchmarks only targets whose config `max_batch_size` is greater than `1`.
   - Batch runs use the resolved `max_batch_size` exactly as the actual input batch size.
+  - Batch text-generation sweep runs scale default `--prefill-range` and `--cache-lengths` down by
+    `1/4`; explicit user-provided values are preserved. `--decode-window` is not scaled.
   - Batch TPS is total throughput across the batch: prefill tokens and decoded tokens are summed
     across all batch rows before dividing by elapsed time.
   - Models whose id contains `GGUF`, or whose local/Hub repository contains `.gguf` artifacts, are
@@ -251,6 +253,9 @@ python benchmark/transformers/benchmark_text_generation_models.py sweep \
 
 To benchmark only batch-capable text-generation targets, pass `--batch`. The script uses each
 target's config `max_batch_size` as the real input batch size and reports total token throughput.
+For `sweep`, the default `--prefill-range` becomes `128:512:128` and default `--cache-lengths`
+becomes `32,128,256,512`; `--decode-window` remains `32`. If you pass `--prefill-range` or
+`--cache-lengths` explicitly, the script uses your values as-is.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py measure \

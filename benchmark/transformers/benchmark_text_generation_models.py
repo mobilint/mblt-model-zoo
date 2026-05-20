@@ -87,6 +87,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
 
 _BATCH_MODE_BATCH = "batch"
 _BATCH_MODE_NON_BATCH = "non_batch"
+_BATCH_SWEEP_LENGTH_SCALE = 4
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
 
@@ -274,6 +275,26 @@ def _filter_text_targets_by_batch_mode(
 
 def _parse_int_list(raw: str) -> list[int]:
     return _parse_int_csv_common(raw, unique_sorted=False)
+
+
+def _scale_positive_int(value: int, divisor: int) -> int:
+    """Scale a positive integer down while preserving a minimum value of one."""
+    return max(1, int(value) // int(divisor))
+
+
+def _scale_range_arg(value: tuple[int, int, int], divisor: int) -> tuple[int, int, int]:
+    """Scale a parsed range tuple down by a positive divisor."""
+    start, end, step = value
+    return (
+        _scale_positive_int(start, divisor),
+        _scale_positive_int(end, divisor),
+        _scale_positive_int(step, divisor),
+    )
+
+
+def _scale_int_list(values: Sequence[int], divisor: int) -> list[int]:
+    """Scale a sequence of positive integers down by a positive divisor."""
+    return [_scale_positive_int(value, divisor) for value in values]
 
 
 def _build_pipeline(
@@ -1089,6 +1110,29 @@ def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bo
     args.core_mode = "single"
 
 
+def _resolve_batch_sweep_lengths(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
+    """Scale default sweep lengths down for batch text-generation benchmarks."""
+    if args.command != "sweep" or args.batch_mode != _BATCH_MODE_BATCH:
+        return
+
+    scaled: list[str] = []
+    if not _flag_present(raw_argv, "--prefill-range"):
+        original_prefill_range = args.prefill_range
+        args.prefill_range = _scale_range_arg(args.prefill_range, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"prefill_range={original_prefill_range}->{args.prefill_range}")
+    if not _flag_present(raw_argv, "--cache-lengths"):
+        original_cache_lengths = list(args.cache_lengths)
+        args.cache_lengths = _scale_int_list(args.cache_lengths, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"cache_lengths={original_cache_lengths}->{args.cache_lengths}")
+
+    if scaled:
+        print(
+            "Auto-scaled --batch sweep lengths by "
+            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: "
+            + ", ".join(scaled)
+        )
+
+
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
     device_explicit = _flag_present(raw_argv, "--device")
@@ -1121,6 +1165,7 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
     _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
+    _resolve_batch_sweep_lengths(args, raw_argv)
 
 
 def _args_for_target_device_backend(
