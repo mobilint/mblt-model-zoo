@@ -89,7 +89,9 @@ try:
         _format_gib,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
+        _read_raw_config,
         _resolve_original_model_ids,
+        _revision_exists,
         _should_precheck_cuda,
     )
 except Exception:
@@ -101,7 +103,9 @@ except Exception:
         _format_gib,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
+        _read_raw_config,
         _resolve_original_model_ids,
+        _revision_exists,
         _should_precheck_cuda,
     )
 
@@ -174,7 +178,7 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
+    model_kwargs = _apply_vlm_core_mode_model_kwargs(model_kwargs, core_mode)
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -187,6 +191,95 @@ def _build_pipeline(
             kwargs.pop("dtype", None)
             kwargs["torch_dtype"] = args.dtype
     return hf_pipeline(**kwargs)
+
+
+def _apply_vlm_core_mode_model_kwargs(model_kwargs: dict[str, Any], core_mode: str | None) -> dict[str, Any]:
+    """Apply shared VLM NPU core-mode kwargs to both vision and text sub-configs.
+
+    Image-text-to-text Mobilint models use composite configs with separate ``vision_config`` and
+    ``text_config`` NPU backends. Passing text-generation style top-level kwargs such as
+    ``core_mode`` leaves them unused by the config loader, and Transformers forwards them to the
+    model constructor where upstream VLM classes can reject them. This helper maps the benchmark's
+    shared ``--core-mode`` option onto the VLM-specific ``vision_*`` and ``text_*`` config fields.
+
+    Args:
+        model_kwargs: Existing model kwargs to update.
+        core_mode: Core mode requested by the benchmark CLI.
+
+    Returns:
+        The updated model kwargs.
+    """
+    expanded: dict[str, Any] = {}
+    _apply_core_mode_model_kwargs_common(expanded, core_mode)
+
+    for prefix in ("vision", "text"):
+        for key, value in expanded.items():
+            model_kwargs[f"{prefix}_{key}"] = value
+    return model_kwargs
+
+
+def _collect_vlm_config_mxq_paths(config: dict[str, Any]) -> list[str]:
+    """Collect MXQ paths referenced by a VLM config and its sub-configs."""
+    paths: list[str] = []
+
+    def _visit(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, item in value.items():
+            if key == "mxq_path" and isinstance(item, str) and item:
+                paths.append(item)
+            elif key.endswith("_config") and isinstance(item, dict):
+                _visit(item)
+
+    _visit(config)
+    return paths
+
+
+def _list_repo_files(model_id: str, revision: str | None) -> list[str] | None:
+    """Return repository files for a revision, or ``None`` when Hub access fails."""
+    try:
+        from huggingface_hub import HfApi
+
+        return list(HfApi().list_repo_files(repo_id=model_id, revision=revision, repo_type="model"))
+    except Exception:
+        return None
+
+
+def _vlm_revision_artifacts_available(
+    model_id: str,
+    revision: str | None,
+    mxq_path: str | None,
+) -> tuple[bool, str | None]:
+    """Best-effort preflight check for VLM revision and referenced MXQ artifacts."""
+    if mxq_path or not revision:
+        return True, None
+
+    revision_state = _revision_exists(model_id, revision)
+    if revision_state is False:
+        return False, f"revision {revision!r} was not found on Hugging Face Hub"
+
+    config = _read_raw_config(model_id, revision)
+    if config is None:
+        return True, None
+
+    mxq_paths = _collect_vlm_config_mxq_paths(config)
+    if not mxq_paths:
+        return True, None
+
+    revision_files = _list_repo_files(model_id, revision)
+    main_files = _list_repo_files(model_id, None)
+    if revision_files is None and main_files is None:
+        return True, None
+
+    file_sets = [set(files) for files in (revision_files, main_files) if files is not None]
+    missing = [
+        path
+        for path in mxq_paths
+        if not any(path in files or os.path.basename(path) in files for files in file_sets)
+    ]
+    if missing:
+        return False, f"referenced MXQ artifact(s) not found: {', '.join(missing)}"
+    return True, None
 
 
 def _iter_targets(
@@ -1113,6 +1206,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.skip_existing and json_path.is_file() and csv_path.is_file() and png_path.is_file():
             print(f"Skipping {label} (results exist).")
             continue
+        artifacts_available, skip_reason = _vlm_revision_artifacts_available(model_id, revision, target_mxq_path)
+        if not artifacts_available:
+            print(f"Skipping {label} ({skip_reason}).")
+            continue
         if _should_precheck_cuda(args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
             mem_info = _cuda_memory_info(args.device)
@@ -1337,6 +1434,10 @@ def _run_measure(args: argparse.Namespace) -> int:
         json_path = results_dir / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
+            continue
+        artifacts_available, skip_reason = _vlm_revision_artifacts_available(model_id, revision, target_mxq_path)
+        if not artifacts_available:
+            print(f"Skipping {label} ({skip_reason}).")
             continue
         pipeline = None
         try:

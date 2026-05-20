@@ -83,6 +83,101 @@ def test_vlm_benchmark_sweep_defaults_and_removed_old_names() -> None:
         parser.parse_args(["sweep", "--llm-prefill-range", "128:512:128"])
 
 
+@pytest.mark.parametrize(
+    ("core_mode", "expected"),
+    [
+        (
+            "single",
+            {
+                "vision_core_mode": "single",
+                "vision_target_cores": ["0:0"],
+                "text_core_mode": "single",
+                "text_target_cores": ["0:0"],
+            },
+        ),
+        (
+            "global4",
+            {
+                "vision_core_mode": "global4",
+                "vision_target_clusters": [0],
+                "text_core_mode": "global4",
+                "text_target_clusters": [0],
+            },
+        ),
+        (
+            "global8",
+            {
+                "vision_core_mode": "global8",
+                "vision_target_clusters": [0, 1],
+                "text_core_mode": "global8",
+                "text_target_clusters": [0, 1],
+            },
+        ),
+    ],
+)
+def test_vlm_core_mode_kwargs_are_prefixed(core_mode: str, expected: dict[str, object]) -> None:
+    """Verify VLM benchmark maps shared core mode to composite config kwargs."""
+    model_kwargs = vlm_bench._apply_vlm_core_mode_model_kwargs({}, core_mode)
+
+    assert model_kwargs == expected
+    assert "core_mode" not in model_kwargs
+    assert "target_cores" not in model_kwargs
+    assert "target_clusters" not in model_kwargs
+
+
+def test_vlm_core_mode_none_does_not_add_kwargs() -> None:
+    """Verify omitted VLM core mode does not create empty prefixed kwargs."""
+    assert vlm_bench._apply_vlm_core_mode_model_kwargs({}, None) == {}
+
+
+def test_vlm_revision_preflight_skips_missing_revision(monkeypatch) -> None:
+    """Verify VLM preflight rejects revisions that do not exist on the Hub."""
+    monkeypatch.setattr(vlm_bench, "_revision_exists", lambda model_id, revision: False)
+
+    available, reason = vlm_bench._vlm_revision_artifacts_available("mobilint/vlm-a", "W8", None)
+
+    assert available is False
+    assert "revision 'W8'" in str(reason)
+
+
+def test_vlm_revision_preflight_skips_missing_mxq_artifact(monkeypatch) -> None:
+    """Verify VLM preflight rejects configs that reference missing MXQ files."""
+    monkeypatch.setattr(vlm_bench, "_revision_exists", lambda model_id, revision: True)
+    monkeypatch.setattr(
+        vlm_bench,
+        "_read_raw_config",
+        lambda model_id, revision: {
+            "vision_config": {"mxq_path": "missing-vision.mxq"},
+            "text_config": {"mxq_path": "present-text.mxq"},
+        },
+    )
+    monkeypatch.setattr(vlm_bench, "_list_repo_files", lambda model_id, revision: ["present-text.mxq"])
+
+    available, reason = vlm_bench._vlm_revision_artifacts_available("mobilint/vlm-a", "W8", None)
+
+    assert available is False
+    assert "missing-vision.mxq" in str(reason)
+
+
+def test_vlm_revision_preflight_allows_existing_mxq_artifacts(monkeypatch) -> None:
+    """Verify VLM preflight accepts revisions when all referenced MXQ files exist."""
+    monkeypatch.setattr(vlm_bench, "_revision_exists", lambda model_id, revision: True)
+    monkeypatch.setattr(
+        vlm_bench,
+        "_read_raw_config",
+        lambda model_id, revision: {
+            "vision_config": {"mxq_path": "vision.mxq"},
+            "text_config": {"mxq_path": "text.mxq"},
+        },
+    )
+    monkeypatch.setattr(vlm_bench, "_list_repo_files", lambda model_id, revision: ["vision.mxq", "text.mxq"])
+
+    available, reason = vlm_bench._vlm_revision_artifacts_available("mobilint/vlm-a", "W8", None)
+
+    assert available is True
+    assert reason is None
+
+
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
 @pytest.mark.parametrize("command", ["measure", "sweep"])
 def test_benchmark_batch_flags(module, command) -> None:
@@ -129,7 +224,9 @@ def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:
     monkeypatch.setattr(
         text_bench,
         "_resolve_config_max_batch_size",
-        lambda model_id, revision, *, task: 4 if model_id.endswith("batch") and not model_id.endswith("non-batch") else 1,
+        lambda model_id, revision, *, task: (
+            4 if model_id.endswith("batch") and not model_id.endswith("non-batch") else 1
+        ),
     )
 
     non_batch = text_bench._filter_text_targets_by_batch_mode(raw_targets, batch_mode="non_batch")
