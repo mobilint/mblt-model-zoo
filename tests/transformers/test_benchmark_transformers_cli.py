@@ -83,6 +83,17 @@ def test_vlm_benchmark_sweep_defaults_and_removed_old_names() -> None:
         parser.parse_args(["sweep", "--llm-prefill-range", "128:512:128"])
 
 
+def test_vlm_warmup_llm_kwargs_are_lightweight() -> None:
+    """Verify VLM warmup uses fixed lightweight LLM dimensions."""
+    warmup_kwargs = vlm_bench._vlm_warmup_llm_kwargs()
+
+    assert warmup_kwargs == {
+        "prefill_range": (128, 128, 128),
+        "cache_lengths": [128],
+        "decode_window": 32,
+    }
+
+
 @pytest.mark.parametrize(
     ("core_mode", "expected"),
     [

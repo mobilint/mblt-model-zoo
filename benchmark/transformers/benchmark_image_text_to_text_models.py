@@ -80,6 +80,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer, npu_latency_pct
 
+_VLM_WARMUP_PREFILL = 128
+_VLM_WARMUP_DECODE = 32
+
 try:
     from benchmark_text_generation_models import (
         _add_batch_selection_args,
@@ -154,6 +157,15 @@ def _summary(values: list[float]) -> dict[str, float]:
         "p50": _percentile(vals, 0.50),
         "p95": _percentile(vals, 0.95),
         "p99": _percentile(vals, 0.99),
+    }
+
+
+def _vlm_warmup_llm_kwargs() -> dict[str, Any]:
+    """Return the lightweight VLM LLM warmup dimensions."""
+    return {
+        "prefill_range": (_VLM_WARMUP_PREFILL, _VLM_WARMUP_PREFILL, _VLM_WARMUP_PREFILL),
+        "cache_lengths": [_VLM_WARMUP_PREFILL],
+        "decode_window": _VLM_WARMUP_DECODE,
     }
 
 
@@ -320,19 +332,33 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     all_vision_img_per_j: list[float] = []
     all_vision_j_per_img: list[float] = []
 
+    llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
+    resolved_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.prefill_chunk_size
+    warmup_resolution = llm_resolution
+    warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
+    for warmup_idx in tqdm(
+        range(args.warmup),
+        desc=f"{label} warmup@{warmup_resolution}",
+        leave=False,
+    ):
+        measurer.measure_vision(
+            image_resolution=warmup_resolution,
+            repeat=1,
+            prompt=args.prompt,
+            batch_size=args.batch_size,
+            show_progress=False,
+        )
+        measurer.measure_llm_full(
+            image_resolution=warmup_resolution,
+            prompt=args.prompt,
+            **warmup_llm_kwargs,
+            prefill_chunk_size=resolved_prefill_chunk_size,
+            batch_size=args.batch_size,
+            show_progress=True,
+            progress_prefix=f"{label} warmup {warmup_idx + 1}/{args.warmup}",
+        )
+
     for resolution in args.image_resolutions:
-        for _ in tqdm(
-            range(args.warmup),
-            desc=f"{label} vision@{resolution} warmup",
-            leave=False,
-        ):
-            measurer.measure_vision(
-                image_resolution=resolution,
-                repeat=1,
-                prompt=args.prompt,
-                batch_size=args.batch_size,
-                show_progress=False,
-            )
         runs = []
         power_vals: list[float] = []
         p99_power_vals: list[float] = []
@@ -478,25 +504,6 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "vision_j_per_img": j_per_img_vals[idx - 1] if idx - 1 < len(j_per_img_vals) else None,
                 }
             )
-
-    llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
-    resolved_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.prefill_chunk_size
-    for warmup_idx in tqdm(
-        range(args.warmup),
-        desc=f"{label} llm@{llm_resolution} warmup",
-        leave=False,
-    ):
-        measurer.measure_llm_full(
-            image_resolution=llm_resolution,
-            prompt=args.prompt,
-            prefill_range=args.prefill_range,
-            cache_lengths=args.cache_lengths,
-            decode_window=args.decode_window,
-            prefill_chunk_size=resolved_prefill_chunk_size,
-            batch_size=args.batch_size,
-            show_progress=True,
-            progress_prefix=f"{label} llm@{llm_resolution} warmup {warmup_idx + 1}/{args.warmup}",
-        )
 
     llm_runs = []
     llm_avg_power_w: list[float] = []
@@ -1448,6 +1455,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             tracker = _build_device_tracker(target_args, pipeline)
             _print_device_status(target_args, tracker)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
             for warmup_idx in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure_vision(
                     args.image_resolution,
@@ -1459,9 +1467,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 measurer.measure_llm_full(
                     image_resolution=args.image_resolution,
                     prompt=args.prompt,
-                    prefill_range=(args.prefill, args.prefill, args.prefill),
-                    cache_lengths=[args.prefill],
-                    decode_window=args.decode,
+                    **warmup_llm_kwargs,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     batch_size=batch_size,
                     show_progress=True,
