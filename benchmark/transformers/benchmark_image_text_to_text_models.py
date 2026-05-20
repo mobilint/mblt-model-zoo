@@ -481,7 +481,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
     resolved_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.prefill_chunk_size
-    for _ in tqdm(
+    for warmup_idx in tqdm(
         range(args.warmup),
         desc=f"{label} llm@{llm_resolution} warmup",
         leave=False,
@@ -494,7 +494,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             decode_window=args.decode_window,
             prefill_chunk_size=resolved_prefill_chunk_size,
             batch_size=args.batch_size,
-            show_progress=False,
+            show_progress=True,
+            progress_prefix=f"{label} llm@{llm_resolution} warmup {warmup_idx + 1}/{args.warmup}",
         )
 
     llm_runs = []
@@ -514,7 +515,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_prefill_j_per_tok: list[float] = []
     llm_decode_j_per_tok: list[float] = []
     llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
-    for _ in tqdm(
+    for repeat_idx in tqdm(
         range(args.repeat),
         desc=f"{label} llm@{llm_resolution} runs",
         leave=False,
@@ -530,7 +531,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 decode_window=args.decode_window,
                 prefill_chunk_size=resolved_prefill_chunk_size,
                 batch_size=args.batch_size,
-                show_progress=False,
+                show_progress=True,
+                progress_prefix=f"{label} llm@{llm_resolution} run {repeat_idx + 1}/{args.repeat}",
             )
         finally:
             _stop_tracker_safe(tracker)
@@ -1446,7 +1448,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             tracker = _build_device_tracker(target_args, pipeline)
             _print_device_status(target_args, tracker)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
-            for _ in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
+            for warmup_idx in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure_vision(
                     args.image_resolution,
                     repeat=1,
@@ -1462,7 +1464,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                     decode_window=args.decode,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     batch_size=batch_size,
-                    show_progress=False,
+                    show_progress=True,
+                    progress_prefix=f"{label} warmup {warmup_idx + 1}/{args.warmup}",
                 )
             vision_runs: list[dict[str, float]] = []
             llm_runs: list[dict[str, Any]] = []
@@ -1474,7 +1477,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             total_energy_j: list[float] = []
             llm_prefill_tok_per_j: list[float] = []
             llm_decode_tok_per_j: list[float] = []
-            for _ in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
                 if tracker is not None:
                     tracker.start()
                 vision_latency, vision_fps = measurer.measure_vision(
@@ -1493,7 +1496,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                         decode_window=args.decode,
                         prefill_chunk_size=resolved_prefill_chunk_size,
                         batch_size=batch_size,
-                        show_progress=False,
+                        show_progress=True,
+                        progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
                     )
                 finally:
                     _stop_tracker_safe(tracker)

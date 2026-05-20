@@ -11,7 +11,6 @@ from transformers import TextIteratorStreamer
 
 from .cache_utils import MobilintCache
 
-
 _NS_PER_SECOND = 1_000_000_000
 _SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
 
@@ -231,6 +230,32 @@ def _resolve_image_features_tensor(image_features) -> torch.Tensor:
                     return tensor
 
     raise TypeError(f"Could not resolve image feature tensor from {type(image_features).__name__}.")
+
+
+def _resolve_decoder_logits(outputs: object) -> torch.Tensor:
+    """Resolve decoder logits from text model outputs used by VLM fake decode.
+
+    Args:
+        outputs: Language model output object, tuple, or list.
+
+    Returns:
+        Tensor containing decoder logits for next-token selection.
+
+    Raises:
+        TypeError: If logits cannot be resolved from the output object.
+    """
+    last_hidden_state = getattr(outputs, "last_hidden_state", None)
+    if isinstance(last_hidden_state, torch.Tensor):
+        return last_hidden_state
+
+    logits = getattr(outputs, "logits", None)
+    if isinstance(logits, torch.Tensor):
+        return logits
+
+    if isinstance(outputs, (list, tuple)) and outputs and isinstance(outputs[0], torch.Tensor):
+        return outputs[0]
+
+    raise TypeError(f"Could not resolve decoder logits from {type(outputs).__name__}.")
 
 
 class TokenIteratorStreamer(TextIteratorStreamer):
@@ -1422,6 +1447,8 @@ class VLMTPSMeasurer:
         inputs_embeds: torch.Tensor,
         num_decode: int,
         prefill_chunk_size: Optional[int] = None,
+        show_progress: bool = False,
+        progress_desc: Union[str, None] = None,
     ) -> SingleMeasurement:
         seq_len = int(inputs_embeds.shape[1])
         lm_for_npu = self._get_language_model()
@@ -1456,7 +1483,10 @@ class VLMTPSMeasurer:
             with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
                 outputs = gen_model.generate(**gen_kwargs)
             t_end_ns = time.perf_counter_ns()
-            generated_per_row = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else num_decode + 1
+            if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2:
+                generated_per_row = int(outputs.shape[1])
+            else:
+                generated_per_row = num_decode + 1
             decode_count = max(generated_per_row - 1, num_decode)
             total_time_ns = t_end_ns - t_start_ns
             total_time = _ns_to_seconds(total_time_ns)
@@ -1469,7 +1499,9 @@ class VLMTPSMeasurer:
                 decode_duration = total_time
             total_prefill_tokens = seq_len * batch_size
             total_decode_tokens = decode_count * batch_size
-            avg_total_prefill_token_latency = prefill_latency / total_prefill_tokens if total_prefill_tokens > 0 else 0.0
+            avg_total_prefill_token_latency = (
+                prefill_latency / total_prefill_tokens if total_prefill_tokens > 0 else 0.0
+            )
             avg_total_decode_token_latency = decode_duration / total_decode_tokens if total_decode_tokens > 0 else 0.0
             avg_npu_prefill_token_latency = (
                 npu_prefill_time / total_prefill_tokens if has_npu_time and total_prefill_tokens > 0 else None
@@ -1500,8 +1532,12 @@ class VLMTPSMeasurer:
                 prefill_latency_ns=prefill_latency_ns,
                 decode_duration_ns=decode_duration_ns,
                 total_time_ns=total_time_ns,
-                avg_total_prefill_token_latency_ns=prefill_latency_ns // total_prefill_tokens if total_prefill_tokens > 0 else 0,
-                avg_total_decode_token_latency_ns=decode_duration_ns // total_decode_tokens if total_decode_tokens > 0 else 0,
+                avg_total_prefill_token_latency_ns=(
+                    prefill_latency_ns // total_prefill_tokens if total_prefill_tokens > 0 else 0
+                ),
+                avg_total_decode_token_latency_ns=(
+                    decode_duration_ns // total_decode_tokens if total_decode_tokens > 0 else 0
+                ),
             )
 
         streamer = TokenIteratorStreamer(
@@ -1555,18 +1591,31 @@ class VLMTPSMeasurer:
         npu_prefill_time = 0.0
         npu_decode_time = 0.0
         has_npu_time = False
+        token_pbar = None
+        if show_progress:
+            token_pbar = tqdm(
+                total=num_decode + 1,
+                desc=progress_desc or f"vlm llm generate (prefill={seq_len}, decode={num_decode})",
+                leave=False,
+            )
 
-        for _ in streamer:
-            if first_token_time_ns is None:
-                first_token_time_ns = time.perf_counter_ns()
-            decoded_tokens += 1
-            npu_time = getattr(lm_for_npu, "npu_time", None)
-            if npu_time is not None:
-                has_npu_time = True
-                if decoded_tokens == 1:
-                    npu_prefill_time += npu_time
-                else:
-                    npu_decode_time += npu_time
+        try:
+            for _ in streamer:
+                if first_token_time_ns is None:
+                    first_token_time_ns = time.perf_counter_ns()
+                decoded_tokens += 1
+                if token_pbar is not None:
+                    token_pbar.update(1)
+                npu_time = getattr(lm_for_npu, "npu_time", None)
+                if npu_time is not None:
+                    has_npu_time = True
+                    if decoded_tokens == 1:
+                        npu_prefill_time += npu_time
+                    else:
+                        npu_decode_time += npu_time
+        finally:
+            if token_pbar is not None:
+                token_pbar.close()
 
         t_end_ns = time.perf_counter_ns()
         thread.join()
@@ -1634,6 +1683,8 @@ class VLMTPSMeasurer:
         cache_len: int,
         num_decode: int,
         batch_size: int = 1,
+        show_progress: bool = False,
+        progress_desc: Union[str, None] = None,
     ) -> SingleMeasurement:
         """Measure VLM language-model decode TPS with fake prefilled cache length."""
         assert cache_len > 0, "cache_len should be positive! cache_len: %d" % cache_len
@@ -1665,32 +1716,45 @@ class VLMTPSMeasurer:
         decoded_tokens = 0
         npu_decode_time = 0.0
         has_npu_time = False
+        token_pbar = None
+        if show_progress:
+            token_pbar = tqdm(
+                total=num_decode,
+                desc=progress_desc or f"vlm fake decode (cache={cache_len}, window={num_decode})",
+                leave=False,
+            )
 
-        with torch.no_grad():
-            for decode_idx in range(num_decode):
-                current_cache_len = cache_len + decode_idx
-                attention_mask = torch.ones((batch_size, current_cache_len + 1), dtype=torch.long, device=device)
-                position_ids = torch.full((batch_size, 1), current_cache_len, dtype=torch.long, device=device)
-                cache_position = torch.tensor([current_cache_len], dtype=torch.long, device=device)
+        try:
+            with torch.no_grad():
+                for decode_idx in range(num_decode):
+                    current_cache_len = cache_len + decode_idx
+                    attention_mask = torch.ones((batch_size, current_cache_len + 1), dtype=torch.long, device=device)
+                    position_ids = torch.full((batch_size, 1), current_cache_len, dtype=torch.long, device=device)
+                    cache_position = torch.tensor([current_cache_len], dtype=torch.long, device=device)
 
-                outputs = lm_for_npu(
-                    inputs_embeds=inputs_embeds,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    past_key_values=past_key_values,
-                    use_cache=True,
-                    cache_position=cache_position,
-                    count_npu_time=count_npu_time,
-                )
-                logits = outputs.last_hidden_state
-                next_token_id = torch.argmax(logits[:, -1, :], dim=-1).view(batch_size, 1)
-                inputs_embeds = lm_for_npu.get_input_embeddings()(next_token_id.to(device))
+                    outputs = lm_for_npu(
+                        inputs_embeds=inputs_embeds,
+                        attention_mask=attention_mask,
+                        position_ids=position_ids,
+                        past_key_values=past_key_values,
+                        use_cache=True,
+                        cache_position=cache_position,
+                        count_npu_time=count_npu_time,
+                    )
+                    logits = _resolve_decoder_logits(outputs)
+                    next_token_id = torch.argmax(logits[:, -1, :], dim=-1).view(batch_size, 1)
+                    inputs_embeds = lm_for_npu.get_input_embeddings()(next_token_id.to(device))
 
-                decoded_tokens += 1
-                npu_time = getattr(lm_for_npu, "npu_time", None)
-                if npu_time is not None:
-                    has_npu_time = True
-                    npu_decode_time += npu_time
+                    decoded_tokens += 1
+                    if token_pbar is not None:
+                        token_pbar.update(1)
+                    npu_time = getattr(lm_for_npu, "npu_time", None)
+                    if npu_time is not None:
+                        has_npu_time = True
+                        npu_decode_time += npu_time
+        finally:
+            if token_pbar is not None:
+                token_pbar.close()
 
         t_end_ns = time.perf_counter_ns()
 
@@ -1849,6 +1913,8 @@ class VLMTPSMeasurer:
                 inputs_embeds=inputs_embeds,
                 num_decode=1,
                 prefill_chunk_size=prefill_chunk_size,
+                show_progress=show_progress,
+                progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
             )
             full_result.prefill_sweep.x_values.append(p_len)
             full_result.prefill_sweep.tps_values.append(res.prefill_tps)
@@ -1865,11 +1931,14 @@ class VLMTPSMeasurer:
         t_decode_start = time.perf_counter()
         use_fake_decode_prefill = _supports_fake_decode_prefill(self._get_language_model())
         for cache_len in decode_iter:
+            progress_desc = f"{prefix}vlm llm decode generate (cache={cache_len}, window={decode_window})"
             if use_fake_decode_prefill:
                 res = self._measure_llm_decode_with_fake_prefill(
                     cache_len=cache_len,
                     num_decode=decode_window,
                     batch_size=batch_size,
+                    show_progress=show_progress,
+                    progress_desc=progress_desc,
                 )
             else:
                 inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
@@ -1891,6 +1960,8 @@ class VLMTPSMeasurer:
                     inputs_embeds=inputs_embeds,
                     num_decode=decode_window,
                     prefill_chunk_size=prefill_chunk_size,
+                    show_progress=show_progress,
+                    progress_desc=progress_desc,
                 )
             full_result.decode_sweep.x_values.append(cache_len)
             full_result.decode_sweep.tps_values.append(res.decode_tps)
