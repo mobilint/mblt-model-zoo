@@ -53,6 +53,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             if images.ndim == 3:
                 images = images.unsqueeze(0).float()
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
+            elif images.ndim == 4:
+                if images.shape[0] != 1:
+                    raise NotImplementedError("Only batch size 1 image tensor input is supported")
+                images = images.float()
+                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             elif images.ndim == 2:
                 images = images.unsqueeze(0).unsqueeze(0).float()
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
