@@ -472,7 +472,7 @@ def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
 def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
-    measure_calls: list[int] = []
+    measure_calls: list[tuple[int, int, int]] = []
     full_calls: list[int] = []
     pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=3)))
 
@@ -481,7 +481,7 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
             assert pipeline_arg is pipeline
 
         def measure(self, **kwargs) -> SingleMeasurement:
-            measure_calls.append(kwargs["batch_size"])
+            measure_calls.append((kwargs["batch_size"], kwargs["num_prefill"], kwargs["num_decode"]))
             return SingleMeasurement(
                 num_prefill=kwargs["num_prefill"],
                 num_decode=kwargs["num_decode"],
@@ -549,7 +549,7 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
     )
 
     assert tps_cli._run_text_sweep(args) == 0
-    assert measure_calls == [3]
+    assert measure_calls == [(3, 128, 32)]
     assert full_calls == [3]
 
 

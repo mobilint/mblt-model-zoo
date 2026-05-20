@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import sys
+import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -86,6 +87,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
 
 _BATCH_MODE_BATCH = "batch"
 _BATCH_MODE_NON_BATCH = "non_batch"
+_SWEEP_WARMUP_PREFILL = 128
+_SWEEP_WARMUP_DECODE = 32
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,21 @@ class TextBenchmarkTarget:
 
 def _safe_filename(model_id: str) -> str:
     return _safe_filename_common(model_id, replace_slash_only=True)
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Return an exception string that remains useful for empty-message exceptions."""
+    message = str(exc)
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return f"{type(exc).__name__}: {exc!r}"
+
+
+def _print_exception(message: str, exc: BaseException, *, debug_errors: bool) -> None:
+    """Print a benchmark exception summary and optionally its traceback."""
+    print(f"{message}: {_format_exception(exc)}")
+    if debug_errors:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
 
 
 def _add_batch_selection_args(parser: argparse.ArgumentParser) -> None:
@@ -1007,6 +1025,11 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="output directory (default: benchmark/transformers/results/text_generation)",
     )
+    parser.add_argument(
+        "--debug-errors",
+        action="store_true",
+        help="print full tracebacks for per-target benchmark failures",
+    )
 
 
 def _add_measure_args(parser: argparse.ArgumentParser) -> None:
@@ -1241,6 +1264,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
+        print(
+            "Run config: "
+            f"batch_size={batch_size} core_mode={core_mode or 'default'} revision={revision or 'main'} "
+            f"device={args.device} device_backend={target_args.device_backend} "
+            f"prefill_chunk_size={args.prefill_chunk_size if args.prefill_chunk_size is not None else 'auto'}"
+        )
+        print(
+            "Sweep config: "
+            f"warmup_prefill={_SWEEP_WARMUP_PREFILL} warmup_decode={_SWEEP_WARMUP_DECODE} "
+            f"prefill_range={args.prefill_range} cache_lengths={args.cache_lengths} "
+            f"decode_window={args.decode_window} repeat={args.repeat} warmup={args.warmup}"
+        )
         if _should_precheck_cuda(args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
             mem_info = _cuda_memory_info(args.device)
@@ -1276,20 +1311,23 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     _clear_cuda_memory(args.device)
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
-                    print(f"Skipping (failed to load revision {revision}): {e}")
+                    _print_exception(
+                        f"Skipping (failed to load revision {revision})",
+                        e,
+                        debug_errors=args.debug_errors,
+                    )
                 else:
-                    print(f"Skipping (failed to load model): {e}")
+                    _print_exception("Skipping (failed to load model)", e, debug_errors=args.debug_errors)
                 continue
 
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
             _print_device_status(target_args, tracker_prefill)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
-            warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
-                    num_prefill=warmup_prefill,
-                    num_decode=args.decode_window,
+                    num_prefill=_SWEEP_WARMUP_PREFILL,
+                    num_decode=_SWEEP_WARMUP_DECODE,
                     batch_size=batch_size,
                     prefill_chunk_size=resolved_prefill_chunk_size,
                     trace_path=None,
@@ -1323,7 +1361,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 print(f"Skipping (CUDA OOM during benchmark): {e}")
                 _release_pipeline(pipeline, args.device)
                 continue
-            print(f"Skipping (benchmark failed): {e}")
+            _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
             _release_pipeline(pipeline, args.device)
             continue
 

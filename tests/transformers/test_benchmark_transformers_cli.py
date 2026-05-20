@@ -42,6 +42,7 @@ def test_text_benchmark_sweep_defaults() -> None:
     assert args.cache_lengths == [128, 512, 1024, 2048]
     assert args.decode_window == 32
     assert args.core_mode == "global8"
+    assert args.debug_errors is False
 
 
 def test_vlm_benchmark_requires_subcommand() -> None:

@@ -55,6 +55,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import npu_latency_pct
 
+_SWEEP_WARMUP_PREFILL = 128
+_SWEEP_WARMUP_DECODE = 32
+
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
     text = spec.strip()
@@ -1094,11 +1097,10 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
-    warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=warmup_prefill,
-            num_decode=args.decode_window,
+            num_prefill=_SWEEP_WARMUP_PREFILL,
+            num_decode=_SWEEP_WARMUP_DECODE,
             prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
