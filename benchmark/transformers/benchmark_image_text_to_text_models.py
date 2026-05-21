@@ -1728,14 +1728,14 @@ def _run_measure(args: argparse.Namespace) -> int:
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
                 if tracker is not None:
                     tracker.start()
-                vision_latency, vision_fps = measurer.measure_vision(
-                    args.image_resolution,
-                    repeat=1,
-                    prompt=args.prompt,
-                    batch_size=batch_size,
-                    show_progress=False,
-                )[0]
                 try:
+                    vision_latency, vision_fps = measurer.measure_vision(
+                        args.image_resolution,
+                        repeat=1,
+                        prompt=args.prompt,
+                        batch_size=batch_size,
+                        show_progress=False,
+                    )[0]
                     llm_result = measurer.measure_llm_full(
                         image_resolution=args.image_resolution,
                         prompt=args.prompt,

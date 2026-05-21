@@ -299,6 +299,53 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
     assert run_targets[0][-1] == 2
 
 
+def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_path) -> None:
+    """Verify VLM fixed measure stops the whole-run tracker when vision measurement fails."""
+    args = vlm_bench._build_arg_parser().parse_args([
+        "measure",
+        "--results-dir",
+        str(tmp_path),
+    ])
+    stopped: list[bool] = []
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            stopped.append(True)
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            self._vision_calls = 0
+
+        def measure_vision(self, *args, **kwargs):
+            self._vision_calls += 1
+            if self._vision_calls == 1:
+                return [(0.1, 10.0)]
+            raise RuntimeError("vision failed")
+
+        def measure_llm_full(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        vlm_bench,
+        "_collect_vlm_run_targets",
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1)]),
+    )
+    monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(vlm_bench, "_vlm_revision_artifacts_available", lambda model_id, revision, mxq_path: (True, None))
+    monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
+
+    assert vlm_bench._run_measure(args) == 0
+    assert stopped == [True]
+
+
 def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:
     """Verify Mobilint targets use NPU metrics even when the initial command has no model."""
     args = text_bench._build_arg_parser().parse_args(["measure", "--all"])
