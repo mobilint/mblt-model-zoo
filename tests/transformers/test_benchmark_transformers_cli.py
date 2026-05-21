@@ -248,6 +248,24 @@ def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:
     assert batch[0].max_batch_size == 4
 
 
+def test_text_target_filtering_treats_missing_max_batch_size_as_non_batch(monkeypatch) -> None:
+    """Verify missing batch metadata keeps original targets only in non-batch mode."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("upstream/original", [None], "original", "original", None),
+    ]
+
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: None)
+
+    non_batch = text_bench._filter_text_targets_by_batch_mode(raw_targets, batch_mode="non_batch")
+    batch = text_bench._filter_text_targets_by_batch_mode(raw_targets, batch_mode="batch")
+
+    assert [target.model_id for target in non_batch] == ["upstream/original"]
+    assert non_batch[0].max_batch_size == 1
+    assert batch == []
+
+
 def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> None:
     """Verify VLM target collection uses image-text-to-text batch metadata."""
     args = vlm_bench._build_arg_parser().parse_args([

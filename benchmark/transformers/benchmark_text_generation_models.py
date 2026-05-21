@@ -238,6 +238,17 @@ def _target_matches_batch_mode(max_batch_size: int, batch_mode: str) -> bool:
     raise ValueError(f"Unsupported batch mode: {batch_mode}")
 
 
+def _resolve_filter_max_batch_size(max_batch_size: int | None, batch_mode: str) -> int | None:
+    """Resolve the effective max batch size used for batch-mode filtering."""
+    if max_batch_size is not None:
+        return max_batch_size
+    if batch_mode == _BATCH_MODE_NON_BATCH:
+        return 1
+    if batch_mode == _BATCH_MODE_BATCH:
+        return None
+    raise ValueError(f"Unsupported batch mode: {batch_mode}")
+
+
 def _target_filter_revision(model_id: str, revision_candidates: list[str | None], mxq_path: str | None) -> str | None:
     """Pick the revision used for best-effort config filtering."""
     if mxq_path:
@@ -258,7 +269,10 @@ def _filter_text_targets_by_batch_mode(
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
-        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
+        max_batch_size = _resolve_filter_max_batch_size(
+            _resolve_config_max_batch_size(model_id, revision, task=task),
+            batch_mode,
+        )
         if max_batch_size is None:
             print(f"Skip {label}: max_batch_size is not available for batch-mode filtering.")
             continue
