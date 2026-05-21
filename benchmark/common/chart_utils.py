@@ -1,7 +1,12 @@
+import os
 import re
 from pathlib import Path
 from typing import Optional, Sequence
 
+import matplotlib
+
+if "MPLBACKEND" not in os.environ:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
