@@ -150,12 +150,189 @@ def write_summary_markdown(
     """
     summary_path = Path(path)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    host_info_lines = _host_info_markdown(Path(host_info_path) if host_info_path else None)
     lines = [f"# {title}\n\n"]
-    lines.extend(_host_info_markdown(Path(host_info_path) if host_info_path else None))
     lines.extend(_plots_markdown(summary_path.parent, [Path(p) for p in plot_paths], plot_tables=plot_tables))
     if not plot_tables:
         lines.extend(_table_markdown(Path(table_markdown_path) if table_markdown_path else None))
+    lines.extend(host_info_lines)
     summary_path.write_text("".join(lines), encoding="utf-8")
+
+
+def read_csv_rows(path: Path | str) -> list[dict[str, str]]:
+    """Read CSV rows if the file exists.
+
+    Args:
+        path: CSV path to read.
+
+    Returns:
+        CSV rows as dictionaries, or an empty list when the file does not exist.
+    """
+    csv_path = Path(path)
+    if not csv_path.is_file():
+        return []
+    import csv
+
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
+    """Build a compact Markdown table with right-aligned metric columns.
+
+    Args:
+        headers: Table headers.
+        rows: Table row values.
+
+    Returns:
+        Markdown table text, or an empty string for empty rows.
+    """
+    if not rows:
+        return ""
+    lines = [
+        "| " + " | ".join(_escape_markdown(header) for header in headers) + " |\n",
+        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_format_summary_cell(value) for value in row) + " |\n")
+    return "".join(lines)
+
+
+def scalar_plot_table(rows: Sequence[Mapping[str, Any]], *, value_key: str, unit_header: str) -> str:
+    """Build a model/value table for one scalar plot.
+
+    Args:
+        rows: Rows containing a ``model`` key and the requested scalar key.
+        value_key: Key containing the scalar value.
+        unit_header: Header for the value column.
+
+    Returns:
+        Markdown table text.
+    """
+    return markdown_table(["Model", unit_header], [[row.get("model"), row.get(value_key)] for row in rows])
+
+
+def token_sweep_plot_table(
+    models: Sequence[str],
+    metrics_by_model: Mapping[str, Any],
+    *,
+    value_key: str,
+) -> str:
+    """Build a model/token table for one token-sweep plot.
+
+    Args:
+        models: Model names to include.
+        metrics_by_model: Mapping from model name to metric object with token dictionaries.
+        value_key: Attribute name containing a ``dict[int, float]`` token metric.
+
+    Returns:
+        Markdown table text.
+    """
+    token_set: set[int] = set()
+    for model in models:
+        token_set.update(getattr(metrics_by_model[model], value_key).keys())
+    tokens = sorted(token_set)
+    if not tokens:
+        return ""
+    table_rows = []
+    for model in models:
+        values = getattr(metrics_by_model[model], value_key)
+        table_rows.append([model, *(values.get(token) for token in tokens)])
+    return markdown_table(["Model", *(f"{token} tokens" for token in tokens)], table_rows)
+
+
+def write_token_combined_markdown(
+    path: Path | str,
+    tps_rows: Sequence[Mapping[str, Any]],
+    device_rows: Sequence[Mapping[str, Any]],
+) -> None:
+    """Write a wide-form token sweep Markdown table shared by transformer benchmarks.
+
+    Args:
+        path: Markdown output path.
+        tps_rows: Long-form TPS rows from ``BenchmarkResult.iter_rows``.
+        device_rows: Per-model device metric rows.
+    """
+    if not tps_rows:
+        return
+    models = sorted({str(r["model"]) for r in tps_rows})
+    prefill_tokens = sorted(
+        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "prefill" and _is_int_like(r.get("tokens"))}
+    )
+    decode_tokens = sorted(
+        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "decode" and _is_int_like(r.get("tokens"))}
+    )
+    tps_map: dict[tuple[str, str, int], float] = {}
+    time_map: dict[tuple[str, str, int], float] = {}
+    npu_pct_map: dict[tuple[str, str, int], float] = {}
+    for row in tps_rows:
+        model = str(row["model"])
+        phase = str(row["phase"])
+        token = int(row["tokens"])
+        tps_val = row.get("tps")
+        time_ms_val = row.get("time_ms")
+        npu_pct_val = row.get("avg_npu_token_latency_pct")
+        if isinstance(tps_val, (int, float)):
+            tps_map[(model, phase, token)] = float(tps_val)
+        if isinstance(time_ms_val, (int, float)):
+            time_map[(model, phase, token)] = float(time_ms_val)
+        if isinstance(npu_pct_val, (int, float)):
+            npu_pct_map[(model, phase, token)] = float(npu_pct_val)
+
+    device_map = {str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)}
+    device_cols = [
+        "avg_power_w",
+        "p99_power_w",
+        "avg_utilization_pct",
+        "p99_utilization_pct",
+        "avg_temperature_c",
+        "p99_temperature_c",
+        "avg_memory_used_mb",
+        "p99_memory_used_mb",
+        "total_memory_mb",
+        "avg_memory_used_pct",
+        "p99_memory_used_pct",
+        "total_energy_j",
+        "prefill_tps_last",
+        "decode_tps_last",
+        "prefill_tok_per_j_last",
+        "decode_tok_per_j_last",
+        "prefill_j_per_tok_last",
+        "decode_j_per_tok_last",
+    ]
+
+    headers = ["model"]
+    headers.extend([f"prefill_tps_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_tps_{t}" for t in decode_tokens])
+    headers.extend([f"prefill_latency_ms_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_duration_ms_{t}" for t in decode_tokens])
+    headers.extend([f"prefill_npu_latency_pct_{t}" for t in prefill_tokens])
+    headers.extend([f"decode_npu_latency_pct_{t}" for t in decode_tokens])
+    headers.extend(device_cols)
+
+    rows: list[list[str]] = []
+    for model in models:
+        values: list[str] = [model]
+        for token in prefill_tokens:
+            values.append(_format_optional_float(tps_map.get((model, "prefill", token))))
+        for token in decode_tokens:
+            values.append(_format_optional_float(tps_map.get((model, "decode", token))))
+        for token in prefill_tokens:
+            values.append(_format_optional_float(time_map.get((model, "prefill", token))))
+        for token in decode_tokens:
+            values.append(_format_optional_float(time_map.get((model, "decode", token))))
+        for token in prefill_tokens:
+            values.append(_format_optional_float(npu_pct_map.get((model, "prefill", token))))
+        for token in decode_tokens:
+            values.append(_format_optional_float(npu_pct_map.get((model, "decode", token))))
+
+        drow = device_map.get(model, {})
+        for col in device_cols:
+            v = drow.get(col) if isinstance(drow, Mapping) else None
+            values.append(_format_optional_float(v))
+        rows.append(values)
+
+    Path(path).write_text(markdown_table(headers, rows), encoding="utf-8")
 
 
 def existing_png_paths(results_dir: Path | str, *, prefixes: Sequence[str] | None = None) -> list[Path]:
@@ -364,6 +541,38 @@ def _scalar_to_text(value: Any) -> str:
     if isinstance(value, (str, int, float, bool)):
         return str(value)
     return json.dumps(value, ensure_ascii=False)
+
+
+def _format_summary_cell(value: Any) -> str:
+    """Format one benchmark summary table value."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        return f"{float(value):.6f}"
+    if isinstance(value, str):
+        try:
+            return f"{float(value):.6f}"
+        except ValueError:
+            return _escape_markdown(value)
+    return _escape_markdown(str(value))
+
+
+def _format_optional_float(value: Any) -> str:
+    """Format a numeric value for compact benchmark tables."""
+    return f"{float(value):.6f}" if isinstance(value, (int, float)) else ""
+
+
+def _is_int_like(value: Any) -> bool:
+    """Return whether a value can be losslessly parsed as an integer token count."""
+    if isinstance(value, int):
+        return True
+    if isinstance(value, str):
+        try:
+            int(value)
+        except ValueError:
+            return False
+        return True
+    return False
 
 
 def _escape_markdown(value: str) -> str:

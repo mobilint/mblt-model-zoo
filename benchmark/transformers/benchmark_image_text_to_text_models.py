@@ -16,6 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import matplotlib.pyplot as plt
+from chart_utils import ModelMetrics, plot_scalar_chart, plot_token_chart
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
@@ -32,7 +33,11 @@ from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from benchmark.common.summary_utils import HOST_PC_INFO_FILENAME as _HOST_PC_INFO_FILENAME
 from benchmark.common.summary_utils import collect_host_pc_info as _collect_host_pc_info
 from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
+from benchmark.common.summary_utils import read_csv_rows as _read_csv_rows_common
+from benchmark.common.summary_utils import scalar_plot_table as _scalar_plot_table_common
+from benchmark.common.summary_utils import token_sweep_plot_table as _token_sweep_plot_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
+from benchmark.common.summary_utils import write_token_combined_markdown as _write_token_combined_markdown
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -79,7 +84,12 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer, npu_latency_pct
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    BenchmarkResult,
+    SweepData,
+    VLMTPSMeasurer,
+    npu_latency_pct,
+)
 
 _VLM_WARMUP_PREFILL = 128
 _VLM_WARMUP_DECODE = 32
@@ -631,51 +641,49 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         float(r.decode_j_per_token) for r in llm_runs if getattr(r, "decode_j_per_token", None) is not None
     ]
     for idx, r in enumerate(llm_runs, start=1):
-        llm_prefill_tps = float(r.prefill_sweep.tps_values[-1]) if r.prefill_sweep.tps_values else None
-        llm_decode_tps = float(r.decode_sweep.tps_values[-1]) if r.decode_sweep.tps_values else None
-        llm_ttft_ms = float(r.prefill_sweep.time_values[-1] * 1000.0) if r.prefill_sweep.time_values else None
-        prefill_npu_pct = None
-        if r.prefill_sweep.avg_total_token_latency_values and r.prefill_sweep.avg_npu_token_latency_values:
-            prefill_npu_pct = npu_latency_pct(
-                r.prefill_sweep.avg_total_token_latency_values[-1],
-                r.prefill_sweep.avg_npu_token_latency_values[-1],
+        for row in BenchmarkResult.iter_rows(label, r):
+            phase = str(row.get("phase"))
+            csv_rows.append(
+                {
+                    "type": "llm",
+                    "image_resolution": llm_resolution,
+                    "repeat_index": idx,
+                    "model": row.get("model"),
+                    "phase": phase,
+                    "tokens": row.get("tokens"),
+                    "tps": row.get("tps"),
+                    "time_ms": row.get("time_ms"),
+                    "avg_total_token_latency_ms": row.get("avg_total_token_latency_ms"),
+                    "avg_npu_token_latency_ms": row.get("avg_npu_token_latency_ms"),
+                    "avg_npu_token_latency_pct": row.get("avg_npu_token_latency_pct"),
+                    "decode_prefill_mode": row.get("decode_prefill_mode"),
+                    "vision_encode_ms": None,
+                    "vision_fps": None,
+                    "llm_prefill_tps": row.get("tps") if phase == "prefill" else None,
+                    "llm_decode_tps": row.get("tps") if phase == "decode" else None,
+                    "llm_ttft_ms": row.get("time_ms") if phase == "prefill" else None,
+                    "llm_decode_duration_ms": row.get("time_ms") if phase == "decode" else None,
+                    "llm_prefill_npu_latency_pct": row.get("avg_npu_token_latency_pct") if phase == "prefill" else None,
+                    "llm_decode_npu_latency_pct": row.get("avg_npu_token_latency_pct") if phase == "decode" else None,
+                    "avg_power_w": r.avg_power_w,
+                    "p99_power_w": r.p99_power_w,
+                    "avg_utilization_pct": r.avg_utilization_pct,
+                    "p99_utilization_pct": r.p99_utilization_pct,
+                    "avg_temperature_c": r.avg_temperature_c,
+                    "p99_temperature_c": r.p99_temperature_c,
+                    "avg_memory_used_mb": r.avg_memory_used_mb,
+                    "p99_memory_used_mb": r.p99_memory_used_mb,
+                    "avg_memory_used_pct": r.avg_memory_used_pct,
+                    "p99_memory_used_pct": r.p99_memory_used_pct,
+                    "total_energy_j": getattr(r, "total_energy_j", None),
+                    "prefill_tok_per_j": getattr(r, "prefill_tokens_per_j", None),
+                    "decode_tok_per_j": getattr(r, "decode_tokens_per_j", None),
+                    "prefill_j_per_tok": getattr(r, "prefill_j_per_token", None),
+                    "decode_j_per_tok": getattr(r, "decode_j_per_token", None),
+                    "vision_img_per_j": None,
+                    "vision_j_per_img": None,
+                }
             )
-        decode_npu_pct = None
-        if r.decode_sweep.avg_total_token_latency_values and r.decode_sweep.avg_npu_token_latency_values:
-            decode_npu_pct = npu_latency_pct(
-                r.decode_sweep.avg_total_token_latency_values[-1],
-                r.decode_sweep.avg_npu_token_latency_values[-1],
-            )
-        csv_rows.append(
-            {
-                "type": "llm",
-                "image_resolution": llm_resolution,
-                "repeat_index": idx,
-                "vision_encode_ms": None,
-                "vision_fps": None,
-                "llm_prefill_tps": llm_prefill_tps,
-                "llm_decode_tps": llm_decode_tps,
-                "llm_ttft_ms": llm_ttft_ms,
-                "llm_prefill_npu_latency_pct": prefill_npu_pct,
-                "llm_decode_npu_latency_pct": decode_npu_pct,
-                "avg_power_w": r.avg_power_w,
-                "p99_power_w": r.p99_power_w,
-                "avg_utilization_pct": r.avg_utilization_pct,
-                "p99_utilization_pct": r.p99_utilization_pct,
-                "avg_temperature_c": r.avg_temperature_c,
-                "p99_temperature_c": r.p99_temperature_c,
-                "avg_memory_used_mb": r.avg_memory_used_mb,
-                "p99_memory_used_mb": r.p99_memory_used_mb,
-                "avg_memory_used_pct": r.avg_memory_used_pct,
-                "p99_memory_used_pct": r.p99_memory_used_pct,
-                "total_energy_j": getattr(r, "total_energy_j", None),
-                "prefill_tok_per_j": getattr(r, "prefill_tokens_per_j", None),
-                "decode_tok_per_j": getattr(r, "decode_tokens_per_j", None),
-                "prefill_j_per_tok": getattr(r, "prefill_j_per_token", None),
-                "decode_j_per_tok": getattr(r, "decode_j_per_token", None),
-                "vision_img_per_j": None,
-            }
-        )
 
     payload = {
         "model": label,
@@ -764,10 +772,134 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     return payload, csv_rows
 
 
+def _sweep_from_dict(payload: Mapping[str, Any]) -> SweepData:
+    """Build ``SweepData`` from a serialized sweep dictionary."""
+    return SweepData(
+        x_values=list(payload.get("x_values", [])),
+        tps_values=list(payload.get("tps_values", [])),
+        time_values=list(payload.get("time_values", [])),
+        avg_total_token_latency_values=list(payload.get("avg_total_token_latency_values", [])),
+        avg_npu_token_latency_values=list(payload.get("avg_npu_token_latency_values", [])),
+    )
+
+
+def _benchmark_result_from_vlm_run(payload: Mapping[str, Any]) -> BenchmarkResult:
+    """Build ``BenchmarkResult`` from one serialized VLM LLM run."""
+    return BenchmarkResult(
+        prefill_sweep=_sweep_from_dict(payload.get("prefill_sweep", {})),
+        decode_sweep=_sweep_from_dict(payload.get("decode_sweep", {})),
+        decode_prefill_modes=list(payload.get("decode_prefill_modes", [])),
+        prefill_phase_duration_s=payload.get("prefill_phase_duration_s"),
+        decode_phase_duration_s=payload.get("decode_phase_duration_s"),
+        avg_power_w=payload.get("avg_power_w"),
+        p99_power_w=payload.get("p99_power_w"),
+        avg_utilization_pct=payload.get("avg_utilization_pct"),
+        p99_utilization_pct=payload.get("p99_utilization_pct"),
+        avg_temperature_c=payload.get("avg_temperature_c"),
+        p99_temperature_c=payload.get("p99_temperature_c"),
+        avg_memory_used_mb=payload.get("avg_memory_used_mb"),
+        p99_memory_used_mb=payload.get("p99_memory_used_mb"),
+        avg_memory_used_pct=payload.get("avg_memory_used_pct"),
+        p99_memory_used_pct=payload.get("p99_memory_used_pct"),
+        total_energy_j=payload.get("total_energy_j"),
+        prefill_tokens_per_j=payload.get("prefill_tokens_per_j"),
+        prefill_j_per_token=payload.get("prefill_j_per_token"),
+        decode_tokens_per_j=payload.get("decode_tokens_per_j"),
+        decode_j_per_token=payload.get("decode_j_per_token"),
+    )
+
+
+def _mean_optional(values: Sequence[Any]) -> float | None:
+    """Return a mean over numeric values, or ``None`` when no numeric values exist."""
+    numeric = [float(value) for value in values if isinstance(value, (int, float))]
+    return sum(numeric) / len(numeric) if numeric else None
+
+
+def _aggregate_vlm_llm_runs(runs: Sequence[Mapping[str, Any]]) -> BenchmarkResult | None:
+    """Aggregate serialized VLM LLM runs into the same shape used by LLM combined outputs."""
+    results = [_benchmark_result_from_vlm_run(run) for run in runs]
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+
+    def _aggregate_phase(phase: str) -> SweepData:
+        first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
+        out = SweepData(x_values=list(first.x_values))
+        for idx in range(len(first.x_values)):
+            tps_values: list[float] = []
+            time_values: list[float] = []
+            total_latency_values: list[float | None] = []
+            npu_latency_values: list[float | None] = []
+            for result in results:
+                src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
+                tps_values.append(float(src.tps_values[idx]))
+                time_values.append(float(src.time_values[idx]))
+                total_latency_values.append(src.avg_total_token_latency_values[idx])
+                npu_latency_values.append(src.avg_npu_token_latency_values[idx])
+            out.tps_values.append(sum(tps_values) / len(tps_values))
+            out.time_values.append(sum(time_values) / len(time_values))
+            out.avg_total_token_latency_values.append(_mean_optional(total_latency_values))
+            out.avg_npu_token_latency_values.append(_mean_optional(npu_latency_values))
+        return out
+
+    return BenchmarkResult(
+        prefill_sweep=_aggregate_phase("prefill"),
+        decode_sweep=_aggregate_phase("decode"),
+        decode_prefill_modes=list(results[0].decode_prefill_modes),
+    )
+
+
+def _vlm_metrics_from_result(payload: Mapping[str, Any], result: BenchmarkResult) -> ModelMetrics:
+    """Convert one VLM aggregate result into chart ``ModelMetrics``."""
+    raw_device = payload.get("device")
+    device: Mapping[str, Any] = raw_device if isinstance(raw_device, Mapping) else {}
+
+    def _token_map(sweep: SweepData, values: Sequence[Any]) -> dict[int, float]:
+        return {
+            int(token): float(value)
+            for token, value in zip(sweep.x_values, values)
+            if isinstance(token, int) and isinstance(value, (int, float))
+        }
+
+    return ModelMetrics(
+        prefill_tps=_token_map(result.prefill_sweep, result.prefill_sweep.tps_values),
+        decode_tps=_token_map(result.decode_sweep, result.decode_sweep.tps_values),
+        prefill_latency_ms=_token_map(
+            result.prefill_sweep,
+            [value * 1000.0 for value in result.prefill_sweep.time_values],
+        ),
+        decode_duration_ms=_token_map(
+            result.decode_sweep,
+            [value * 1000.0 for value in result.decode_sweep.time_values],
+        ),
+        prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
+        decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+        prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
+        decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
+        avg_power_w=_as_float(device.get("avg_power_w")),
+        total_energy_j=_as_float(device.get("total_energy_j")),
+        avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
+        p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+        avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+        p99_temperature_c=_as_float(device.get("p99_temperature_c")),
+        avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
+        p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
+        avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
+        p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+    )
+
+
+def _as_float(value: Any) -> float | None:
+    """Return a float for numeric values."""
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 def _rebuild_combined(results_dir: Path) -> None:
     llm_rows: list[dict[str, Any]] = []
     device_rows: list[dict[str, Any]] = []
     vision_rows: list[dict[str, Any]] = []
+    metrics_by_model: dict[str, ModelMetrics] = {}
     for path in sorted(results_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -778,48 +910,24 @@ def _rebuild_combined(results_dir: Path) -> None:
             continue
         if not isinstance(payload.get("model"), str) or not isinstance(payload.get("benchmark"), dict):
             continue
+        label = str(payload["model"])
         bench = payload.get("benchmark", {})
-        summ = bench.get("llm_results", {}).get("summary", {})
-        vision_summ = bench.get("vision_summary", {})
-        llm_rows.append(
-            {
-                "model": payload.get("model"),
-                "batch_mode": payload.get("batch_mode"),
-                "batch_size": payload.get("batch_size"),
-                "llm_reference_resolution": bench.get("llm_reference_resolution"),
-                "llm_prefill_tps_mean": summ.get("llm_prefill_tps", {}).get("mean"),
-                "llm_decode_tps_mean": summ.get("llm_decode_tps", {}).get("mean"),
-                "llm_ttft_ms_mean": summ.get("llm_ttft_ms", {}).get("mean"),
-                "llm_decode_duration_ms_mean": summ.get("llm_decode_duration_ms", {}).get("mean"),
-                "llm_total_ms_mean": summ.get("llm_total_ms", {}).get("mean"),
-                "llm_prefill_npu_latency_pct_mean": summ.get("llm_prefill_npu_latency_pct", {}).get("mean"),
-                "llm_decode_npu_latency_pct_mean": summ.get("llm_decode_npu_latency_pct", {}).get("mean"),
-                "llm_prefill_tok_per_j_mean": summ.get("prefill_tok_per_j", {}).get("mean"),
-                "llm_decode_tok_per_j_mean": summ.get("decode_tok_per_j", {}).get("mean"),
-                "llm_prefill_j_per_tok_mean": summ.get("prefill_j_per_tok", {}).get("mean"),
-                "llm_decode_j_per_tok_mean": summ.get("decode_j_per_tok", {}).get("mean"),
-                "avg_power_w": payload.get("device", {}).get("avg_power_w"),
-                "avg_utilization_pct": payload.get("device", {}).get("avg_utilization_pct"),
-                "avg_temperature_c": payload.get("device", {}).get("avg_temperature_c"),
-                "p99_temperature_c": payload.get("device", {}).get("p99_temperature_c"),
-                "avg_memory_used_mb": payload.get("device", {}).get("avg_memory_used_mb"),
-                "total_energy_j": payload.get("device", {}).get("total_energy_j"),
-                "vision_encode_ms_mean": vision_summ.get("vision_encode_ms", {}).get("mean"),
-                "vision_fps_mean": vision_summ.get("vision_fps", {}).get("mean"),
-                "vision_img_per_j_mean": vision_summ.get("vision_img_per_j", {}).get("mean"),
-                "vision_j_per_img_mean": vision_summ.get("vision_j_per_img", {}).get("mean"),
-            }
-        )
+        llm_results = bench.get("llm_results", {}) if isinstance(bench.get("llm_results"), dict) else {}
+        llm_runs = llm_results.get("runs", []) if isinstance(llm_results.get("runs"), list) else []
+        result = _aggregate_vlm_llm_runs([run for run in llm_runs if isinstance(run, dict)])
+        if result is not None:
+            llm_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
+            metrics_by_model[label] = _vlm_metrics_from_result(payload, result)
         device = payload.get("device")
         if isinstance(device, dict):
-            device_rows.append({"model": payload.get("model"), **device})
+            device_rows.append({"model": label, **device})
         for row in bench.get("vision_results", []):
             if not isinstance(row, dict):
                 continue
             s = row.get("summary", {})
             vision_rows.append(
                 {
-                    "model": payload.get("model"),
+                    "model": label,
                     "batch_mode": payload.get("batch_mode"),
                     "batch_size": payload.get("batch_size"),
                     "image_resolution": row.get("image_resolution"),
@@ -829,49 +937,70 @@ def _rebuild_combined(results_dir: Path) -> None:
                     "vision_j_per_img_mean": s.get("vision_j_per_img", {}).get("mean"),
                 }
             )
-    _write_csv(results_dir / "combined.csv", llm_rows)
-    _write_csv(results_dir / "combined_llm.csv", llm_rows)
+    BenchmarkResult.write_combined_csv(str(results_dir / "combined.csv"), llm_rows)
+    BenchmarkResult.write_combined_csv(str(results_dir / "combined_llm.csv"), llm_rows)
     _write_csv(results_dir / "combined_vision.csv", vision_rows)
     _write_csv(results_dir / "combined_device.csv", device_rows)
     if not llm_rows:
         _write_vlm_summary(results_dir)
         return
-    with (results_dir / "combined.md").open("w", encoding="utf-8") as f:
-        headers = list(llm_rows[0].keys())
-        f.write("| " + " | ".join(headers) + " |\n")
-        f.write("| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n")
-        for row in llm_rows:
-            vals = [str(row.get(h, "")) for h in headers]
-            f.write("| " + " | ".join(vals) + " |\n")
-    models = [str(r["model"]) for r in llm_rows]
-    prefill = [float(r.get("llm_prefill_tps_mean") or 0.0) for r in llm_rows]
-    decode = [float(r.get("llm_decode_tps_mean") or 0.0) for r in llm_rows]
-    avg_power = [float(r.get("avg_power_w") or 0.0) for r in llm_rows]
-    avg_temp = [float(r.get("avg_temperature_c") or 0.0) for r in llm_rows]
-    avg_util = [float(r.get("avg_utilization_pct") or 0.0) for r in llm_rows]
-    avg_mem_mb = [float(r.get("avg_memory_used_mb") or 0.0) for r in llm_rows]
-    total_energy = [float(r.get("total_energy_j") or 0.0) for r in llm_rows]
-    llm_prefill_tpj = [float(r.get("llm_prefill_tok_per_j_mean") or 0.0) for r in llm_rows]
-    llm_decode_tpj = [float(r.get("llm_decode_tok_per_j_mean") or 0.0) for r in llm_rows]
-    chart_specs = [
-        ("llm_prefill_tps.png", prefill, "Tokens Per Second", "Prefill Tokens Per Second"),
-        ("llm_prefill_tokens_per_j.png", llm_prefill_tpj, "Tokens Per Joule", "Prefill Tokens Per Joule"),
-        ("llm_decode_tps.png", decode, "Tokens Per Second", "Decode Tokens Per Second"),
-        ("llm_decode_tokens_per_j.png", llm_decode_tpj, "Tokens Per Joule", "Decode Tokens Per Joule"),
-        ("avg_power_w.png", avg_power, "Power (Watts)", "Power"),
-        ("avg_temperature_c.png", avg_temp, "Temperature (Celsius)", "Temperature"),
-        ("avg_utilization_pct.png", avg_util, "Utilization (Percent)", "Utilization"),
-        ("avg_memory_used_mb.png", avg_mem_mb, "Memory Used (Megabytes)", "Memory Used Megabytes"),
-        ("total_energy_j.png", total_energy, "Energy (Joules)", "Total Energy"),
-    ]
-    for filename, values, x_label, title in chart_specs:
-        plot_simple_barh(
-            labels=models,
-            values=values,
-            x_label=x_label,
-            title=title,
-            output_path=results_dir / filename,
+    _write_token_combined_markdown(results_dir / "combined.md", llm_rows, device_rows)
+    if metrics_by_model:
+        models = sorted(metrics_by_model.keys())
+        labels = ["benchmark"]
+        metrics_by_folder = [metrics_by_model]
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda metric: metric.prefill_tps,
+            title="Prefill Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=results_dir / "llm_prefill_tps.png",
         )
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda metric: metric.decode_tps,
+            title="Decode Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=results_dir / "llm_decode_tps.png",
+        )
+        scalar_specs = [
+            (
+                "llm_prefill_tokens_per_j.png",
+                "Prefill Tokens Per Joule",
+                "Tokens Per Joule",
+                lambda m: m.prefill_tokens_per_j,
+            ),
+            (
+                "llm_decode_tokens_per_j.png",
+                "Decode Tokens Per Joule",
+                "Tokens Per Joule",
+                lambda m: m.decode_tokens_per_j,
+            ),
+            ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
+            ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
+            ("avg_utilization_pct.png", "Utilization", "Utilization (Percent)", lambda m: m.avg_utilization_pct),
+            (
+                "avg_memory_used_mb.png",
+                "Memory Used Megabytes",
+                "Memory Used (Megabytes)",
+                lambda m: m.avg_memory_used_mb,
+            ),
+            ("total_energy_j.png", "Total Energy", "Energy (Joules)", lambda m: m.total_energy_j),
+        ]
+        for filename, title, x_label, selector in scalar_specs:
+            plot_scalar_chart(
+                models=models,
+                folder_labels=labels,
+                metrics_by_folder=metrics_by_folder,
+                scalar_selector=selector,
+                title=title,
+                x_label=x_label,
+                output_path=results_dir / filename,
+            )
     _write_vlm_summary(results_dir)
 
 
@@ -1391,38 +1520,46 @@ def _format_summary_cell(value: Any) -> str:
 
 def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """Build a compact Markdown table with right-aligned metric columns."""
-    if not rows:
-        return ""
-    lines = [
-        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |\n",
-        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
-    ]
-    for row in rows:
-        lines.append("| " + " | ".join(_format_summary_cell(value) for value in row) + " |\n")
-    return "".join(lines)
+    from benchmark.common.summary_utils import markdown_table as _markdown_table_common
+
+    return _markdown_table_common(headers, rows)
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     """Read CSV rows if the file exists."""
-    if not path.is_file():
-        return []
-    import csv
-
-    with path.open("r", encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
+    return _read_csv_rows_common(path)
 
 
 def _scalar_plot_table(rows: Sequence[Mapping[str, Any]], *, value_key: str, unit_header: str) -> str:
     """Build a model/value table for one scalar plot."""
-    return _markdown_table(["Model", unit_header], [[row.get("model"), row.get(value_key)] for row in rows])
+    return _scalar_plot_table_common(rows, value_key=value_key, unit_header=unit_header)
 
 
 def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[str, str]:
     """Build plot-specific Markdown tables for VLM summaries."""
-    rows = _read_csv_rows(results_dir / ("combined_measure.csv" if measure else "combined.csv"))
-    if not rows:
-        return {}
+    rows = _read_csv_rows(results_dir / ("combined_measure.csv" if measure else "combined_device.csv"))
     prefix = "measure_" if measure else ""
+    if not measure:
+        metrics_by_model = _collect_vlm_combined_metrics(results_dir)
+        models = sorted(metrics_by_model.keys())
+        tables = {
+            "llm_prefill_tps.png": _token_sweep_plot_table_common(models, metrics_by_model, value_key="prefill_tps"),
+            "llm_decode_tps.png": _token_sweep_plot_table_common(models, metrics_by_model, value_key="decode_tps"),
+        }
+        scalar_specs = [
+            ("llm_prefill_tokens_per_j.png", "prefill_tokens_per_j", "tokens/J"),
+            ("llm_decode_tokens_per_j.png", "decode_tokens_per_j", "tokens/J"),
+            ("avg_power_w.png", "avg_power_w", "W"),
+            ("avg_temperature_c.png", "avg_temperature_c", "°C"),
+            ("avg_utilization_pct.png", "avg_utilization_pct", "%"),
+            ("avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+            ("total_energy_j.png", "total_energy_j", "J"),
+        ]
+        metric_rows = [{"model": model, **vars(metrics_by_model[model])} for model in models]
+        for filename, key, unit_header in scalar_specs:
+            tables[filename] = _scalar_plot_table(metric_rows, value_key=key, unit_header=unit_header)
+        return {filename: table for filename, table in tables.items() if table}
+
     specs = [
         (f"{prefix}llm_prefill_tps.png", "llm_prefill_tps_mean", "tokens/s"),
         (f"{prefix}llm_prefill_tokens_per_j.png", "llm_prefill_tok_per_j_mean", "tokens/J"),
@@ -1434,11 +1571,40 @@ def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[
         (f"{prefix}avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
         (f"{prefix}total_energy_j.png", "total_energy_j", "J"),
     ]
+    if not rows:
+        return {}
     return {
         filename: table
         for filename, key, unit_header in specs
         if (table := _scalar_plot_table(rows, value_key=key, unit_header=unit_header))
     }
+
+
+def _collect_vlm_combined_metrics(results_dir: Path) -> dict[str, ModelMetrics]:
+    """Collect VLM token-sweep metrics from JSON result files."""
+    metrics: dict[str, ModelMetrics] = {}
+    for path in sorted(results_dir.glob("*.json")):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
+            continue
+        label = payload.get("model")
+        bench = payload.get("benchmark")
+        if not isinstance(label, str) or not isinstance(bench, dict):
+            continue
+        llm_results = bench.get("llm_results") if isinstance(bench.get("llm_results"), dict) else {}
+        runs = (
+            llm_results.get("runs", [])
+            if isinstance(llm_results, dict) and isinstance(llm_results.get("runs"), list)
+            else []
+        )
+        result = _aggregate_vlm_llm_runs([run for run in runs if isinstance(run, dict)])
+        if result is not None:
+            metrics[label] = _vlm_metrics_from_result(payload, result)
+    return metrics
 
 
 def _rebuild_measure_outputs(results_dir: Path) -> None:

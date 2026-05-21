@@ -31,7 +31,12 @@ from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from benchmark.common.summary_utils import HOST_PC_INFO_FILENAME as _HOST_PC_INFO_FILENAME
 from benchmark.common.summary_utils import collect_host_pc_info as _collect_host_pc_info
 from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
+from benchmark.common.summary_utils import markdown_table as _markdown_table_common
+from benchmark.common.summary_utils import read_csv_rows as _read_csv_rows_common
+from benchmark.common.summary_utils import scalar_plot_table as _scalar_plot_table_common
+from benchmark.common.summary_utils import token_sweep_plot_table as _token_sweep_plot_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
+from benchmark.common.summary_utils import write_token_combined_markdown as _write_token_combined_markdown
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -759,25 +764,12 @@ def _format_summary_cell(value: Any) -> str:
 
 def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """Build a compact Markdown table with right-aligned metric columns."""
-    if not rows:
-        return ""
-    lines = [
-        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |\n",
-        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
-    ]
-    for row in rows:
-        lines.append("| " + " | ".join(_format_summary_cell(value) for value in row) + " |\n")
-    return "".join(lines)
+    return _markdown_table_common(headers, rows)
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     """Read CSV rows if the file exists."""
-    if not path.is_file():
-        return []
-    import csv
-
-    with path.open("r", encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
+    return _read_csv_rows_common(path)
 
 
 def _scalar_plot_table(
@@ -787,8 +779,7 @@ def _scalar_plot_table(
     unit_header: str,
 ) -> str:
     """Build a model/value table for one scalar plot."""
-    table_rows = [(row.get("model"), row.get(value_key)) for row in rows]
-    return _markdown_table(["Model", unit_header], table_rows)
+    return _scalar_plot_table_common(rows, value_key=value_key, unit_header=unit_header)
 
 
 def _token_sweep_plot_table(
@@ -798,17 +789,7 @@ def _token_sweep_plot_table(
     value_key: str,
 ) -> str:
     """Build a model/token table for one token-sweep plot."""
-    token_set: set[int] = set()
-    for model in models:
-        token_set.update(getattr(metrics_by_model[model], value_key).keys())
-    tokens = sorted(token_set)
-    if not tokens:
-        return ""
-    table_rows = []
-    for model in models:
-        values = getattr(metrics_by_model[model], value_key)
-        table_rows.append([model, *(values.get(token) for token in tokens)])
-    return _markdown_table(["Model", *(f"{token} tokens" for token in tokens)], table_rows)
+    return _token_sweep_plot_table_common(models, metrics_by_model, value_key=value_key)
 
 
 def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
@@ -864,96 +845,7 @@ def _write_single_combined_markdown(
     tps_rows: Sequence[dict[str, Any]],
     device_rows: Sequence[dict[str, float | str | None]],
 ) -> None:
-    if not tps_rows:
-        return
-    models = sorted({str(r["model"]) for r in tps_rows})
-    prefill_tokens = sorted(
-        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "prefill" and isinstance(r.get("tokens"), int)}
-    )
-    decode_tokens = sorted(
-        {int(r["tokens"]) for r in tps_rows if str(r.get("phase")) == "decode" and isinstance(r.get("tokens"), int)}
-    )
-    tps_map: dict[tuple[str, str, int], float] = {}
-    time_map: dict[tuple[str, str, int], float] = {}
-    npu_pct_map: dict[tuple[str, str, int], float] = {}
-    for row in tps_rows:
-        model = str(row["model"])
-        phase = str(row["phase"])
-        token = int(row["tokens"])
-        tps_val = row.get("tps")
-        time_ms_val = row.get("time_ms")
-        npu_pct_val = row.get("avg_npu_token_latency_pct")
-        if isinstance(tps_val, (int, float)):
-            tps_map[(model, phase, token)] = float(tps_val)
-        if isinstance(time_ms_val, (int, float)):
-            time_map[(model, phase, token)] = float(time_ms_val)
-        if isinstance(npu_pct_val, (int, float)):
-            npu_pct_map[(model, phase, token)] = float(npu_pct_val)
-
-    device_map = {str(r["model"]): r for r in device_rows if isinstance(r.get("model"), str)}
-    device_cols = [
-        "avg_power_w",
-        "p99_power_w",
-        "avg_utilization_pct",
-        "p99_utilization_pct",
-        "avg_temperature_c",
-        "p99_temperature_c",
-        "avg_memory_used_mb",
-        "p99_memory_used_mb",
-        "total_memory_mb",
-        "avg_memory_used_pct",
-        "p99_memory_used_pct",
-        "total_energy_j",
-        "prefill_tps_last",
-        "decode_tps_last",
-        "prefill_tok_per_j_last",
-        "decode_tok_per_j_last",
-        "prefill_j_per_tok_last",
-        "decode_j_per_tok_last",
-    ]
-
-    headers = ["model"]
-    headers.extend([f"prefill_tps_{t}" for t in prefill_tokens])
-    headers.extend([f"decode_tps_{t}" for t in decode_tokens])
-    headers.extend([f"prefill_latency_ms_{t}" for t in prefill_tokens])
-    headers.extend([f"decode_duration_ms_{t}" for t in decode_tokens])
-    headers.extend([f"prefill_npu_latency_pct_{t}" for t in prefill_tokens])
-    headers.extend([f"decode_npu_latency_pct_{t}" for t in decode_tokens])
-    headers.extend(device_cols)
-
-    lines = [
-        "| " + " | ".join(headers) + " |\n",
-        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
-    ]
-    for model in models:
-        values: list[str] = [model]
-        for token in prefill_tokens:
-            v = tps_map.get((model, "prefill", token))
-            values.append("" if v is None else f"{v:.6f}")
-        for token in decode_tokens:
-            v = tps_map.get((model, "decode", token))
-            values.append("" if v is None else f"{v:.6f}")
-        for token in prefill_tokens:
-            v = time_map.get((model, "prefill", token))
-            values.append("" if v is None else f"{v:.6f}")
-        for token in decode_tokens:
-            v = time_map.get((model, "decode", token))
-            values.append("" if v is None else f"{v:.6f}")
-        for token in prefill_tokens:
-            v = npu_pct_map.get((model, "prefill", token))
-            values.append("" if v is None else f"{v:.6f}")
-        for token in decode_tokens:
-            v = npu_pct_map.get((model, "decode", token))
-            values.append("" if v is None else f"{v:.6f}")
-
-        drow = device_map.get(model, {})
-        for col in device_cols:
-            v = drow.get(col) if isinstance(drow, dict) else None
-            values.append("" if not isinstance(v, (int, float)) else f"{float(v):.6f}")
-        lines.append("| " + " | ".join(values) + " |\n")
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
+    _write_token_combined_markdown(path, tps_rows, device_rows)
 
 
 def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = False) -> None:
