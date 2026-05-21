@@ -681,7 +681,8 @@ class TPSMeasurer:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
 
-        if on_prefill_start is not None:
+        phase_callbacks_enabled = bool(fake_prefill)
+        if phase_callbacks_enabled and on_prefill_start is not None:
             on_prefill_start()
         if fake_prefill and on_prefill_end is not None:
             on_prefill_end()
@@ -691,11 +692,7 @@ class TPSMeasurer:
         with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
             outputs = self.model.generate(**gen_kwargs)
         t_end_ns = time.perf_counter_ns()
-        if not fake_prefill and on_prefill_end is not None:
-            on_prefill_end()
-        if not fake_prefill and on_decode_start is not None:
-            on_decode_start()
-        if on_decode_end is not None:
+        if phase_callbacks_enabled and on_decode_end is not None:
             on_decode_end()
 
         output_len = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else 0

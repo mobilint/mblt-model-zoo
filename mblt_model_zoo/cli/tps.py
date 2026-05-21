@@ -658,6 +658,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
+    phase_callbacks_supported = batch_size == 1
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=args.prefill,
@@ -681,16 +682,32 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
-                on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
-                on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
-                on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
-                on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                on_prefill_start=(
+                    (lambda: tracker_prefill.start())
+                    if phase_callbacks_supported and tracker_prefill is not None
+                    else None
+                ),
+                on_prefill_end=(
+                    (lambda: tracker_prefill.stop())
+                    if phase_callbacks_supported and tracker_prefill is not None
+                    else None
+                ),
+                on_decode_start=(
+                    (lambda: tracker_decode.start())
+                    if phase_callbacks_supported and tracker_decode is not None
+                    else None
+                ),
+                on_decode_end=(
+                    (lambda: tracker_decode.stop())
+                    if phase_callbacks_supported and tracker_decode is not None
+                    else None
+                ),
                 batch_size=batch_size,
             )
         finally:
             _stop_tracker_safe(tracker_prefill)
             _stop_tracker_safe(tracker_decode)
-        if tracker_prefill is not None and tracker_decode is not None:
+        if phase_callbacks_supported and tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
             run_phase_device_time_series.append(

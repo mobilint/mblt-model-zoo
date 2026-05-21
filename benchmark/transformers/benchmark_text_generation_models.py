@@ -1946,6 +1946,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 )
             runs: list[dict[str, Any]] = []
             device_time_series_runs: list[dict[str, Any]] = []
+            phase_callbacks_supported = batch_size == 1
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
                 tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
                 try:
@@ -1956,16 +1957,32 @@ def _run_measure(args: argparse.Namespace) -> int:
                         prefill_chunk_size=resolved_prefill_chunk_size,
                         show_progress=True,
                         progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",
-                        on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
-                        on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
-                        on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
-                        on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                        on_prefill_start=(
+                            (lambda: tracker_prefill.start())
+                            if phase_callbacks_supported and tracker_prefill is not None
+                            else None
+                        ),
+                        on_prefill_end=(
+                            (lambda: tracker_prefill.stop())
+                            if phase_callbacks_supported and tracker_prefill is not None
+                            else None
+                        ),
+                        on_decode_start=(
+                            (lambda: tracker_decode.start())
+                            if phase_callbacks_supported and tracker_decode is not None
+                            else None
+                        ),
+                        on_decode_end=(
+                            (lambda: tracker_decode.stop())
+                            if phase_callbacks_supported and tracker_decode is not None
+                            else None
+                        ),
                     )
                 finally:
                     _stop_tracker_safe(tracker_prefill)
                     _stop_tracker_safe(tracker_decode)
                 row = asdict(run)
-                if tracker_prefill is not None and tracker_decode is not None:
+                if phase_callbacks_supported and tracker_prefill is not None and tracker_decode is not None:
                     prefill_metric = _extract_device_metric(tracker_prefill)
                     decode_metric = _extract_device_metric(tracker_decode)
                     row["avg_power_w"] = _weighted_two(

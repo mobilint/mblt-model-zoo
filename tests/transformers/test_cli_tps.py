@@ -109,6 +109,17 @@ class _DummyGenerateNPUModel(_DummyNPUModel):
         return kwargs["input_ids"]
 
 
+class _DummyBatchedGenerateNPUModel(_DummyGenerateNPUModel):
+    """NPU-backed model double for batched generate callback tests."""
+
+    def generate(self, **kwargs) -> torch.Tensor:
+        """Return batched generated ids without requiring a streamer."""
+        self.generate_kwargs = kwargs
+        input_ids = kwargs["input_ids"]
+        new_tokens = int(kwargs["max_new_tokens"])
+        return torch.zeros((int(input_ids.shape[0]), int(input_ids.shape[1]) + new_tokens), dtype=torch.long)
+
+
 class _DummyTextPipeline:
     """Minimal text-generation pipeline for TPSMeasurer tests."""
 
@@ -909,6 +920,25 @@ def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
     assert result.num_prefill == 8
     assert result.num_decode == num_decode
     assert result.decode_tps > 0.0
+
+
+def test_text_batched_generate_disables_unobservable_phase_callbacks():
+    model = _DummyBatchedGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+    callbacks: list[str] = []
+
+    result = measurer.measure(
+        num_prefill=8,
+        num_decode=4,
+        batch_size=2,
+        on_prefill_start=lambda: callbacks.append("prefill_start"),
+        on_prefill_end=lambda: callbacks.append("prefill_end"),
+        on_decode_start=lambda: callbacks.append("decode_start"),
+        on_decode_end=lambda: callbacks.append("decode_end"),
+    )
+
+    assert callbacks == []
+    assert result.num_decode == 4
 
 
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
