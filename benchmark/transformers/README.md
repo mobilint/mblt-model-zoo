@@ -46,7 +46,6 @@ defined in `pyproject.toml` as `mblt-model-zoo = "mblt_model_zoo.cli:main"`.
 mblt-model-zoo tps --help
 mblt-model-zoo tps measure --help
 mblt-model-zoo tps sweep --help
-mblt-model-zoo tps vlm-sweep --help
 ```
 
 ### Measure One Text-Generation Case
@@ -160,23 +159,25 @@ mblt-model-zoo tps measure \
 
 ### Sweep Image-Text-to-Text Models
 
-`vlm-sweep` uses synthetic image inputs and measures both the vision encode stage and the LLM
-prefill/decode stage.
+`sweep --task image-text-to-text` uses synthetic image inputs and measures both the vision encode
+stage and the LLM prefill/decode stage.
 
 ```bash
-mblt-model-zoo tps vlm-sweep \
+mblt-model-zoo tps sweep \
   --model mobilint/Qwen2-VL-2B-Instruct \
+  --task image-text-to-text \
   --revision W8 \
   --device cpu \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
   --llm-resolution 384 \
-  --llm-prefill-range 1024:4096:1024 \
-  --llm-cache-lengths 1024,2048,4096,8192 \
-  --llm-decode-window 128 \
+  --prefill-range 1024:4096:1024 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 \
   --prompt "Describe the image in one sentence." \
   --repeat 1 \
   --warmup 1 \
+  --no-plot \
   --json benchmark/transformers/results/vlm_sweep.json \
   --csv benchmark/transformers/results/vlm_sweep.csv
 ```
@@ -456,7 +457,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--cache-lengths`: Cache lengths for decode sweep.
 - `--decode-window`: Decode token window measured at each cache length.
 - `--image-resolutions`: Image resolutions for the VLM vision stage.
-- `--llm-prefill-range`, `--llm-cache-lengths`, `--llm-decode-window`: VLM LLM-stage sweep ranges.
+- `--prefill-range`, `--cache-lengths`, `--decode-window`: Text and VLM LLM-stage sweep ranges.
 - `--repeat`: Number of measured repeats.
 - `--warmup`: Number of warmup runs before measured runs.
 
@@ -506,5 +507,4 @@ python benchmark/transformers/plot_compare_benchmark_results.py --help
 python benchmark/transformers/update_prefill_chunk_size_configs.py --help
 mblt-model-zoo tps measure --help
 mblt-model-zoo tps sweep --help
-mblt-model-zoo tps vlm-sweep --help
 ```

@@ -15,10 +15,10 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
+    add_device_tracking_args as _add_device_tracking_args,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    add_device_tracking_args as _add_device_tracking_args,
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
@@ -117,6 +117,11 @@ def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
             continue
         clusters.append(int(item))
     return clusters
+
+
+def _is_vlm_task(task: str) -> bool:
+    """Return whether a transformers pipeline task should use VLM TPS measurement."""
+    return task in {"image-text-to-text", "image-to-text"}
 
 
 def _require_transformers_deps() -> None:
@@ -483,9 +488,7 @@ def _enrich_single_run_device(
     run.total_energy_j = total_energy
     run.prefill_tokens_per_j = _safe_div(float(num_prefill), prefill_energy) if prefill_energy is not None else None
     run.prefill_j_per_token = (
-        _safe_div(prefill_energy, float(num_prefill))
-        if prefill_energy is not None and num_prefill > 0
-        else None
+        _safe_div(prefill_energy, float(num_prefill)) if prefill_energy is not None and num_prefill > 0 else None
     )
     run.decode_tokens_per_j = _safe_div(float(num_decode), decode_energy) if decode_energy is not None else None
     run.decode_j_per_token = (
@@ -763,6 +766,14 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
+    """Dispatch a TPS sweep to the text or VLM measurement path."""
+    if _is_vlm_task(args.task):
+        return _run_vlm_sweep(args)
+    return _run_text_sweep(args)
+
+
+def _run_text_sweep(args: argparse.Namespace) -> int:
+    """Run a text-generation TPS prefill/decode sweep."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
@@ -1134,7 +1145,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
+def _run_vlm_sweep(args: argparse.Namespace) -> int:
+    """Run a VLM TPS sweep including vision encoder and LLM phases."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
@@ -1346,9 +1358,9 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         measurer.measure_llm_full(
             image_resolution=llm_resolution,
             prompt=args.prompt,
-            prefill_range=args.llm_prefill_range,
-            cache_lengths=args.llm_cache_lengths,
-            decode_window=args.llm_decode_window,
+            prefill_range=args.prefill_range,
+            cache_lengths=args.cache_lengths,
+            decode_window=args.decode_window,
             show_progress=False,
         )
     llm_runs = []
@@ -1359,9 +1371,9 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
                 prompt=args.prompt,
-                prefill_range=args.llm_prefill_range,
-                cache_lengths=args.llm_cache_lengths,
-                decode_window=args.llm_decode_window,
+                prefill_range=args.prefill_range,
+                cache_lengths=args.cache_lengths,
+                decode_window=args.decode_window,
                 show_progress=False,
             )
         finally:
@@ -1478,9 +1490,9 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "task": args.task,
                 "model": args.model,
                 "prompt": args.prompt,
-                "llm_prefill_range": list(args.llm_prefill_range),
-                "llm_cache_lengths": args.llm_cache_lengths,
-                "llm_decode_window": args.llm_decode_window,
+                "prefill_range": list(args.prefill_range),
+                "cache_lengths": args.cache_lengths,
+                "decode_window": args.decode_window,
                 "vision_results": resolution_payloads,
                 "llm_reference_resolution": llm_resolution,
                 "llm_results": {
@@ -1625,6 +1637,23 @@ def add_tps_parser(
         default=128,
         help="decode token window measured after each cache-length prefill",
     )
+    p_sweep.add_argument(
+        "--image-resolutions",
+        type=_parse_int_list,
+        default=[224, 384, 512, 768],
+        help="VLM only: comma-separated image resolutions for vision encoder sweep",
+    )
+    p_sweep.add_argument(
+        "--llm-resolution",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="VLM only: reference resolution used for LLM benchmark (default: first image resolution)",
+    )
+    p_sweep.add_argument(
+        "--prompt",
+        default="Describe the image in one sentence.",
+        help="VLM only: fixed prompt used for synthetic image-text input",
+    )
     p_sweep.add_argument("--plot", default="tps_benchmark.png", help="write PNG plot")
     p_sweep.add_argument(
         "--no-plot",
@@ -1636,45 +1665,3 @@ def add_tps_parser(
     p_sweep.add_argument("--json", default=None, help="write sweep result as JSON")
     p_sweep.add_argument("--csv", default=None, help="write sweep rows as CSV")
     p_sweep.set_defaults(_handler=_cmd_sweep)
-
-    p_vlm = tps_sub.add_parser("vlm-sweep", help="Synthetic VLM benchmark by image resolution")
-    add_common(p_vlm)
-    p_vlm.set_defaults(task="image-text-to-text")
-    p_vlm.add_argument(
-        "--image-resolutions",
-        type=_parse_int_list,
-        default=[224, 384, 512, 768],
-        help="comma-separated image resolutions (e.g., 224,384,512)",
-    )
-    p_vlm.add_argument(
-        "--llm-prefill-range",
-        type=_parse_range,
-        default=(128, 512, 128),
-        help="llm prefill sweep range by total multimodal prefix length (start:end:step)",
-    )
-    p_vlm.add_argument(
-        "--llm-cache-lengths",
-        type=_parse_int_list,
-        default=[1024, 2048, 4096, 8192],
-        help="comma-separated llm cache lengths for decode sweep",
-    )
-    p_vlm.add_argument(
-        "--llm-decode-window",
-        type=_parse_positive_int,
-        default=128,
-        help="decode token window for llm cache-length sweep",
-    )
-    p_vlm.add_argument(
-        "--llm-resolution",
-        type=_parse_positive_int_optional,
-        default=None,
-        help="reference resolution used for LLM-only benchmark (default: first image resolution)",
-    )
-    p_vlm.add_argument(
-        "--prompt",
-        default="Describe the image in one sentence.",
-        help="fixed prompt used for synthetic VLM input",
-    )
-    p_vlm.add_argument("--json", default=None, help="write VLM results as JSON")
-    p_vlm.add_argument("--csv", default=None, help="write VLM rows as CSV")
-    p_vlm.set_defaults(_handler=_cmd_vlm_sweep)
