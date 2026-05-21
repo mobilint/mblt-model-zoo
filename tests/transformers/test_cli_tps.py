@@ -200,6 +200,23 @@ class _DummyVLMModel:
         self.model = type("NestedModel", (), {"language_model": language_model})()
 
 
+class _DummyBatchedVLMModel:
+    """Minimal batched VLM generation model returning prompt plus generated tokens."""
+
+    def __init__(self, language_model: _DummyVLMLanguageModel, generated_tokens: int) -> None:
+        self.device = torch.device("cpu")
+        self.config = _DummyConfig(vocab_size=language_model.embedding.num_embeddings)
+        self.language_model = language_model
+        self.model = type("NestedModel", (), {"language_model": language_model})()
+        self.generated_tokens = generated_tokens
+
+    def generate(self, **kwargs) -> torch.Tensor:
+        """Return token ids whose length includes the prompt prefix."""
+        inputs_embeds = kwargs["inputs_embeds"]
+        batch_size, seq_len = int(inputs_embeds.shape[0]), int(inputs_embeds.shape[1])
+        return torch.zeros((batch_size, seq_len + self.generated_tokens), dtype=torch.long)
+
+
 class _DummyVLMTPSMeasurer(VLMTPSMeasurer):
     """VLM TPS measurer double that bypasses pipeline construction."""
 
@@ -211,6 +228,15 @@ class _DummyVLMTPSMeasurer(VLMTPSMeasurer):
     def _get_language_model(self) -> _DummyVLMLanguageModel:
         """Return the dummy language model under test."""
         return self.model.language_model
+
+
+class _DummyBatchedVLMTPSMeasurer(_DummyVLMTPSMeasurer):
+    """VLM TPS measurer double for batched generation accounting tests."""
+
+    def __init__(self, language_model: _DummyVLMLanguageModel, generated_tokens: int) -> None:
+        self.model = _DummyBatchedVLMModel(language_model, generated_tokens)
+        self.tokenizer = _DummyTokenizer()
+        self.processor = object()
 
 
 class _RoutingTPSMeasurer(TPSMeasurer):
@@ -870,6 +896,19 @@ def test_vlm_fake_prefill_decode_counts_each_decode_token():
     assert result.decode_tps > 0.0
     assert result.npu_decode_time == pytest.approx(1.0)
     assert result.avg_npu_decode_token_latency == pytest.approx(0.25)
+
+
+def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
+    language_model = _DummyVLMLanguageModel()
+    num_decode = 4
+    measurer = _DummyBatchedVLMTPSMeasurer(language_model, generated_tokens=num_decode + 1)
+    inputs_embeds = torch.zeros((2, 8, 4), dtype=torch.float32)
+
+    result = measurer._measure_llm_once(inputs_embeds, num_decode=num_decode)
+
+    assert result.num_prefill == 8
+    assert result.num_decode == num_decode
+    assert result.decode_tps > 0.0
 
 
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():

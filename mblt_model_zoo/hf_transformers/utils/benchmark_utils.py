@@ -1501,10 +1501,10 @@ class VLMTPSMeasurer:
                 outputs = gen_model.generate(**gen_kwargs)
             t_end_ns = time.perf_counter_ns()
             if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2:
-                generated_per_row = int(outputs.shape[1])
+                generated_per_row = max(int(outputs.shape[1]) - seq_len, 0)
             else:
                 generated_per_row = num_decode + 1
-            decode_count = max(generated_per_row - 1, num_decode)
+            decode_count = max(generated_per_row - 1, 0)
             total_time_ns = t_end_ns - t_start_ns
             total_time = _ns_to_seconds(total_time_ns)
             has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
