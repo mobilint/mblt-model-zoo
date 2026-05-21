@@ -6,7 +6,7 @@ import sys
 import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 # ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -738,6 +738,127 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
             writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
 
 
+def _escape_markdown_cell(value: str) -> str:
+    """Escape text for use inside a Markdown table cell."""
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_summary_cell(value: Any) -> str:
+    """Format one benchmark summary table value."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        return f"{float(value):.6f}"
+    if isinstance(value, str):
+        try:
+            return f"{float(value):.6f}"
+        except ValueError:
+            return _escape_markdown_cell(value)
+    return _escape_markdown_cell(str(value))
+
+
+def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
+    """Build a compact Markdown table with right-aligned metric columns."""
+    if not rows:
+        return ""
+    lines = [
+        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |\n",
+        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_format_summary_cell(value) for value in row) + " |\n")
+    return "".join(lines)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """Read CSV rows if the file exists."""
+    if not path.is_file():
+        return []
+    import csv
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _scalar_plot_table(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    value_key: str,
+    unit_header: str,
+) -> str:
+    """Build a model/value table for one scalar plot."""
+    table_rows = [(row.get("model"), row.get(value_key)) for row in rows]
+    return _markdown_table(["Model", unit_header], table_rows)
+
+
+def _token_sweep_plot_table(
+    models: Sequence[str],
+    metrics_by_model: Mapping[str, Any],
+    *,
+    value_key: str,
+) -> str:
+    """Build a model/token table for one token-sweep plot."""
+    token_set: set[int] = set()
+    for model in models:
+        token_set.update(getattr(metrics_by_model[model], value_key).keys())
+    tokens = sorted(token_set)
+    if not tokens:
+        return ""
+    table_rows = []
+    for model in models:
+        values = getattr(metrics_by_model[model], value_key)
+        table_rows.append([model, *(values.get(token) for token in tokens)])
+    return _markdown_table(["Model", *(f"{token} tokens" for token in tokens)], table_rows)
+
+
+def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
+    """Build plot-specific Markdown tables for text-generation sweep summaries."""
+    metrics_by_model = collect_folder_metrics(results_dir)
+    if not metrics_by_model:
+        return {}
+    models = sorted(metrics_by_model.keys())
+    tables = {
+        "prefill_tps.png": _token_sweep_plot_table(models, metrics_by_model, value_key="prefill_tps"),
+        "decode_tps.png": _token_sweep_plot_table(models, metrics_by_model, value_key="decode_tps"),
+    }
+    rows = [{"model": model, **vars(metrics_by_model[model])} for model in models]
+    scalar_specs = [
+        ("prefill_tokens_per_j.png", "prefill_tokens_per_j", "tokens/J"),
+        ("decode_tokens_per_j.png", "decode_tokens_per_j", "tokens/J"),
+        ("avg_power_w.png", "avg_power_w", "W"),
+        ("avg_temperature_c.png", "avg_temperature_c", "°C"),
+        ("avg_utilization_pct.png", "avg_utilization_pct", "%"),
+        ("avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+        ("total_energy_j.png", "total_energy_j", "J"),
+    ]
+    for filename, key, unit_header in scalar_specs:
+        tables[filename] = _scalar_plot_table(rows, value_key=key, unit_header=unit_header)
+    return {filename: table for filename, table in tables.items() if table}
+
+
+def _build_text_generation_measure_plot_tables(results_dir: Path) -> dict[str, str]:
+    """Build plot-specific Markdown tables for text-generation measure summaries."""
+    rows = _read_csv_rows(results_dir / "combined_measure.csv")
+    if not rows:
+        return {}
+    specs = [
+        ("measure_prefill_tps.png", "prefill_tps_mean", "tokens/s"),
+        ("measure_prefill_tokens_per_j.png", "prefill_tok_per_j_mean", "tokens/J"),
+        ("measure_decode_tps.png", "decode_tps_mean", "tokens/s"),
+        ("measure_decode_tokens_per_j.png", "decode_tok_per_j_mean", "tokens/J"),
+        ("measure_avg_power_w.png", "avg_power_w", "W"),
+        ("measure_avg_temperature_c.png", "avg_temperature_c", "°C"),
+        ("measure_avg_utilization_pct.png", "avg_utilization_pct", "%"),
+        ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+        ("measure_total_energy_j.png", "total_energy_j", "J"),
+    ]
+    return {
+        filename: table
+        for filename, key, unit_header in specs
+        if (table := _scalar_plot_table(rows, value_key=key, unit_header=unit_header))
+    }
+
+
 def _write_single_combined_markdown(
     path: str,
     tps_rows: Sequence[dict[str, Any]],
@@ -842,12 +963,16 @@ def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = F
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Text Generation Measure Benchmark Summary" if measure else "Text Generation Benchmark Summary"
     prefixes = ("measure_",) if measure else None
+    plot_tables = (
+        _build_text_generation_measure_plot_tables(out_dir) if measure else _build_text_generation_plot_tables(out_dir)
+    )
     _write_summary_markdown(
         out_dir / summary_name,
         title=title,
         host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
         table_markdown_path=out_dir / table_name,
         plot_paths=_existing_png_paths(out_dir, prefixes=prefixes),
+        plot_tables=plot_tables,
     )
 
 

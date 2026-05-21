@@ -5,9 +5,10 @@ import copy
 import json
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 # ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -146,7 +147,7 @@ def _percentile(values: list[float], q: float) -> float:
     return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
 
 
-def _summary(values: list[float]) -> dict[str, float]:
+def _summary(values: Sequence[float]) -> dict[str, float]:
     vals = [float(v) for v in values]
     if not vals:
         return {"mean": 0.0, "min": 0.0, "max": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
@@ -573,7 +574,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         llm_runs.append(run)
     llm_prefill = [float(r.prefill_sweep.tps_values[-1]) for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]
-    llm_ttft_ms = [float(r.prefill_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.prefill_sweep.time_values]
+    llm_ttft_values_ms = [
+        float(r.prefill_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.prefill_sweep.time_values
+    ]
     llm_decode_ms = [float(r.decode_sweep.time_values[-1] * 1000.0) for r in llm_runs if r.decode_sweep.time_values]
     llm_prefill_npu_pct = [
         pct
@@ -709,7 +712,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "summary": {
                     "llm_prefill_tps": _summary(llm_prefill),
                     "llm_decode_tps": _summary(llm_decode),
-                    "llm_ttft_ms": _summary(llm_ttft_ms),
+                    "llm_ttft_ms": _summary(llm_ttft_values_ms),
                     "llm_decode_duration_ms": _summary(llm_decode_ms),
                     "llm_total_ms": _summary(llm_total_ms),
                     "llm_prefill_npu_latency_pct": _summary(llm_prefill_npu_pct),
@@ -878,12 +881,14 @@ def _write_vlm_summary(results_dir: Path, *, measure: bool = False) -> None:
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Image Text-to-Text Measure Benchmark Summary" if measure else "Image Text-to-Text Benchmark Summary"
     prefixes = ("measure_",) if measure else None
+    plot_tables = _build_vlm_plot_tables(results_dir, measure=measure)
     _write_summary_markdown(
         results_dir / summary_name,
         title=title,
         host_info_path=results_dir / _HOST_PC_INFO_FILENAME,
         table_markdown_path=results_dir / table_name,
         plot_paths=_existing_png_paths(results_dir, prefixes=prefixes),
+        plot_tables=plot_tables,
     )
 
 
@@ -1363,6 +1368,77 @@ def _write_measure_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
         f.write("| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n")
         for row in rows:
             f.write("| " + " | ".join("" if row.get(h) is None else str(row.get(h)) for h in headers) + " |\n")
+
+
+def _escape_markdown_cell(value: str) -> str:
+    """Escape text for use inside a Markdown table cell."""
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_summary_cell(value: Any) -> str:
+    """Format one benchmark summary table value."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        return f"{float(value):.6f}"
+    if isinstance(value, str):
+        try:
+            return f"{float(value):.6f}"
+        except ValueError:
+            return _escape_markdown_cell(value)
+    return _escape_markdown_cell(str(value))
+
+
+def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
+    """Build a compact Markdown table with right-aligned metric columns."""
+    if not rows:
+        return ""
+    lines = [
+        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |\n",
+        "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_format_summary_cell(value) for value in row) + " |\n")
+    return "".join(lines)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """Read CSV rows if the file exists."""
+    if not path.is_file():
+        return []
+    import csv
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _scalar_plot_table(rows: Sequence[Mapping[str, Any]], *, value_key: str, unit_header: str) -> str:
+    """Build a model/value table for one scalar plot."""
+    return _markdown_table(["Model", unit_header], [[row.get("model"), row.get(value_key)] for row in rows])
+
+
+def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[str, str]:
+    """Build plot-specific Markdown tables for VLM summaries."""
+    rows = _read_csv_rows(results_dir / ("combined_measure.csv" if measure else "combined.csv"))
+    if not rows:
+        return {}
+    prefix = "measure_" if measure else ""
+    specs = [
+        (f"{prefix}llm_prefill_tps.png", "llm_prefill_tps_mean", "tokens/s"),
+        (f"{prefix}llm_prefill_tokens_per_j.png", "llm_prefill_tok_per_j_mean", "tokens/J"),
+        (f"{prefix}llm_decode_tps.png", "llm_decode_tps_mean", "tokens/s"),
+        (f"{prefix}llm_decode_tokens_per_j.png", "llm_decode_tok_per_j_mean", "tokens/J"),
+        (f"{prefix}avg_power_w.png", "avg_power_w", "W"),
+        (f"{prefix}avg_temperature_c.png", "avg_temperature_c", "°C"),
+        (f"{prefix}avg_utilization_pct.png", "avg_utilization_pct", "%"),
+        (f"{prefix}avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+        (f"{prefix}total_energy_j.png", "total_energy_j", "J"),
+    ]
+    return {
+        filename: table
+        for filename, key, unit_header in specs
+        if (table := _scalar_plot_table(rows, value_key=key, unit_header=unit_header))
+    }
 
 
 def _rebuild_measure_outputs(results_dir: Path) -> None:

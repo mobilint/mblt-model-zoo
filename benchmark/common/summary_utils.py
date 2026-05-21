@@ -135,6 +135,7 @@ def write_summary_markdown(
     host_info_path: Path | str | None,
     table_markdown_path: Path | str | None,
     plot_paths: Sequence[Path | str],
+    plot_tables: Mapping[str, str] | None = None,
 ) -> None:
     """Write a benchmark summary Markdown file with host info, plots, and table.
 
@@ -144,13 +145,16 @@ def write_summary_markdown(
         host_info_path: JSON file written by :func:`collect_host_pc_info`.
         table_markdown_path: Existing Markdown table to include.
         plot_paths: PNG files to embed in the summary.
+        plot_tables: Optional Markdown tables keyed by plot PNG filename. When provided, matching tables are rendered
+            directly below each plot and the bottom combined table is omitted.
     """
     summary_path = Path(path)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"# {title}\n\n"]
     lines.extend(_host_info_markdown(Path(host_info_path) if host_info_path else None))
-    lines.extend(_plots_markdown(summary_path.parent, [Path(p) for p in plot_paths]))
-    lines.extend(_table_markdown(Path(table_markdown_path) if table_markdown_path else None))
+    lines.extend(_plots_markdown(summary_path.parent, [Path(p) for p in plot_paths], plot_tables=plot_tables))
+    if not plot_tables:
+        lines.extend(_table_markdown(Path(table_markdown_path) if table_markdown_path else None))
     summary_path.write_text("".join(lines), encoding="utf-8")
 
 
@@ -210,17 +214,29 @@ def _host_info_markdown(path: Path | None) -> list[str]:
     return lines
 
 
-def _plots_markdown(base_dir: Path, plot_paths: Sequence[Path]) -> list[str]:
+def _plots_markdown(
+    base_dir: Path,
+    plot_paths: Sequence[Path],
+    *,
+    plot_tables: Mapping[str, str] | None = None,
+) -> list[str]:
     lines = ["## Plots\n\n"]
     existing = [path for path in plot_paths if path.is_file()]
     if not existing:
         lines.append("No plot PNG files were generated.\n\n")
         return lines
+    tables = plot_tables or {}
     for path in existing:
         rel = path.relative_to(base_dir) if path.is_relative_to(base_dir) else path
         title = _PLOT_TITLES_BY_NAME.get(path.name, path.stem.replace("_", " ").title())
         lines.append(f"### {title}\n\n")
         lines.append(f"![{title}]({rel.as_posix()})\n\n")
+        table = tables.get(path.name)
+        if table:
+            lines.append(table)
+            if not lines[-1].endswith("\n"):
+                lines.append("\n")
+            lines.append("\n")
     return lines
 
 
