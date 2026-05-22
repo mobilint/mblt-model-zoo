@@ -5,16 +5,21 @@ import json
 import math
 import os
 import re
-import sys
 import statistics
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import matplotlib
+
+if "MPLBACKEND" not in os.environ:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline

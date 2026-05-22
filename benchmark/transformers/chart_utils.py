@@ -1,9 +1,14 @@
 import importlib.util
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+import matplotlib
+
+if "MPLBACKEND" not in os.environ:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
