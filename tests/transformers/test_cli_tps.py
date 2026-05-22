@@ -267,6 +267,52 @@ class _DummyBatchedVLMTPSMeasurer(_DummyVLMTPSMeasurer):
         self.processor = object()
 
 
+class _DummyVisionLatencyVLMTPSMeasurer(_DummyVLMTPSMeasurer):
+    """VLM TPS measurer double with deterministic batch vision latency."""
+
+    def __init__(self, language_model: _DummyVLMLanguageModel, batch_latency: float) -> None:
+        super().__init__(language_model)
+        self.batch_latency = batch_latency
+
+    def _build_inputs(self, image_resolution: int, prompt: str, batch_size: int = 1) -> dict[str, object]:
+        """Return minimal inputs that preserve batch metadata for tests."""
+        return {"image_resolution": image_resolution, "prompt": prompt, "batch_size": batch_size}
+
+    def _measure_vision_encode(self, inputs: dict) -> tuple[float, torch.Tensor]:
+        """Return a deterministic latency for the whole vision batch."""
+        del inputs
+        return self.batch_latency, torch.zeros((1, 4), dtype=torch.float32)
+
+    def _build_inputs_embeds(self, inputs: dict, image_features: torch.Tensor) -> torch.Tensor:
+        """Return dummy embeddings for the requested batch size."""
+        del image_features
+        return torch.zeros((int(inputs["batch_size"]), 2, 4), dtype=torch.float32)
+
+    def _measure_llm_once(
+        self,
+        inputs_embeds: torch.Tensor,
+        num_decode: int,
+        prefill_chunk_size=None,
+        show_progress: bool = False,
+        progress_desc=None,
+    ) -> SingleMeasurement:
+        """Return a lightweight LLM measurement without running generation."""
+        del inputs_embeds, prefill_chunk_size, show_progress, progress_desc
+        return SingleMeasurement(
+            num_prefill=2,
+            num_decode=int(num_decode),
+            prefill_latency=1.0,
+            prefill_tps=2.0,
+            decode_duration=1.0,
+            decode_tps=float(num_decode),
+            total_time=2.0,
+            avg_total_prefill_token_latency=0.5,
+            avg_npu_prefill_token_latency=None,
+            avg_total_decode_token_latency=1.0 / int(num_decode),
+            avg_npu_decode_token_latency=None,
+        )
+
+
 class _RoutingTPSMeasurer(TPSMeasurer):
     """TPS measurer test double that records real/fake decode routing."""
 
@@ -937,6 +983,26 @@ def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
     assert result.num_prefill == 8
     assert result.num_decode == num_decode
     assert result.decode_tps > 0.0
+
+
+def test_vlm_measure_vision_reports_per_image_latency_for_batch():
+    language_model = _DummyVLMLanguageModel()
+    measurer = _DummyVisionLatencyVLMTPSMeasurer(language_model, batch_latency=2.0)
+
+    result = measurer.measure_vision(image_resolution=224, repeat=1, prompt="Describe it.", batch_size=4)
+
+    assert result == [(pytest.approx(0.5), pytest.approx(2.0))]
+
+
+def test_vlm_measure_reports_per_image_vision_latency_for_batch():
+    language_model = _DummyVLMLanguageModel()
+    measurer = _DummyVisionLatencyVLMTPSMeasurer(language_model, batch_latency=2.0)
+
+    result = measurer.measure(image_resolution=224, num_decode=4, repeat=1, prompt="Describe it.", batch_size=4)
+
+    assert len(result) == 1
+    assert result[0].vision_encode_latency == pytest.approx(0.5)
+    assert result[0].vision_fps == pytest.approx(2.0)
 
 
 @pytest.mark.parametrize("batch_size", [1, 2])

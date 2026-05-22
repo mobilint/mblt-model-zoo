@@ -1440,6 +1440,11 @@ class VLMTPSMeasurer:
     def _supports_npu_timing(model) -> bool:
         return _get_npu_timing_target(model) is not None
 
+    @staticmethod
+    def _per_image_latency(batch_latency: float, batch_size: int) -> float:
+        """Normalize batch vision latency to per-image latency."""
+        return batch_latency / batch_size
+
     def _build_inputs(self, image_resolution: int, prompt: str, batch_size: int = 1):
         batch_size = _validate_batch_size(batch_size)
         image = torch.randint(
@@ -2138,8 +2143,9 @@ class VLMTPSMeasurer:
                     f"run={idx + 1}/{repeat}: measuring..."
                 )
             inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
-            vision_encode_latency, _ = self._measure_vision_encode(inputs)
-            vision_fps = (batch_size / vision_encode_latency) if vision_encode_latency > 0 else 0.0
+            vision_batch_latency, _ = self._measure_vision_encode(inputs)
+            vision_encode_latency = self._per_image_latency(vision_batch_latency, batch_size)
+            vision_fps = (batch_size / vision_batch_latency) if vision_batch_latency > 0 else 0.0
             results.append((vision_encode_latency, vision_fps))
             if show_progress:
                 print(
@@ -2203,7 +2209,8 @@ class VLMTPSMeasurer:
                     f"[vlm] resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
                 )
             inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
-            vision_encode_latency, image_features = self._measure_vision_encode(inputs)
+            vision_batch_latency, image_features = self._measure_vision_encode(inputs)
+            vision_encode_latency = self._per_image_latency(vision_batch_latency, batch_size)
             inputs_embeds = self._build_inputs_embeds(inputs, image_features=image_features)
             llm = self._measure_llm_once(
                 inputs_embeds=inputs_embeds,
@@ -2214,7 +2221,7 @@ class VLMTPSMeasurer:
                 VLMSingleMeasurement(
                     image_resolution=image_resolution,
                     vision_encode_latency=vision_encode_latency,
-                    vision_fps=(batch_size / vision_encode_latency) if vision_encode_latency > 0 else 0.0,
+                    vision_fps=(batch_size / vision_batch_latency) if vision_batch_latency > 0 else 0.0,
                     llm=llm,
                 )
             )
