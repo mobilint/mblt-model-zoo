@@ -998,8 +998,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 batch_size=batch_size,
             )[0]
         finally:
-            if tracker is not None:
-                tracker.stop()
+            _stop_tracker_safe(tracker)
         runs.append(run)
         if tracker is not None:
             device_metrics.append(_extract_device_metric(tracker))
@@ -1011,7 +1010,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     decode_tps = [r.llm.decode_tps for r in runs]
     ttft_ms = [r.llm.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.llm.decode_duration * 1000.0 for r in runs]
-    total_ms = [(r.vision_encode_latency + r.llm.total_time) * 1000.0 for r in runs]
+    total_ms = [((r.vision_encode_latency * batch_size) + r.llm.total_time) * 1000.0 for r in runs]
     prefill_npu_latency_pct = [pct for r in runs if (pct := r.llm.prefill_npu_latency_pct) is not None]
     decode_npu_latency_pct = [pct for r in runs if (pct := r.llm.decode_npu_latency_pct) is not None]
     total_npu_latency_pct = [pct for r in runs if (pct := r.llm.total_npu_latency_pct) is not None]
