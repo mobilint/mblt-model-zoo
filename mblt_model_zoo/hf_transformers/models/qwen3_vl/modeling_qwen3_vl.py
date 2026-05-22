@@ -456,13 +456,24 @@ class MobilintQwen3VLForConditionalGeneration(
         """Delegate generation cache creation to the Qwen3-VL language model."""
         return self.model.language_model._get_cache(cache_implementation, batch_size, max_cache_len, *args)
 
-    @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.prepare_inputs_for_generation, "count_npu_time")
-    def prepare_inputs_for_generation(self, *args: Any, count_npu_time: bool = False, **kwargs: Any):
+    @with_mobilint_generation_signature(
+        Qwen3VLForConditionalGeneration.prepare_inputs_for_generation,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
+    def prepare_inputs_for_generation(
+        self,
+        *args: Any,
+        count_npu_time: bool = False,
+        prefill_chunk_size: int | None = None,
+        **kwargs: Any,
+    ):
         """Prepare generation inputs while preserving Mobilint timing kwargs.
 
         Args:
             *args: Positional arguments forwarded to the upstream Qwen3-VL generation helper.
             count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
+            prefill_chunk_size: Optional prefill chunk size forwarded to Mobilint generation.
             **kwargs: Keyword arguments forwarded to the upstream Qwen3-VL generation helper.
 
         Returns:
@@ -470,6 +481,8 @@ class MobilintQwen3VLForConditionalGeneration(
         """
         model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
         model_inputs["count_npu_time"] = count_npu_time
+        if prefill_chunk_size is not None:
+            model_inputs["prefill_chunk_size"] = prefill_chunk_size
         return model_inputs
 
     @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.forward, "count_npu_time")

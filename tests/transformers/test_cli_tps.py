@@ -1095,6 +1095,32 @@ def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytes
     assert model_inputs["prefill_chunk_size"] == 64
 
 
+def test_qwen3_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+    signature = inspect.signature(MobilintQwen3VLForConditionalGeneration.prepare_inputs_for_generation)
+
+    assert "prefill_chunk_size" in signature.parameters
+
+    def _base_prepare_inputs_for_generation(*args, **kwargs):
+        del args, kwargs
+        return {"input_ids": torch.tensor([[1]])}
+
+    monkeypatch.setattr(
+        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl."
+        "Qwen3VLForConditionalGeneration.prepare_inputs_for_generation",
+        _base_prepare_inputs_for_generation,
+    )
+    model = object.__new__(MobilintQwen3VLForConditionalGeneration)
+
+    model_inputs = model.prepare_inputs_for_generation(
+        torch.tensor([[1]]),
+        count_npu_time=True,
+        prefill_chunk_size=64,
+    )
+
+    assert model_inputs["count_npu_time"] is True
+    assert model_inputs["prefill_chunk_size"] == 64
+
+
 @pytest.mark.parametrize("spec", ["", "1", "1:2", "1:2:0", "2:1:1", "a:b:c"])
 def test_cli_tps_invalid_range_exits(spec: str):
     parser = build_parser()
