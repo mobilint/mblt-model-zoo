@@ -22,8 +22,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
     SingleMeasurement,
     SweepData,
-    VLMSingleMeasurement,
     TPSMeasurer,
+    VLMSingleMeasurement,
     VLMTPSMeasurer,
     _get_npu_timing_target,
     _resolve_config_vocab_size,
@@ -684,6 +684,150 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
     assert tps_cli._run_text_sweep(args) == 0
     assert measure_calls == [(3, 128, 32)]
     assert full_calls == [3]
+
+
+def test_run_vlm_sweep_writes_plot(monkeypatch, tmp_path):
+    """Verify VLM sweeps honor the shared --plot output path."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            return [(float(kwargs["image_resolution"]) / 1000.0, 10.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            del kwargs
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(8)
+            result.prefill_sweep.tps_values.append(16.0)
+            result.prefill_sweep.time_values.append(0.5)
+            result.prefill_sweep.avg_total_token_latency_values.append(0.0625)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(4)
+            result.decode_sweep.tps_values.append(8.0)
+            result.decode_sweep.time_values.append(0.5)
+            result.decode_sweep.avg_total_token_latency_values.append(0.125)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
+
+    plot_path = tmp_path / "vlm_sweep.png"
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: None)
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=1,
+        warmup=0,
+        repeat=1,
+        prefill_range=(8, 8, 1),
+        cache_lengths=[4],
+        decode_window=2,
+        image_resolutions=[224, 448],
+        llm_resolution=224,
+        prompt="Describe.",
+        device_metrics=False,
+        json=None,
+        csv=None,
+        plot=str(plot_path),
+        device_backend="none",
+    )
+
+    assert tps_cli._run_vlm_sweep(args) == 0
+    assert plot_path.is_file()
+    assert plot_path.stat().st_size > 0
+
+
+def test_run_vlm_sweep_ignores_tracker_stop_errors(monkeypatch):
+    """Verify tracker cleanup failures do not abort completed VLM sweeps."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FailingStopTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            raise RuntimeError("tracker stop failed")
+
+        def get_metric(self) -> dict[str, float]:
+            return {}
+
+        def get_trace(self) -> list[tuple[float, float]]:
+            return []
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            return [(float(kwargs["image_resolution"]) / 1000.0, 10.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            del kwargs
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(8)
+            result.prefill_sweep.tps_values.append(16.0)
+            result.prefill_sweep.time_values.append(0.5)
+            result.decode_sweep.x_values.append(4)
+            result.decode_sweep.tps_values.append(8.0)
+            result.decode_sweep.time_values.append(0.5)
+            return result
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FailingStopTracker())
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=1,
+        warmup=0,
+        repeat=1,
+        prefill_range=(8, 8, 1),
+        cache_lengths=[4],
+        decode_window=2,
+        image_resolutions=[224],
+        llm_resolution=224,
+        prompt="Describe.",
+        device_metrics=False,
+        json=None,
+        csv=None,
+        plot=None,
+        device_backend="npu",
+    )
+
+    assert tps_cli._run_vlm_sweep(args) == 0
 
 
 def test_cli_tps_sweep_vlm_options_parsing():

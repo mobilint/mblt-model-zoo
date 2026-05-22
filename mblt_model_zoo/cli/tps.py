@@ -754,18 +754,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
-                on_prefill_start=(
-                    (lambda: tracker_prefill.start()) if tracker_prefill is not None else None
-                ),
-                on_prefill_end=(
-                    (lambda: tracker_prefill.stop()) if tracker_prefill is not None else None
-                ),
-                on_decode_start=(
-                    (lambda: tracker_decode.start()) if tracker_decode is not None else None
-                ),
-                on_decode_end=(
-                    (lambda: tracker_decode.stop()) if tracker_decode is not None else None
-                ),
+                on_prefill_start=((lambda: tracker_prefill.start()) if tracker_prefill is not None else None),
+                on_prefill_end=((lambda: tracker_prefill.stop()) if tracker_prefill is not None else None),
+                on_decode_start=((lambda: tracker_decode.start()) if tracker_decode is not None else None),
+                on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
                 batch_size=batch_size,
             )
         finally:
@@ -1545,6 +1537,61 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def _plot_vlm_sweep(
+    *,
+    resolution_payloads: Sequence[dict[str, Any]],
+    llm_result: Any,
+    save_path: str,
+) -> None:
+    """Write a VLM sweep summary plot.
+
+    Args:
+        resolution_payloads: Vision sweep payloads produced by ``_run_vlm_sweep``.
+        llm_result: Aggregated LLM TPS sweep result.
+        save_path: Destination PNG path.
+    """
+    import matplotlib.pyplot as plt
+
+    output_dir = os.path.dirname(os.path.abspath(save_path))
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    resolutions = [int(payload["image_resolution"]) for payload in resolution_payloads]
+    vision_encode_ms = [payload["summary"]["vision_encode_ms"]["mean"] for payload in resolution_payloads]
+    vision_fps = [payload["summary"]["vision_fps"]["mean"] for payload in resolution_payloads]
+
+    fig, axs = plt.subplots(2, 2, figsize=(16, 10))
+    fig.suptitle("VLM TPS Sweep", fontsize=16)
+
+    axs[0, 0].plot(resolutions, vision_encode_ms, "o-", color="tab:red")
+    axs[0, 0].set_title("Vision Encode Latency")
+    axs[0, 0].set_xlabel("Image resolution")
+    axs[0, 0].set_ylabel("Latency (ms/image)")
+    axs[0, 0].grid(True, alpha=0.3)
+
+    axs[0, 1].plot(resolutions, vision_fps, "o-", color="tab:blue")
+    axs[0, 1].set_title("Vision Throughput")
+    axs[0, 1].set_xlabel("Image resolution")
+    axs[0, 1].set_ylabel("FPS")
+    axs[0, 1].grid(True, alpha=0.3)
+
+    axs[1, 0].plot(llm_result.prefill_sweep.x_values, llm_result.prefill_sweep.tps_values, "o-", color="tab:green")
+    axs[1, 0].set_title("LLM Prefill TPS")
+    axs[1, 0].set_xlabel("Prefill tokens")
+    axs[1, 0].set_ylabel("Tokens/s")
+    axs[1, 0].grid(True, alpha=0.3)
+
+    axs[1, 1].plot(llm_result.decode_sweep.x_values, llm_result.decode_sweep.tps_values, "o-", color="tab:purple")
+    axs[1, 1].set_title("LLM Decode TPS")
+    axs[1, 1].set_xlabel("Cache length")
+    axs[1, 1].set_ylabel("Tokens/s")
+    axs[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+
+
 def _run_vlm_sweep(args: argparse.Namespace) -> int:
     """Run a VLM TPS sweep including vision encoder and LLM phases."""
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -1611,8 +1658,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     batch_size=batch_size,
                 )[0]
             finally:
-                if tracker is not None:
-                    tracker.stop()
+                _stop_tracker_safe(tracker)
             vision_runs.append(single)
             if tracker is not None:
                 metric = _extract_device_metric(tracker)
@@ -1790,8 +1836,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 batch_size=batch_size,
             )
         finally:
-            if tracker is not None:
-                tracker.stop()
+            _stop_tracker_safe(tracker)
         if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
             metric = _extract_device_metric(tracker)
             llm_device_time_series_runs.append(_extract_device_time_series(tracker))
@@ -1990,6 +2035,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     if args.csv:
         _write_csv(args.csv, csv_rows)
         print(f"wrote: {args.csv}")
+
+    if args.plot:
+        _plot_vlm_sweep(resolution_payloads=resolution_payloads, llm_result=llm_result, save_path=args.plot)
+        print(f"wrote: {args.plot}")
 
     return 0
 
