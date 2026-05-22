@@ -1,5 +1,5 @@
 import inspect
-from functools import lru_cache, wraps
+from functools import lru_cache
 from typing import Union, cast
 
 import torch
@@ -95,35 +95,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         if return_dict is None and _upstream_qwen2_vl_uses_structured_vision_outputs():
             return_dict = self.config.return_dict
         del kwargs
-        gt, gh, gw = grid_thw[0].tolist()
-
-        c = 3
-        pt = 2
-        Mh = 2
-        Mw = 2
-        gh2 = gh // 2
-        gw2 = gw // 2
-        ph = pw = int((hidden_states.shape[-1] // (pt * c)) ** 0.5)
-
-        assert hidden_states.shape[0] == gt * gh2 * gw2 * Mh * Mw
-        assert hidden_states.shape[1] == c * pt * ph * pw
-
-        # (gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
-        hidden_states = hidden_states.view(gt, gh2, gw2, Mh, Mw, c, pt, ph, pw)
-
-        # rearrange: "(gt gh gw Mh Mw) (c pt ph pw) -> gt (gh gw ph) (Mh Mw pw) (pt c)"
-        # (gt, pt, c, Mh, Mw, pw, gh2, gw2, ph)
-        hidden_states = hidden_states.permute(0, 1, 2, 7, 3, 4, 8, 6, 5).contiguous()
-
-        # gt (gh gw ph) (Mh Mw pw) (pt c)
-        hidden_states = hidden_states.view(
-            gt,
-            gh2 * gw2 * ph,
-            Mh * Mw * pw,
-            pt * c,
-        ).squeeze(0)
-
-        merged_hidden_states = self.mxq_forward(hidden_states).squeeze(0)
+        merged_hidden_states = self._encode_images(hidden_states, grid_thw)
         structured_outputs = BaseModelOutputWithPooling(
             last_hidden_state=None,
             pooler_output=merged_hidden_states,
@@ -137,6 +109,78 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
                 return structured_outputs.to_tuple()
             return structured_outputs
         return merged_hidden_states
+
+    def _preprocess_image_tokens(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
+        """Convert one Qwen2-VL image patch sequence to the MXQ vision input layout."""
+        gt, gh, gw = grid_thw.tolist()
+
+        c = 3
+        pt = 2
+        mh = 2
+        mw = 2
+        gh2 = gh // 2
+        gw2 = gw // 2
+        ph = pw = int((hidden_states.shape[-1] // (pt * c)) ** 0.5)
+
+        expected_tokens = gt * gh2 * gw2 * mh * mw
+        expected_hidden = c * pt * ph * pw
+        if hidden_states.shape[0] != expected_tokens:
+            raise ValueError(
+                f"Unexpected pixel token count for Qwen2-VL vision input: {hidden_states.shape[0]} vs {expected_tokens}"
+            )
+        if hidden_states.shape[1] != expected_hidden:
+            raise ValueError(
+                f"Unexpected pixel hidden size for Qwen2-VL vision input: {hidden_states.shape[1]} vs {expected_hidden}"
+            )
+
+        hidden_states = hidden_states.view(gt, gh2, gw2, mh, mw, c, pt, ph, pw)
+        hidden_states = hidden_states.permute(0, 1, 2, 7, 3, 4, 8, 6, 5).contiguous()
+        return hidden_states.view(gt, gh2 * gw2 * ph, mh * mw * pw, pt * c).squeeze(0)
+
+    def _split_hidden_states_by_grid(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        """Split flattened processor image tokens according to `grid_thw` rows."""
+        offset = 0
+        chunks: list[torch.Tensor] = []
+        for grid in grid_thw:
+            gt, gh, gw = grid.tolist()
+            token_count = int(gt * gh * gw)
+            chunks.append(hidden_states[offset : offset + token_count])
+            offset += token_count
+        if offset != int(hidden_states.shape[0]):
+            raise ValueError(f"Unexpected total Qwen2-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
+        return chunks
+
+    def _flatten_encoder_output(
+        self,
+        output: torch.Tensor,
+        *,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Normalize Qwen2-VL MXQ vision output to `(total_image_tokens, hidden_size)`."""
+        if output.ndim >= 3 and int(output.shape[0]) == batch_size:
+            return output.reshape(-1, int(output.shape[-1]))
+        if output.ndim >= 3 and int(output.shape[0]) == 1:
+            return output.squeeze(0).reshape(-1, int(output.shape[-1]))
+        if output.ndim == 2:
+            return output
+        raise ValueError(f"Unexpected Qwen2-VL vision output shape: {tuple(output.shape)}")
+
+    def _encode_images(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
+        """Run Qwen2-VL vision encoding with core-mode-specific batch handling."""
+        chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
+        mxq_inputs = [self._preprocess_image_tokens(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        npu_backend = getattr(self, "npu_backend", None)
+        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
+        if core_mode == "multi" and len(mxq_inputs) > 1:
+            batched_inputs = torch.stack(mxq_inputs, dim=0)
+            return self._flatten_encoder_output(self.mxq_forward(batched_inputs), batch_size=len(mxq_inputs))
+
+        outputs = [self._flatten_encoder_output(self.mxq_forward(mxq_input), batch_size=1) for mxq_input in mxq_inputs]
+        return torch.cat(outputs, dim=0)
 
 
 class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen2VLPreTrainedModel):

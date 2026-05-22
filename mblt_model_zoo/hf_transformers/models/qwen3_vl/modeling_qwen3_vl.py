@@ -111,12 +111,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")
 
-        npu_inputs = self._prepare_npu_inputs(hidden_states, grid_thw)
-        encoder_outputs = self.get_mxq_model().infer(npu_inputs)
-        if encoder_outputs is None:
-            raise RuntimeError("Vision MXQ inference returned None.")
-
-        image_embeds, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
+        image_embeds, deepstack_embeds = self._encode_images(hidden_states, grid_thw)
         structured_outputs = BaseModelOutputWithDeepstackFeatures(
             last_hidden_state=None,
             pooler_output=image_embeds,
@@ -133,8 +128,8 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return image_embeds, deepstack_embeds
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
-        """Match the runtime `repreprocess_pixel_values` layout for Qwen3-VL vision input."""
-        gt, gh, gw = grid_thw[0].tolist()
+        """Match the runtime `repreprocess_pixel_values` layout for one Qwen3-VL image input."""
+        gt, gh, gw = grid_thw.tolist()
         c = int(self.config.in_channels)
         pt = int(self.config.temporal_patch_size)
         merge_size = int(self.config.spatial_merge_size)
@@ -191,25 +186,90 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
         return processed.to(torch.float32).cpu().numpy()
 
+    def _split_hidden_states_by_grid(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        """Split flattened processor image tokens according to `grid_thw` rows."""
+        offset = 0
+        chunks: list[torch.Tensor] = []
+        for grid in grid_thw:
+            gt, gh, gw = grid.tolist()
+            token_count = int(gt * gh * gw)
+            chunks.append(hidden_states[offset : offset + token_count])
+            offset += token_count
+        if offset != int(hidden_states.shape[0]):
+            raise ValueError(f"Unexpected total Qwen3-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
+        return chunks
+
     def _reorder_encoder_outputs(
         self,
         encoder_outputs: list[np.ndarray],
         device: torch.device,
+        batch_size: int = 1,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         if len(encoder_outputs) < 4:
             raise ValueError(f"Expected at least 4 encoder outputs, got {len(encoder_outputs)}")
 
-        image_embeds = torch.tensor(
-            np.squeeze(encoder_outputs[0]),
-            dtype=torch.float32,
-            device=device,
-        )
+        image_embeds = self._flatten_encoder_output(encoder_outputs[0], device=device, batch_size=batch_size)
         deepstack_embeds = [
-            torch.tensor(np.squeeze(encoder_outputs[2]), dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[3]), dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[1]), dtype=torch.float32, device=device),
+            self._flatten_encoder_output(encoder_outputs[2], device=device, batch_size=batch_size),
+            self._flatten_encoder_output(encoder_outputs[3], device=device, batch_size=batch_size),
+            self._flatten_encoder_output(encoder_outputs[1], device=device, batch_size=batch_size),
         ]
         return image_embeds, deepstack_embeds
+
+    def _flatten_encoder_output(
+        self,
+        output: np.ndarray,
+        *,
+        device: torch.device,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Normalize Qwen3-VL MXQ vision output to `(total_image_tokens, hidden_size)`."""
+        output_array = np.asarray(output)
+        if output_array.ndim >= 3 and int(output_array.shape[0]) == batch_size:
+            output_array = output_array.reshape(-1, int(output_array.shape[-1]))
+        else:
+            output_array = np.squeeze(output_array)
+            if output_array.ndim > 2:
+                output_array = output_array.reshape(-1, int(output_array.shape[-1]))
+        if output_array.ndim != 2:
+            raise ValueError(f"Unexpected Qwen3-VL vision output shape: {tuple(np.asarray(output).shape)}")
+        return torch.tensor(output_array, dtype=torch.float32, device=device)
+
+    def _encode_images(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
+        chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
+        npu_inputs = [self._prepare_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        npu_backend = getattr(self, "npu_backend", None)
+        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
+        mxq_model = self.get_mxq_model()
+        if core_mode == "multi" and len(npu_inputs) > 1:
+            encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
+            if encoder_outputs is None:
+                raise RuntimeError("Vision MXQ inference returned None.")
+            return self._reorder_encoder_outputs(encoder_outputs, hidden_states.device, batch_size=len(npu_inputs))
+
+        image_embeds: list[torch.Tensor] = []
+        deepstack_by_layer: list[list[torch.Tensor]] = []
+        for npu_input in npu_inputs:
+            encoder_outputs = mxq_model.infer(npu_input)
+            if encoder_outputs is None:
+                raise RuntimeError("Vision MXQ inference returned None.")
+            image_embed, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
+            image_embeds.append(image_embed)
+            if not deepstack_by_layer:
+                deepstack_by_layer = [[] for _ in deepstack_embeds]
+            for layer_idx, deepstack_embed in enumerate(deepstack_embeds):
+                deepstack_by_layer[layer_idx].append(deepstack_embed)
+
+        return torch.cat(image_embeds, dim=0), [torch.cat(layer_embeds, dim=0) for layer_embeds in deepstack_by_layer]
 
 
 class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen3VLPreTrainedModel):
