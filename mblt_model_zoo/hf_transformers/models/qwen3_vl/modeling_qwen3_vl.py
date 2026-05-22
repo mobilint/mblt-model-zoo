@@ -271,7 +271,8 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
-        if past_key_values is None:
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        if use_cache and past_key_values is None:
             past_key_values = self._get_cache("", 0, 0)
 
         if inputs_embeds is None:
@@ -306,7 +307,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         inputs_embeds: torch.Tensor,
         deepstack_visual_embeds: Optional[list[torch.Tensor]],
         visual_pos_masks: Optional[torch.Tensor],
-        past_key_values: MobilintDeepStackCache,
+        past_key_values: Optional[MobilintDeepStackCache],
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
@@ -329,7 +330,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             raise ValueError(f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}")
         if inputs_embeds.shape[0] != 1:
             raise NotImplementedError("Mobilint Qwen3-VL currently supports batch size 1 only.")
-        if not isinstance(past_key_values, MobilintDeepStackCache):
+        if past_key_values is not None and not isinstance(past_key_values, MobilintDeepStackCache):
             raise TypeError("Qwen3-VL text decoding requires MobilintDeepStackCache.")
 
         deepstack_tensor = self._build_deepstack_tensor(
@@ -337,7 +338,8 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             visual_pos_masks=visual_pos_masks,
             deepstack_visual_embeds=deepstack_visual_embeds,
         )
-        past_key_values.set_deepstack_tensor(deepstack_tensor)
+        if past_key_values is not None:
+            past_key_values.set_deepstack_tensor(deepstack_tensor)
 
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
 
@@ -351,15 +353,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         for chunk_idx in range(num_chunks):
             start_index = chunk_idx * resolved_prefill_chunk_size
             end_index = min(start_index + resolved_prefill_chunk_size, inputs_np.shape[1])
-            cache_size = past_key_values.get_seq_length()
+            cache_size = past_key_values.get_seq_length() if past_key_values is not None else 0
 
             inputs_chunk = inputs_np[:, start_index:end_index, :]
-            deepstack_chunk = past_key_values.get_deepstack_chunk(
-                start_index,
-                end_index,
-                device=inputs_embeds.device,
-                dtype=torch.float32,
-            ).cpu().numpy()
+            if past_key_values is None:
+                deepstack_chunk = deepstack_tensor[:, start_index:end_index, :].to(dtype=torch.float32).cpu().numpy()
+            else:
+                deepstack_chunk = past_key_values.get_deepstack_chunk(
+                    start_index,
+                    end_index,
+                    device=inputs_embeds.device,
+                    dtype=torch.float32,
+                ).cpu().numpy()
 
             if count_npu_time:
                 import time
@@ -374,7 +379,8 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 raise RuntimeError("Text MXQ inference returned None.")
             logits_ndarray = result[0]
 
-            past_key_values.update_cache_position(cache_position[start_index:end_index])
+            if past_key_values is not None:
+                past_key_values.update_cache_position(cache_position[start_index:end_index])
 
         if logits_ndarray is None:
             raise RuntimeError("Text MXQ inference did not produce logits.")
