@@ -473,6 +473,12 @@ class SweepData:
     avg_total_token_latency_values: List[Optional[float]] = field(default_factory=list)
     avg_npu_token_latency_values: List[Optional[float]] = field(default_factory=list)
 
+
+def _optional_values(values: List[Optional[float]], length: int) -> List[Optional[float]]:
+    """Return optional values padded with ``None`` to match the requested length."""
+    return [values[idx] if idx < len(values) else None for idx in range(length)]
+
+
 @dataclass
 class BenchmarkResult:
     """Aggregated text-generation benchmark result and optional device metrics."""
@@ -500,12 +506,17 @@ class BenchmarkResult:
 
     @staticmethod
     def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
+        prefill_len = min(
+            len(result.prefill_sweep.x_values),
+            len(result.prefill_sweep.tps_values),
+            len(result.prefill_sweep.time_values),
+        )
         for x, tps, t, avg_total, avg_npu in zip(
-            result.prefill_sweep.x_values,
-            result.prefill_sweep.tps_values,
-            result.prefill_sweep.time_values,
-            result.prefill_sweep.avg_total_token_latency_values,
-            result.prefill_sweep.avg_npu_token_latency_values,
+            result.prefill_sweep.x_values[:prefill_len],
+            result.prefill_sweep.tps_values[:prefill_len],
+            result.prefill_sweep.time_values[:prefill_len],
+            _optional_values(result.prefill_sweep.avg_total_token_latency_values, prefill_len),
+            _optional_values(result.prefill_sweep.avg_npu_token_latency_values, prefill_len),
         ):
             yield {
                 "model": model_id,
@@ -517,14 +528,19 @@ class BenchmarkResult:
                 "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
                 "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
             }
-        decode_prefill_modes = result.decode_prefill_modes or [None] * len(result.decode_sweep.x_values)
+        decode_len = min(
+            len(result.decode_sweep.x_values),
+            len(result.decode_sweep.tps_values),
+            len(result.decode_sweep.time_values),
+        )
+        decode_prefill_modes = (result.decode_prefill_modes or []) + [None] * decode_len
         for x, tps, t, avg_total, avg_npu, prefill_mode in zip(
-            result.decode_sweep.x_values,
-            result.decode_sweep.tps_values,
-            result.decode_sweep.time_values,
-            result.decode_sweep.avg_total_token_latency_values,
-            result.decode_sweep.avg_npu_token_latency_values,
-            decode_prefill_modes,
+            result.decode_sweep.x_values[:decode_len],
+            result.decode_sweep.tps_values[:decode_len],
+            result.decode_sweep.time_values[:decode_len],
+            _optional_values(result.decode_sweep.avg_total_token_latency_values, decode_len),
+            _optional_values(result.decode_sweep.avg_npu_token_latency_values, decode_len),
+            decode_prefill_modes[:decode_len],
         ):
             yield {
                 "model": model_id,

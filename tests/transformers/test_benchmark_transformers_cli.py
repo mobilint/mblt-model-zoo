@@ -504,3 +504,60 @@ def test_vlm_measure_rebuild_outputs(tmp_path) -> None:
 
     assert (tmp_path / "combined_measure.csv").is_file()
     assert (tmp_path / "combined_measure.md").is_file()
+
+
+def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
+    """Verify old text sweep JSON without latency arrays still produces rows."""
+    payload = {
+        "model": "text-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [8], "tps_values": [10.0], "time_values": [0.8]},
+            "decode_sweep": {"x_values": [4], "tps_values": [20.0], "time_values": [0.2]},
+        },
+    }
+    path = tmp_path / "text-a.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = text_bench._load_result(str(path))
+    rows = list(text_bench.BenchmarkResult.iter_rows("text-a", result))
+
+    assert len(rows) == 2
+    assert result.prefill_sweep.avg_total_token_latency_values == [None]
+    assert result.decode_sweep.avg_npu_token_latency_values == [None]
+
+
+def test_text_aggregate_results_tolerates_missing_latency_arrays() -> None:
+    """Verify text repeated sweeps aggregate missing latency arrays as None."""
+    first = text_bench.BenchmarkResult(
+        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[10.0], time_values=[0.8])
+    )
+    second = text_bench.BenchmarkResult(
+        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[20.0], time_values=[1.2])
+    )
+
+    result = text_bench._aggregate_benchmark_results([first, second])
+
+    assert result.prefill_sweep.tps_values == [15.0]
+    assert result.prefill_sweep.avg_total_token_latency_values == [None]
+
+
+def test_vlm_aggregate_llm_runs_tolerates_missing_latency_arrays() -> None:
+    """Verify old VLM LLM runs without latency arrays aggregate and emit rows."""
+    runs = [
+        {
+            "prefill_sweep": {"x_values": [8], "tps_values": [10.0], "time_values": [0.8]},
+            "decode_sweep": {"x_values": [4], "tps_values": [20.0], "time_values": [0.2]},
+        },
+        {
+            "prefill_sweep": {"x_values": [8], "tps_values": [30.0], "time_values": [1.2]},
+            "decode_sweep": {"x_values": [4], "tps_values": [40.0], "time_values": [0.4]},
+        },
+    ]
+
+    result = vlm_bench._aggregate_vlm_llm_runs(runs)
+    rows = list(vlm_bench.BenchmarkResult.iter_rows("vlm-a", result))
+
+    assert result.prefill_sweep.tps_values == [20.0]
+    assert result.decode_sweep.tps_values == [30.0]
+    assert result.prefill_sweep.avg_total_token_latency_values == [None]
+    assert len(rows) == 2

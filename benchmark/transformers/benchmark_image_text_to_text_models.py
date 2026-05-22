@@ -772,12 +772,18 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
 
 def _sweep_from_dict(payload: Mapping[str, Any]) -> SweepData:
     """Build ``SweepData`` from a serialized sweep dictionary."""
+    x_values = list(payload.get("x_values", []))
+
+    def _latency_values(key: str) -> list[Any]:
+        values = list(payload.get(key, []))
+        return values + [None] * max(0, len(x_values) - len(values))
+
     return SweepData(
-        x_values=list(payload.get("x_values", [])),
+        x_values=x_values,
         tps_values=list(payload.get("tps_values", [])),
         time_values=list(payload.get("time_values", [])),
-        avg_total_token_latency_values=list(payload.get("avg_total_token_latency_values", [])),
-        avg_npu_token_latency_values=list(payload.get("avg_npu_token_latency_values", [])),
+        avg_total_token_latency_values=_latency_values("avg_total_token_latency_values"),
+        avg_npu_token_latency_values=_latency_values("avg_npu_token_latency_values"),
     )
 
 
@@ -824,6 +830,10 @@ def _aggregate_vlm_llm_runs(runs: Sequence[Mapping[str, Any]]) -> BenchmarkResul
     def _aggregate_phase(phase: str) -> SweepData:
         first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
         out = SweepData(x_values=list(first.x_values))
+
+        def _get_optional(values: Sequence[Any], idx: int) -> Any:
+            return values[idx] if idx < len(values) else None
+
         for idx in range(len(first.x_values)):
             tps_values: list[float] = []
             time_values: list[float] = []
@@ -833,8 +843,8 @@ def _aggregate_vlm_llm_runs(runs: Sequence[Mapping[str, Any]]) -> BenchmarkResul
                 src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
                 tps_values.append(float(src.tps_values[idx]))
                 time_values.append(float(src.time_values[idx]))
-                total_latency_values.append(src.avg_total_token_latency_values[idx])
-                npu_latency_values.append(src.avg_npu_token_latency_values[idx])
+                total_latency_values.append(_get_optional(src.avg_total_token_latency_values, idx))
+                npu_latency_values.append(_get_optional(src.avg_npu_token_latency_values, idx))
             out.tps_values.append(sum(tps_values) / len(tps_values))
             out.time_values.append(sum(time_values) / len(time_values))
             out.avg_total_token_latency_values.append(_mean_optional(total_latency_values))

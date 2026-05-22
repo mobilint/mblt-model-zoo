@@ -504,20 +504,25 @@ def _load_result(path: str) -> BenchmarkResult:
         payload = payload["benchmark"]
     prefill = payload.get("prefill_sweep", {})
     decode = payload.get("decode_sweep", {})
+
+    def _latency_values(sweep: dict[str, Any], key: str) -> list[Any]:
+        values = list(sweep.get(key, []))
+        return values + [None] * max(0, len(sweep.get("x_values", [])) - len(values))
+
     return BenchmarkResult(
         prefill_sweep=SweepData(
             x_values=prefill.get("x_values", []),
             tps_values=prefill.get("tps_values", []),
             time_values=prefill.get("time_values", []),
-            avg_total_token_latency_values=prefill.get("avg_total_token_latency_values", []),
-            avg_npu_token_latency_values=prefill.get("avg_npu_token_latency_values", []),
+            avg_total_token_latency_values=_latency_values(prefill, "avg_total_token_latency_values"),
+            avg_npu_token_latency_values=_latency_values(prefill, "avg_npu_token_latency_values"),
         ),
         decode_sweep=SweepData(
             x_values=decode.get("x_values", []),
             tps_values=decode.get("tps_values", []),
             time_values=decode.get("time_values", []),
-            avg_total_token_latency_values=decode.get("avg_total_token_latency_values", []),
-            avg_npu_token_latency_values=decode.get("avg_npu_token_latency_values", []),
+            avg_total_token_latency_values=_latency_values(decode, "avg_total_token_latency_values"),
+            avg_npu_token_latency_values=_latency_values(decode, "avg_npu_token_latency_values"),
         ),
     )
 
@@ -568,6 +573,10 @@ def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> Benchmar
     def _aggregate_phase(phase: str) -> SweepData:
         first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
         out = SweepData(x_values=list(first.x_values))
+
+        def _get_optional(values: Sequence[Any], idx: int) -> Any:
+            return values[idx] if idx < len(values) else None
+
         for idx in range(len(first.x_values)):
             tps_values = []
             time_values = []
@@ -577,8 +586,8 @@ def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> Benchmar
                 src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
                 tps_values.append(float(src.tps_values[idx]))
                 time_values.append(float(src.time_values[idx]))
-                total_latency_values.append(src.avg_total_token_latency_values[idx])
-                npu_latency_values.append(src.avg_npu_token_latency_values[idx])
+                total_latency_values.append(_get_optional(src.avg_total_token_latency_values, idx))
+                npu_latency_values.append(_get_optional(src.avg_npu_token_latency_values, idx))
             out.tps_values.append(sum(tps_values) / len(tps_values))
             out.time_values.append(sum(time_values) / len(time_values))
             out.avg_total_token_latency_values.append(_mean_or_none(total_latency_values))

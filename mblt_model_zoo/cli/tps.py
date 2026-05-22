@@ -131,6 +131,27 @@ def _is_vlm_task(task: str) -> bool:
     return task in {"image-text-to-text", "image-to-text"}
 
 
+def _apply_vlm_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    core_mode: str | None,
+    *,
+    target_cores: list[str] | None = None,
+    target_clusters: list[int] | None = None,
+) -> dict[str, Any]:
+    """Apply shared VLM core-mode kwargs to both vision and text sub-configs."""
+    expanded: dict[str, Any] = {}
+    _apply_core_mode_model_kwargs_common(
+        expanded,
+        core_mode,
+        target_cores=target_cores,
+        target_clusters=target_clusters,
+    )
+    for prefix in ("vision", "text"):
+        for key, value in expanded.items():
+            model_kwargs[f"{prefix}_{key}"] = value
+    return model_kwargs
+
+
 def _normalize_max_batch_size(value: Any) -> int | None:
     """Normalize a model config max batch size value.
 
@@ -251,12 +272,20 @@ def _build_pipeline(
         model_kwargs["embedding_weight"] = embedding_weight
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
-    model_kwargs = _apply_core_mode_model_kwargs_common(
-        model_kwargs,
-        core_mode,
-        target_cores=target_cores,
-        target_clusters=target_clusters,
-    )
+    if _is_vlm_task(task):
+        model_kwargs = _apply_vlm_core_mode_model_kwargs(
+            model_kwargs,
+            core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
+    else:
+        model_kwargs = _apply_core_mode_model_kwargs_common(
+            model_kwargs,
+            core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -293,12 +322,20 @@ def _build_pipeline(
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
+    def _optional_values(values: Sequence[Any], length: int) -> list[Any]:
+        return [values[idx] if idx < len(values) else None for idx in range(length)]
+
+    prefill_len = min(
+        len(result.prefill_sweep.x_values),
+        len(result.prefill_sweep.tps_values),
+        len(result.prefill_sweep.time_values),
+    )
     for x, tps, t, avg_total, avg_npu in zip(
-        result.prefill_sweep.x_values,
-        result.prefill_sweep.tps_values,
-        result.prefill_sweep.time_values,
-        result.prefill_sweep.avg_total_token_latency_values,
-        result.prefill_sweep.avg_npu_token_latency_values,
+        result.prefill_sweep.x_values[:prefill_len],
+        result.prefill_sweep.tps_values[:prefill_len],
+        result.prefill_sweep.time_values[:prefill_len],
+        _optional_values(result.prefill_sweep.avg_total_token_latency_values, prefill_len),
+        _optional_values(result.prefill_sweep.avg_npu_token_latency_values, prefill_len),
     ):
         yield {
             "phase": "prefill",
@@ -309,12 +346,17 @@ def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
             "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
             "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
         }
+    decode_len = min(
+        len(result.decode_sweep.x_values),
+        len(result.decode_sweep.tps_values),
+        len(result.decode_sweep.time_values),
+    )
     for x, tps, t, avg_total, avg_npu in zip(
-        result.decode_sweep.x_values,
-        result.decode_sweep.tps_values,
-        result.decode_sweep.time_values,
-        result.decode_sweep.avg_total_token_latency_values,
-        result.decode_sweep.avg_npu_token_latency_values,
+        result.decode_sweep.x_values[:decode_len],
+        result.decode_sweep.tps_values[:decode_len],
+        result.decode_sweep.time_values[:decode_len],
+        _optional_values(result.decode_sweep.avg_total_token_latency_values, decode_len),
+        _optional_values(result.decode_sweep.avg_npu_token_latency_values, decode_len),
     ):
         yield {
             "phase": "decode",
@@ -603,6 +645,10 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
     def _aggregate_phase(phase: str) -> SweepData:
         first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
         out = SweepData(x_values=list(first.x_values))
+
+        def _get_optional(values: Sequence[Any], idx: int) -> Any:
+            return values[idx] if idx < len(values) else None
+
         for idx in range(len(first.x_values)):
             tps_vals = []
             time_vals = []
@@ -612,8 +658,8 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
                 src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
                 tps_vals.append(src.tps_values[idx])
                 time_vals.append(src.time_values[idx])
-                total_vals.append(src.avg_total_token_latency_values[idx])
-                npu_vals.append(src.avg_npu_token_latency_values[idx])
+                total_vals.append(_get_optional(src.avg_total_token_latency_values, idx))
+                npu_vals.append(_get_optional(src.avg_npu_token_latency_values, idx))
             out.tps_values.append(sum(tps_vals) / len(tps_vals))
             out.time_values.append(sum(time_vals) / len(time_vals))
             out.avg_total_token_latency_values.append(_mean_or_none(total_vals))

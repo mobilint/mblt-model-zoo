@@ -21,6 +21,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
     SingleMeasurement,
+    SweepData,
     TPSMeasurer,
     VLMTPSMeasurer,
     _get_npu_timing_target,
@@ -1414,6 +1415,115 @@ def test_cli_tps_device_backend_none_parsing():
         ]
     )
     assert args.device_backend == "none"
+
+
+def test_cli_tps_vlm_build_pipeline_uses_prefixed_core_kwargs(monkeypatch: pytest.MonkeyPatch):
+    """Verify VLM TPS pipeline maps core-mode kwargs to vision/text-prefixed config fields."""
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("transformers.pipeline", _fake_pipeline)
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/vlm-a",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+    )
+
+    model_kwargs = captured["model_kwargs"]
+    assert model_kwargs == {
+        "vision_core_mode": "global8",
+        "vision_target_clusters": [0, 1],
+        "text_core_mode": "global8",
+        "text_target_clusters": [0, 1],
+    }
+    assert "core_mode" not in model_kwargs
+    assert "target_clusters" not in model_kwargs
+
+
+def test_cli_tps_vlm_core_kwargs_preserve_explicit_targets():
+    """Verify explicit TPS target core-mode values are prefixed for VLM tasks."""
+    kwargs = tps_cli._apply_vlm_core_mode_model_kwargs(
+        {},
+        "single",
+        target_cores=["0:2"],
+        target_clusters=[1],
+    )
+
+    assert kwargs == {
+        "vision_core_mode": "single",
+        "vision_target_cores": ["0:2"],
+        "vision_target_clusters": [1],
+        "text_core_mode": "single",
+        "text_target_cores": ["0:2"],
+        "text_target_clusters": [1],
+    }
+
+
+def test_benchmark_result_iter_rows_pads_missing_latency_values():
+    """Verify combined rows survive old JSON-style sweeps without latency arrays."""
+    result = BenchmarkResult()
+    result.prefill_sweep.x_values.append(8)
+    result.prefill_sweep.tps_values.append(10.0)
+    result.prefill_sweep.time_values.append(0.8)
+    result.decode_sweep.x_values.append(4)
+    result.decode_sweep.tps_values.append(20.0)
+    result.decode_sweep.time_values.append(0.2)
+
+    rows = list(BenchmarkResult.iter_rows("dummy", result))
+
+    assert len(rows) == 2
+    assert rows[0]["phase"] == "prefill"
+    assert rows[0]["avg_total_token_latency_ms"] is None
+    assert rows[1]["phase"] == "decode"
+    assert rows[1]["avg_npu_token_latency_pct"] is None
+
+
+def test_cli_iter_rows_for_csv_pads_missing_latency_values():
+    """Verify TPS CSV rows are emitted even when latency arrays are absent."""
+    result = BenchmarkResult()
+    result.prefill_sweep.x_values.append(8)
+    result.prefill_sweep.tps_values.append(10.0)
+    result.prefill_sweep.time_values.append(0.8)
+
+    rows = list(tps_cli._iter_rows_for_csv(result))
+
+    assert rows == [
+        {
+            "phase": "prefill",
+            "tokens": 8,
+            "tps": 10.0,
+            "time_ms": 800.0,
+            "avg_total_token_latency_ms": None,
+            "avg_npu_token_latency_ms": None,
+            "avg_npu_token_latency_pct": None,
+        }
+    ]
+
+
+def test_cli_aggregate_sweep_results_tolerates_missing_latency_values():
+    """Verify repeated TPS sweeps aggregate old results without latency arrays."""
+    first = BenchmarkResult(prefill_sweep=SweepData(x_values=[8], tps_values=[10.0], time_values=[0.8]))
+    second = BenchmarkResult(prefill_sweep=SweepData(x_values=[8], tps_values=[20.0], time_values=[1.2]))
+
+    result = tps_cli._aggregate_sweep_results([first, second])
+
+    assert result.prefill_sweep.tps_values == [15.0]
+    assert result.prefill_sweep.avg_total_token_latency_values == [None]
+    assert result.prefill_sweep.avg_npu_token_latency_values == [None]
 
 
 def test_extract_device_metric_normalizes_tracker_023_shape():
