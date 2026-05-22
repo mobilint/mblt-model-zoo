@@ -1,6 +1,7 @@
 import argparse
 import importlib
 import inspect
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -97,7 +98,7 @@ class _DummyGenerateNPUModel(_DummyNPUModel):
         return self
 
     def generate(self, **kwargs) -> torch.Tensor:
-        """Record generation kwargs and stop the streamer without emitting tokens."""
+        """Record generation kwargs and emit deterministic generated tokens."""
         self.generate_kwargs = kwargs
         self.generation_config_during_generate = {
             "do_sample": self.generation_config.do_sample,
@@ -105,8 +106,20 @@ class _DummyGenerateNPUModel(_DummyNPUModel):
             "top_p": self.generation_config.top_p,
             "top_k": self.generation_config.top_k,
         }
-        kwargs["streamer"].end()
-        return kwargs["input_ids"]
+        input_ids = kwargs["input_ids"]
+        new_tokens = int(kwargs["max_new_tokens"])
+        outputs = torch.zeros((int(input_ids.shape[0]), int(input_ids.shape[1]) + new_tokens), dtype=torch.long)
+        streamer = kwargs.get("streamer")
+        if streamer is not None:
+            streamer.put(input_ids)
+        stopping_criteria = kwargs.get("stopping_criteria")
+        if stopping_criteria is not None:
+            stopping_criteria(outputs[:, : int(input_ids.shape[1]) + 1], None)
+        if streamer is not None:
+            for _ in range(new_tokens):
+                streamer.put(torch.zeros((int(input_ids.shape[0]), 1), dtype=torch.long))
+            streamer.end()
+        return outputs
 
 
 class _DummyBatchedGenerateNPUModel(_DummyGenerateNPUModel):
@@ -117,7 +130,11 @@ class _DummyBatchedGenerateNPUModel(_DummyGenerateNPUModel):
         self.generate_kwargs = kwargs
         input_ids = kwargs["input_ids"]
         new_tokens = int(kwargs["max_new_tokens"])
-        return torch.zeros((int(input_ids.shape[0]), int(input_ids.shape[1]) + new_tokens), dtype=torch.long)
+        outputs = torch.zeros((int(input_ids.shape[0]), int(input_ids.shape[1]) + new_tokens), dtype=torch.long)
+        stopping_criteria = kwargs.get("stopping_criteria")
+        if stopping_criteria is not None:
+            stopping_criteria(outputs[:, : int(input_ids.shape[1]) + 1], None)
+        return outputs
 
 
 class _DummyTextPipeline:
@@ -922,23 +939,113 @@ def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
     assert result.decode_tps > 0.0
 
 
-def test_text_batched_generate_disables_unobservable_phase_callbacks():
-    model = _DummyBatchedGenerateNPUModel()
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_text_generate_supports_phase_callbacks_for_all_batch_sizes(batch_size: int):
+    model = _DummyGenerateNPUModel() if batch_size == 1 else _DummyBatchedGenerateNPUModel()
     measurer = TPSMeasurer(_DummyTextPipeline(model))
     callbacks: list[str] = []
 
     result = measurer.measure(
         num_prefill=8,
         num_decode=4,
-        batch_size=2,
+        batch_size=batch_size,
         on_prefill_start=lambda: callbacks.append("prefill_start"),
         on_prefill_end=lambda: callbacks.append("prefill_end"),
         on_decode_start=lambda: callbacks.append("decode_start"),
         on_decode_end=lambda: callbacks.append("decode_end"),
     )
 
-    assert callbacks == []
+    assert callbacks == ["prefill_start", "prefill_end", "decode_start", "decode_end"]
     assert result.num_decode == 4
+
+
+def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, tmp_path):
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    events: list[str] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=2)))
+
+    class _FakeTracker:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def start(self) -> None:
+            events.append(f"{self.name}:start")
+
+        def stop(self) -> None:
+            events.append(f"{self.name}:stop")
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": 2.0, "p99_power_w": 3.0}
+
+        def get_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, 2.0)]
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            if kwargs.get("on_prefill_start") is not None:
+                kwargs["on_prefill_start"]()
+                kwargs["on_prefill_end"]()
+                kwargs["on_decode_start"]()
+                kwargs["on_decode_end"]()
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=2.0,
+                decode_duration=1.0,
+                decode_tps=2.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+    json_path = tmp_path / "measure.json"
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(
+        tps_cli,
+        "_build_phase_trackers",
+        lambda args, pipeline: (_FakeTracker("prefill"), _FakeTracker("decode")),
+    )
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=0,
+        repeat=1,
+        prefill=8,
+        decode=2,
+        prefill_chunk_size=None,
+        trace=None,
+        device_metrics=True,
+        json=str(json_path),
+        device_backend="npu",
+    )
+
+    assert tps_cli._run_text_measure(args) == 0
+    assert events[:4] == ["prefill:start", "prefill:stop", "decode:start", "decode:stop"]
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["batch_size"] == 2
+    assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}]
 
 
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():

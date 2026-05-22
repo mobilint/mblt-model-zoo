@@ -7,12 +7,112 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, cast
 import matplotlib.pyplot as plt
 import torch
 from tqdm.auto import tqdm
-from transformers import TextIteratorStreamer
+from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
 from .cache_utils import MobilintCache
 
 _NS_PER_SECOND = 1_000_000_000
 _SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
+
+
+class _GenerationPhaseCallbacks:
+    """Coordinate generation phase callbacks with single-call semantics."""
+
+    def __init__(
+        self,
+        *,
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
+    ) -> None:
+        self._on_prefill_start = on_prefill_start
+        self._on_prefill_end = on_prefill_end
+        self._on_decode_start = on_decode_start
+        self._on_decode_end = on_decode_end
+        self._prefill_started = False
+        self._prefill_finished = False
+        self._decode_started = False
+        self._decode_finished = False
+
+    def start_prefill(self) -> None:
+        """Mark the prefill phase as started."""
+        if self._prefill_started:
+            return
+        self._prefill_started = True
+        if self._on_prefill_start is not None:
+            self._on_prefill_start()
+
+    def finish_prefill_start_decode(self) -> None:
+        """Mark the first generated token boundary between prefill and decode."""
+        self.start_prefill()
+        if not self._prefill_finished:
+            self._prefill_finished = True
+            if self._on_prefill_end is not None:
+                self._on_prefill_end()
+        if not self._decode_started:
+            self._decode_started = True
+            if self._on_decode_start is not None:
+                self._on_decode_start()
+
+    def finish_decode(self) -> None:
+        """Mark the decode phase as finished."""
+        if self._decode_finished:
+            return
+        if not self._decode_started:
+            self.finish_prefill_start_decode()
+        self._decode_finished = True
+        if self._on_decode_end is not None:
+            self._on_decode_end()
+
+    def close_started(self) -> None:
+        """Close any phase that has been started but not yet closed."""
+        if self._decode_started and not self._decode_finished:
+            self.finish_decode()
+            return
+        if self._prefill_started and not self._prefill_finished:
+            self._prefill_finished = True
+            if self._on_prefill_end is not None:
+                self._on_prefill_end()
+
+    def close_on_error(self) -> None:
+        """Close started phases after generation exits with an error."""
+        self.close_started()
+
+
+class _FirstGeneratedTokenStoppingCriteria(StoppingCriteria):
+    """Trigger phase callbacks after the first generated token is available."""
+
+    def __init__(self, *, prompt_length: int, phase_callbacks: _GenerationPhaseCallbacks) -> None:
+        self._prompt_length = int(prompt_length)
+        self._phase_callbacks = phase_callbacks
+        self._marked = False
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: object) -> bool:
+        """Notify phase callbacks once generation has produced at least one new token."""
+        del scores, kwargs
+        if not self._marked and int(input_ids.shape[-1]) > self._prompt_length:
+            self._marked = True
+            self._phase_callbacks.finish_prefill_start_decode()
+        return False
+
+
+def _with_first_token_stopping_criteria(
+    gen_kwargs: dict[str, Any],
+    *,
+    prompt_length: int,
+    phase_callbacks: _GenerationPhaseCallbacks,
+) -> None:
+    """Attach a first-token phase marker to generation kwargs."""
+    marker = _FirstGeneratedTokenStoppingCriteria(prompt_length=prompt_length, phase_callbacks=phase_callbacks)
+    existing = gen_kwargs.get("stopping_criteria")
+    if existing is None:
+        gen_kwargs["stopping_criteria"] = StoppingCriteriaList([marker])
+        return
+    if isinstance(existing, StoppingCriteriaList):
+        existing.append(marker)
+        return
+    gen_kwargs["stopping_criteria"] = StoppingCriteriaList([*list(existing), marker])
 
 
 def _ns_to_seconds(value_ns: int) -> float:
@@ -681,19 +781,29 @@ class TPSMeasurer:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
 
-        phase_callbacks_enabled = bool(fake_prefill)
-        if phase_callbacks_enabled and on_prefill_start is not None:
-            on_prefill_start()
-        if fake_prefill and on_prefill_end is not None:
-            on_prefill_end()
-        if fake_prefill and on_decode_start is not None:
-            on_decode_start()
+        phase_callbacks = _GenerationPhaseCallbacks(
+            on_prefill_start=on_prefill_start,
+            on_prefill_end=on_prefill_end,
+            on_decode_start=on_decode_start,
+            on_decode_end=on_decode_end,
+        )
+        _with_first_token_stopping_criteria(
+            gen_kwargs,
+            prompt_length=int(input_ids.shape[1]),
+            phase_callbacks=phase_callbacks,
+        )
         t_start_ns = time.perf_counter_ns()
-        with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
-            outputs = self.model.generate(**gen_kwargs)
-        t_end_ns = time.perf_counter_ns()
-        if phase_callbacks_enabled and on_decode_end is not None:
-            on_decode_end()
+        phase_callbacks.start_prefill()
+        if fake_prefill:
+            phase_callbacks.finish_prefill_start_decode()
+        try:
+            with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
+                outputs = self.model.generate(**gen_kwargs)
+            t_end_ns = time.perf_counter_ns()
+            phase_callbacks.finish_decode()
+        except Exception:
+            phase_callbacks.close_on_error()
+            raise
 
         output_len = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else 0
         input_len = int(input_ids.shape[1])
@@ -713,8 +823,8 @@ class TPSMeasurer:
             prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
             decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
         else:
-            # Without a batch-safe streamer, phase boundary is unavailable. Keep total-throughput
-            # semantics by assigning the same wall time to both phase metrics.
+            # When aggregate phase timing is unavailable, keep total-throughput semantics by assigning
+            # the same wall time to both phase metrics.
             prefill_latency = total_time
             decode_duration = total_time
 
@@ -819,6 +929,17 @@ class TPSMeasurer:
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
+            phase_callbacks = _GenerationPhaseCallbacks(
+                on_prefill_start=on_prefill_start,
+                on_prefill_end=on_prefill_end,
+                on_decode_start=on_decode_start,
+                on_decode_end=on_decode_end,
+            )
+            _with_first_token_stopping_criteria(
+                gen_kwargs,
+                prompt_length=int(input_ids.shape[1]),
+                phase_callbacks=phase_callbacks,
+            )
 
             # 3. Execution
             thread_error: list[Exception] = []
@@ -837,8 +958,7 @@ class TPSMeasurer:
             thread = Thread(target=_run_generate)
             
             t_start_ns = time.perf_counter_ns()
-            if on_prefill_start is not None:
-                on_prefill_start()
+            phase_callbacks.start_prefill()
             thread.start()
             
             first_token_time_ns = None
@@ -860,10 +980,6 @@ class TPSMeasurer:
                 for _ in streamer:
                     if first_token_time_ns is None:
                         first_token_time_ns = time.perf_counter_ns()
-                        if on_prefill_end is not None:
-                            on_prefill_end()
-                        if on_decode_start is not None:
-                            on_decode_start()
                     decoded_tokens += 1
                     if token_pbar is not None:
                         token_pbar.update(1)
@@ -878,16 +994,21 @@ class TPSMeasurer:
                 stream_error = e
             t_end_ns = time.perf_counter_ns()
             thread.join()
-            if thread_error:
-                raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
-            if stream_error is not None:
-                raise stream_error
-            if on_decode_end is not None:
-                on_decode_end()
-            if token_pbar is not None:
-                token_pbar.close()
+            try:
+                if thread_error:
+                    raise RuntimeError(f"generate failed: {thread_error[0]}") from thread_error[0]
+                if stream_error is not None:
+                    raise stream_error
+                phase_callbacks.finish_decode()
+            except Exception:
+                phase_callbacks.close_on_error()
+                raise
+            finally:
+                if token_pbar is not None:
+                    token_pbar.close()
             
             if first_token_time_ns is None:
+                phase_callbacks.close_on_error()
                 raise RuntimeError("Generation ended before the first token.")
 
             has_aggregate_npu_time, aggregate_prefill_time, aggregate_decode_time = _read_aggregate_npu_timing(
