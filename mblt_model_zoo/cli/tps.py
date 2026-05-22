@@ -977,22 +977,86 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
-    from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
+    from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+        SingleMeasurement,
+        VLMSingleMeasurement,
+        VLMTPSMeasurer,
+    )
+
+    def _single_llm_measurement(result: Any) -> SingleMeasurement:
+        """Convert a fixed-point VLM LLM sweep result into a single measurement."""
+        if not result.prefill_sweep.x_values:
+            raise SystemExit(
+                f"Requested VLM prefill length {args.prefill} is shorter than the model's multimodal prefix length."
+            )
+        if not result.decode_sweep.x_values:
+            raise SystemExit(f"Requested VLM decode cache length {args.prefill} could not be measured.")
+
+        prefill_idx = len(result.prefill_sweep.x_values) - 1
+        decode_idx = len(result.decode_sweep.x_values) - 1
+        prefill_latency = float(result.prefill_sweep.time_values[prefill_idx])
+        decode_duration = float(result.decode_sweep.time_values[decode_idx])
+        avg_total_prefill = result.prefill_sweep.avg_total_token_latency_values[prefill_idx]
+        avg_npu_prefill = result.prefill_sweep.avg_npu_token_latency_values[prefill_idx]
+        avg_total_decode = result.decode_sweep.avg_total_token_latency_values[decode_idx]
+        avg_npu_decode = result.decode_sweep.avg_npu_token_latency_values[decode_idx]
+        npu_prefill_time = None if avg_npu_prefill is None else float(avg_npu_prefill) * int(args.prefill) * batch_size
+        npu_decode_time = None if avg_npu_decode is None else float(avg_npu_decode) * int(args.decode) * batch_size
+        total_npu_time = (
+            npu_prefill_time + npu_decode_time if npu_prefill_time is not None and npu_decode_time is not None else None
+        )
+        return SingleMeasurement(
+            num_prefill=int(result.prefill_sweep.x_values[prefill_idx]),
+            num_decode=int(args.decode),
+            prefill_latency=prefill_latency,
+            prefill_tps=float(result.prefill_sweep.tps_values[prefill_idx]),
+            decode_duration=decode_duration,
+            decode_tps=float(result.decode_sweep.tps_values[decode_idx]),
+            total_time=prefill_latency + decode_duration,
+            avg_total_prefill_token_latency=float(avg_total_prefill or 0.0),
+            avg_npu_prefill_token_latency=avg_npu_prefill,
+            avg_total_decode_token_latency=float(avg_total_decode or 0.0),
+            avg_npu_decode_token_latency=avg_npu_decode,
+            prefill_npu_latency_pct=npu_latency_pct(avg_total_prefill, avg_npu_prefill),
+            decode_npu_latency_pct=npu_latency_pct(avg_total_decode, avg_npu_decode),
+            total_npu_latency_pct=npu_latency_pct(prefill_latency + decode_duration, total_npu_time),
+            npu_prefill_time=npu_prefill_time,
+            npu_decode_time=npu_decode_time,
+            decode_prefill_mode=(result.decode_prefill_modes[decode_idx] if result.decode_prefill_modes else "real"),
+        )
+
+    def _measure_fixed_vlm_run(*, show_progress: bool) -> VLMSingleMeasurement:
+        """Measure VLM vision plus LLM with the requested fixed prefill length."""
+        vision_latency, vision_fps = measurer.measure_vision(
+            image_resolution=args.image_resolution,
+            repeat=1,
+            prompt=args.prompt,
+            batch_size=batch_size,
+            show_progress=show_progress,
+        )[0]
+        llm_result = measurer.measure_llm_full(
+            image_resolution=args.image_resolution,
+            prompt=args.prompt,
+            prefill_range=(args.prefill, args.prefill, args.prefill),
+            cache_lengths=[args.prefill],
+            decode_window=args.decode,
+            prefill_chunk_size=args.prefill_chunk_size,
+            show_progress=show_progress,
+            batch_size=batch_size,
+        )
+        return VLMSingleMeasurement(
+            image_resolution=args.image_resolution,
+            vision_encode_latency=vision_latency,
+            vision_fps=vision_fps,
+            llm=_single_llm_measurement(llm_result),
+        )
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
     _print_device_status(args, tracker)
 
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
-        measurer.measure(
-            image_resolution=args.image_resolution,
-            num_decode=args.decode,
-            repeat=1,
-            prompt=args.prompt,
-            prefill_chunk_size=args.prefill_chunk_size,
-            show_progress=False,
-            batch_size=batch_size,
-        )
+        _measure_fixed_vlm_run(show_progress=False)
 
     runs = []
     device_metrics = []
@@ -1001,20 +1065,16 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         if tracker is not None:
             tracker.start()
         try:
-            run = measurer.measure(
-                image_resolution=args.image_resolution,
-                num_decode=args.decode,
-                repeat=1,
-                prompt=args.prompt,
-                prefill_chunk_size=args.prefill_chunk_size,
-                show_progress=False,
-                batch_size=batch_size,
-            )[0]
+            run = _measure_fixed_vlm_run(show_progress=False)
         finally:
             _stop_tracker_safe(tracker)
         runs.append(run)
         if tracker is not None:
-            device_metrics.append(_extract_device_metric(tracker))
+            metric = _extract_device_metric(tracker)
+            avg_power = metric.get("avg_power_w")
+            if avg_power is not None:
+                metric["total_energy_j"] = avg_power * ((run.vision_encode_latency * batch_size) + run.llm.total_time)
+            device_metrics.append(metric)
             device_time_series_runs.append(_extract_device_time_series(tracker))
 
     vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
@@ -1039,6 +1099,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     total_memory_mb = [m["total_memory_mb"] for m in device_metrics if m.get("total_memory_mb") is not None]
     avg_memory_used_pct = [m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None]
     p99_memory_used_pct = [m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None]
+    total_energy_j = [m["total_energy_j"] for m in device_metrics if m.get("total_energy_j") is not None]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -1070,6 +1131,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         _print_summary("total_memory", total_memory_mb, "MB")
         _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
         _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
+        _print_summary("total_energy", total_energy_j, "J")
     _print_summary_footer()
 
     if args.json:
@@ -1103,6 +1165,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "total_memory_mb": _summary(total_memory_mb),
                 "avg_memory_used_pct": _summary(avg_memory_used_pct),
                 "p99_memory_used_pct": _summary(p99_memory_used_pct),
+                "total_energy_j": _summary(total_energy_j),
             },
             "device_runs": device_metrics,
             "device_time_series_runs": device_time_series_runs,

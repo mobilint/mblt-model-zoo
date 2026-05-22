@@ -23,7 +23,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     SingleMeasurement,
     SweepData,
     TPSMeasurer,
-    VLMSingleMeasurement,
     VLMTPSMeasurer,
     _get_npu_timing_target,
     _resolve_config_vocab_size,
@@ -1301,22 +1300,24 @@ def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
         def __init__(self, pipeline_arg) -> None:
             assert pipeline_arg is pipeline
 
-        def measure(self, **kwargs) -> list[SimpleNamespace]:
-            calls.append(kwargs)
-            llm = SingleMeasurement(
-                num_prefill=8,
-                num_decode=kwargs["num_decode"],
-                prefill_latency=1.0,
-                prefill_tps=8.0,
-                decode_duration=1.0,
-                decode_tps=2.0,
-                total_time=2.0,
-                avg_total_prefill_token_latency=0.125,
-                avg_npu_prefill_token_latency=None,
-                avg_total_decode_token_latency=0.5,
-                avg_npu_decode_token_latency=None,
-            )
-            return [SimpleNamespace(vision_encode_latency=1.0, vision_fps=2.0, llm=llm)]
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            calls.append({"phase": "vision", **kwargs})
+            return [(1.0, 2.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            calls.append({"phase": "llm", **kwargs})
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(kwargs["prefill_range"][0])
+            result.prefill_sweep.tps_values.append(8.0)
+            result.prefill_sweep.time_values.append(1.0)
+            result.prefill_sweep.avg_total_token_latency_values.append(0.125)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(kwargs["cache_lengths"][0])
+            result.decode_sweep.tps_values.append(2.0)
+            result.decode_sweep.time_values.append(1.0)
+            result.decode_sweep.avg_total_token_latency_values.append(0.5)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
 
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
     monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: None)
@@ -1341,6 +1342,7 @@ def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
         warmup=1,
         repeat=1,
         image_resolution=224,
+        prefill=8,
         decode=2,
         prompt="Describe the image.",
         prefill_chunk_size=64,
@@ -1350,8 +1352,11 @@ def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
     )
 
     assert tps_cli._run_vlm_measure(args) == 0
-    assert [call["prefill_chunk_size"] for call in calls] == [64, 64]
-    assert [call["batch_size"] for call in calls] == [2, 2]
+    llm_calls = [call for call in calls if call["phase"] == "llm"]
+    assert [call["prefill_chunk_size"] for call in llm_calls] == [64, 64]
+    assert [call["batch_size"] for call in llm_calls] == [2, 2]
+    assert [call["prefill_range"] for call in llm_calls] == [(8, 8, 8), (8, 8, 8)]
+    assert [call["cache_lengths"] for call in llm_calls] == [[8], [8]]
 
 
 def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
@@ -1363,28 +1368,22 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
         def __init__(self, pipeline_arg) -> None:
             assert pipeline_arg is pipeline
 
-        def measure(self, **kwargs) -> list[SimpleNamespace]:
-            llm = SingleMeasurement(
-                num_prefill=8,
-                num_decode=kwargs["num_decode"],
-                prefill_latency=1.0,
-                prefill_tps=8.0,
-                decode_duration=1.0,
-                decode_tps=2.0,
-                total_time=2.0,
-                avg_total_prefill_token_latency=0.125,
-                avg_npu_prefill_token_latency=None,
-                avg_total_decode_token_latency=0.5,
-                avg_npu_decode_token_latency=None,
-            )
-            return [
-                VLMSingleMeasurement(
-                    image_resolution=kwargs["image_resolution"],
-                    vision_encode_latency=1.0,
-                    vision_fps=4.0,
-                    llm=llm,
-                )
-            ]
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            return [(1.0, 4.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(kwargs["prefill_range"][0])
+            result.prefill_sweep.tps_values.append(8.0)
+            result.prefill_sweep.time_values.append(1.0)
+            result.prefill_sweep.avg_total_token_latency_values.append(0.125)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(kwargs["cache_lengths"][0])
+            result.decode_sweep.tps_values.append(2.0)
+            result.decode_sweep.time_values.append(1.0)
+            result.decode_sweep.avg_total_token_latency_values.append(0.5)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
 
     json_path = tmp_path / "vlm_measure.json"
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
@@ -1410,6 +1409,7 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
         warmup=0,
         repeat=1,
         image_resolution=224,
+        prefill=8,
         decode=2,
         prompt="Describe the image.",
         prefill_chunk_size=None,
@@ -1422,6 +1422,84 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["summary"]["vision_encode_ms"]["mean"] == pytest.approx(1000.0)
     assert payload["summary"]["total_ms"]["mean"] == pytest.approx(6000.0)
+
+
+def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_path):
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=4)))
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": 2.0}
+
+        def get_trace(self) -> list[tuple[float, float]]:
+            return []
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            return [(1.0, 4.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(kwargs["prefill_range"][0])
+            result.prefill_sweep.tps_values.append(8.0)
+            result.prefill_sweep.time_values.append(1.0)
+            result.prefill_sweep.avg_total_token_latency_values.append(0.125)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(kwargs["cache_lengths"][0])
+            result.decode_sweep.tps_values.append(2.0)
+            result.decode_sweep.time_values.append(1.0)
+            result.decode_sweep.avg_total_token_latency_values.append(0.5)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
+
+    json_path = tmp_path / "vlm_measure_energy.json"
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=4,
+        warmup=0,
+        repeat=1,
+        image_resolution=224,
+        prefill=8,
+        decode=2,
+        prompt="Describe the image.",
+        prefill_chunk_size=None,
+        device_metrics=True,
+        json=str(json_path),
+        device_backend="npu",
+    )
+
+    assert tps_cli._run_vlm_measure(args) == 0
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["device_runs"][0]["total_energy_j"] == pytest.approx(12.0)
+    assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
 
 
 def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
@@ -1446,28 +1524,22 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
         def __init__(self, pipeline_arg) -> None:
             assert pipeline_arg is pipeline
 
-        def measure(self, **kwargs) -> list[SimpleNamespace]:
-            llm = SingleMeasurement(
-                num_prefill=8,
-                num_decode=kwargs["num_decode"],
-                prefill_latency=1.0,
-                prefill_tps=8.0,
-                decode_duration=1.0,
-                decode_tps=2.0,
-                total_time=2.0,
-                avg_total_prefill_token_latency=0.125,
-                avg_npu_prefill_token_latency=None,
-                avg_total_decode_token_latency=0.5,
-                avg_npu_decode_token_latency=None,
-            )
-            return [
-                VLMSingleMeasurement(
-                    image_resolution=kwargs["image_resolution"],
-                    vision_encode_latency=1.0,
-                    vision_fps=1.0,
-                    llm=llm,
-                )
-            ]
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            return [(1.0, 1.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.append(kwargs["prefill_range"][0])
+            result.prefill_sweep.tps_values.append(8.0)
+            result.prefill_sweep.time_values.append(1.0)
+            result.prefill_sweep.avg_total_token_latency_values.append(0.125)
+            result.prefill_sweep.avg_npu_token_latency_values.append(None)
+            result.decode_sweep.x_values.append(kwargs["cache_lengths"][0])
+            result.decode_sweep.tps_values.append(2.0)
+            result.decode_sweep.time_values.append(1.0)
+            result.decode_sweep.avg_total_token_latency_values.append(0.5)
+            result.decode_sweep.avg_npu_token_latency_values.append(None)
+            return result
 
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
     monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FailingStopTracker())
@@ -1492,6 +1564,7 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
         warmup=0,
         repeat=1,
         image_resolution=224,
+        prefill=8,
         decode=2,
         prompt="Describe the image.",
         prefill_chunk_size=None,
