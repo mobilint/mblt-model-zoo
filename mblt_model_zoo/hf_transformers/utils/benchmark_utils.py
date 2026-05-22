@@ -2154,6 +2154,7 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
+        prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[SingleMeasurement]:
@@ -2170,7 +2171,11 @@ class VLMTPSMeasurer:
                 print(
                     f"[vlm][llm] ref_resolution={image_resolution} run={idx + 1}/{repeat}: measuring..."
                 )
-            llm = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=num_decode)
+            llm = self._measure_llm_once(
+                inputs_embeds=inputs_embeds,
+                num_decode=num_decode,
+                prefill_chunk_size=prefill_chunk_size,
+            )
             results.append(llm)
             if show_progress:
                 print(
@@ -2185,6 +2190,7 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
+        prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[VLMSingleMeasurement]:
@@ -2199,7 +2205,11 @@ class VLMTPSMeasurer:
             inputs = self._build_inputs(image_resolution=image_resolution, prompt=prompt, batch_size=batch_size)
             vision_encode_latency, image_features = self._measure_vision_encode(inputs)
             inputs_embeds = self._build_inputs_embeds(inputs, image_features=image_features)
-            llm = self._measure_llm_once(inputs_embeds=inputs_embeds, num_decode=num_decode)
+            llm = self._measure_llm_once(
+                inputs_embeds=inputs_embeds,
+                num_decode=num_decode,
+                prefill_chunk_size=prefill_chunk_size,
+            )
             results.append(
                 VLMSingleMeasurement(
                     image_resolution=image_resolution,

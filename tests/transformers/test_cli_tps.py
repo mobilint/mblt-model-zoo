@@ -1048,6 +1048,69 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
     assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}]
 
 
+def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    calls: list[dict[str, object]] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=2)))
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> list[SimpleNamespace]:
+            calls.append(kwargs)
+            llm = SingleMeasurement(
+                num_prefill=8,
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=8.0,
+                decode_duration=1.0,
+                decode_tps=2.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=0.125,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=0.5,
+                avg_npu_decode_token_latency=None,
+            )
+            return [SimpleNamespace(vision_encode_latency=1.0, vision_fps=2.0, llm=llm)]
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: None)
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=1,
+        repeat=1,
+        image_resolution=224,
+        decode=2,
+        prompt="Describe the image.",
+        prefill_chunk_size=64,
+        device_metrics=False,
+        json=None,
+        device_backend="none",
+    )
+
+    assert tps_cli._run_vlm_measure(args) == 0
+    assert [call["prefill_chunk_size"] for call in calls] == [64, 64]
+    assert [call["batch_size"] for call in calls] == [2, 2]
+
+
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
     model = _DummyGenerateNPUModel()
     measurer = TPSMeasurer(_DummyTextPipeline(model))
@@ -1193,6 +1256,32 @@ def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytes
     )
 
     model_inputs = _DummyGenerationModel().prepare_inputs_for_generation(
+        torch.tensor([[1]]),
+        count_npu_time=True,
+        prefill_chunk_size=64,
+    )
+
+    assert model_inputs["count_npu_time"] is True
+    assert model_inputs["prefill_chunk_size"] == 64
+
+
+def test_qwen2_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+    signature = inspect.signature(MobilintQwen2VLForConditionalGeneration.prepare_inputs_for_generation)
+
+    assert "prefill_chunk_size" in signature.parameters
+
+    def _base_prepare_inputs_for_generation(*args, **kwargs):
+        del args, kwargs
+        return {"input_ids": torch.tensor([[1]])}
+
+    monkeypatch.setattr(
+        "mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl."
+        "Qwen2VLForConditionalGeneration.prepare_inputs_for_generation",
+        _base_prepare_inputs_for_generation,
+    )
+    model = object.__new__(MobilintQwen2VLForConditionalGeneration)
+
+    model_inputs = model.prepare_inputs_for_generation(
         torch.tensor([[1]]),
         count_npu_time=True,
         prefill_chunk_size=64,

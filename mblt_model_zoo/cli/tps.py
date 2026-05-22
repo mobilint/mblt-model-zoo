@@ -923,6 +923,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             num_decode=args.decode,
             repeat=1,
             prompt=args.prompt,
+            prefill_chunk_size=args.prefill_chunk_size,
             show_progress=False,
             batch_size=batch_size,
         )
@@ -939,6 +940,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 num_decode=args.decode,
                 repeat=1,
                 prompt=args.prompt,
+                prefill_chunk_size=args.prefill_chunk_size,
                 show_progress=False,
                 batch_size=batch_size,
             )[0]
