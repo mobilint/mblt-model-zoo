@@ -268,12 +268,14 @@ def test_text_target_filtering_treats_missing_max_batch_size_as_non_batch(monkey
 
 def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> None:
     """Verify VLM target collection uses image-text-to-text batch metadata."""
-    args = vlm_bench._build_arg_parser().parse_args([
-        "measure",
-        "--batch",
-        "--results-dir",
-        str(tmp_path),
-    ])
+    args = vlm_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--results-dir",
+            str(tmp_path),
+        ]
+    )
 
     monkeypatch.setattr(vlm_bench, "list_models", lambda tasks: {"image-text-to-text": ["mobilint/vlm-a"]})
 
@@ -301,11 +303,13 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
 
 def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_path) -> None:
     """Verify VLM fixed measure stops the whole-run tracker when vision measurement fails."""
-    args = vlm_bench._build_arg_parser().parse_args([
-        "measure",
-        "--results-dir",
-        str(tmp_path),
-    ])
+    args = vlm_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--results-dir",
+            str(tmp_path),
+        ]
+    )
     stopped: list[bool] = []
 
     class _FakeTracker:
@@ -334,7 +338,11 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
         lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1)]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
-    monkeypatch.setattr(vlm_bench, "_vlm_revision_artifacts_available", lambda model_id, revision, mxq_path: (True, None))
+    monkeypatch.setattr(
+        vlm_bench,
+        "_vlm_revision_artifacts_available",
+        lambda model_id, revision, mxq_path: (True, None),
+    )
     monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())

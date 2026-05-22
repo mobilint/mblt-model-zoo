@@ -1,6 +1,6 @@
+import argparse
 import importlib
 import inspect
-import argparse
 from types import SimpleNamespace
 
 import pytest

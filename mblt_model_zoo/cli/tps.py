@@ -728,21 +728,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     ttft_ms = [r.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.decode_duration * 1000.0 for r in runs]
     total_ms = [r.total_time * 1000.0 for r in runs]
-    prefill_npu_latency_pct = [
-        pct
-        for r in runs
-        if (pct := r.prefill_npu_latency_pct) is not None
-    ]
-    decode_npu_latency_pct = [
-        pct
-        for r in runs
-        if (pct := r.decode_npu_latency_pct) is not None
-    ]
-    total_npu_latency_pct = [
-        pct
-        for r in runs
-        if (pct := r.total_npu_latency_pct) is not None
-    ]
+    prefill_npu_latency_pct = [pct for r in runs if (pct := r.prefill_npu_latency_pct) is not None]
+    decode_npu_latency_pct = [pct for r in runs if (pct := r.decode_npu_latency_pct) is not None]
+    total_npu_latency_pct = [pct for r in runs if (pct := r.total_npu_latency_pct) is not None]
     avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
     p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
     avg_utilization_pct = [r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None]
@@ -978,35 +966,21 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     ttft_ms = [r.llm.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.llm.decode_duration * 1000.0 for r in runs]
     total_ms = [(r.vision_encode_latency + r.llm.total_time) * 1000.0 for r in runs]
-    prefill_npu_latency_pct = [
-        pct for r in runs if (pct := r.llm.prefill_npu_latency_pct) is not None
-    ]
-    decode_npu_latency_pct = [
-        pct for r in runs if (pct := r.llm.decode_npu_latency_pct) is not None
-    ]
-    total_npu_latency_pct = [
-        pct for r in runs if (pct := r.llm.total_npu_latency_pct) is not None
-    ]
+    prefill_npu_latency_pct = [pct for r in runs if (pct := r.llm.prefill_npu_latency_pct) is not None]
+    decode_npu_latency_pct = [pct for r in runs if (pct := r.llm.decode_npu_latency_pct) is not None]
+    total_npu_latency_pct = [pct for r in runs if (pct := r.llm.total_npu_latency_pct) is not None]
 
     avg_power_w = [m["avg_power_w"] for m in device_metrics if m.get("avg_power_w") is not None]
     p99_power_w = [m["p99_power_w"] for m in device_metrics if m.get("p99_power_w") is not None]
-    avg_utilization_pct = [
-        m["avg_utilization_pct"] for m in device_metrics if m.get("avg_utilization_pct") is not None
-    ]
-    p99_utilization_pct = [
-        m["p99_utilization_pct"] for m in device_metrics if m.get("p99_utilization_pct") is not None
-    ]
+    avg_utilization_pct = [m["avg_utilization_pct"] for m in device_metrics if m.get("avg_utilization_pct") is not None]
+    p99_utilization_pct = [m["p99_utilization_pct"] for m in device_metrics if m.get("p99_utilization_pct") is not None]
     avg_temperature_c = [m["avg_temperature_c"] for m in device_metrics if m.get("avg_temperature_c") is not None]
     p99_temperature_c = [m["p99_temperature_c"] for m in device_metrics if m.get("p99_temperature_c") is not None]
     avg_memory_used_mb = [m["avg_memory_used_mb"] for m in device_metrics if m.get("avg_memory_used_mb") is not None]
     p99_memory_used_mb = [m["p99_memory_used_mb"] for m in device_metrics if m.get("p99_memory_used_mb") is not None]
     total_memory_mb = [m["total_memory_mb"] for m in device_metrics if m.get("total_memory_mb") is not None]
-    avg_memory_used_pct = [
-        m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None
-    ]
-    p99_memory_used_pct = [
-        m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None
-    ]
+    avg_memory_used_pct = [m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None]
+    p99_memory_used_pct = [m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -1818,7 +1792,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
 
-    print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}")
+    print(
+        f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}"
+    )
     _print_summary_header()
     _print_summary("llm_prefill_tps(last)", llm_prefill_tps, "tok/s")
     _print_summary("llm_decode_tps(last)", llm_decode_tps, "tok/s")

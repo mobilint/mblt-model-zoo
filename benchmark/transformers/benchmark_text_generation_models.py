@@ -1159,8 +1159,7 @@ def _resolve_batch_sweep_lengths(args: argparse.Namespace, raw_argv: Sequence[st
     if scaled:
         print(
             "Auto-scaled --batch sweep lengths by "
-            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: "
-            + ", ".join(scaled)
+            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: " + ", ".join(scaled)
         )
 
 
@@ -1313,7 +1312,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.max_batch_size,
                 )
             )
-
 
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets,

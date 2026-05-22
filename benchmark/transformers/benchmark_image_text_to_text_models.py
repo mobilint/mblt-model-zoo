@@ -296,9 +296,7 @@ def _vlm_revision_artifacts_available(
 
     file_sets = [set(files) for files in (revision_files, main_files) if files is not None]
     missing = [
-        path
-        for path in mxq_paths
-        if not any(path in files or os.path.basename(path) in files for files in file_sets)
+        path for path in mxq_paths if not any(path in files or os.path.basename(path) in files for files in file_sets)
     ]
     if missing:
         return False, f"referenced MXQ artifact(s) not found: {', '.join(missing)}"
