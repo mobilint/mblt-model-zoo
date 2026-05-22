@@ -9,7 +9,6 @@ from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 from tqdm.auto import tqdm
-from transformers import HfArgumentParser
 
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
@@ -53,10 +52,18 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_utils import npu_latency_pct
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+
+
+def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
+    """Return the NPU latency percentage of total latency."""
+    if total_latency is None or npu_latency is None:
+        return None
+    if total_latency <= 0:
+        return None
+    return (npu_latency / total_latency) * 100.0
 
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
@@ -1967,7 +1974,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
 
 
 def add_tps_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("tps", help="Measure/sweep tokens-per-second")
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)

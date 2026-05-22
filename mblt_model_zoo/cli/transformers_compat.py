@@ -6,9 +6,8 @@ import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence
+from typing import Any, Sequence
 
-import transformers
 from huggingface_hub.errors import HFValidationError
 from huggingface_hub.utils import validate_repo_id
 
@@ -36,7 +35,8 @@ def is_transformers_cli_command(argv: Sequence[str]) -> bool:
 
 def dispatch_transformers_cli(argv: Sequence[str]) -> int:
     """Delegate the active command to the installed Transformers CLI."""
-    _prepare_transformers_cli(argv)
+    transformers = _require_transformers_cli_deps()
+    _prepare_transformers_cli(argv, transformers)
 
     module_name = (
         "transformers.cli.transformers"
@@ -65,9 +65,23 @@ def _has_module(module_name: str) -> bool:
     return True
 
 
-def _prepare_transformers_cli(argv: Sequence[str]) -> None:
+def _require_transformers_cli_deps() -> Any:
+    try:
+        import transformers
+    except Exception as e:
+        print(
+            "Missing optional dependencies for Transformers CLI delegation.\n"
+            "Install with: pip install 'mblt-model-zoo[transformers]'\n"
+            f"Original error: {e}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return transformers
+
+
+def _prepare_transformers_cli(argv: Sequence[str], transformers: Any) -> None:
     if _should_install_transformers_serve_registration_hook(argv):
-        _install_transformers_serve_registration_hook()
+        _install_transformers_serve_registration_hook(transformers)
 
 
 def _should_install_transformers_serve_registration_hook(argv: Sequence[str]) -> bool:
@@ -94,7 +108,7 @@ def _has_module_spec(module_name: str) -> bool:
         return False
 
 
-def _install_transformers_serve_registration_hook() -> None:
+def _install_transformers_serve_registration_hook(transformers: Any) -> None:
     serve_module_name = _get_transformers_serve_module_name()
     serve_module = importlib.import_module(serve_module_name)
     serve_cls = serve_module.Serve if hasattr(serve_module, "Serve") else serve_module.ServeCommand
@@ -163,9 +177,7 @@ def _register_mobilint_model_for_modules(
         model_revision=model_revision,
         trust_remote_code=trust_remote_code,
     )
-    register_mobilint_models(args, transformers)
-    if extra_transformers is not transformers:
-        register_mobilint_models(args, extra_transformers)
+    register_mobilint_models(args, extra_transformers)
 
 
 def _get_transformers_serve_module_name() -> str:

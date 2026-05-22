@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from transformers import HfArgumentParser
-
 
 def _require_melotts_deps() -> None:
     try:
@@ -40,7 +38,7 @@ def _cmd_melo_ui(args: argparse.Namespace) -> int:
 
 
 def add_melo_ui_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("melo-ui", help="Launch MeloTTS WebUI (Gradio)")
     parser.add_argument(
