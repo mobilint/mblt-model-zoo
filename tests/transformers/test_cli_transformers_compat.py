@@ -146,7 +146,13 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
     monkeypatch.setattr(
         transformers_compat,
         "_has_module",
@@ -198,7 +204,13 @@ def test_install_transformers_serve_registration_hook_respects_serve_trust_remot
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
     monkeypatch.setattr(
         transformers_compat,
         "_has_module",
@@ -280,6 +292,22 @@ def test_prepare_transformers_cli_does_not_register_chat_models_during_help_or_p
     transformers_compat._prepare_transformers_cli(argv)
 
 
+def test_get_registration_transformers_initializes_transformers_when_not_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Initialize Transformers before Mobilint registration instead of returning the unloaded sentinel."""
+    fake_registration_transformers = object()
+
+    monkeypatch.setattr(transformers_compat, "transformers", transformers_compat._TRANSFORMERS_NOT_LOADED)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
+
+    assert transformers_compat._get_registration_transformers() is fake_registration_transformers
+
+
 def test_install_transformers_serve_registration_hook_registers_separate_serve_transformers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -310,7 +338,13 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
     monkeypatch.setattr(
         transformers_compat,
         "_has_module",
@@ -328,7 +362,7 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", "main", False, transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", False, fake_registration_transformers),
         ("mobilint/Llama-3.2-1B-Instruct", "main", False, fake_serve_module.transformers),
     ]
 
@@ -368,7 +402,13 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
     monkeypatch.setattr(
         transformers_compat,
         "_has_module",
@@ -390,7 +430,7 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
 
     assert result == ("loaded", "mobilint/Llama-3.2-1B-Instruct@main")
     assert calls == [
-        ("mobilint/Llama-3.2-1B-Instruct", "main", True, transformers_compat.transformers),
+        ("mobilint/Llama-3.2-1B-Instruct", "main", True, fake_registration_transformers),
         ("mobilint/Llama-3.2-1B-Instruct", "main", True, fake_model_manager_module.transformers),
     ]
 
@@ -410,7 +450,13 @@ def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pyt
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
 
     transformers_compat._register_mobilint_model_for_modules(
         "mobilint/demo-model@dev",
@@ -419,7 +465,7 @@ def test_register_mobilint_model_for_modules_preserves_revision(monkeypatch: pyt
     )
 
     assert calls == [
-        ("mobilint/demo-model", "dev", True, transformers_compat.transformers),
+        ("mobilint/demo-model", "dev", True, fake_registration_transformers),
         ("mobilint/demo-model", "dev", True, extra_transformers),
     ]
 
@@ -444,12 +490,18 @@ def test_register_mobilint_model_for_modules_splits_canonicalized_existing_local
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
 
     transformers_compat._register_mobilint_model_for_modules(f"{local_model_path}@main", extra_transformers)
 
     assert calls == [
-        (str(local_model_path), "main", False, transformers_compat.transformers),
+        (str(local_model_path), "main", False, fake_registration_transformers),
         (str(local_model_path), "main", False, extra_transformers),
     ]
 
@@ -474,12 +526,18 @@ def test_register_mobilint_model_for_modules_preserves_existing_local_path_with_
             )
         )
 
+    fake_registration_transformers = object()
     monkeypatch.setattr(transformers_compat, "register_mobilint_models", _fake_register)
+    monkeypatch.setattr(
+        transformers_compat,
+        "_require_transformers_cli_deps",
+        lambda: fake_registration_transformers,
+    )
 
     transformers_compat._register_mobilint_model_for_modules(str(local_model_path), extra_transformers)
 
     assert calls == [
-        (str(local_model_path), None, False, transformers_compat.transformers),
+        (str(local_model_path), None, False, fake_registration_transformers),
         (str(local_model_path), None, False, extra_transformers),
     ]
 

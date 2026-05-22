@@ -92,8 +92,8 @@ def _raise_transformers_cli_deps_error(exc: Exception) -> None:
 
 
 def _get_registration_transformers() -> Any:
-    """Return the loaded Transformers module or the compatibility placeholder."""
-    return transformers
+    """Return the Transformers module used for Mobilint model registration."""
+    return _require_transformers_cli_deps()
 
 
 def _prepare_transformers_cli(argv: Sequence[str]) -> None:
