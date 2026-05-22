@@ -510,6 +510,37 @@ def test_cli_resolve_cli_batch_size_prefers_explicit_override():
     assert tps_cli._resolve_cli_batch_size(args, pipeline) == 6
 
 
+def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
+    """Energy efficiency metrics should use total tokens across the batch."""
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=8.0,
+        decode_duration=1.0,
+        decode_tps=8.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.25,
+        avg_npu_prefill_token_latency=None,
+        avg_total_decode_token_latency=0.25,
+        avg_npu_decode_token_latency=None,
+    )
+
+    tps_cli._enrich_single_run_device(
+        run=measurement,
+        prefill_metric={"avg_power_w": 2.0},
+        decode_metric={"avg_power_w": 4.0},
+        batch_size=3,
+    )
+
+    assert measurement.prefill_tokens_per_j == pytest.approx(3.0)
+    assert measurement.prefill_j_per_token == pytest.approx(1.0 / 3.0)
+    assert measurement.decode_tokens_per_j == pytest.approx(1.5)
+    assert measurement.decode_j_per_token == pytest.approx(2.0 / 3.0)
+    assert measurement.total_tokens_per_j == pytest.approx(2.25)
+    assert measurement.total_j_per_token == pytest.approx(4.0 / 9.0)
+
+
 def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 

@@ -64,6 +64,15 @@ def test_fake_prefill_sets_batched_seq_lengths() -> None:
     assert cache.get_seq_length(index=1) == 64
 
 
+def test_fake_prefill_scalar_sets_all_batched_seq_lengths() -> None:
+    """Scalar fake prefill should prepare every cache entry for batched decode."""
+    cache = MobilintCache(_FakeMxqModel(), batch_size=3)
+
+    cache.fake_prefill(128)
+
+    assert [cache.get_seq_length(index=i) for i in range(3)] == [128, 128, 128]
+
+
 def test_fake_prefill_rejects_negative_length() -> None:
     """Fake prefill should reuse sequence length validation."""
     cache = MobilintCache(_FakeMxqModel())

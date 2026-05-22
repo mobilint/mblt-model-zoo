@@ -518,7 +518,16 @@ def _enrich_single_run_device(
     run: Any,
     prefill_metric: dict[str, Optional[float]],
     decode_metric: dict[str, Optional[float]],
+    batch_size: int = 1,
 ) -> None:
+    """Attach device metrics to a benchmark run.
+
+    Args:
+        run: Single-run or aggregate benchmark result object to enrich.
+        prefill_metric: Device metrics measured during the prefill phase.
+        decode_metric: Device metrics measured during the decode phase.
+        batch_size: Number of sequences measured in parallel.
+    """
     prefill_avg_power = prefill_metric.get("avg_power_w")
     decode_avg_power = decode_metric.get("avg_power_w")
     run.prefill_avg_power_w = prefill_avg_power
@@ -619,17 +628,28 @@ def _enrich_single_run_device(
             run.decode_sweep.x_values[-1] if getattr(run, "decode_sweep", None) and run.decode_sweep.x_values else 0,
         )
     )
-    total_tokens = num_prefill + num_decode
+    batch_size = max(1, int(batch_size))
+    total_prefill_tokens = num_prefill * batch_size
+    total_decode_tokens = num_decode * batch_size
+    total_tokens = total_prefill_tokens + total_decode_tokens
 
     run.avg_power_w = float(avg_power)
     run.total_energy_j = total_energy
-    run.prefill_tokens_per_j = _safe_div(float(num_prefill), prefill_energy) if prefill_energy is not None else None
-    run.prefill_j_per_token = (
-        _safe_div(prefill_energy, float(num_prefill)) if prefill_energy is not None and num_prefill > 0 else None
+    run.prefill_tokens_per_j = (
+        _safe_div(float(total_prefill_tokens), prefill_energy) if prefill_energy is not None else None
     )
-    run.decode_tokens_per_j = _safe_div(float(num_decode), decode_energy) if decode_energy is not None else None
+    run.prefill_j_per_token = (
+        _safe_div(prefill_energy, float(total_prefill_tokens))
+        if prefill_energy is not None and total_prefill_tokens > 0
+        else None
+    )
+    run.decode_tokens_per_j = (
+        _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
+    )
     run.decode_j_per_token = (
-        _safe_div(decode_energy, float(num_decode)) if decode_energy is not None and num_decode > 0 else None
+        _safe_div(decode_energy, float(total_decode_tokens))
+        if decode_energy is not None and total_decode_tokens > 0
+        else None
     )
     run.total_tokens_per_j = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
     run.total_j_per_token = (
@@ -764,6 +784,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 run=run,
                 prefill_metric=prefill_metric,
                 decode_metric=decode_metric,
+                batch_size=batch_size,
             )
         runs.append(run)
 
@@ -1778,6 +1799,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 run=run,
                 prefill_metric=metric,
                 decode_metric=metric,
+                batch_size=batch_size,
             )
         llm_runs.append(run)
 

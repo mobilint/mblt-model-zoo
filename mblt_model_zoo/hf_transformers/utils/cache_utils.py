@@ -130,14 +130,16 @@ class MobilintCache(Cache):
 
         Args:
             sequence_lengths: Single sequence length or per-cache-id sequence
-                lengths to expose via ``get_seq_length()``.
-            index: Cache entry used when ``sequence_lengths`` is a single int.
+                lengths to expose via ``get_seq_length()``. A single sequence length
+                is applied to every cache entry in the batch.
+            index: Unused compatibility argument for scalar sequence lengths.
 
         Raises:
             ValueError: If any sequence length is negative.
         """
         if isinstance(sequence_lengths, int):
-            self.layers[index].fake_prefill(sequence_lengths)
+            for layer in self.layers:
+                layer.fake_prefill(sequence_lengths)
             return
         for cache_id, seq_len in sequence_lengths.items():
             self.layers[cache_id].fake_prefill(seq_len)
