@@ -277,7 +277,7 @@ Default output directory: `benchmark/transformers/results/text_generation/`.
 - `{model}[-{revision}]-{core_mode}.png`: Per-model sweep summary chart.
 - `{model}[-{revision}]-{core_mode}_measure.json`: Per-model measure payload.
 - `combined_measure.csv`, `combined_measure.md`: Combined measure summary tables.
-- `measure_prefill_tps.png`, `measure_decode_tps.png`, `measure_ttft_ms.png`: Measure charts.
+- `measure_prefill_tps.png`, `measure_decode_tps.png`: Measure charts.
 - `combined.csv`, `combined.md`: Combined model summary tables.
 - `combined_device.csv`: Combined device metric summary.
 - `prefill_tps.png`, `decode_tps.png`, `prefill_latency_ms.png`, `decode_duration_ms.png`: Core metric charts.
@@ -411,7 +411,7 @@ Default output directory: `benchmark/transformers/results/image_text_to_text/`.
 - `{model}[-{revision}]-{core_mode}.png`: Per-model sweep summary chart.
 - `{model}[-{revision}]-{core_mode}_measure.json`: Per-model measure payload.
 - `combined_measure.csv`, `combined_measure.md`: Combined measure summary tables.
-- `measure_vision_encode_ms.png`, `measure_llm_prefill_tps.png`, `measure_llm_decode_tps.png`: Measure charts.
+- `measure_llm_prefill_tps.png`, `measure_llm_decode_tps.png`: Measure charts.
 - `combined.csv`, `combined.md`: Combined summary.
 - `combined_llm.csv`, `combined_vision.csv`, `combined_device.csv`: Stage/device summaries.
 - `llm_prefill_tps.png`, `llm_decode_tps.png`, `llm_ttft_ms.png`: LLM charts.
