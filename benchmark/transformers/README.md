@@ -261,7 +261,6 @@ becomes `32,128,256,512`; `--decode-window` remains `32`. If you pass `--prefill
 python benchmark/transformers/benchmark_text_generation_models.py measure \
   --batch \
   --all \
-  --core-mode global8 \
   --prefill 512 \
   --decode 128 \
   --repeat 1 \
@@ -384,7 +383,6 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py measure \
   --batch \
   --model mobilint/Qwen2-VL-2B-Instruct \
   --revision W8 \
-  --core-mode global8 \
   --image-resolution 384 \
   --prefill 1024 \
   --decode 128 \
