@@ -1727,7 +1727,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if tracker is not None:
                     tracker.start()
                 try:
-                    vision_latency, vision_fps = measurer.measure_vision(
+                    vision_latency_per_image, vision_fps = measurer.measure_vision(
                         args.image_resolution,
                         repeat=1,
                         prompt=args.prompt,
@@ -1747,7 +1747,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     )
                 finally:
                     _stop_tracker_safe(tracker)
-                vision_runs.append({"vision_encode_latency": vision_latency, "vision_fps": vision_fps})
+                vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
                 llm_runs.append(asdict(llm_result))
                 if tracker is not None:
                     metric = _extract_device_metric(tracker)
@@ -1763,7 +1763,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                     if memory_used is not None:
                         avg_memory_used_mb.append(float(memory_used))
                     if power is not None:
-                        total_time = vision_latency + float(llm_result.prefill_phase_duration_s or 0.0)
+                        vision_batch_latency = vision_latency_per_image * batch_size
+                        total_time = vision_batch_latency + float(llm_result.prefill_phase_duration_s or 0.0)
                         total_time += float(llm_result.decode_phase_duration_s or 0.0)
                         avg_power_w.append(float(power))
                         total_energy_j.append(float(power) * total_time)
@@ -1817,7 +1818,9 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "total_energy_j": sum(total_energy_j) if total_energy_j else None,
                     "llm_prefill_tok_per_j": _mean(llm_prefill_tok_per_j),
                     "llm_decode_tok_per_j": _mean(llm_decode_tok_per_j),
-                    "vision_img_per_j": _safe_div(len(vision_runs), sum(total_energy_j)) if total_energy_j else None,
+                    "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, sum(total_energy_j))
+                    if total_energy_j
+                    else None,
                 }
                 if avg_power_w or total_energy_j
                 else None,

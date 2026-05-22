@@ -354,6 +354,68 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     assert stopped == [True]
 
 
+def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_path) -> None:
+    """Verify VLM fixed measure scales vision latency and image count by batch size."""
+    args = vlm_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--results-dir",
+            str(tmp_path),
+            "--repeat",
+            "1",
+        ]
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[20.0], time_values=[0.2]),
+                decode_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[40.0], time_values=[0.3]),
+                prefill_phase_duration_s=0.2,
+                decode_phase_duration_s=0.3,
+            )
+
+    monkeypatch.setattr(
+        vlm_bench,
+        "_collect_vlm_run_targets",
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4)]),
+    )
+    monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(
+        vlm_bench,
+        "_vlm_revision_artifacts_available",
+        lambda model_id, revision, mxq_path: (True, None),
+    )
+    monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(vlm_bench, "_extract_device_time_series", lambda tracker: {})
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
+
+    assert vlm_bench._run_measure(args) == 0
+
+    payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
+    assert payload["device"]["total_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
+
+
 def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:
     """Verify Mobilint targets use NPU metrics even when the initial command has no model."""
     args = text_bench._build_arg_parser().parse_args(["measure", "--all"])
