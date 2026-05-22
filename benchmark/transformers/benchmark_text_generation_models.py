@@ -563,12 +563,26 @@ def _load_device(path: str) -> dict[str, float | None] | None:
 
 
 def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
+    """Aggregate repeated benchmark sweep results while preserving run metadata."""
     if len(results) == 1:
         return results[0]
 
     def _mean_or_none(values: list[float | None]) -> float | None:
         compact = [float(v) for v in values if v is not None]
         return (sum(compact) / len(compact)) if compact else None
+
+    def _aggregate_decode_prefill_modes() -> list[str]:
+        first = results[0].decode_sweep
+        modes: list[str] = []
+        for idx in range(len(first.x_values)):
+            for result in results:
+                if idx >= len(result.decode_prefill_modes):
+                    continue
+                mode = result.decode_prefill_modes[idx]
+                if mode:
+                    modes.append(mode)
+                    break
+        return modes
 
     def _aggregate_phase(phase: str) -> SweepData:
         first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
@@ -594,7 +608,13 @@ def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> Benchmar
             out.avg_npu_token_latency_values.append(_mean_or_none(npu_latency_values))
         return out
 
-    return BenchmarkResult(prefill_sweep=_aggregate_phase("prefill"), decode_sweep=_aggregate_phase("decode"))
+    return BenchmarkResult(
+        prefill_sweep=_aggregate_phase("prefill"),
+        decode_sweep=_aggregate_phase("decode"),
+        decode_prefill_modes=_aggregate_decode_prefill_modes(),
+        prefill_phase_duration_s=_mean_or_none([result.prefill_phase_duration_s for result in results]),
+        decode_phase_duration_s=_mean_or_none([result.decode_phase_duration_s for result in results]),
+    )
 
 
 def _revision_exists(model_id: str, revision: str) -> bool | None:

@@ -527,18 +527,30 @@ def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
 
 
 def test_text_aggregate_results_tolerates_missing_latency_arrays() -> None:
-    """Verify text repeated sweeps aggregate missing latency arrays as None."""
+    """Verify text repeated sweeps aggregate missing latency arrays and metadata."""
     first = text_bench.BenchmarkResult(
-        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[10.0], time_values=[0.8])
+        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[10.0], time_values=[0.8]),
+        decode_sweep=text_bench.SweepData(x_values=[4], tps_values=[20.0], time_values=[0.2]),
+        decode_prefill_modes=["fake"],
+        prefill_phase_duration_s=0.8,
+        decode_phase_duration_s=0.2,
     )
     second = text_bench.BenchmarkResult(
-        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[20.0], time_values=[1.2])
+        prefill_sweep=text_bench.SweepData(x_values=[8], tps_values=[20.0], time_values=[1.2]),
+        decode_sweep=text_bench.SweepData(x_values=[4], tps_values=[40.0], time_values=[0.4]),
+        decode_prefill_modes=["fake"],
+        prefill_phase_duration_s=1.2,
+        decode_phase_duration_s=0.4,
     )
 
     result = text_bench._aggregate_benchmark_results([first, second])
 
     assert result.prefill_sweep.tps_values == [15.0]
+    assert result.decode_sweep.tps_values == [30.0]
     assert result.prefill_sweep.avg_total_token_latency_values == [None]
+    assert result.decode_prefill_modes == ["fake"]
+    assert result.prefill_phase_duration_s == pytest.approx(1.0)
+    assert result.decode_phase_duration_s == pytest.approx(0.3)
 
 
 def test_vlm_aggregate_llm_runs_tolerates_missing_latency_arrays() -> None:
