@@ -9,10 +9,15 @@ from dataclasses import asdict
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 from tqdm.auto import tqdm
-from transformers import HfArgumentParser
 
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
@@ -24,6 +29,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    extract_device_time_series as _extract_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -33,11 +41,29 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     print_device_status as _print_device_status_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device as _resolve_default_device_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    resolve_default_device_backend as _resolve_default_device_backend_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
+
+_SWEEP_WARMUP_PREFILL = 128
+_SWEEP_WARMUP_DECODE = 32
+
+
+def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
+    """Return the NPU latency percentage of total latency."""
+    if total_latency is None or npu_latency is None:
+        return None
+    if total_latency <= 0:
+        return None
+    return (npu_latency / total_latency) * 100.0
 
 
 def _parse_range(spec: str) -> Tuple[int, int, int]:
@@ -107,6 +133,103 @@ def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
     return clusters
 
 
+def _is_vlm_task(task: str) -> bool:
+    """Return whether a transformers pipeline task should use VLM TPS measurement."""
+    return task in {"image-text-to-text", "image-to-text"}
+
+
+def _apply_vlm_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    core_mode: str | None,
+    *,
+    target_cores: list[str] | None = None,
+    target_clusters: list[int] | None = None,
+) -> dict[str, Any]:
+    """Apply shared VLM core-mode kwargs to both vision and text sub-configs."""
+    expanded: dict[str, Any] = {}
+    _apply_core_mode_model_kwargs_common(
+        expanded,
+        core_mode,
+        target_cores=target_cores,
+        target_clusters=target_clusters,
+    )
+    for prefix in ("vision", "text"):
+        for key, value in expanded.items():
+            model_kwargs[f"{prefix}_{key}"] = value
+    return model_kwargs
+
+
+def _normalize_max_batch_size(value: Any) -> int | None:
+    """Normalize a model config max batch size value.
+
+    Args:
+        value: Candidate value read from a model config.
+
+    Returns:
+        A positive batch size when the candidate can be converted to an integer, otherwise ``None``.
+    """
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_max_batch_sizes(config: Any, *, task: str) -> Iterable[Any]:
+    """Yield task-specific max batch size candidates from a model config.
+
+    Args:
+        config: Model config object that may expose top-level or nested max batch size attributes.
+        task: Transformers pipeline task used to decide VLM-specific candidates.
+
+    Yields:
+        Candidate max batch size values in priority order.
+    """
+    yield getattr(config, "max_batch_size", None)
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        yield getattr(text_config, "max_batch_size", None)
+    if _is_vlm_task(task):
+        vision_config = getattr(config, "vision_config", None)
+        if vision_config is not None:
+            yield getattr(vision_config, "max_batch_size", None)
+
+
+def _resolve_model_max_batch_size(pipeline: Any, *, task: str) -> int:
+    """Resolve the automatic CLI batch size from a loaded pipeline.
+
+    Args:
+        pipeline: Loaded transformers pipeline.
+        task: Transformers pipeline task.
+
+    Returns:
+        The first valid model max batch size candidate, or ``1`` when unavailable.
+    """
+    model = getattr(pipeline, "model", None)
+    config = getattr(model, "config", None)
+    if config is None:
+        return 1
+    for candidate in _candidate_max_batch_sizes(config, task=task):
+        batch_size = _normalize_max_batch_size(candidate)
+        if batch_size is not None:
+            return batch_size
+    return 1
+
+
+def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
+    """Resolve the effective TPS measurement batch size.
+
+    Args:
+        args: Parsed CLI arguments.
+        pipeline: Loaded transformers pipeline.
+
+    Returns:
+        Explicit CLI batch size when provided, otherwise the model config batch size fallback.
+    """
+    if args.batch_size is not None:
+        return int(args.batch_size)
+    return _resolve_model_max_batch_size(pipeline, task=args.task)
+
+
 def _require_transformers_deps() -> None:
     try:
         import transformers  # noqa: F401
@@ -156,12 +279,20 @@ def _build_pipeline(
         model_kwargs["embedding_weight"] = embedding_weight
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
-    if core_mode:
-        model_kwargs["core_mode"] = core_mode
-    if target_cores:
-        model_kwargs["target_cores"] = target_cores
-    if target_clusters:
-        model_kwargs["target_clusters"] = target_clusters
+    if _is_vlm_task(task):
+        model_kwargs = _apply_vlm_core_mode_model_kwargs(
+            model_kwargs,
+            core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
+    else:
+        model_kwargs = _apply_core_mode_model_kwargs_common(
+            model_kwargs,
+            core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
+        )
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -198,12 +329,20 @@ def _build_pipeline(
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
+    def _optional_values(values: Sequence[Any], length: int) -> list[Any]:
+        return [values[idx] if idx < len(values) else None for idx in range(length)]
+
+    prefill_len = min(
+        len(result.prefill_sweep.x_values),
+        len(result.prefill_sweep.tps_values),
+        len(result.prefill_sweep.time_values),
+    )
     for x, tps, t, avg_total, avg_npu in zip(
-        result.prefill_sweep.x_values,
-        result.prefill_sweep.tps_values,
-        result.prefill_sweep.time_values,
-        result.prefill_sweep.avg_total_token_latency_values,
-        result.prefill_sweep.avg_npu_token_latency_values,
+        result.prefill_sweep.x_values[:prefill_len],
+        result.prefill_sweep.tps_values[:prefill_len],
+        result.prefill_sweep.time_values[:prefill_len],
+        _optional_values(result.prefill_sweep.avg_total_token_latency_values, prefill_len),
+        _optional_values(result.prefill_sweep.avg_npu_token_latency_values, prefill_len),
     ):
         yield {
             "phase": "prefill",
@@ -212,13 +351,19 @@ def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
             "time_ms": t * 1000.0,
             "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
             "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+            "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
         }
+    decode_len = min(
+        len(result.decode_sweep.x_values),
+        len(result.decode_sweep.tps_values),
+        len(result.decode_sweep.time_values),
+    )
     for x, tps, t, avg_total, avg_npu in zip(
-        result.decode_sweep.x_values,
-        result.decode_sweep.tps_values,
-        result.decode_sweep.time_values,
-        result.decode_sweep.avg_total_token_latency_values,
-        result.decode_sweep.avg_npu_token_latency_values,
+        result.decode_sweep.x_values[:decode_len],
+        result.decode_sweep.tps_values[:decode_len],
+        result.decode_sweep.time_values[:decode_len],
+        _optional_values(result.decode_sweep.avg_total_token_latency_values, decode_len),
+        _optional_values(result.decode_sweep.avg_npu_token_latency_values, decode_len),
     ):
         yield {
             "phase": "decode",
@@ -227,6 +372,7 @@ def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
             "time_ms": t * 1000.0,
             "avg_total_token_latency_ms": avg_total * 1000.0 if avg_total is not None else None,
             "avg_npu_token_latency_ms": avg_npu * 1000.0 if avg_npu is not None else None,
+            "avg_npu_token_latency_pct": npu_latency_pct(avg_total, avg_npu),
         }
 
 
@@ -241,11 +387,15 @@ def _write_csv(path: str, rows: Sequence[dict[str, Any]]) -> None:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     fieldnames = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+            writer.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in fieldnames})
 
 
 def _percentile(values: Sequence[float], q: float) -> float:
@@ -326,6 +476,10 @@ def _extract_device_metric(tracker: Any) -> dict[str, Optional[float]]:
     return _extract_device_metric_common(tracker)
 
 
+def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]]]:
+    return _extract_device_time_series_common(tracker)
+
+
 def _weighted_two(
     a: Optional[float],
     a_weight: float,
@@ -339,6 +493,21 @@ def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
     _print_device_status_common(args, tracker)
 
 
+def _normalize_runtime_defaults(args: argparse.Namespace) -> None:
+    args.device = _resolve_default_device_common(
+        device=args.device,
+        device_explicit=args.device is not None,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+    )
+    args.device_backend = _resolve_default_device_backend_common(
+        device_backend=args.device_backend or "none",
+        device_backend_explicit=args.device_backend is not None,
+        model_id=args.model,
+        mxq_path=args.mxq_path,
+    )
+
+
 def _safe_div(a: float, b: float) -> Optional[float]:
     if b == 0:
         return None
@@ -349,7 +518,16 @@ def _enrich_single_run_device(
     run: Any,
     prefill_metric: dict[str, Optional[float]],
     decode_metric: dict[str, Optional[float]],
+    batch_size: int = 1,
 ) -> None:
+    """Attach device metrics to a benchmark run.
+
+    Args:
+        run: Single-run or aggregate benchmark result object to enrich.
+        prefill_metric: Device metrics measured during the prefill phase.
+        decode_metric: Device metrics measured during the decode phase.
+        batch_size: Number of sequences measured in parallel.
+    """
     prefill_avg_power = prefill_metric.get("avg_power_w")
     decode_avg_power = decode_metric.get("avg_power_w")
     run.prefill_avg_power_w = prefill_avg_power
@@ -373,8 +551,14 @@ def _enrich_single_run_device(
     run.decode_avg_memory_used_pct = decode_metric.get("avg_memory_used_pct")
     run.decode_p99_memory_used_pct = decode_metric.get("p99_memory_used_pct")
 
-    prefill_t = float(run.prefill_latency)
-    decode_t = float(run.decode_duration)
+    fallback_prefill_t = 0.0
+    if getattr(run, "prefill_sweep", None) and run.prefill_sweep.time_values:
+        fallback_prefill_t = run.prefill_sweep.time_values[-1]
+    fallback_decode_t = 0.0
+    if getattr(run, "decode_sweep", None) and run.decode_sweep.time_values:
+        fallback_decode_t = run.decode_sweep.time_values[-1]
+    prefill_t = float(getattr(run, "prefill_latency", fallback_prefill_t))
+    decode_t = float(getattr(run, "decode_duration", fallback_decode_t))
     run.avg_power_w = _weighted_two(prefill_avg_power, prefill_t, decode_avg_power, decode_t)
     p_p99 = prefill_metric.get("p99_power_w")
     d_p99 = decode_metric.get("p99_power_w")
@@ -424,25 +608,48 @@ def _enrich_single_run_device(
     if avg_power is None:
         return
 
-    prefill_energy = prefill_avg_power * run.prefill_latency if prefill_avg_power is not None else None
-    decode_energy = decode_avg_power * run.decode_duration if decode_avg_power is not None else None
+    prefill_energy = prefill_avg_power * prefill_t if prefill_avg_power is not None else None
+    decode_energy = decode_avg_power * decode_t if decode_avg_power is not None else None
     total_energy = None
     if prefill_energy is not None and decode_energy is not None:
         total_energy = prefill_energy + decode_energy
 
-    total_tokens = run.num_prefill + run.num_decode
+    num_prefill = int(
+        getattr(
+            run,
+            "num_prefill",
+            run.prefill_sweep.x_values[-1] if getattr(run, "prefill_sweep", None) and run.prefill_sweep.x_values else 0,
+        )
+    )
+    num_decode = int(
+        getattr(
+            run,
+            "num_decode",
+            run.decode_sweep.x_values[-1] if getattr(run, "decode_sweep", None) and run.decode_sweep.x_values else 0,
+        )
+    )
+    batch_size = max(1, int(batch_size))
+    total_prefill_tokens = num_prefill * batch_size
+    total_decode_tokens = num_decode * batch_size
+    total_tokens = total_prefill_tokens + total_decode_tokens
 
     run.avg_power_w = float(avg_power)
     run.total_energy_j = total_energy
-    run.prefill_tokens_per_j = _safe_div(float(run.num_prefill), prefill_energy) if prefill_energy is not None else None
+    run.prefill_tokens_per_j = (
+        _safe_div(float(total_prefill_tokens), prefill_energy) if prefill_energy is not None else None
+    )
     run.prefill_j_per_token = (
-        _safe_div(prefill_energy, float(run.num_prefill))
-        if prefill_energy is not None and run.num_prefill > 0
+        _safe_div(prefill_energy, float(total_prefill_tokens))
+        if prefill_energy is not None and total_prefill_tokens > 0
         else None
     )
-    run.decode_tokens_per_j = _safe_div(float(run.num_decode), decode_energy) if decode_energy is not None else None
+    run.decode_tokens_per_j = (
+        _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
+    )
     run.decode_j_per_token = (
-        _safe_div(decode_energy, float(run.num_decode)) if decode_energy is not None and run.num_decode > 0 else None
+        _safe_div(decode_energy, float(total_decode_tokens))
+        if decode_energy is not None and total_decode_tokens > 0
+        else None
     )
     run.total_tokens_per_j = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
     run.total_j_per_token = (
@@ -465,6 +672,10 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
     def _aggregate_phase(phase: str) -> SweepData:
         first = results[0].prefill_sweep if phase == "prefill" else results[0].decode_sweep
         out = SweepData(x_values=list(first.x_values))
+
+        def _get_optional(values: Sequence[Any], idx: int) -> Any:
+            return values[idx] if idx < len(values) else None
+
         for idx in range(len(first.x_values)):
             tps_vals = []
             time_vals = []
@@ -474,8 +685,8 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
                 src = result.prefill_sweep if phase == "prefill" else result.decode_sweep
                 tps_vals.append(src.tps_values[idx])
                 time_vals.append(src.time_values[idx])
-                total_vals.append(src.avg_total_token_latency_values[idx])
-                npu_vals.append(src.avg_npu_token_latency_values[idx])
+                total_vals.append(_get_optional(src.avg_total_token_latency_values, idx))
+                npu_vals.append(_get_optional(src.avg_npu_token_latency_values, idx))
             out.tps_values.append(sum(tps_vals) / len(tps_vals))
             out.time_values.append(sum(time_vals) / len(time_vals))
             out.avg_total_token_latency_values.append(_mean_or_none(total_vals))
@@ -489,7 +700,15 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
+    """Dispatch a single TPS measurement to the text or VLM measurement path."""
+    if _is_vlm_task(args.task):
+        return _run_vlm_measure(args)
+    return _run_text_measure(args)
+
+
+def _run_text_measure(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -505,6 +724,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
@@ -519,8 +739,10 @@ def _cmd_measure(args: argparse.Namespace) -> int:
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
+            batch_size=batch_size,
         )
     runs = []
+    run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
@@ -532,10 +754,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
                 progress_desc=f"measure generate {i + 1}/{args.repeat}",
-                on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
-                on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
-                on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
-                on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                on_prefill_start=((lambda: tracker_prefill.start()) if tracker_prefill is not None else None),
+                on_prefill_end=((lambda: tracker_prefill.stop()) if tracker_prefill is not None else None),
+                on_decode_start=((lambda: tracker_decode.start()) if tracker_decode is not None else None),
+                on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
+                batch_size=batch_size,
             )
         finally:
             _stop_tracker_safe(tracker_prefill)
@@ -543,10 +766,17 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
+            run_phase_device_time_series.append(
+                {
+                    "prefill": _extract_device_time_series(tracker_prefill),
+                    "decode": _extract_device_time_series(tracker_decode),
+                }
+            )
             _enrich_single_run_device(
                 run=run,
                 prefill_metric=prefill_metric,
                 decode_metric=decode_metric,
+                batch_size=batch_size,
             )
         runs.append(run)
 
@@ -555,6 +785,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     ttft_ms = [r.prefill_latency * 1000.0 for r in runs]
     decode_ms = [r.decode_duration * 1000.0 for r in runs]
     total_ms = [r.total_time * 1000.0 for r in runs]
+    prefill_npu_latency_pct = [pct for r in runs if (pct := r.prefill_npu_latency_pct) is not None]
+    decode_npu_latency_pct = [pct for r in runs if (pct := r.decode_npu_latency_pct) is not None]
+    total_npu_latency_pct = [pct for r in runs if (pct := r.total_npu_latency_pct) is not None]
     avg_power_w = [r.avg_power_w for r in runs if r.avg_power_w is not None]
     p99_power_w = [r.p99_power_w for r in runs if r.p99_power_w is not None]
     avg_utilization_pct = [r.avg_utilization_pct for r in runs if r.avg_utilization_pct is not None]
@@ -614,6 +847,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
     print(f"prefill tokens: {runs[0].num_prefill} | decode tokens: {runs[0].num_decode}")
     _print_summary_header()
     _print_summary("prefill_tps", prefill_tps, "tok/s")
@@ -621,6 +855,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     _print_summary("ttft", ttft_ms, "ms")
     _print_summary("decode_duration", decode_ms, "ms")
     _print_summary("total", total_ms, "ms")
+    _print_summary("prefill_npu_latency", prefill_npu_latency_pct, "%")
+    _print_summary("decode_npu_latency", decode_npu_latency_pct, "%")
+    _print_summary("total_npu_latency", total_npu_latency_pct, "%")
     if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
@@ -663,6 +900,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "repeat": args.repeat,
+            "batch_size": batch_size,
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "prefill_tps": _summary(prefill_tps),
@@ -670,6 +908,9 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "ttft_ms": _summary(ttft_ms),
                 "decode_duration_ms": _summary(decode_ms),
                 "total_ms": _summary(total_ms),
+                "prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
+                "decode_npu_latency_pct": _summary(decode_npu_latency_pct),
+                "total_npu_latency_pct": _summary(total_npu_latency_pct),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
                 "prefill_avg_power_w": _summary(prefill_avg_power_w),
@@ -707,6 +948,7 @@ def _cmd_measure(args: argparse.Namespace) -> int:
                 "prefill_j_per_tok": _summary(prefill_j_per_tok),
                 "decode_j_per_tok": _summary(decode_j_per_tok),
             },
+            "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
@@ -714,8 +956,10 @@ def _cmd_measure(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_sweep(args: argparse.Namespace) -> int:
+def _run_vlm_measure(args: argparse.Namespace) -> int:
+    """Run a single VLM TPS measurement with separate vision and LLM metrics."""
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -731,21 +975,249 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
+
+    from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+        SingleMeasurement,
+        VLMSingleMeasurement,
+        VLMTPSMeasurer,
+    )
+
+    def _single_llm_measurement(result: Any) -> SingleMeasurement:
+        """Convert a fixed-point VLM LLM sweep result into a single measurement."""
+        if not result.prefill_sweep.x_values:
+            raise SystemExit(
+                f"Requested VLM prefill length {args.prefill} is shorter than the model's multimodal prefix length."
+            )
+        if not result.decode_sweep.x_values:
+            raise SystemExit(f"Requested VLM decode cache length {args.prefill} could not be measured.")
+
+        prefill_idx = len(result.prefill_sweep.x_values) - 1
+        decode_idx = len(result.decode_sweep.x_values) - 1
+        prefill_latency = float(result.prefill_sweep.time_values[prefill_idx])
+        decode_duration = float(result.decode_sweep.time_values[decode_idx])
+        avg_total_prefill = result.prefill_sweep.avg_total_token_latency_values[prefill_idx]
+        avg_npu_prefill = result.prefill_sweep.avg_npu_token_latency_values[prefill_idx]
+        avg_total_decode = result.decode_sweep.avg_total_token_latency_values[decode_idx]
+        avg_npu_decode = result.decode_sweep.avg_npu_token_latency_values[decode_idx]
+        npu_prefill_time = None if avg_npu_prefill is None else float(avg_npu_prefill) * int(args.prefill) * batch_size
+        npu_decode_time = None if avg_npu_decode is None else float(avg_npu_decode) * int(args.decode) * batch_size
+        total_npu_time = (
+            npu_prefill_time + npu_decode_time if npu_prefill_time is not None and npu_decode_time is not None else None
+        )
+        return SingleMeasurement(
+            num_prefill=int(result.prefill_sweep.x_values[prefill_idx]),
+            num_decode=int(args.decode),
+            prefill_latency=prefill_latency,
+            prefill_tps=float(result.prefill_sweep.tps_values[prefill_idx]),
+            decode_duration=decode_duration,
+            decode_tps=float(result.decode_sweep.tps_values[decode_idx]),
+            total_time=prefill_latency + decode_duration,
+            avg_total_prefill_token_latency=float(avg_total_prefill or 0.0),
+            avg_npu_prefill_token_latency=avg_npu_prefill,
+            avg_total_decode_token_latency=float(avg_total_decode or 0.0),
+            avg_npu_decode_token_latency=avg_npu_decode,
+            prefill_npu_latency_pct=npu_latency_pct(avg_total_prefill, avg_npu_prefill),
+            decode_npu_latency_pct=npu_latency_pct(avg_total_decode, avg_npu_decode),
+            total_npu_latency_pct=npu_latency_pct(prefill_latency + decode_duration, total_npu_time),
+            npu_prefill_time=npu_prefill_time,
+            npu_decode_time=npu_decode_time,
+            decode_prefill_mode=(result.decode_prefill_modes[decode_idx] if result.decode_prefill_modes else "real"),
+        )
+
+    def _measure_fixed_vlm_run(*, show_progress: bool) -> VLMSingleMeasurement:
+        """Measure VLM vision plus LLM with the requested fixed prefill length."""
+        vision_latency, vision_fps = measurer.measure_vision(
+            image_resolution=args.image_resolution,
+            repeat=1,
+            prompt=args.prompt,
+            batch_size=batch_size,
+            show_progress=show_progress,
+        )[0]
+        llm_result = measurer.measure_llm_full(
+            image_resolution=args.image_resolution,
+            prompt=args.prompt,
+            prefill_range=(args.prefill, args.prefill, args.prefill),
+            cache_lengths=[args.prefill],
+            decode_window=args.decode,
+            prefill_chunk_size=args.prefill_chunk_size,
+            show_progress=show_progress,
+            batch_size=batch_size,
+        )
+        return VLMSingleMeasurement(
+            image_resolution=args.image_resolution,
+            vision_encode_latency=vision_latency,
+            vision_fps=vision_fps,
+            llm=_single_llm_measurement(llm_result),
+        )
+
+    measurer = VLMTPSMeasurer(pipeline)
+    tracker = _build_device_tracker(args, pipeline)
+    _print_device_status(args, tracker)
+
+    for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
+        _measure_fixed_vlm_run(show_progress=False)
+
+    runs = []
+    device_metrics = []
+    device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+    for _ in tqdm(range(args.repeat), desc="measure runs", leave=False):
+        if tracker is not None:
+            tracker.start()
+        try:
+            run = _measure_fixed_vlm_run(show_progress=False)
+        finally:
+            _stop_tracker_safe(tracker)
+        runs.append(run)
+        if tracker is not None:
+            metric = _extract_device_metric(tracker)
+            avg_power = metric.get("avg_power_w")
+            if avg_power is not None:
+                metric["total_energy_j"] = avg_power * ((run.vision_encode_latency * batch_size) + run.llm.total_time)
+            device_metrics.append(metric)
+            device_time_series_runs.append(_extract_device_time_series(tracker))
+
+    vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
+    vision_fps = [r.vision_fps for r in runs]
+    prefill_tps = [r.llm.prefill_tps for r in runs]
+    decode_tps = [r.llm.decode_tps for r in runs]
+    ttft_ms = [r.llm.prefill_latency * 1000.0 for r in runs]
+    decode_ms = [r.llm.decode_duration * 1000.0 for r in runs]
+    total_ms = [((r.vision_encode_latency * batch_size) + r.llm.total_time) * 1000.0 for r in runs]
+    prefill_npu_latency_pct = [pct for r in runs if (pct := r.llm.prefill_npu_latency_pct) is not None]
+    decode_npu_latency_pct = [pct for r in runs if (pct := r.llm.decode_npu_latency_pct) is not None]
+    total_npu_latency_pct = [pct for r in runs if (pct := r.llm.total_npu_latency_pct) is not None]
+
+    avg_power_w = [m["avg_power_w"] for m in device_metrics if m.get("avg_power_w") is not None]
+    p99_power_w = [m["p99_power_w"] for m in device_metrics if m.get("p99_power_w") is not None]
+    avg_utilization_pct = [m["avg_utilization_pct"] for m in device_metrics if m.get("avg_utilization_pct") is not None]
+    p99_utilization_pct = [m["p99_utilization_pct"] for m in device_metrics if m.get("p99_utilization_pct") is not None]
+    avg_temperature_c = [m["avg_temperature_c"] for m in device_metrics if m.get("avg_temperature_c") is not None]
+    p99_temperature_c = [m["p99_temperature_c"] for m in device_metrics if m.get("p99_temperature_c") is not None]
+    avg_memory_used_mb = [m["avg_memory_used_mb"] for m in device_metrics if m.get("avg_memory_used_mb") is not None]
+    p99_memory_used_mb = [m["p99_memory_used_mb"] for m in device_metrics if m.get("p99_memory_used_mb") is not None]
+    total_memory_mb = [m["total_memory_mb"] for m in device_metrics if m.get("total_memory_mb") is not None]
+    avg_memory_used_pct = [m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None]
+    p99_memory_used_pct = [m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None]
+    total_energy_j = [m["total_energy_j"] for m in device_metrics if m.get("total_energy_j") is not None]
+
+    print(f"warmup: {args.warmup}")
+    print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
+    print(
+        f"image resolution: {args.image_resolution} | "
+        f"llm prefill tokens: {runs[0].llm.num_prefill} | decode tokens: {runs[0].llm.num_decode}"
+    )
+    _print_summary_header()
+    _print_summary("vision_encode", vision_ms, "ms")
+    _print_summary("vision_fps", vision_fps, "fps")
+    _print_summary("llm_prefill_tps", prefill_tps, "tok/s")
+    _print_summary("llm_decode_tps", decode_tps, "tok/s")
+    _print_summary("llm_ttft", ttft_ms, "ms")
+    _print_summary("llm_decode_duration", decode_ms, "ms")
+    _print_summary("total", total_ms, "ms")
+    _print_summary("llm_prefill_npu_lat", prefill_npu_latency_pct, "%")
+    _print_summary("llm_decode_npu_lat", decode_npu_latency_pct, "%")
+    _print_summary("llm_total_npu_lat", total_npu_latency_pct, "%")
+    if args.device_metrics:
+        _print_summary("avg_power", avg_power_w, "W")
+        _print_summary("p99_power", p99_power_w, "W")
+        _print_summary("avg_utilization", avg_utilization_pct, "%")
+        _print_summary("p99_utilization", p99_utilization_pct, "%")
+        _print_summary("avg_temperature", avg_temperature_c, "C")
+        _print_summary("p99_temperature", p99_temperature_c, "C")
+        _print_summary("avg_memory_used", avg_memory_used_mb, "MB")
+        _print_summary("p99_memory_used", p99_memory_used_mb, "MB")
+        _print_summary("total_memory", total_memory_mb, "MB")
+        _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
+        _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
+        _print_summary("total_energy", total_energy_j, "J")
+    _print_summary_footer()
+
+    if args.json:
+        payload = {
+            "task": args.task,
+            "model": args.model,
+            "prompt": args.prompt,
+            "image_resolution": args.image_resolution,
+            "repeat": args.repeat,
+            "batch_size": batch_size,
+            "runs": [asdict(r) for r in runs],
+            "summary": {
+                "vision_encode_ms": _summary(vision_ms),
+                "vision_fps": _summary(vision_fps),
+                "llm_prefill_tps": _summary(prefill_tps),
+                "llm_decode_tps": _summary(decode_tps),
+                "llm_ttft_ms": _summary(ttft_ms),
+                "llm_decode_duration_ms": _summary(decode_ms),
+                "total_ms": _summary(total_ms),
+                "llm_prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
+                "llm_decode_npu_latency_pct": _summary(decode_npu_latency_pct),
+                "llm_total_npu_latency_pct": _summary(total_npu_latency_pct),
+                "avg_power_w": _summary(avg_power_w),
+                "p99_power_w": _summary(p99_power_w),
+                "avg_utilization_pct": _summary(avg_utilization_pct),
+                "p99_utilization_pct": _summary(p99_utilization_pct),
+                "avg_temperature_c": _summary(avg_temperature_c),
+                "p99_temperature_c": _summary(p99_temperature_c),
+                "avg_memory_used_mb": _summary(avg_memory_used_mb),
+                "p99_memory_used_mb": _summary(p99_memory_used_mb),
+                "total_memory_mb": _summary(total_memory_mb),
+                "avg_memory_used_pct": _summary(avg_memory_used_pct),
+                "p99_memory_used_pct": _summary(p99_memory_used_pct),
+                "total_energy_j": _summary(total_energy_j),
+            },
+            "device_runs": device_metrics,
+            "device_time_series_runs": device_time_series_runs,
+        }
+        _write_json(args.json, payload)
+        print(f"wrote: {args.json}")
+
+    return 0
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    """Dispatch a TPS sweep to the text or VLM measurement path."""
+    if _is_vlm_task(args.task):
+        return _run_vlm_sweep(args)
+    return _run_text_sweep(args)
+
+
+def _run_text_sweep(args: argparse.Namespace) -> int:
+    """Run a text-generation TPS prefill/decode sweep."""
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
+    pipeline = _build_pipeline(
+        task=args.task,
+        model=args.model,
+        tokenizer=args.tokenizer,
+        device=args.device,
+        trust_remote_code=args.trust_remote_code,
+        dtype=args.dtype,
+        device_map=args.device_map,
+        revision=args.revision,
+        embedding_weight=args.embedding_weight,
+        mxq_path=args.mxq_path,
+        core_mode=args.core_mode,
+        target_cores=args.target_cores,
+        target_clusters=args.target_clusters,
+    )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
-    warmup_prefill = max(args.prefill_range[0], max(args.cache_lengths))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=warmup_prefill,
-            num_decode=args.decode_window,
+            num_prefill=_SWEEP_WARMUP_PREFILL,
+            num_decode=_SWEEP_WARMUP_DECODE,
             prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
+            batch_size=batch_size,
         )
     runs = []
     run_avg_power: list[float] = []
@@ -781,6 +1253,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     run_decode_avg_mem_used_pct: list[float] = []
     run_decode_p99_mem_used_pct: list[float] = []
     run_phase_device: list[dict[str, dict[str, Optional[float]]]] = []
+    run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
@@ -798,6 +1271,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                     on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
                     on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
                     on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+                    batch_size=batch_size,
                 )
             )
         finally:
@@ -807,6 +1281,12 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
             run_phase_device.append({"prefill": prefill_metric, "decode": decode_metric})
+            run_phase_device_time_series.append(
+                {
+                    "prefill": _extract_device_time_series(tracker_prefill),
+                    "decode": _extract_device_time_series(tracker_decode),
+                }
+            )
             prefill_dur = float(getattr(runs[-1], "prefill_phase_duration_s", 0.0) or 0.0)
             decode_dur = float(getattr(runs[-1], "decode_phase_duration_s", 0.0) or 0.0)
             avg_power = _weighted_two(
@@ -954,6 +1434,32 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
 
     prefill_last = [r.prefill_sweep.tps_values[-1] for r in runs if r.prefill_sweep.tps_values]
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]
+    prefill_npu_latency_pct_last = [
+        pct
+        for r in runs
+        if r.prefill_sweep.avg_total_token_latency_values
+        and r.prefill_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
+    decode_npu_latency_pct_last = [
+        pct
+        for r in runs
+        if r.decode_sweep.avg_total_token_latency_values
+        and r.decode_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
     prefill_last_tpj: list[float] = []
     decode_last_tpj: list[float] = []
     prefill_last_jpt: list[float] = []
@@ -980,11 +1486,14 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
             decode_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
+    print(f"batch size: {batch_size}")
     _print_summary_header()
     if prefill_last:
         _print_summary("prefill_tps(last_point)", prefill_last, "tok/s")
     if decode_last:
         _print_summary("decode_tps(last_point)", decode_last, "tok/s")
+    _print_summary("prefill_npu_lat(last)", prefill_npu_latency_pct_last, "%")
+    _print_summary("decode_npu_lat(last)", decode_npu_latency_pct_last, "%")
     if args.device_metrics:
         _print_summary("avg_power", run_avg_power, "W")
         _print_summary("p99_power", run_p99_power, "W")
@@ -1027,11 +1536,14 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "repeat": args.repeat,
+            "batch_size": batch_size,
             "aggregate": asdict(result),
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "prefill_tps_last": _summary(prefill_last),
                 "decode_tps_last": _summary(decode_last),
+                "prefill_npu_latency_pct_last": _summary(prefill_npu_latency_pct_last),
+                "decode_npu_latency_pct_last": _summary(decode_npu_latency_pct_last),
                 "avg_power_w": _summary(run_avg_power),
                 "p99_power_w": _summary(run_p99_power),
                 "avg_utilization_pct": _summary(run_avg_utilization),
@@ -1070,12 +1582,15 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
                 "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
             "device_runs": run_phase_device,
+            "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
         print(f"wrote: {args.json}")
 
     if args.csv:
         rows = list(_iter_rows_for_csv(result))
+        for row in rows:
+            row["batch_size"] = batch_size
         _write_csv(args.csv, rows)
         print(f"wrote: {args.csv}")
 
@@ -1085,8 +1600,65 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
+def _plot_vlm_sweep(
+    *,
+    resolution_payloads: Sequence[dict[str, Any]],
+    llm_result: Any,
+    save_path: str,
+) -> None:
+    """Write a VLM sweep summary plot.
+
+    Args:
+        resolution_payloads: Vision sweep payloads produced by ``_run_vlm_sweep``.
+        llm_result: Aggregated LLM TPS sweep result.
+        save_path: Destination PNG path.
+    """
+    import matplotlib.pyplot as plt
+
+    output_dir = os.path.dirname(os.path.abspath(save_path))
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    resolutions = [int(payload["image_resolution"]) for payload in resolution_payloads]
+    vision_encode_ms = [payload["summary"]["vision_encode_ms"]["mean"] for payload in resolution_payloads]
+    vision_fps = [payload["summary"]["vision_fps"]["mean"] for payload in resolution_payloads]
+
+    fig, axs = plt.subplots(2, 2, figsize=(16, 10))
+    fig.suptitle("VLM TPS Sweep", fontsize=16)
+
+    axs[0, 0].plot(resolutions, vision_encode_ms, "o-", color="tab:red")
+    axs[0, 0].set_title("Vision Encode Latency")
+    axs[0, 0].set_xlabel("Image resolution")
+    axs[0, 0].set_ylabel("Latency (ms/image)")
+    axs[0, 0].grid(True, alpha=0.3)
+
+    axs[0, 1].plot(resolutions, vision_fps, "o-", color="tab:blue")
+    axs[0, 1].set_title("Vision Throughput")
+    axs[0, 1].set_xlabel("Image resolution")
+    axs[0, 1].set_ylabel("FPS")
+    axs[0, 1].grid(True, alpha=0.3)
+
+    axs[1, 0].plot(llm_result.prefill_sweep.x_values, llm_result.prefill_sweep.tps_values, "o-", color="tab:green")
+    axs[1, 0].set_title("LLM Prefill TPS")
+    axs[1, 0].set_xlabel("Prefill tokens")
+    axs[1, 0].set_ylabel("Tokens/s")
+    axs[1, 0].grid(True, alpha=0.3)
+
+    axs[1, 1].plot(llm_result.decode_sweep.x_values, llm_result.decode_sweep.tps_values, "o-", color="tab:purple")
+    axs[1, 1].set_title("LLM Decode TPS")
+    axs[1, 1].set_xlabel("Cache length")
+    axs[1, 1].set_ylabel("Tokens/s")
+    axs[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+
+
+def _run_vlm_sweep(args: argparse.Namespace) -> int:
+    """Run a VLM TPS sweep including vision encoder and LLM phases."""
     os.environ.setdefault("MPLBACKEND", "Agg")
+    _normalize_runtime_defaults(args)
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1102,6 +1674,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
+    batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import VLMTPSMeasurer
 
@@ -1118,6 +1691,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 repeat=1,
                 prompt=args.prompt,
                 show_progress=False,
+                batch_size=batch_size,
             )
         vision_runs = []
         vision_power_avg = []
@@ -1134,6 +1708,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         vision_energy_j = []
         vision_img_per_j = []
         vision_j_per_img = []
+        vision_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
         for _ in tqdm(range(args.repeat), desc=f"vision@{resolution}", leave=False):
             if tracker is not None:
                 tracker.start()
@@ -1143,13 +1718,14 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     repeat=1,
                     prompt=args.prompt,
                     show_progress=False,
+                    batch_size=batch_size,
                 )[0]
             finally:
-                if tracker is not None:
-                    tracker.stop()
+                _stop_tracker_safe(tracker)
             vision_runs.append(single)
             if tracker is not None:
-                metric = tracker.get_metric()
+                metric = _extract_device_metric(tracker)
+                vision_device_time_series_runs.append(_extract_device_time_series(tracker))
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_utilization = metric.get("avg_utilization_pct")
@@ -1192,7 +1768,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
         vision_fps = [fps for _, fps in vision_runs]
 
-        print(f"\nresolution={resolution} warmup={args.warmup} runs={args.repeat}")
+        print(f"\nresolution={resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}")
         _print_summary_header()
         _print_summary("vision_encode", vision_ms, "ms")
         _print_summary("vision_fps", vision_fps, "fps")
@@ -1219,6 +1795,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             csv_rows.append(
                 {
                     "type": "vision",
+                    "batch_size": batch_size,
                     "image_resolution": resolution,
                     "repeat_index": idx,
                     "vision_encode_ms": latency * 1000.0,
@@ -1230,6 +1807,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "llm_ttft_ms": None,
                     "llm_decode_ms": None,
                     "llm_total_ms": None,
+                    "llm_prefill_npu_latency_pct": None,
+                    "llm_decode_npu_latency_pct": None,
                     "avg_power_w": vision_power_avg[idx - 1] if idx - 1 < len(vision_power_avg) else None,
                     "p99_power_w": vision_power_p99[idx - 1] if idx - 1 < len(vision_power_p99) else None,
                     "avg_utilization_pct": vision_util_avg[idx - 1] if idx - 1 < len(vision_util_avg) else None,
@@ -1263,6 +1842,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             {
                 "image_resolution": resolution,
                 "repeat": args.repeat,
+                "batch_size": batch_size,
                 "runs": [
                     {
                         "vision_encode_latency": latency,
@@ -1288,6 +1868,7 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                     "vision_img_per_j": _summary(vision_img_per_j),
                     "vision_j_per_img": _summary(vision_j_per_img),
                 },
+                "device_time_series_runs": vision_device_time_series_runs,
             }
         )
 
@@ -1296,12 +1877,14 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         measurer.measure_llm_full(
             image_resolution=llm_resolution,
             prompt=args.prompt,
-            prefill_range=args.llm_prefill_range,
-            cache_lengths=args.llm_cache_lengths,
-            decode_window=args.llm_decode_window,
+            prefill_range=args.prefill_range,
+            cache_lengths=args.cache_lengths,
+            decode_window=args.decode_window,
             show_progress=False,
+            batch_size=batch_size,
         )
     llm_runs = []
+    llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
     for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
         if tracker is not None:
             tracker.start()
@@ -1309,20 +1892,22 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
                 prompt=args.prompt,
-                prefill_range=args.llm_prefill_range,
-                cache_lengths=args.llm_cache_lengths,
-                decode_window=args.llm_decode_window,
+                prefill_range=args.prefill_range,
+                cache_lengths=args.cache_lengths,
+                decode_window=args.decode_window,
                 show_progress=False,
+                batch_size=batch_size,
             )
         finally:
-            if tracker is not None:
-                tracker.stop()
+            _stop_tracker_safe(tracker)
         if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
             metric = _extract_device_metric(tracker)
+            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
             _enrich_single_run_device(
                 run=run,
                 prefill_metric=metric,
                 decode_metric=metric,
+                batch_size=batch_size,
             )
         llm_runs.append(run)
 
@@ -1331,6 +1916,32 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
     llm_decode_ms = [r.decode_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.decode_sweep.time_values]
+    llm_prefill_npu_latency_pct = [
+        pct
+        for r in llm_runs
+        if r.prefill_sweep.avg_total_token_latency_values
+        and r.prefill_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.prefill_sweep.avg_total_token_latency_values[-1],
+                r.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
+    llm_decode_npu_latency_pct = [
+        pct
+        for r in llm_runs
+        if r.decode_sweep.avg_total_token_latency_values
+        and r.decode_sweep.avg_npu_token_latency_values
+        and (
+            pct := npu_latency_pct(
+                r.decode_sweep.avg_total_token_latency_values[-1],
+                r.decode_sweep.avg_npu_token_latency_values[-1],
+            )
+        )
+        is not None
+    ]
     llm_avg_power_w = [r.avg_power_w for r in llm_runs if getattr(r, "avg_power_w", None) is not None]
     llm_p99_power_w = [r.p99_power_w for r in llm_runs if getattr(r, "p99_power_w", None) is not None]
     llm_avg_utilization_pct = [
@@ -1356,12 +1967,16 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
 
-    print(f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat}")
+    print(
+        f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}"
+    )
     _print_summary_header()
     _print_summary("llm_prefill_tps(last)", llm_prefill_tps, "tok/s")
     _print_summary("llm_decode_tps(last)", llm_decode_tps, "tok/s")
     _print_summary("llm_ttft(last)", llm_ttft_ms, "ms")
     _print_summary("llm_decode_duration(last)", llm_decode_ms, "ms")
+    _print_summary("llm_prefill_npu_lat", llm_prefill_npu_latency_pct, "%")
+    _print_summary("llm_decode_npu_lat", llm_decode_npu_latency_pct, "%")
     if args.device_metrics:
         _print_summary("llm_avg_power", llm_avg_power_w, "W")
         _print_summary("llm_p99_power", llm_p99_power_w, "W")
@@ -1386,9 +2001,22 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         decode_tps = run.decode_sweep.tps_values[-1] if run.decode_sweep.tps_values else None
         ttft_ms = (run.prefill_sweep.time_values[-1] * 1000.0) if run.prefill_sweep.time_values else None
         decode_ms = (run.decode_sweep.time_values[-1] * 1000.0) if run.decode_sweep.time_values else None
+        prefill_npu_pct = None
+        if run.prefill_sweep.avg_total_token_latency_values and run.prefill_sweep.avg_npu_token_latency_values:
+            prefill_npu_pct = npu_latency_pct(
+                run.prefill_sweep.avg_total_token_latency_values[-1],
+                run.prefill_sweep.avg_npu_token_latency_values[-1],
+            )
+        decode_npu_pct = None
+        if run.decode_sweep.avg_total_token_latency_values and run.decode_sweep.avg_npu_token_latency_values:
+            decode_npu_pct = npu_latency_pct(
+                run.decode_sweep.avg_total_token_latency_values[-1],
+                run.decode_sweep.avg_npu_token_latency_values[-1],
+            )
         csv_rows.append(
             {
                 "type": "llm",
+                "batch_size": batch_size,
                 "image_resolution": llm_resolution,
                 "repeat_index": idx,
                 "vision_encode_ms": None,
@@ -1400,6 +2028,8 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "llm_ttft_ms": ttft_ms,
                 "llm_decode_ms": decode_ms,
                 "llm_total_ms": None,
+                "llm_prefill_npu_latency_pct": prefill_npu_pct,
+                "llm_decode_npu_latency_pct": decode_npu_pct,
                 "avg_power_w": getattr(run, "avg_power_w", None),
                 "p99_power_w": getattr(run, "p99_power_w", None),
                 "avg_utilization_pct": getattr(run, "avg_utilization_pct", None),
@@ -1428,20 +2058,25 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
                 "task": args.task,
                 "model": args.model,
                 "prompt": args.prompt,
-                "llm_prefill_range": list(args.llm_prefill_range),
-                "llm_cache_lengths": args.llm_cache_lengths,
-                "llm_decode_window": args.llm_decode_window,
+                "prefill_range": list(args.prefill_range),
+                "cache_lengths": args.cache_lengths,
+                "decode_window": args.decode_window,
+                "batch_size": batch_size,
                 "vision_results": resolution_payloads,
                 "llm_reference_resolution": llm_resolution,
                 "llm_results": {
                     "repeat": args.repeat,
+                    "batch_size": batch_size,
                     "aggregate": asdict(llm_result),
                     "runs": [asdict(r) for r in llm_runs],
+                    "device_time_series_runs": llm_device_time_series_runs,
                     "summary": {
-                        "llm_prefill_tps_last": _summary(llm_prefill_tps),
-                        "llm_decode_tps_last": _summary(llm_decode_tps),
-                        "llm_ttft_ms_last": _summary(llm_ttft_ms),
-                        "llm_decode_duration_ms_last": _summary(llm_decode_ms),
+                        "llm_prefill_tps": _summary(llm_prefill_tps),
+                        "llm_decode_tps": _summary(llm_decode_tps),
+                        "llm_ttft_ms": _summary(llm_ttft_ms),
+                        "llm_decode_duration_ms": _summary(llm_decode_ms),
+                        "llm_prefill_npu_latency_pct": _summary(llm_prefill_npu_latency_pct),
+                        "llm_decode_npu_latency_pct": _summary(llm_decode_npu_latency_pct),
                         "avg_power_w": _summary(llm_avg_power_w),
                         "p99_power_w": _summary(llm_p99_power_w),
                         "avg_utilization_pct": _summary(llm_avg_utilization_pct),
@@ -1464,11 +2099,15 @@ def _cmd_vlm_sweep(args: argparse.Namespace) -> int:
         _write_csv(args.csv, csv_rows)
         print(f"wrote: {args.csv}")
 
+    if args.plot:
+        _plot_vlm_sweep(resolution_payloads=resolution_payloads, llm_result=llm_result, save_path=args.plot)
+        print(f"wrote: {args.plot}")
+
     return 0
 
 
 def add_tps_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("tps", help="Measure/sweep tokens-per-second")
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
@@ -1485,7 +2124,7 @@ def add_tps_parser(
             default=None,
             help="tokenizer id or local path (defaults to model)",
         )
-        p.add_argument("--device", default="cpu", help="device for pipeline (e.g., cpu, cuda:0)")
+        p.add_argument("--device", default=None, help="device for pipeline (e.g., cpu, cuda:0)")
         p.add_argument(
             "--revision",
             default=None,
@@ -1503,8 +2142,9 @@ def add_tps_parser(
         )
         p.add_argument(
             "--core-mode",
+            choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, multi, global4, global8)",
+            help="NPU core mode (single, global4, global8)",
         )
         p.add_argument(
             "--target-cores",
@@ -1542,14 +2182,32 @@ def add_tps_parser(
             "--prefill-chunk-size",
             type=_parse_positive_int_optional,
             default=None,
-            help="optional prefill_chunk_size forwarded to model.generate/model.forward (default: None)",
+            help="optional prefill_chunk_size forwarded to model.generate/model.forward",
+        )
+        p.add_argument(
+            "--batch-size",
+            type=_parse_positive_int,
+            default=None,
+            help="batch size for synthetic inputs; defaults to model max_batch_size when available",
         )
         _add_device_tracking_args(p)
+        p.set_defaults(device_backend=None)
 
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
-    p_measure.add_argument("--prefill", type=_parse_positive_int, default=512, help="input token count")
-    p_measure.add_argument("--decode", type=_parse_positive_int, default=128, help="new tokens to generate")
+    p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
+    p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--image-resolution",
+        type=_parse_positive_int,
+        default=224,
+        help="VLM only: synthetic image resolution for single measurement",
+    )
+    p_measure.add_argument(
+        "--prompt",
+        default="Describe the image in one sentence.",
+        help="VLM only: fixed prompt used for synthetic image-text input",
+    )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
 
@@ -1558,20 +2216,37 @@ def add_tps_parser(
     p_sweep.add_argument(
         "--prefill-range",
         type=_parse_range,
-        default=(128, 512, 128),
+        default=(512, 2048, 512),
         help="prefill sweep range (start:end:step)",
     )
     p_sweep.add_argument(
         "--cache-lengths",
         type=_parse_int_list,
-        default=[1024, 2048, 4096, 8192],
+        default=[128, 512, 1024, 2048],
         help="comma-separated cache lengths for decode sweep",
     )
     p_sweep.add_argument(
         "--decode-window",
         type=_parse_positive_int,
-        default=128,
+        default=32,
         help="decode token window measured after each cache-length prefill",
+    )
+    p_sweep.add_argument(
+        "--image-resolutions",
+        type=_parse_int_list,
+        default=[224, 384, 512, 768],
+        help="VLM only: comma-separated image resolutions for vision encoder sweep",
+    )
+    p_sweep.add_argument(
+        "--llm-resolution",
+        type=_parse_positive_int_optional,
+        default=None,
+        help="VLM only: reference resolution used for LLM benchmark (default: first image resolution)",
+    )
+    p_sweep.add_argument(
+        "--prompt",
+        default="Describe the image in one sentence.",
+        help="VLM only: fixed prompt used for synthetic image-text input",
     )
     p_sweep.add_argument("--plot", default="tps_benchmark.png", help="write PNG plot")
     p_sweep.add_argument(
@@ -1584,45 +2259,3 @@ def add_tps_parser(
     p_sweep.add_argument("--json", default=None, help="write sweep result as JSON")
     p_sweep.add_argument("--csv", default=None, help="write sweep rows as CSV")
     p_sweep.set_defaults(_handler=_cmd_sweep)
-
-    p_vlm = tps_sub.add_parser("vlm-sweep", help="Synthetic VLM benchmark by image resolution")
-    add_common(p_vlm)
-    p_vlm.set_defaults(task="image-text-to-text")
-    p_vlm.add_argument(
-        "--image-resolutions",
-        type=_parse_int_list,
-        default=[224, 384, 512, 768],
-        help="comma-separated image resolutions (e.g., 224,384,512)",
-    )
-    p_vlm.add_argument(
-        "--llm-prefill-range",
-        type=_parse_range,
-        default=(128, 512, 128),
-        help="llm prefill sweep range by total multimodal prefix length (start:end:step)",
-    )
-    p_vlm.add_argument(
-        "--llm-cache-lengths",
-        type=_parse_int_list,
-        default=[1024, 2048, 4096, 8192],
-        help="comma-separated llm cache lengths for decode sweep",
-    )
-    p_vlm.add_argument(
-        "--llm-decode-window",
-        type=_parse_positive_int,
-        default=128,
-        help="decode token window for llm cache-length sweep",
-    )
-    p_vlm.add_argument(
-        "--llm-resolution",
-        type=_parse_positive_int_optional,
-        default=None,
-        help="reference resolution used for LLM-only benchmark (default: first image resolution)",
-    )
-    p_vlm.add_argument(
-        "--prompt",
-        default="Describe the image in one sentence.",
-        help="fixed prompt used for synthetic VLM input",
-    )
-    p_vlm.add_argument("--json", default=None, help="write VLM results as JSON")
-    p_vlm.add_argument("--csv", default=None, help="write VLM rows as CSV")
-    p_vlm.set_defaults(_handler=_cmd_vlm_sweep)

@@ -252,162 +252,36 @@ def main() -> int:
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
             token_selector=lambda m: m.prefill_tps,
-            title="Prefill TPS",
-            x_label="TPS (tokens/sec)",
+            title="Prefill Tokens Per Second",
+            x_label="Tokens Per Second",
             output_path=output_dir / "prefill_tps.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.decode_tps,
-            title="Decode TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=output_dir / "decode_tps.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.prefill_latency_ms,
-            title="Prefill Latency",
-            x_label="Latency (ms)",
-            output_path=output_dir / "prefill_latency_ms.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.decode_duration_ms,
-            title="Decode Duration",
-            x_label="Duration (ms)",
-            output_path=output_dir / "decode_duration_ms.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_power_w,
-            title="Average Power",
-            x_label="Power (W)",
-            output_path=output_dir / "avg_power_w.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.total_energy_j,
-            title="Total Energy",
-            x_label="Energy (J)",
-            output_path=output_dir / "total_energy_j.png",
         )
         plot_scalar_chart(
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.prefill_tokens_per_j,
-            title="Prefill Tokens/J",
-            x_label="Tokens/J",
+            title="Prefill Tokens Per Joule",
+            x_label="Tokens Per Joule",
             output_path=output_dir / "prefill_tokens_per_j.png",
+        )
+        plot_token_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            token_selector=lambda m: m.decode_tps,
+            title="Decode Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=output_dir / "decode_tps.png",
         )
         plot_scalar_chart(
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.decode_tokens_per_j,
-            title="Decode Tokens/J",
-            x_label="Tokens/J",
+            title="Decode Tokens Per Joule",
+            x_label="Tokens Per Joule",
             output_path=output_dir / "decode_tokens_per_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.prefill_j_per_token,
-            title="Prefill J/Token",
-            x_label="J/Token",
-            output_path=output_dir / "prefill_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.decode_j_per_token,
-            title="Decode J/Token",
-            x_label="J/Token",
-            output_path=output_dir / "decode_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_utilization_pct,
-            title="Average Utilization",
-            x_label="Utilization (%)",
-            output_path=output_dir / "avg_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_utilization_pct,
-            title="P99 Utilization",
-            x_label="Utilization (%)",
-            output_path=output_dir / "p99_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_temperature_c,
-            title="Average Temperature",
-            x_label="Temperature (C)",
-            output_path=output_dir / "avg_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_temperature_c,
-            title="P99 Temperature",
-            x_label="Temperature (C)",
-            output_path=output_dir / "p99_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_mb,
-            title="Average Memory Used",
-            x_label="Memory (MB)",
-            output_path=output_dir / "avg_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_mb,
-            title="P99 Memory Used",
-            x_label="Memory (MB)",
-            output_path=output_dir / "p99_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_pct,
-            title="Average Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=output_dir / "avg_memory_used_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_pct,
-            title="P99 Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=output_dir / "p99_memory_used_pct.png",
         )
     else:
         plot_scalar_chart(
@@ -415,198 +289,54 @@ def main() -> int:
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.llm_prefill_tps,
-            title="LLM Prefill TPS",
-            x_label="TPS (tokens/sec)",
+            title="Prefill Tokens Per Second",
+            x_label="Tokens Per Second",
             output_path=output_dir / "llm_prefill_tps.png",
         )
         plot_scalar_chart(
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_decode_tps,
-            title="LLM Decode TPS",
-            x_label="TPS (tokens/sec)",
-            output_path=output_dir / "llm_decode_tps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_ttft_ms,
-            title="LLM TTFT",
-            x_label="Latency (ms)",
-            output_path=output_dir / "llm_ttft_ms.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_decode_duration_ms,
-            title="LLM Decode Duration",
-            x_label="Duration (ms)",
-            output_path=output_dir / "llm_decode_duration_ms.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.vision_encode_ms,
-            title="Vision Encode Latency",
-            x_label="Latency (ms)",
-            output_path=output_dir / "vision_encode_ms.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.vision_fps,
-            title="Vision FPS",
-            x_label="FPS",
-            output_path=output_dir / "vision_fps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.vision_img_per_j,
-            title="Vision Img/J",
-            x_label="img/J",
-            output_path=output_dir / "vision_img_per_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.vision_j_per_img,
-            title="Vision J/Img",
-            x_label="J/img",
-            output_path=output_dir / "vision_j_per_img.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.llm_prefill_tok_per_j,
-            title="LLM Prefill Tokens/J",
-            x_label="tok/J",
+            title="Prefill Tokens Per Joule",
+            x_label="Tokens Per Joule",
             output_path=output_dir / "llm_prefill_tokens_per_j.png",
         )
         plot_scalar_chart(
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
+            scalar_selector=lambda m: m.llm_decode_tps,
+            title="Decode Tokens Per Second",
+            x_label="Tokens Per Second",
+            output_path=output_dir / "llm_decode_tps.png",
+        )
+        plot_scalar_chart(
+            models=models,
+            folder_labels=labels,
+            metrics_by_folder=metrics_by_folder,
             scalar_selector=lambda m: m.llm_decode_tok_per_j,
-            title="LLM Decode Tokens/J",
-            x_label="tok/J",
+            title="Decode Tokens Per Joule",
+            x_label="Tokens Per Joule",
             output_path=output_dir / "llm_decode_tokens_per_j.png",
         )
+
+    shared_scalar_specs = [
+        ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
+        ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
+        ("avg_utilization_pct.png", "Utilization", "Utilization (Percent)", lambda m: m.avg_utilization_pct),
+        ("avg_memory_used_mb.png", "Memory Used Megabytes", "Memory Used (Megabytes)", lambda m: m.avg_memory_used_mb),
+        ("total_energy_j.png", "Total Energy", "Energy (Joules)", lambda m: m.total_energy_j),
+    ]
+    for filename, title, x_label, selector in shared_scalar_specs:
         plot_scalar_chart(
             models=models,
             folder_labels=labels,
             metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_prefill_j_per_tok,
-            title="LLM Prefill J/Token",
-            x_label="J/tok",
-            output_path=output_dir / "llm_prefill_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_decode_j_per_tok,
-            title="LLM Decode J/Token",
-            x_label="J/tok",
-            output_path=output_dir / "llm_decode_j_per_token.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_power_w,
-            title="Average Power",
-            x_label="Power (W)",
-            output_path=output_dir / "avg_power_w.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.total_energy_j,
-            title="Total Energy",
-            x_label="Energy (J)",
-            output_path=output_dir / "total_energy_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_utilization_pct,
-            title="Average Utilization",
-            x_label="Utilization (%)",
-            output_path=output_dir / "avg_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_utilization_pct,
-            title="P99 Utilization",
-            x_label="Utilization (%)",
-            output_path=output_dir / "p99_utilization_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_temperature_c,
-            title="Average Temperature",
-            x_label="Temperature (C)",
-            output_path=output_dir / "avg_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_temperature_c,
-            title="P99 Temperature",
-            x_label="Temperature (C)",
-            output_path=output_dir / "p99_temperature_c.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_mb,
-            title="Average Memory Used",
-            x_label="Memory (MB)",
-            output_path=output_dir / "avg_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_mb,
-            title="P99 Memory Used",
-            x_label="Memory (MB)",
-            output_path=output_dir / "p99_memory_used_mb.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.avg_memory_used_pct,
-            title="Average Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=output_dir / "avg_memory_used_pct.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.p99_memory_used_pct,
-            title="P99 Memory Used (%)",
-            x_label="Memory Usage (%)",
-            output_path=output_dir / "p99_memory_used_pct.png",
+            scalar_selector=selector,
+            title=title,
+            x_label=x_label,
+            output_path=output_dir / filename,
         )
 
     print(f"Saved charts to: {output_dir}")

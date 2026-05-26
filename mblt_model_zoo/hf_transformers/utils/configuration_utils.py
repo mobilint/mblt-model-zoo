@@ -396,8 +396,16 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
         unused_kwargs: dict[str, Any]
         config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)  # type: ignore
 
-        config.text_config.name_or_path = config.name_or_path
-        config.vision_config.name_or_path = config.name_or_path
+        for sub_config in (config.text_config, config.vision_config):
+            sub_config.name_or_path = config.name_or_path
+
+            revision = getattr(config, "revision", None)
+            if revision:
+                sub_config.revision = revision
+
+            commit_hash = getattr(config, "_commit_hash", None)
+            if commit_hash:
+                sub_config._commit_hash = commit_hash
 
         if return_unused_kwargs:
             return config, unused_kwargs

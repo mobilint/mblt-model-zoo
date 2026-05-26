@@ -1,7 +1,12 @@
+import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
+import matplotlib
+
+if "MPLBACKEND" not in os.environ:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -96,6 +101,41 @@ def plot_grouped_scalar_barh(
     ax.set_title(title)
     ax.grid(axis="x", linestyle="--", alpha=0.3)
     ax.legend(loc="best")
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def plot_simple_barh(
+    *,
+    labels: Sequence[str],
+    values: Sequence[float],
+    x_label: str,
+    title: str,
+    output_path: Path,
+    fig_width: float = 12.0,
+) -> None:
+    """Plots a single horizontal bar chart.
+
+    Args:
+        labels: Y-axis labels.
+        values: Numeric values aligned with labels.
+        x_label: X-axis label.
+        title: Chart title.
+        output_path: Destination PNG path.
+        fig_width: Figure width.
+    """
+    if not labels:
+        return
+    fig, ax = plt.subplots(figsize=(fig_width, max(4.0, 0.45 * len(labels) + 2.0)))
+    y = list(range(len(labels)))
+    ax.barh(y, [float(value) for value in values])
+    ax.set_yticks(y)
+    ax.set_yticklabels(list(labels))
+    ax.invert_yaxis()
+    ax.set_xlabel(x_label)
+    ax.set_title(title)
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
     plt.tight_layout()
     fig.savefig(output_path, dpi=220)
     plt.close(fig)

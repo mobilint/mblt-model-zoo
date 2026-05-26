@@ -55,6 +55,9 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
             if images.ndim == 3:  # CHW
                 images = images.unsqueeze(0).float()  # BCHW
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
+            elif images.ndim == 4:  # BCHW
+                images = images.float()
+                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             elif images.ndim == 2:  # HW
                 images = images.unsqueeze(0).unsqueeze(0).float()  # B1HW
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)

@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from transformers import HfArgumentParser
-
 
 def _require_melotts_deps() -> None:
     try:
@@ -32,7 +30,7 @@ def _cmd_melo(args: argparse.Namespace) -> int:
 
 
 def add_melo_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     # Forward all args to the Click-based MeloTTS CLI so `mblt-model-zoo melo --help`
     # shows Click help (not argparse help).

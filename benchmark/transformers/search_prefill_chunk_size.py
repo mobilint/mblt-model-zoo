@@ -1,21 +1,37 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import gc
 import json
 import math
 import os
 import re
 import statistics
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+import matplotlib
+
+if "MPLBACKEND" not in os.environ:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from transformers import pipeline as hf_pipeline
 
+from benchmark.common.argparse_utils import parse_int_csv as _parse_int_csv
+from benchmark.common.argparse_utils import parse_positive_int as _parse_positive_int
+from benchmark.common.io_utils import safe_filename as _safe_filename
+from benchmark.common.io_utils import write_csv as _write_csv
+from benchmark.common.io_utils import write_json as _write_json
+from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
+from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
+from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_SWEEP_VALUES as _CORE_MODE_SWEEP_VALUES_COMMON,
@@ -26,14 +42,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    parse_positive_int as _parse_positive_int_common,
-)
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
-
-
-def _safe_filename(text: str) -> str:
-    return text.replace("/", "__").replace("\\", "__").replace(":", "_").replace(" ", "_")
 
 
 def _discover_targets_from_mxq_dir(
@@ -133,10 +142,6 @@ def _discover_targets_from_available_models(
     return targets, skipped
 
 
-def _parse_positive_int(raw: str) -> int:
-    return _parse_positive_int_common(raw)
-
-
 def _parse_core_modes(raw: str) -> list[str]:
     modes = [x.strip() for x in raw.split(",") if x.strip()]
     if not modes:
@@ -146,46 +151,6 @@ def _parse_core_modes(raw: str) -> list[str]:
     if invalid:
         raise argparse.ArgumentTypeError(f"unsupported core mode(s): {invalid}. allowed={sorted(allowed)}")
     return modes
-
-
-def _is_cuda_device(device: str | None) -> bool:
-    return isinstance(device, str) and device.strip().lower().startswith("cuda")
-
-
-def _cuda_device_index(device: str | None) -> int | None:
-    if not _is_cuda_device(device):
-        return None
-    text = (device or "").strip().lower()
-    if ":" not in text:
-        return 0
-    try:
-        return int(text.split(":", 1)[1])
-    except ValueError:
-        return None
-
-
-def _clear_cuda_memory(device: str | None) -> None:
-    try:
-        import torch
-    except Exception:
-        return
-    if not torch.cuda.is_available():
-        return
-    idx = _cuda_device_index(device)
-    try:
-        if idx is not None:
-            torch.cuda.set_device(idx)
-    except Exception:
-        pass
-    gc.collect()
-    try:
-        torch.cuda.empty_cache()
-    except Exception:
-        pass
-    try:
-        torch.cuda.ipc_collect()
-    except Exception:
-        pass
 
 
 def _build_pipeline(
@@ -228,22 +193,6 @@ def _build_pipeline(
     return hf_pipeline(**kwargs)
 
 
-def _release_pipeline(pipeline_obj: Any, device: str | None) -> None:
-    if pipeline_obj is not None:
-        try:
-            model_obj = getattr(pipeline_obj, "model", None)
-            if model_obj is not None and hasattr(model_obj, "dispose"):
-                model_obj.dispose()
-            elif hasattr(pipeline_obj, "dispose"):
-                pipeline_obj.dispose()
-        except Exception:
-            pass
-        del pipeline_obj
-    gc.collect()
-    if _is_cuda_device(device):
-        _clear_cuda_memory(device)
-
-
 def _median(values: list[float]) -> float:
     return float(statistics.median(values))
 
@@ -281,7 +230,7 @@ def _measure_prefill_median(
             measurer=measurer,
             prefill_length=prefill_length,
             decode_length=decode_length,
-            prefill_chunk_size=chunk_size,
+            chunk_size=chunk_size,
         )
         tps_values.append(tps)
         wall_times.append(wall)
@@ -299,19 +248,6 @@ def _is_timeout_like_error(exc: Exception) -> bool:
         "device hang",
     )
     return any(k in msg for k in keywords)
-
-
-def _parse_int_csv(raw: str) -> list[int]:
-    parts = [x.strip() for x in str(raw).split(",") if x.strip()]
-    if not parts:
-        raise argparse.ArgumentTypeError("expected at least one integer")
-    try:
-        values = [int(x) for x in parts]
-    except ValueError as e:
-        raise argparse.ArgumentTypeError("all values must be integers") from e
-    if any(v <= 0 for v in values):
-        raise argparse.ArgumentTypeError("all values must be > 0")
-    return sorted(set(values))
 
 
 def _run_prefill_grid(
@@ -491,12 +427,6 @@ def _run_prefill_grid(
     }
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-
 def _load_record(path: Path) -> dict[str, Any] | None:
     try:
         with path.open("r", encoding="utf-8") as f:
@@ -549,18 +479,6 @@ def _collect_rows(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
                 }
             )
     return measurement_rows, best_rows
-
-
-def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = list(rows[0].keys())
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
 
 
 def _plot_mode_prefill_2d_chart(
@@ -770,7 +688,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--decode-length", type=_parse_positive_int, default=16, help="fixed decode length per measurement"
     )
     parser.add_argument("--warmup", type=_parse_positive_int, default=1, help="warmup runs per model/core mode")
-    parser.add_argument("--repeat", type=_parse_positive_int, default=3, help="repeat count per chunk size")
+    parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="repeat count per chunk size")
     parser.add_argument(
         "--time-guard-sec",
         type=float,

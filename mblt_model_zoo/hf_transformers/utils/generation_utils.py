@@ -1,5 +1,7 @@
 from abc import ABC
-from typing import Dict
+import inspect
+from functools import wraps
+from typing import Any, Callable, Dict, Optional
 
 import qbruntime
 from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
@@ -8,7 +10,73 @@ from ..utils.cache_utils import MobilintCache
 from ..utils.modeling_utils import MobilintModelMixin
 
 
+def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: str) -> Callable:
+    """Preserve an upstream generation hook signature while adding Mobilint kwargs.
+
+    Args:
+        wrapped: Upstream callable whose public signature should be preserved.
+        *extra_keyword_names: Keyword-only parameters to append before ``**kwargs``.
+
+    Returns:
+        Decorator that applies ``functools.wraps`` and exposes an augmented signature.
+    """
+
+    def decorator(wrapper: Callable) -> Callable:
+        wrapper_signature = inspect.signature(wrapper)
+        wrapper = wraps(wrapped)(wrapper)
+        signature = inspect.signature(wrapped)
+        parameters = list(signature.parameters.values())
+        existing = set(signature.parameters)
+        insert_at = next(
+            (idx for idx, parameter in enumerate(parameters) if parameter.kind == inspect.Parameter.VAR_KEYWORD),
+            len(parameters),
+        )
+        for name in extra_keyword_names:
+            if name in existing:
+                continue
+            extra_parameter = wrapper_signature.parameters.get(name)
+            default = False if extra_parameter is None else extra_parameter.default
+            annotation = bool if extra_parameter is None else extra_parameter.annotation
+            parameters.insert(
+                insert_at,
+                inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=annotation),
+            )
+            insert_at += 1
+        wrapper.__signature__ = signature.replace(parameters=parameters)
+        return wrapper
+
+    return decorator
+
+
 class MobilintGenerationMixin(ABC, GenerationMixin):
+    @with_mobilint_generation_signature(
+        GenerationMixin.prepare_inputs_for_generation,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
+    def prepare_inputs_for_generation(
+        self,
+        *args: Any,
+        count_npu_time: bool = False,
+        prefill_chunk_size: Optional[int] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Prepare generation inputs while preserving Mobilint benchmark kwargs.
+
+        Args:
+            *args: Positional arguments forwarded to the upstream generation helper.
+            count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
+            prefill_chunk_size: Optional Mobilint prefill chunk size.
+            **kwargs: Keyword arguments forwarded to the upstream generation helper.
+
+        Returns:
+            Prepared model inputs for the next generation step.
+        """
+        model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
+        model_inputs["count_npu_time"] = count_npu_time
+        model_inputs["prefill_chunk_size"] = prefill_chunk_size
+        return model_inputs
+
     def get_cache_mxq_model(self) -> qbruntime.Model:
         if isinstance(self, MobilintModelMixin):
             return self.get_mxq_model()
