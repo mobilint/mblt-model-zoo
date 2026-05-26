@@ -103,6 +103,7 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
+    "qwen-asr; python_version >= '3.10'",
 ]
 
 [tool.pytest.ini_options]
