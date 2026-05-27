@@ -685,7 +685,6 @@ class MobilintQwen2Eagle3ForCausalLM(
         super().__init__(config, *args, **kwargs)
         self.model = MobilintQwen2Eagle3Model(config, _internal_call=True, no_launch=no_launch)
         self.lm_head = nn.Identity()
-        self._dummy_param = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.post_init()
 
     @property
@@ -772,7 +771,7 @@ class MobilintQwen2Eagle3ForCausalLM(
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
         return CausalLMOutputWithPast(
             loss=loss,
-            logits=cast(torch.FloatTensor, logits.to(self._dummy_param.device)),
+            logits=cast(torch.FloatTensor, logits),
             past_key_values=past_key_values,
             hidden_states=None if outputs is None else tuple(outputs["hidden_states"]),
             attentions=None,
