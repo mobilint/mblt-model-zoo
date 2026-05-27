@@ -154,6 +154,18 @@ def evaluate_posterior(
     retrieve_indices: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """Choose the best accepted branch and the next sampling distribution."""
+    if logits.ndim == 1:
+        logits = logits.unsqueeze(0)
+
+    def select_token_logits(source: torch.Tensor, index: torch.Tensor | int) -> torch.Tensor:
+        """Select a token distribution without collapsing it to a scalar."""
+        selected = source[index]
+        if selected.ndim == 0:
+            return source
+        if selected.ndim > 1:
+            return selected[0]
+        return selected
+
     if logits_processor is None:
         path_positions = retrieve_indices[:, :-1].to(logits.device)
         safe_positions = path_positions.clamp_min(0)
@@ -183,7 +195,7 @@ def evaluate_posterior(
             break
         matching = (candidates[:, :accept_length] == accept_prefix).all(dim=1)
         topk_probs, topk_indices = softmax_topk_cpu_torch(
-            logits[retrieve_idx][0],
+            select_token_logits(logits, retrieve_idx),
             10,
             logits_processor=logits_processor,
         )
@@ -212,8 +224,9 @@ def evaluate_posterior(
     if adjusted and accept_length != candidates.shape[1]:
         sample_p = topk_probs
     else:
+        sample_logits = select_token_logits(logits, retrieve_indices[best_candidate, accept_length - 1])
         sample_p, sampled_indices = softmax_topk_cpu_torch(
-            logits[retrieve_indices[best_candidate, accept_length - 1]],
+            sample_logits,
             10,
             logits_processor=logits_processor,
         )

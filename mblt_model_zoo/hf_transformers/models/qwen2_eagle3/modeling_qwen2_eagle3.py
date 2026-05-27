@@ -8,7 +8,7 @@ from typing import Any, Optional, cast
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoModelForCausalLM
+from transformers import AutoModel, AutoModelForCausalLM, GenerationConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
 
@@ -241,11 +241,11 @@ class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreTr
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
-        inputs_embeds_numpy = inputs_embeds.cpu().contiguous().numpy()
+        inputs_embeds_numpy = inputs_embeds.cpu().contiguous().float().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
 
-        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids)
+        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids).astype(np.float32, copy=False)
         if position_embs_numpy.ndim == 3:
             position_embs_numpy = np.expand_dims(position_embs_numpy, 1)
 
@@ -401,7 +401,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
             )
         else:
             position_ids = position_ids.view(-1, seq_length).long()
-        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids)
+        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids).astype(np.float32, copy=False)
         if position_embs_numpy.ndim == 3:
             position_embs_numpy = np.expand_dims(position_embs_numpy, 1)
 
@@ -784,6 +784,7 @@ class MobilintQwen2Eagle3ForCausalLM(
         inputs: Optional[torch.Tensor] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        generation_config: Optional[GenerationConfig] = None,
         max_new_tokens: Optional[int] = None,
         do_sample: Optional[bool] = None,
         temperature: Optional[float] = None,
@@ -798,6 +799,30 @@ class MobilintQwen2Eagle3ForCausalLM(
         assistant_model: Optional[PreTrainedModel] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
+        """Generate tokens with the Mobilint EAGLE-3 decoding loop.
+
+        Args:
+            inputs: Optional tensor alias for ``input_ids``.
+            input_ids: Prompt token ids.
+            attention_mask: Optional attention mask for the prompt.
+            generation_config: Optional Hugging Face generation config from the pipeline.
+            max_new_tokens: Maximum number of new tokens to emit.
+            do_sample: Whether to use sampling. ``False`` forces deterministic decoding.
+            temperature: Sampling temperature.
+            top_p: Nucleus sampling threshold.
+            top_k: Top-k sampling threshold.
+            streamer: Optional text streamer passed through by the pipeline.
+            return_dict_in_generate: Unsupported Hugging Face generation output mode.
+            output_scores: Unsupported Hugging Face generation output mode.
+            output_hidden_states: Unsupported Hugging Face generation output mode.
+            output_attentions: Unsupported Hugging Face generation output mode.
+            num_beams: Beam search width. Only greedy decoding is supported.
+            assistant_model: Unsupported Hugging Face assistant model.
+            **kwargs: Additional generation kwargs.
+
+        Returns:
+            The generated token tensor.
+        """
         if return_dict_in_generate or output_scores or output_hidden_states or output_attentions:
             raise NotImplementedError("mobilint-qwen2-eagle3 only returns generated token tensors in v1.")
         if num_beams != 1:
@@ -814,7 +839,7 @@ class MobilintQwen2Eagle3ForCausalLM(
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
             raise NotImplementedError("mobilint-qwen2-eagle3 only supports batch size 1.")
 
-        generation_config = self.generation_config
+        generation_config = self.generation_config if generation_config is None else generation_config
         resolved_max_new_tokens = int(
             max_new_tokens if max_new_tokens is not None else generation_config.max_new_tokens
         )
