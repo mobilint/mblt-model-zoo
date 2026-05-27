@@ -151,28 +151,30 @@ def apply_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     core_mode: str | None,
     *,
+    prefix: str | None = None,
     target_cores: list[str] | None = None,
     target_clusters: list[int] | None = None,
 ) -> dict[str, Any]:
+    key_prefix = f"{prefix}_" if prefix else ""
     if not core_mode:
         if target_cores:
-            model_kwargs["target_cores"] = target_cores
+            model_kwargs[f"{key_prefix}target_cores"] = target_cores
         if target_clusters:
-            model_kwargs["target_clusters"] = target_clusters
+            model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
         return model_kwargs
 
-    model_kwargs["core_mode"] = core_mode
+    model_kwargs[f"{key_prefix}core_mode"] = core_mode
     if target_cores:
-        model_kwargs["target_cores"] = target_cores
+        model_kwargs[f"{key_prefix}target_cores"] = target_cores
     elif core_mode == "single":
-        model_kwargs["target_cores"] = ["0:0"]
+        model_kwargs[f"{key_prefix}target_cores"] = ["0:0"]
 
     if target_clusters:
-        model_kwargs["target_clusters"] = target_clusters
+        model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
     elif not target_cores and core_mode == "global4":
-        model_kwargs["target_clusters"] = [0]
+        model_kwargs[f"{key_prefix}target_clusters"] = [0]
     elif not target_cores and core_mode == "global8":
-        model_kwargs["target_clusters"] = [0, 1]
+        model_kwargs[f"{key_prefix}target_clusters"] = [0, 1]
     return model_kwargs
 
 

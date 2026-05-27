@@ -424,3 +424,69 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
             vision_config=vision_config.to_dict(),
             **kwargs,
         )
+
+
+class MobilintEagle3ConfigMixin(PretrainedConfig):
+    """Config mixin for EAGLE-3 models with base/draft/fc backends."""
+
+    sub_configs = {"draft_config": MobilintConfigMixin}
+
+    def _ensure_eagle3_npu_backends(self, kwargs: dict[str, Any]) -> None:
+        if not hasattr(self, "base_npu_backend"):
+            self.base_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="base_")
+        if not hasattr(self, "draft_npu_backend"):
+            self.draft_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="draft_")
+        if not hasattr(self, "fc_npu_backend"):
+            self.fc_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="fc_")
+
+    def __init__(self, **kwargs):
+        self._ensure_eagle3_npu_backends(kwargs)
+        super().__init__(**kwargs)
+
+    def __post_init__(self, **kwargs: Any) -> None:
+        self._ensure_eagle3_npu_backends(kwargs)
+        super().__post_init__(**kwargs)
+
+    @PretrainedConfig.name_or_path.setter
+    def name_or_path(self, value):
+        PretrainedConfig.name_or_path.fset(self, value)
+        draft_config = getattr(self, "draft_config", None)
+        if draft_config is not None:
+            draft_config.name_or_path = value
+
+    @property
+    def base_mxq_path(self) -> str:
+        return self.base_npu_backend.mxq_path
+
+    @base_mxq_path.setter
+    def base_mxq_path(self, value: str) -> None:
+        self.base_npu_backend.mxq_path = value
+
+    @property
+    def draft_mxq_path(self) -> str:
+        return self.draft_npu_backend.mxq_path
+
+    @draft_mxq_path.setter
+    def draft_mxq_path(self, value: str) -> None:
+        self.draft_npu_backend.mxq_path = value
+
+    @property
+    def fc_mxq_path(self) -> str:
+        return self.fc_npu_backend.mxq_path
+
+    @fc_mxq_path.setter
+    def fc_mxq_path(self, value: str) -> None:
+        self.fc_npu_backend.mxq_path = value
+
+    def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
+        _ = d.pop("base_npu_backend", None)
+        _ = d.pop("draft_npu_backend", None)
+        _ = d.pop("fc_npu_backend", None)
+        super()._remove_keys_not_serialized(d)
+
+    def to_dict(self):
+        output = super().to_dict()
+        output.update(self.base_npu_backend.to_dict(prefix="base_"))
+        output.update(self.draft_npu_backend.to_dict(prefix="draft_"))
+        output.update(self.fc_npu_backend.to_dict(prefix="fc_"))
+        return output

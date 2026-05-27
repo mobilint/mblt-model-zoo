@@ -1871,6 +1871,57 @@ def test_cli_tps_vlm_core_kwargs_preserve_explicit_targets():
     }
 
 
+def test_cli_tps_eagle3_build_pipeline_uses_prefixed_backend_kwargs(monkeypatch: pytest.MonkeyPatch):
+    """Verify EAGLE-3 TPS pipeline maps prefixed MXQ and embedding kwargs directly."""
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("transformers.pipeline", _fake_pipeline)
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-JPharmatron-7B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path="base.pt",
+        draft_embedding_path="draft.pt",
+        mxq_path=None,
+        base_mxq_path="base.mxq",
+        draft_mxq_path="draft.mxq",
+        fc_mxq_path="fc.mxq",
+        core_mode="global4",
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        target_cores=None,
+        target_clusters=None,
+    )
+
+    model_kwargs = captured["model_kwargs"]
+    assert model_kwargs["base_embedding_weight"] == "base.pt"
+    assert model_kwargs["draft_embedding_weight"] == "draft.pt"
+    assert model_kwargs["base_mxq_path"] == "base.mxq"
+    assert model_kwargs["draft_mxq_path"] == "draft.mxq"
+    assert model_kwargs["fc_mxq_path"] == "fc.mxq"
+    assert model_kwargs["base_core_mode"] == "global4"
+    assert model_kwargs["draft_core_mode"] == "global4"
+    assert model_kwargs["fc_core_mode"] == "global4"
+
+
 def test_benchmark_result_iter_rows_pads_missing_latency_values():
     """Verify combined rows survive old JSON-style sweeps without latency arrays."""
     result = BenchmarkResult()

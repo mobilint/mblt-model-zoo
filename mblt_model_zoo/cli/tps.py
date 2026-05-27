@@ -254,8 +254,22 @@ def _build_pipeline(
     device_map: Union[str, None],
     revision: Union[str, None],
     embedding_weight: Union[str, None],
+    base_embedding_path: Union[str, None],
+    draft_embedding_path: Union[str, None],
     mxq_path: Union[str, None],
+    base_mxq_path: Union[str, None],
+    draft_mxq_path: Union[str, None],
+    fc_mxq_path: Union[str, None],
     core_mode: Union[str, None],
+    base_core_mode: Union[str, None],
+    draft_core_mode: Union[str, None],
+    fc_core_mode: Union[str, None],
+    base_target_cores: Union[list[str], None],
+    draft_target_cores: Union[list[str], None],
+    fc_target_cores: Union[list[str], None],
+    base_target_clusters: Union[list[int], None],
+    draft_target_clusters: Union[list[int], None],
+    fc_target_clusters: Union[list[int], None],
     target_cores: Union[list[str], None],
     target_clusters: Union[list[int], None],
 ) -> Any:
@@ -277,8 +291,37 @@ def _build_pipeline(
     model_kwargs: dict[str, Any] = {}
     if embedding_weight:
         model_kwargs["embedding_weight"] = embedding_weight
+    if base_embedding_path:
+        model_kwargs["base_embedding_weight"] = base_embedding_path
+    if draft_embedding_path:
+        model_kwargs["draft_embedding_weight"] = draft_embedding_path
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
+    if base_mxq_path:
+        model_kwargs["base_mxq_path"] = base_mxq_path
+    if draft_mxq_path:
+        model_kwargs["draft_mxq_path"] = draft_mxq_path
+    if fc_mxq_path:
+        model_kwargs["fc_mxq_path"] = fc_mxq_path
+    eagle3_prefix_requested = any(
+        value is not None
+        for value in (
+            base_embedding_path,
+            draft_embedding_path,
+            base_mxq_path,
+            draft_mxq_path,
+            fc_mxq_path,
+            base_core_mode,
+            draft_core_mode,
+            fc_core_mode,
+            base_target_cores,
+            draft_target_cores,
+            fc_target_cores,
+            base_target_clusters,
+            draft_target_clusters,
+            fc_target_clusters,
+        )
+    )
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
             model_kwargs,
@@ -286,6 +329,29 @@ def _build_pipeline(
             target_cores=target_cores,
             target_clusters=target_clusters,
         )
+    elif eagle3_prefix_requested:
+        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
+            (
+                "base",
+                base_core_mode or core_mode,
+                base_target_cores or target_cores,
+                base_target_clusters or target_clusters,
+            ),
+            (
+                "draft",
+                draft_core_mode or core_mode,
+                draft_target_cores or target_cores,
+                draft_target_clusters or target_clusters,
+            ),
+            ("fc", fc_core_mode or core_mode, fc_target_cores or target_cores, fc_target_clusters or target_clusters),
+        ):
+            model_kwargs = _apply_core_mode_model_kwargs_common(
+                model_kwargs,
+                prefix_core_mode,
+                target_cores=prefix_target_cores,
+                target_clusters=prefix_target_clusters,
+                prefix=prefix,
+            )
     else:
         model_kwargs = _apply_core_mode_model_kwargs_common(
             model_kwargs,
@@ -719,8 +785,22 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
         mxq_path=args.mxq_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
         core_mode=args.core_mode,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -970,8 +1050,22 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
         mxq_path=args.mxq_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
         core_mode=args.core_mode,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1197,8 +1291,22 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
         mxq_path=args.mxq_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
         core_mode=args.core_mode,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1669,8 +1777,22 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         device_map=args.device_map,
         revision=args.revision,
         embedding_weight=args.embedding_weight,
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
         mxq_path=args.mxq_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
         core_mode=args.core_mode,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -2135,11 +2257,17 @@ def add_tps_parser(
             default=None,
             help="path to custom embedding weights",
         )
+        p.add_argument("--base-embedding-path", default=None, help="path to custom base embedding weights")
+        p.add_argument("--draft-embedding-path", default=None, help="path to custom draft embedding weights")
         p.add_argument(
             "--mxq-path",
             default=None,
             help="override mxq_path for pipeline loading",
         )
+        for prefix in ("base", "draft", "fc"):
+            p.add_argument(
+                f"--{prefix}-mxq-path", default=None, help=f"override {prefix} mxq_path for pipeline loading"
+            )
         p.add_argument(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
@@ -2158,6 +2286,25 @@ def add_tps_parser(
             default=None,
             help='Target clusters (e.g., "0;1")',
         )
+        for prefix in ("base", "draft", "fc"):
+            p.add_argument(
+                f"--{prefix}-core-mode",
+                choices=list(_CORE_MODE_CHOICES),
+                default=None,
+                help=f"{prefix} NPU core mode (single, global4, global8)",
+            )
+            p.add_argument(
+                f"--{prefix}-target-cores",
+                type=_parse_target_cores,
+                default=None,
+                help=f'{prefix} target cores (e.g., "0:0;0:1")',
+            )
+            p.add_argument(
+                f"--{prefix}-target-clusters",
+                type=_parse_target_clusters,
+                default=None,
+                help=f'{prefix} target clusters (e.g., "0;1")',
+            )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
         p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")
         p.add_argument(

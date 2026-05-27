@@ -277,3 +277,116 @@ class MobilintDeepStackCache(MobilintCache):
             copied.layers[i] = self.layers[i].copy()
         copied._deepstack_tensor = None if self._deepstack_tensor is None else self._deepstack_tensor.clone()
         return copied
+
+
+class MobilintEagle3Cache(Cache):
+    """Mobilint cache for EAGLE-3 speculative decoding.
+
+    This cache carries both base and draft MXQ cache states plus the mutable tree
+    decoding state that upstream EAGLE-3 stores on the model instance.
+    """
+
+    def __init__(
+        self,
+        base_mxq_model: qbruntime.Model,
+        draft_mxq_model: qbruntime.Model,
+    ) -> None:
+        self.base_mxq_model = base_mxq_model
+        self.draft_mxq_model = draft_mxq_model
+        self.base_layer = MobilintLayer(base_mxq_model, 0)
+        self.draft_layer = MobilintLayer(draft_mxq_model, 0)
+        self.layers = [self.base_layer]
+        self.layer_classes = MobilintLayer
+        self.num_hidden_layers = 1
+        self.cache_processor = None
+        self.accept_tokens: Optional[torch.LongTensor] = None
+        self.tree_mask: Optional[torch.Tensor] = None
+        self.retrieve_indices: Optional[torch.LongTensor] = None
+        self.tree_position_ids: Optional[torch.LongTensor] = None
+        self.pending_draft_tokens: Optional[torch.LongTensor] = None
+
+    def get_seq_length(self, index: int = 0) -> int:
+        del index
+        return self.base_layer.get_seq_length()
+
+    def get_base_seq_length(self) -> int:
+        return self.base_layer.get_seq_length()
+
+    def get_draft_seq_length(self) -> int:
+        return self.draft_layer.get_seq_length()
+
+    def set_seq_length(self, sequence_length: int, index: int = 0) -> None:
+        del index
+        self.base_layer.set_seq_length(sequence_length)
+
+    def set_base_seq_length(self, sequence_length: int) -> None:
+        self.base_layer.set_seq_length(sequence_length)
+
+    def set_draft_seq_length(self, sequence_length: int) -> None:
+        self.draft_layer.set_seq_length(sequence_length)
+
+    def update_cache_position(self, cache_position: torch.Tensor, index: int = 0) -> None:
+        del index
+        self.base_layer.update_cache_position(cache_position)
+
+    def update_base_seen_tokens(self, num_new_seen_tokens: int) -> None:
+        self.base_layer.update_seen_tokens(num_new_seen_tokens)
+
+    def update_draft_seen_tokens(self, num_new_seen_tokens: int) -> None:
+        self.draft_layer.update_seen_tokens(num_new_seen_tokens)
+
+    def fake_prefill(self, sequence_length: int, index: int = 0) -> None:
+        del index
+        self.base_layer.fake_prefill(sequence_length)
+        self.draft_layer.fake_prefill(sequence_length)
+        self.accept_tokens = None
+        self.tree_mask = None
+        self.retrieve_indices = None
+        self.tree_position_ids = None
+        self.pending_draft_tokens = None
+
+    def reset(self) -> None:
+        self.base_layer.reset()
+        self.draft_layer.reset()
+        self.accept_tokens = None
+        self.tree_mask = None
+        self.retrieve_indices = None
+        self.tree_position_ids = None
+        self.pending_draft_tokens = None
+
+    def dump_cache_memory(self) -> None:
+        self.base_layer.dump_cache_memory()
+        self.draft_layer.dump_cache_memory()
+
+    def load_cache_memory(self) -> None:
+        self.base_layer.load_cache_memory()
+        self.draft_layer.load_cache_memory()
+
+    def dump_cache_memory_to(self, cache_dir: str, index: int = 0) -> None:
+        del index
+        base_dir = Path(cache_dir) / "base"
+        draft_dir = Path(cache_dir) / "draft"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        self.base_layer.dump_cache_memory_to(str(base_dir))
+        self.draft_layer.dump_cache_memory_to(str(draft_dir))
+
+    def load_cache_memory_from(self, cache_dir: str, index: int = 0) -> None:
+        del index
+        self.reset()
+        self.base_layer.load_cache_memory_from(str(Path(cache_dir) / "base"))
+        self.draft_layer.load_cache_memory_from(str(Path(cache_dir) / "draft"))
+
+    def copy(self) -> "MobilintEagle3Cache":
+        copied = MobilintEagle3Cache(self.base_mxq_model, self.draft_mxq_model)
+        copied.base_layer = self.base_layer.copy()
+        copied.draft_layer = self.draft_layer.copy()
+        copied.layers = [copied.base_layer]
+        copied.accept_tokens = None if self.accept_tokens is None else self.accept_tokens.clone()
+        copied.tree_mask = None if self.tree_mask is None else self.tree_mask.clone()
+        copied.retrieve_indices = None if self.retrieve_indices is None else self.retrieve_indices.clone()
+        copied.tree_position_ids = None if self.tree_position_ids is None else self.tree_position_ids.clone()
+        copied.pending_draft_tokens = (
+            None if self.pending_draft_tokens is None else self.pending_draft_tokens.clone()
+        )
+        return copied

@@ -10,7 +10,7 @@ import pytest
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
-ALL_PREFIXES = ("base", "encoder", "decoder", "vision", "text")
+ALL_PREFIXES = ("base", "draft", "fc", "encoder", "decoder", "vision", "text")
 
 
 def parse_target_cores(value: str | None) -> list[str] | None:
@@ -125,6 +125,13 @@ class VisionTextNpuParams:
 
     vision: dict[str, Any]
     text: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Eagle3NpuParams:
+    """NPU backend kwargs for EAGLE-3 models."""
+
+    model: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -334,6 +341,28 @@ def build_base_npu_params(
         base_kwargs["embedding_weight"] = embedding_weight
 
     return BaseNpuParams(base=base_kwargs)
+
+
+def build_eagle3_npu_params(
+    config: pytest.Config,
+    base_embedding_path: str | None,
+    draft_embedding_path: str | None,
+) -> Eagle3NpuParams:
+    """Build backend kwargs for EAGLE-3 models."""
+    provided_prefixes = collect_provided_prefixes(config, None)
+    warn_unused_prefixes(provided_prefixes, {"base", "draft", "fc"})
+
+    model_kwargs: dict[str, Any] = {}
+    for prefix in ("base", "draft", "fc"):
+        prefix_kwargs, _ = collect_npu_kwargs(config, prefix)
+        model_kwargs.update(prefix_kwargs)
+
+    if base_embedding_path:
+        model_kwargs["base_embedding_weight"] = base_embedding_path
+    if draft_embedding_path:
+        model_kwargs["draft_embedding_weight"] = draft_embedding_path
+
+    return Eagle3NpuParams(model=model_kwargs)
 
 
 def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) -> None:

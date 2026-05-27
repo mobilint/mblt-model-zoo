@@ -1,12 +1,12 @@
-from abc import ABC
 import inspect
+from abc import ABC
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 
 import qbruntime
 from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
 
-from ..utils.cache_utils import MobilintCache
+from ..utils.cache_utils import MobilintCache, MobilintEagle3Cache
 from ..utils.modeling_utils import MobilintModelMixin
 
 
@@ -82,13 +82,11 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
             return self.get_mxq_model()
         else:
             raise TypeError("mxq_model for cache not found! Class: %s" % self.__class__.__name__)
-    
+
     # Function arguments changed for transformers>=4.56.0
     # args contain device and model_kwargs in transformers<4.56.0
     # args contain only model_kwargs in transformers>=4.56.0
-    def _get_cache(
-        self, cache_implementation: str, batch_size: int, max_cache_len: int, *args
-    ) -> MobilintCache:
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintCache:
         configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
         if not hasattr(self, "_cache"):
             self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
@@ -96,7 +94,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
             self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
         else:
             self._cache.reset()
-            
+
         return self._cache
 
     # Function arguments changed for transformers>=4.56.0
@@ -114,7 +112,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         super()._prepare_cache_for_generation(
             generation_config,
             model_kwargs,
-            assistant_model, # type: ignore
+            assistant_model,  # type: ignore
             batch_size,
             max_cache_length,
             *args,
@@ -129,3 +127,38 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         else:
             model_kwargs[cache_name] = self._get_cache("mobilint", batch_size, max_cache_length, *args, model_kwargs)
             return True
+
+
+class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
+    """Custom generation mixin for Mobilint EAGLE-3 models."""
+
+    def get_cache_mxq_models(self) -> tuple[qbruntime.Model, qbruntime.Model]:
+        raise NotImplementedError("EAGLE-3 models must expose base and draft MXQ models.")
+
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintEagle3Cache:
+        del cache_implementation, batch_size, max_cache_len, args
+        if not hasattr(self, "_cache"):
+            base_mxq_model, draft_mxq_model = self.get_cache_mxq_models()
+            self._cache = MobilintEagle3Cache(base_mxq_model, draft_mxq_model)
+        else:
+            self._cache.reset()
+        return self._cache
+
+    def _prepare_cache_for_generation(
+        self,
+        generation_config: GenerationConfig,
+        model_kwargs: Dict,
+        assistant_model: "PreTrainedModel",
+        batch_size: int,
+        max_cache_length: int,
+        *args,
+    ) -> bool:
+        del generation_config, assistant_model, batch_size, max_cache_length, args
+        cache_name = "past_key_values"
+        if model_kwargs.get(cache_name) is None:
+            model_kwargs[cache_name] = self._get_cache("mobilint-eagle3", 1, 0)
+        elif not isinstance(model_kwargs[cache_name], MobilintEagle3Cache):
+            model_kwargs[cache_name] = self._get_cache("mobilint-eagle3", 1, 0)
+        else:
+            model_kwargs[cache_name].reset()
+        return True
