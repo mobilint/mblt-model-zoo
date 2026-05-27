@@ -6,13 +6,15 @@ import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence
+from typing import Any, Sequence
 
-import transformers
 from huggingface_hub.errors import HFValidationError
 from huggingface_hub.utils import validate_repo_id
 
 from .chat import register_mobilint_models
+
+_TRANSFORMERS_NOT_LOADED = object()
+transformers: Any = _TRANSFORMERS_NOT_LOADED
 
 TRANSFORMERS_CLI_COMMANDS = frozenset(
     {
@@ -36,14 +38,16 @@ def is_transformers_cli_command(argv: Sequence[str]) -> bool:
 
 def dispatch_transformers_cli(argv: Sequence[str]) -> int:
     """Delegate the active command to the installed Transformers CLI."""
-    _prepare_transformers_cli(argv)
-
-    module_name = (
-        "transformers.cli.transformers"
-        if _has_module("transformers.cli.transformers")
-        else ("transformers.commands.transformers_cli")
-    )
-    cli_module = importlib.import_module(module_name)
+    try:
+        _prepare_transformers_cli(argv)
+        module_name = (
+            "transformers.cli.transformers"
+            if _has_module("transformers.cli.transformers")
+            else ("transformers.commands.transformers_cli")
+        )
+        cli_module = importlib.import_module(module_name)
+    except Exception as e:
+        _raise_transformers_cli_deps_error(e)
 
     original_argv = sys.argv[:]
     try:
@@ -63,6 +67,33 @@ def _has_module(module_name: str) -> bool:
     except ModuleNotFoundError:
         return False
     return True
+
+
+def _require_transformers_cli_deps() -> Any:
+    global transformers
+    if transformers is not _TRANSFORMERS_NOT_LOADED:
+        return transformers
+    try:
+        import transformers as transformers_module
+    except Exception as e:
+        _raise_transformers_cli_deps_error(e)
+    transformers = transformers_module
+    return transformers
+
+
+def _raise_transformers_cli_deps_error(exc: Exception) -> None:
+    print(
+        "Missing optional dependencies for Transformers CLI delegation.\n"
+        "Install with: pip install 'mblt-model-zoo[transformers]'\n"
+        f"Original error: {exc}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2) from exc
+
+
+def _get_registration_transformers() -> Any:
+    """Return the Transformers module used for Mobilint model registration."""
+    return _require_transformers_cli_deps()
 
 
 def _prepare_transformers_cli(argv: Sequence[str]) -> None:
@@ -95,6 +126,7 @@ def _has_module_spec(module_name: str) -> bool:
 
 
 def _install_transformers_serve_registration_hook() -> None:
+    transformers_module = _get_registration_transformers()
     serve_module_name = _get_transformers_serve_module_name()
     serve_module = importlib.import_module(serve_module_name)
     serve_cls = serve_module.Serve if hasattr(serve_module, "Serve") else serve_module.ServeCommand
@@ -103,7 +135,7 @@ def _install_transformers_serve_registration_hook() -> None:
         _install_registration_wrapper(
             target_cls=serve_cls,
             method_name="_load_model_and_data_processor",
-            extra_transformers=getattr(serve_module, "transformers", transformers),
+            extra_transformers=getattr(serve_module, "transformers", transformers_module),
         )
         return
 
@@ -112,7 +144,7 @@ def _install_transformers_serve_registration_hook() -> None:
         _install_registration_wrapper(
             target_cls=model_manager_module.ModelManager,
             method_name="load_model_and_processor",
-            extra_transformers=getattr(model_manager_module, "transformers", transformers),
+            extra_transformers=getattr(model_manager_module, "transformers", transformers_module),
         )
 
 
@@ -157,15 +189,17 @@ def _register_mobilint_model_for_modules(
     extra_transformers: object,
     trust_remote_code: bool = False,
 ) -> None:
+    transformers_module = _get_registration_transformers()
     model_name_or_path_or_address, model_revision = _split_model_id_and_revision(model_id_and_revision)
     args = SimpleNamespace(
         model_name_or_path_or_address=model_name_or_path_or_address,
         model_revision=model_revision,
         trust_remote_code=trust_remote_code,
     )
-    register_mobilint_models(args, transformers)
-    if extra_transformers is not transformers:
-        register_mobilint_models(args, extra_transformers)
+    register_mobilint_models(args, transformers_module)
+    if extra_transformers is transformers_module:
+        return
+    register_mobilint_models(args, extra_transformers)
 
 
 def _get_transformers_serve_module_name() -> str:

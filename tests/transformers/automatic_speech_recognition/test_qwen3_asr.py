@@ -15,6 +15,11 @@ def pipe(request, revision, encoder_decoder_npu_params):
     HuggingFace ASR pipeline fixture. 모델별로 한 번 생성되어 같은
     모듈 안에서 재사용된다.
     """
+    pytest.importorskip(
+        "qwen_asr",
+        reason="Qwen3-ASR HuggingFace pipeline path requires the optional qwen-asr package.",
+    )
+
     model_path = request.param
     model_kwargs = {**encoder_decoder_npu_params.encoder, **encoder_decoder_npu_params.decoder}
 

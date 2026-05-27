@@ -315,17 +315,20 @@ The parameters below follow the standard `transformers` semantics. For Mobilint 
 
 ## Chat CLI
 
-You can test out our models with CLI chat command like below.
+You can test out models with the `chat` command. `mblt-model-zoo chat` is delegated to the installed
+Transformers CLI, while Mobilint model registration hooks are installed for local serve-based
+Transformers backends when applicable. Supported chat options therefore follow the installed
+`transformers` version.
 
 ```bash
 mblt-model-zoo chat mobilint/Llama-3.2-1B-Instruct --trust-remote-code
 ```
 
-Supporting [Keyword Parameters](#keyword-parameters) is still in development.
-
 ## TPS Benchmark CLI
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run TPS benchmarks from the CLI.
+The TPS CLI supports `--core-mode single`, `--core-mode global4`, and `--core-mode global8`. The
+`--core-mode all` sweep alias is available in the benchmark scripts, not in the TPS CLI.
 
 ### Text-generation TPS
 
@@ -343,27 +346,28 @@ mblt-model-zoo tps sweep --model mobilint/Llama-3.2-1B-Instruct \
 
 ### VLM synthetic sweep
 
-`vlm-sweep` measures:
-
+`sweep --task image-text-to-text` measures:
 - Vision encode latency (`vision_encode_ms`) and FPS (`vision_fps`) per image resolution
 - LLM-phase total-prefill-length sweep and cache-length decode sweep at one reference resolution (`--llm-resolution`)
 
 ```bash
-mblt-model-zoo tps vlm-sweep --model mobilint/Qwen2-VL-2B-Instruct \
+mblt-model-zoo tps sweep --model mobilint/Qwen2-VL-2B-Instruct \
+  --task image-text-to-text \
   --image-resolutions 224,384,512,768 \
   --llm-resolution 224 \
-  --llm-prefill-range 1024:4096:1024 \
-  --llm-cache-lengths 1024,2048,4096,8192 \
-  --llm-decode-window 128 --repeat 10 \
-  --json vlm_tps.json --csv vlm_tps.csv
+  --prefill-range 1024:4096:1024 \
+  --cache-lengths 1024,2048,4096,8192 \
+  --decode-window 128 --repeat 10 \
+  --no-plot --json vlm_tps.json --csv vlm_tps.csv
 ```
 
 Note:
-
-- `vlm-sweep` uses synthetic random image inputs.
+- `sweep --task image-text-to-text` uses synthetic random image inputs.
 - Some models/backends may enforce a fixed effective input size at runtime.
 
 For TPS benchmark commands, you can use keyword parameters explained in [Keyword Parameters](#keyword-parameters).
+CLI `tps sweep` and transformer benchmark `sweep` subcommands default to `--prefill-range 512:2048:512`, `--cache-lengths 128,512,1024,2048`,
+`--decode-window 32`, and the CLI plot default is `tps_benchmark.png` when omitted.
 
 ## Tests And Benchmark Scripts
 
@@ -375,6 +379,7 @@ For TPS benchmark commands, you can use keyword parameters explained in [Keyword
   - Text-generation and VLM benchmarks default to `--core-mode global8`.
   - Passing `--core-mode all` benchmarks `single`, `global4`, and `global8`, and result filenames include the core-mode suffix.
   - When `--mxq-dir` is used, a single discovered `.mxq` target is reused across every selected core mode.
+  - Text-generation and VLM benchmark scripts use `--prefill-range`, `--cache-lengths`, and `--decode-window` for sweep subcommands.
 
 ## Model List
 

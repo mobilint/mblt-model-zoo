@@ -8,6 +8,7 @@ HuggingFace Hub when a local path is not found.
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from huggingface_hub import HfApi, hf_hub_download
@@ -148,16 +149,31 @@ class MobilintNPUBackend:
                         filename=mxq_path,
                     )
                 except EntryNotFoundError:
+                    mxq_revision = self._infer_revision_from_mxq_path(mxq_path)
+                    if mxq_revision and mxq_revision != revision:
+                        try:
+                            return hf_hub_download(
+                                repo_id=name_or_path,
+                                filename=mxq_path,
+                                revision=mxq_revision,
+                            )
+                        except EntryNotFoundError:
+                            pass
+
                     cached = self._find_cached_mxq(name_or_path, mxq_path)
                     if cached is not None:
                         return cached
-                    mxq_candidate = self._find_mxq_from_hub(name_or_path, mxq_path)
+                    mxq_candidate = self._find_mxq_from_hub(
+                        name_or_path,
+                        mxq_path,
+                        revision=mxq_revision or revision,
+                    )
                     if mxq_candidate is None:
                         raise
                     return hf_hub_download(
                         repo_id=name_or_path,
                         filename=mxq_candidate,
-                        revision=revision,
+                        revision=mxq_revision or revision,
                     )
 
         raise Exception(f"[Mobilint] Error: Could not locate {mxq_path}.")
@@ -226,6 +242,18 @@ class MobilintNPUBackend:
         return None
 
     @staticmethod
+    def _infer_revision_from_mxq_path(mxq_path: str) -> Optional[str]:
+        basename = os.path.basename(mxq_path)
+        stem, ext = os.path.splitext(basename)
+        if ext != ".mxq" or "-" not in stem:
+            return None
+
+        revision = stem.rsplit("-", 1)[-1]
+        if re.fullmatch(r"[A-Za-z]*\d[A-Za-z0-9]*", revision):
+            return revision
+        return None
+
+    @staticmethod
     def _find_cached_mxq(repo_id: str, mxq_path: str) -> Optional[str]:
         """Searches the local HF hub cache for a cached MXQ file.
 
@@ -283,28 +311,9 @@ class MobilintNPUBackend:
         return None
 
     @staticmethod
-    def _find_mxq_from_hub(repo_id: str, mxq_path: str) -> Optional[str]:
-        """Finds the best-matching MXQ filename in a HuggingFace repository.
-
-        Queries the Hub file listing and checks whether the exact path or
-        the basename of ``mxq_path`` is present.
-
-        Args:
-            repo_id: HuggingFace repository identifier in ``"owner/repo"``
-                format.
-            mxq_path: Expected relative path or basename of the MXQ file
-                within the repository.
-
-        Returns:
-            The matching filename as it appears in the repository, or ``None``
-            if the repository listing cannot be retrieved.
-
-        Raises:
-            ValueError: If the repository is reachable but neither the full
-                path nor the basename of ``mxq_path`` is present.
-        """
+    def _find_mxq_from_hub(repo_id: str, mxq_path: str, revision: Optional[str] = None) -> Optional[str]:
         try:
-            files = HfApi().list_repo_files(repo_id=repo_id)
+            files = HfApi().list_repo_files(repo_id=repo_id, revision=revision)
         except Exception:
             return None
 
@@ -314,7 +323,7 @@ class MobilintNPUBackend:
         if mxq_path in files:
             return mxq_path
 
-        raise ValueError(f"Cannot find {mxq_path} file from HuggingFace repo: f{repo_id}")
+        raise ValueError(f"Cannot find {mxq_path} file from HuggingFace repo: {repo_id}")
 
     def create(self):
         """Creates and configures the NPU accelerator and loads the model.

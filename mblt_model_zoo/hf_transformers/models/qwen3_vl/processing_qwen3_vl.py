@@ -53,6 +53,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             if images.ndim == 3:
                 images = images.unsqueeze(0).float()
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
+            elif images.ndim == 4:
+                images = images.float()
+                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
             elif images.ndim == 2:
                 images = images.unsqueeze(0).unsqueeze(0).float()
                 images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from transformers import HfArgumentParser
+import argparse
 
 from .melo import add_melo_parser
 from .melo_ui import add_melo_ui_parser
@@ -9,8 +9,8 @@ from .tps import add_tps_parser
 from .transformers_compat import dispatch_transformers_cli, is_transformers_cli_command
 
 
-def build_parser() -> HfArgumentParser:
-    parser = HfArgumentParser(
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
         prog="mblt-model-zoo",
         description=(
             "Mobilint CLI helpers. Upstream Transformers commands such as "

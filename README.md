@@ -138,6 +138,50 @@ For the `transformers` extra, the repository also includes:
 
 > Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
 
+## Command Line Interface
+
+Installing this package exposes the `mblt-model-zoo` console command:
+
+```bash
+mblt-model-zoo --help
+```
+
+The CLI provides Mobilint-specific helper commands and delegates selected upstream Hugging Face
+Transformers commands to the installed `transformers` package.
+
+### TPS Benchmark Helpers
+
+The `tps` command measures token-per-second performance for Transformers-based text-generation and
+image-text-to-text pipelines. It requires the `transformers` extra.
+
+```bash
+pip install "mblt-model-zoo[transformers]"
+mblt-model-zoo tps measure --help
+mblt-model-zoo tps sweep --help
+```
+
+Detailed TPS benchmark examples are available in
+[benchmark/transformers/README.md](benchmark/transformers/README.md).
+
+### MeloTTS Helpers
+
+The `melo` command, also available as `melotts`, forwards arguments to the MeloTTS Click CLI. The
+`melo-ui` command launches the MeloTTS Gradio WebUI. These commands require the `MeloTTS` extra.
+
+```bash
+pip install "mblt-model-zoo[MeloTTS]"
+mblt-model-zoo melo --help
+mblt-model-zoo melotts --help
+mblt-model-zoo melo-ui --help
+```
+
+### Delegated Transformers Commands
+
+When the first argument is one of `add-fast-image-processor`, `add-new-model-like`, `chat`,
+`convert`, `download`, `env`, `run`, `serve`, or `version`, `mblt-model-zoo` delegates execution to
+the installed Transformers CLI. For `chat` and `serve`, the CLI installs Mobilint model registration
+hooks when the delegated Transformers backend loads models through the local serve command path.
+
 ## Verbose Option
 
 By default, model initialization stays quiet. To print the model file size and MD5 hash whenever an MXQ model loads, set the environment variable `MBLT_MODEL_ZOO_VERBOSE` to a truthy value before running your script:

@@ -34,6 +34,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         # Used for benchmark
         self.npu_time = None
+        self.reset_npu_timing()
         
         self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
         self.npu_backend.name_or_path = self.config.name_or_path
@@ -119,6 +120,32 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     def get_mxq_model(self):
         return self.npu_backend.mxq_model
 
+    def reset_npu_timing(self) -> None:
+        """Reset aggregate NPU timing counters used by TPS benchmarks."""
+        self.npu_timing = {
+            "prefill_time": 0.0,
+            "decode_time": 0.0,
+            "prefill_calls": 0,
+            "decode_calls": 0,
+        }
+
+    def get_npu_timing(self) -> dict[str, float | int]:
+        """Return aggregate NPU timing counters used by TPS benchmarks."""
+        timing = getattr(self, "npu_timing", None)
+        if not isinstance(timing, dict):
+            self.reset_npu_timing()
+            timing = self.npu_timing
+        return dict(timing)
+
+    def _record_npu_timing(self, phase: Literal["prefill", "decode"], elapsed: float) -> None:
+        """Accumulate one MXQ inference elapsed time without retaining per-token records."""
+        timing = getattr(self, "npu_timing", None)
+        if not isinstance(timing, dict):
+            self.reset_npu_timing()
+            timing = self.npu_timing
+        timing[f"{phase}_time"] = float(timing.get(f"{phase}_time", 0.0)) + float(elapsed)
+        timing[f"{phase}_calls"] = int(timing.get(f"{phase}_calls", 0)) + 1
+
     def mxq_forward(
         self,
         input: torch.Tensor,
@@ -159,8 +186,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
         num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
+        assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
         mxq_model = self.npu_backend.mxq_model
+        initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+        timing_phase: Literal["prefill", "decode"] = (
+            "prefill" if inputs_embeds_numpy.shape[2] > 1 or initial_cache_size == 0 else "decode"
+        )
         
         for i in range(num_of_chunks):
             start_index = i * resolved_prefill_chunk_size
@@ -170,7 +202,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if count_npu_time:
                 t0 = time.perf_counter()
                 result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
-                self.npu_time += time.perf_counter() - t0
+                elapsed = time.perf_counter() - t0
+                self.npu_time += elapsed
+                self._record_npu_timing(timing_phase, elapsed)
             else:
                 result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
 
@@ -336,7 +370,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 t0 = time.perf_counter()
                 result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
                 assert self.npu_time is not None
-                self.npu_time += time.perf_counter() - t0
+                elapsed = time.perf_counter() - t0
+                self.npu_time += elapsed
+                phase: Literal["prefill", "decode"] = (
+                    "prefill" if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks) else "decode"
+                )
+                self._record_npu_timing(phase, elapsed)
             else:
                 result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
             assert result is not None, "mxq infer result is None!"

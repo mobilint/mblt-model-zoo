@@ -28,7 +28,9 @@ class DummyVisionMxqModel:
     def infer(self, npu_inputs: np.ndarray) -> list[np.ndarray]:
         """Record the MXQ input and return placeholder encoder outputs."""
         self.inputs.append(npu_inputs)
-        return [np.zeros((1,), dtype=np.float32)]
+        batch_size = int(npu_inputs.shape[0]) if npu_inputs.ndim == 4 else 1
+        values = [1.0, 3.0, 4.0, 2.0]
+        return [np.full((batch_size, 64, 8), value, dtype=np.float32) for value in values]
 
 
 class DummyQwen3Vision:
@@ -37,9 +39,9 @@ class DummyQwen3Vision:
     dtype = torch.float32
     spatial_merge_size = 2
 
-    def __init__(self, return_dict: bool = True) -> None:
+    def __init__(self, return_dict: bool = True, core_mode: str = "single") -> None:
         """Initialize the dummy config and MXQ backend."""
-        self.config = SimpleNamespace(return_dict=return_dict)
+        self.config = SimpleNamespace(return_dict=return_dict, core_mode=core_mode)
         self.mxq_model = DummyVisionMxqModel()
         self.call_kwargs: list[dict[str, object]] = []
 
@@ -47,6 +49,14 @@ class DummyQwen3Vision:
         """Return the fixed-shape MXQ input expected by the runtime."""
         del hidden_states, grid_thw
         return np.zeros((1024, 64, 6), dtype=np.float32)
+
+    def _split_hidden_states_by_grid(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        """Delegate grid splitting to the wrapper implementation."""
+        return MobilintQwen3VLVisionModel._split_hidden_states_by_grid(self, hidden_states, grid_thw)
 
     def get_mxq_model(self) -> DummyVisionMxqModel:
         """Return the stub MXQ backend."""
@@ -56,16 +66,25 @@ class DummyQwen3Vision:
         self,
         encoder_outputs: list[np.ndarray],
         device: torch.device,
+        batch_size: int = 1,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Return deterministic image and deepstack embeddings."""
         del encoder_outputs
-        image_embeds = torch.arange(64 * 8, dtype=torch.float32, device=device).view(64, 8)
+        image_embeds = torch.arange(batch_size * 64 * 8, dtype=torch.float32, device=device).view(batch_size * 64, 8)
         deepstack_embeds = [
-            torch.ones((64, 8), dtype=torch.float32, device=device),
-            torch.full((64, 8), 2.0, dtype=torch.float32, device=device),
-            torch.full((64, 8), 3.0, dtype=torch.float32, device=device),
+            torch.ones((batch_size * 64, 8), dtype=torch.float32, device=device),
+            torch.full((batch_size * 64, 8), 2.0, dtype=torch.float32, device=device),
+            torch.full((batch_size * 64, 8), 3.0, dtype=torch.float32, device=device),
         ]
         return image_embeds, deepstack_embeds
+
+    def _encode_images(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Delegate image encoding to the wrapper implementation."""
+        return MobilintQwen3VLVisionModel._encode_images(self, hidden_states, grid_thw)
 
     def __call__(
         self,
@@ -211,3 +230,43 @@ def test_qwen3_vl_get_image_features_uses_config_return_dict_default() -> None:
         [{"return_dict": True}] if modeling_qwen3_vl._upstream_qwen3_vl_uses_structured_vision_outputs() else [{}]
     )
     assert dummy.visual.call_kwargs == expected_call_kwargs
+
+
+@pytest.mark.parametrize("core_mode", ["single", "global4", "global8"])
+def test_qwen3_vl_visual_forward_loops_batched_images_for_non_multi_core_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    core_mode: str,
+) -> None:
+    """Run one MXQ call per image when the core mode does not support batched vision inputs."""
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: True)
+    dummy = DummyQwen3Vision(core_mode=core_mode)
+    pixel_values = torch.zeros((512, 1536), dtype=torch.float32)
+    grid_thw = torch.tensor([[1, 16, 16], [1, 16, 16]], dtype=torch.long)
+
+    outputs = MobilintQwen3VLVisionModel.forward(dummy, pixel_values, grid_thw)
+
+    assert isinstance(outputs, BaseModelOutputWithDeepstackFeatures)
+    assert outputs.pooler_output.shape == (128, 8)
+    assert len(outputs.deepstack_features) == 3
+    assert [feature.shape for feature in outputs.deepstack_features] == [torch.Size([128, 8])] * 3
+    assert len(dummy.mxq_model.inputs) == 2
+    assert [item.shape for item in dummy.mxq_model.inputs] == [(1024, 64, 6), (1024, 64, 6)]
+
+
+def test_qwen3_vl_visual_forward_uses_batched_input_for_multi_core_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use one batched MXQ call for Qwen3-VL vision inputs in multi core mode."""
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: True)
+    dummy = DummyQwen3Vision(core_mode="multi")
+    pixel_values = torch.zeros((512, 1536), dtype=torch.float32)
+    grid_thw = torch.tensor([[1, 16, 16], [1, 16, 16]], dtype=torch.long)
+
+    outputs = MobilintQwen3VLVisionModel.forward(dummy, pixel_values, grid_thw)
+
+    assert isinstance(outputs, BaseModelOutputWithDeepstackFeatures)
+    assert outputs.pooler_output.shape == (128, 8)
+    assert len(outputs.deepstack_features) == 3
+    assert [feature.shape for feature in outputs.deepstack_features] == [torch.Size([128, 8])] * 3
+    assert len(dummy.mxq_model.inputs) == 1
+    assert dummy.mxq_model.inputs[0].shape == (2, 1024, 64, 6)

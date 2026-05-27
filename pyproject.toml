@@ -13,7 +13,7 @@ dynamic = ["version"]
 description = "A codebase for pre-quantized AI models for Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 keywords = ["quantization", "NPU", "model zoo", "pre-quantized models", "inference", "mobilint", "mblt", "aries", "regulus", "qb"]
 dependencies = [
     "mobilint-qb-runtime>=1.2.0",
@@ -25,7 +25,7 @@ dependencies = [
     "huggingface-hub",
     "scipy",
     "tqdm",
-    "mblt-tracker>=0.1.0",
+    "mblt-tracker>=0.2.5",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -38,7 +38,6 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -103,6 +102,7 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
+    "qwen-asr",
 ]
 
 [tool.pytest.ini_options]

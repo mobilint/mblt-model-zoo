@@ -1,7 +1,7 @@
 import inspect
 from dataclasses import dataclass
-from functools import lru_cache, wraps
-from typing import Optional, Union, cast
+from functools import lru_cache
+from typing import Any, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -18,8 +18,8 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintCache
-from ...utils.generation_utils import MobilintGenerationMixin
+from ...utils.cache_utils import MobilintDeepStackCache
+from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen3_vl import (
     MobilintQwen3VLConfig,
@@ -111,12 +111,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         if hidden_states.ndim < 2:
             raise ValueError(f"Expected pixel tensor with rank >=2, got shape {tuple(hidden_states.shape)}")
 
-        npu_inputs = self._prepare_npu_inputs(hidden_states, grid_thw)
-        encoder_outputs = self.get_mxq_model().infer(npu_inputs)
-        if encoder_outputs is None:
-            raise RuntimeError("Vision MXQ inference returned None.")
-
-        image_embeds, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
+        image_embeds, deepstack_embeds = self._encode_images(hidden_states, grid_thw)
         structured_outputs = BaseModelOutputWithDeepstackFeatures(
             last_hidden_state=None,
             pooler_output=image_embeds,
@@ -133,8 +128,8 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return image_embeds, deepstack_embeds
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
-        """Match the runtime `repreprocess_pixel_values` layout for Qwen3-VL vision input."""
-        gt, gh, gw = grid_thw[0].tolist()
+        """Match the runtime `repreprocess_pixel_values` layout for one Qwen3-VL image input."""
+        gt, gh, gw = grid_thw.tolist()
         c = int(self.config.in_channels)
         pt = int(self.config.temporal_patch_size)
         merge_size = int(self.config.spatial_merge_size)
@@ -191,25 +186,90 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
         return processed.to(torch.float32).cpu().numpy()
 
+    def _split_hidden_states_by_grid(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        """Split flattened processor image tokens according to `grid_thw` rows."""
+        offset = 0
+        chunks: list[torch.Tensor] = []
+        for grid in grid_thw:
+            gt, gh, gw = grid.tolist()
+            token_count = int(gt * gh * gw)
+            chunks.append(hidden_states[offset : offset + token_count])
+            offset += token_count
+        if offset != int(hidden_states.shape[0]):
+            raise ValueError(f"Unexpected total Qwen3-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
+        return chunks
+
     def _reorder_encoder_outputs(
         self,
         encoder_outputs: list[np.ndarray],
         device: torch.device,
+        batch_size: int = 1,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         if len(encoder_outputs) < 4:
             raise ValueError(f"Expected at least 4 encoder outputs, got {len(encoder_outputs)}")
 
-        image_embeds = torch.tensor(
-            np.squeeze(encoder_outputs[0]),
-            dtype=torch.float32,
-            device=device,
-        )
+        image_embeds = self._flatten_encoder_output(encoder_outputs[0], device=device, batch_size=batch_size)
         deepstack_embeds = [
-            torch.tensor(np.squeeze(encoder_outputs[2]), dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[3]), dtype=torch.float32, device=device),
-            torch.tensor(np.squeeze(encoder_outputs[1]), dtype=torch.float32, device=device),
+            self._flatten_encoder_output(encoder_outputs[2], device=device, batch_size=batch_size),
+            self._flatten_encoder_output(encoder_outputs[3], device=device, batch_size=batch_size),
+            self._flatten_encoder_output(encoder_outputs[1], device=device, batch_size=batch_size),
         ]
         return image_embeds, deepstack_embeds
+
+    def _flatten_encoder_output(
+        self,
+        output: np.ndarray,
+        *,
+        device: torch.device,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Normalize Qwen3-VL MXQ vision output to `(total_image_tokens, hidden_size)`."""
+        output_array = np.asarray(output)
+        if output_array.ndim >= 3 and int(output_array.shape[0]) == batch_size:
+            output_array = output_array.reshape(-1, int(output_array.shape[-1]))
+        else:
+            output_array = np.squeeze(output_array)
+            if output_array.ndim > 2:
+                output_array = output_array.reshape(-1, int(output_array.shape[-1]))
+        if output_array.ndim != 2:
+            raise ValueError(f"Unexpected Qwen3-VL vision output shape: {tuple(np.asarray(output).shape)}")
+        return torch.tensor(output_array, dtype=torch.float32, device=device)
+
+    def _encode_images(
+        self,
+        hidden_states: torch.Tensor,
+        grid_thw: torch.Tensor,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
+        chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
+        npu_inputs = [self._prepare_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        npu_backend = getattr(self, "npu_backend", None)
+        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
+        mxq_model = self.get_mxq_model()
+        if core_mode == "multi" and len(npu_inputs) > 1:
+            encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
+            if encoder_outputs is None:
+                raise RuntimeError("Vision MXQ inference returned None.")
+            return self._reorder_encoder_outputs(encoder_outputs, hidden_states.device, batch_size=len(npu_inputs))
+
+        image_embeds: list[torch.Tensor] = []
+        deepstack_by_layer: list[list[torch.Tensor]] = []
+        for npu_input in npu_inputs:
+            encoder_outputs = mxq_model.infer(npu_input)
+            if encoder_outputs is None:
+                raise RuntimeError("Vision MXQ inference returned None.")
+            image_embed, deepstack_embeds = self._reorder_encoder_outputs(encoder_outputs, hidden_states.device)
+            image_embeds.append(image_embed)
+            if not deepstack_by_layer:
+                deepstack_by_layer = [[] for _ in deepstack_embeds]
+            for layer_idx, deepstack_embed in enumerate(deepstack_embeds):
+                deepstack_by_layer[layer_idx].append(deepstack_embed)
+
+        return torch.cat(image_embeds, dim=0), [torch.cat(layer_embeds, dim=0) for layer_embeds in deepstack_by_layer]
 
 
 class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen3VLPreTrainedModel):
@@ -225,12 +285,40 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
 
+    def _get_cache(
+        self,
+        cache_implementation: str,
+        batch_size: int,
+        max_cache_len: int,
+        *args: object,
+    ) -> MobilintDeepStackCache:
+        """Return a Qwen3-VL cache that also supplies deepstack decoder chunks."""
+        del cache_implementation, batch_size, max_cache_len, args
+        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
+        needs_new_cache = (
+            not hasattr(self, "_cache")
+            or not isinstance(self._cache, MobilintDeepStackCache)
+            or getattr(self._cache, "batch_size", 1) != configured_batch_size
+            or self._cache.num_deepstack_layers != self.num_deepstack_layers
+            or self._cache.hidden_size != int(self.config.hidden_size)
+        )
+        if needs_new_cache:
+            self._cache = MobilintDeepStackCache(
+                self.get_cache_mxq_model(),
+                batch_size=configured_batch_size,
+                num_deepstack_layers=self.num_deepstack_layers,
+                hidden_size=int(self.config.hidden_size),
+            )
+        else:
+            self._cache.reset()
+        return self._cache
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[MobilintCache] = None,
+        past_key_values: Optional[MobilintDeepStackCache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
@@ -243,6 +331,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
         if use_cache and past_key_values is None:
             past_key_values = self._get_cache("", 0, 0)
 
@@ -278,7 +367,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         inputs_embeds: torch.Tensor,
         deepstack_visual_embeds: Optional[list[torch.Tensor]],
         visual_pos_masks: Optional[torch.Tensor],
-        past_key_values: Optional[MobilintCache],
+        past_key_values: Optional[MobilintDeepStackCache],
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
@@ -289,7 +378,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             inputs_embeds: Token embeddings of shape `(batch, seq_len, hidden)`.
             deepstack_visual_embeds: Optional deepstack features by layer.
             visual_pos_masks: Optional visual token mask.
-            past_key_values: Mobilint KV cache.
+            past_key_values: Mobilint deepstack KV cache.
             cache_position: Cache position range.
             prefill_chunk_size: Optional chunk size.
             count_npu_time: Whether to accumulate NPU time.
@@ -301,15 +390,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             raise ValueError(f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}")
         if inputs_embeds.shape[0] != 1:
             raise NotImplementedError("Mobilint Qwen3-VL currently supports batch size 1 only.")
+        if past_key_values is not None and not isinstance(past_key_values, MobilintDeepStackCache):
+            raise TypeError("Qwen3-VL text decoding requires MobilintDeepStackCache.")
 
         deepstack_tensor = self._build_deepstack_tensor(
             inputs_embeds=inputs_embeds,
             visual_pos_masks=visual_pos_masks,
             deepstack_visual_embeds=deepstack_visual_embeds,
         )
+        if past_key_values is not None:
+            past_key_values.set_deepstack_tensor(deepstack_tensor)
 
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
-        deepstack_np = deepstack_tensor.type(torch.float32).cpu().numpy()
 
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_prefill_chunk_size))
@@ -321,10 +413,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         for chunk_idx in range(num_chunks):
             start_index = chunk_idx * resolved_prefill_chunk_size
             end_index = min(start_index + resolved_prefill_chunk_size, inputs_np.shape[1])
-            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+            cache_size = past_key_values.get_seq_length() if past_key_values is not None else 0
 
             inputs_chunk = inputs_np[:, start_index:end_index, :]
-            deepstack_chunk = deepstack_np[:, start_index:end_index, :]
+            if past_key_values is None:
+                deepstack_chunk = deepstack_tensor[:, start_index:end_index, :].to(dtype=torch.float32).cpu().numpy()
+            else:
+                deepstack_chunk = past_key_values.get_deepstack_chunk(
+                    start_index,
+                    end_index,
+                    device=inputs_embeds.device,
+                    dtype=torch.float32,
+                ).cpu().numpy()
 
             if count_npu_time:
                 import time
@@ -412,7 +512,46 @@ class MobilintQwen3VLForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
 
-    @wraps(Qwen3VLForConditionalGeneration.forward)
+    def _get_cache(
+        self,
+        cache_implementation: str,
+        batch_size: int,
+        max_cache_len: int,
+        *args: object,
+    ) -> MobilintDeepStackCache:
+        """Delegate generation cache creation to the Qwen3-VL language model."""
+        return self.model.language_model._get_cache(cache_implementation, batch_size, max_cache_len, *args)
+
+    @with_mobilint_generation_signature(
+        Qwen3VLForConditionalGeneration.prepare_inputs_for_generation,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
+    def prepare_inputs_for_generation(
+        self,
+        *args: Any,
+        count_npu_time: bool = False,
+        prefill_chunk_size: int | None = None,
+        **kwargs: Any,
+    ):
+        """Prepare generation inputs while preserving Mobilint timing kwargs.
+
+        Args:
+            *args: Positional arguments forwarded to the upstream Qwen3-VL generation helper.
+            count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
+            prefill_chunk_size: Optional prefill chunk size forwarded to Mobilint generation.
+            **kwargs: Keyword arguments forwarded to the upstream Qwen3-VL generation helper.
+
+        Returns:
+            Model inputs for a generation step.
+        """
+        model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
+        model_inputs["count_npu_time"] = count_npu_time
+        if prefill_chunk_size is not None:
+            model_inputs["prefill_chunk_size"] = prefill_chunk_size
+        return model_inputs
+
+    @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.forward, "count_npu_time")
     def forward(
         self,
         *args: object,

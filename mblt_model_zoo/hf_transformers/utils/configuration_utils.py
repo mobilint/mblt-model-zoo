@@ -272,6 +272,16 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 class MobilintVisionTextConfigMixin(PretrainedConfig):
     sub_configs = {"vision_config": MobilintConfigMixin, "text_config": MobilintConfigMixin}
 
+    @PretrainedConfig.name_or_path.setter
+    def name_or_path(self, value):
+        PretrainedConfig.name_or_path.fset(self, value)
+        vision_config = getattr(self, "vision_config", None)
+        if vision_config is not None:
+            vision_config.name_or_path = value
+        text_config = getattr(self, "text_config", None)
+        if text_config is not None:
+            text_config.name_or_path = value
+
     @property
     def vision_mxq_path(self) -> str:
         return self.vision_config.mxq_path
@@ -386,8 +396,16 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
         unused_kwargs: dict[str, Any]
         config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)  # type: ignore
 
-        config.text_config.name_or_path = config.name_or_path
-        config.vision_config.name_or_path = config.name_or_path
+        for sub_config in (config.text_config, config.vision_config):
+            sub_config.name_or_path = config.name_or_path
+
+            revision = getattr(config, "revision", None)
+            if revision:
+                sub_config.revision = revision
+
+            commit_hash = getattr(config, "_commit_hash", None)
+            if commit_hash:
+                sub_config._commit_hash = commit_hash
 
         if return_unused_kwargs:
             return config, unused_kwargs
