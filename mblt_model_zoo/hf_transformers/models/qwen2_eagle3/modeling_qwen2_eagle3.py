@@ -288,6 +288,8 @@ class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreTr
                 device=inputs_embeds.device,
                 dtype=inputs_embeds.dtype,
             )
+            if hidden.ndim == 4 and hidden.shape[1] == 1:
+                hidden = hidden.squeeze(1)
             hidden_states_chunks.append(hidden)
             if requires_all_features_logits:
                 logits_chunks.append(
@@ -627,16 +629,22 @@ class MobilintQwen2Eagle3Model(PretrainedOnlyMixin, MobilintQwen2Eagle3PreTraine
     """Nested EAGLE-3 model composition."""
 
     def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
+        no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
-        self.fc_projector = MobilintEagle3FCProjector(config, _internal_call=True)
-        self.base_model = MobilintEagle3BaseModel(config, _internal_call=True)
+        self.fc_projector = MobilintEagle3FCProjector(config, _internal_call=True, no_launch=no_launch)
+        self.base_model = MobilintEagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
         self.draft_model = MobilintEagle3DraftModel(
             config,
             draft_config=config.draft_config,
             fc_projector=self.fc_projector,
             _internal_call=True,
+            no_launch=no_launch,
         )
         self.post_init()
+
+    @property
+    def embed_tokens(self) -> nn.Module:
+        return self._modules["base_model"].embed_tokens
 
     def get_input_embeddings(self) -> nn.Module:
         return self.base_model.get_input_embeddings()
@@ -673,11 +681,24 @@ class MobilintQwen2Eagle3ForCausalLM(
     config_class = MobilintQwen2Eagle3Config
 
     def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
+        no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
-        self.model = MobilintQwen2Eagle3Model(config, _internal_call=True)
+        self.model = MobilintQwen2Eagle3Model(config, _internal_call=True, no_launch=no_launch)
         self.lm_head = nn.Identity()
         self._dummy_param = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.post_init()
+
+    @property
+    def eagle3_model(self) -> MobilintQwen2Eagle3Model:
+        return self._modules["model"]
+
+    @property
+    def eagle3_base_model(self) -> MobilintEagle3BaseModel:
+        return self.eagle3_model._modules["base_model"]
+
+    @property
+    def eagle3_draft_model(self) -> MobilintEagle3DraftModel:
+        return self.eagle3_model._modules["draft_model"]
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[str], *model_args: object, **kwargs: object):
@@ -691,9 +712,9 @@ class MobilintQwen2Eagle3ForCausalLM(
             )
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
         if base_embedding_weight is not None:
-            model._inject_embedding_override(model.model.base_model.embed_tokens, base_embedding_weight, "base")
+            model._inject_embedding_override(model.eagle3_base_model.embed_tokens, base_embedding_weight, "base")
         if draft_embedding_weight is not None:
-            model._inject_embedding_override(model.model.draft_model.embed_tokens, draft_embedding_weight, "draft")
+            model._inject_embedding_override(model.eagle3_draft_model.embed_tokens, draft_embedding_weight, "draft")
         return model
 
     @staticmethod
@@ -710,10 +731,10 @@ class MobilintQwen2Eagle3ForCausalLM(
             embedding.weight.data = weight.to(device=embedding.weight.device, dtype=embedding.weight.dtype)
 
     def get_input_embeddings(self) -> nn.Module:
-        return self.model.get_input_embeddings()
+        return self.eagle3_model.get_input_embeddings()
 
     def get_cache_mxq_models(self) -> tuple[Any, Any]:
-        return self.model.base_model.get_mxq_model(), self.model.draft_model.get_mxq_model()
+        return self.eagle3_base_model.get_mxq_model(), self.eagle3_draft_model.get_mxq_model()
 
     def forward(
         self,
@@ -737,7 +758,7 @@ class MobilintQwen2Eagle3ForCausalLM(
             past_key_values = self._get_cache("mobilint-eagle3", 1, 0)
         if not isinstance(past_key_values, MobilintEagle3Cache):
             raise TypeError("past_key_values must be MobilintEagle3Cache for mobilint-qwen2-eagle3.")
-        outputs, logits = self.model(
+        outputs, logits = self.eagle3_model(
             input_ids=input_ids,
             cache=past_key_values,
             attention_mask=attention_mask,
@@ -803,7 +824,7 @@ class MobilintQwen2Eagle3ForCausalLM(
         if do_sample is False:
             resolved_temperature = 0.0
         num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
-        self.model.draft_model.total_tokens = max(1, num_assistant_tokens - 1)
+        self.eagle3_draft_model.total_tokens = max(1, num_assistant_tokens - 1)
 
         cache = self._get_cache("mobilint-eagle3", 1, 0)
         cache.reset()

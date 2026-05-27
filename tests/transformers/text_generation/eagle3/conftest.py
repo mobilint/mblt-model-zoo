@@ -1,4 +1,4 @@
-"""Non-batch smoke test for Mobilint Qwen2 EAGLE-3 models."""
+"""Shared fixtures for EAGLE-3 text-generation tests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,17 @@ from typing import Optional
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
-MODEL_PATHS = ("mobilint/EAGLE3-JPharmatron-7B",)
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Parametrize the shared pipeline fixture from module-level model paths."""
+    if "pipe" not in metafunc.fixturenames:
+        return
+
+    model_paths = getattr(metafunc.module, "MODEL_PATHS", None)
+    if not model_paths:
+        return
+
+    metafunc.parametrize("pipe", model_paths, indirect=True, ids=list(model_paths), scope="module")
 
 
 @pytest.fixture(scope="module")
@@ -39,22 +49,3 @@ def pipe(request: pytest.FixtureRequest, revision: Optional[str], eagle3_npu_par
         )
     yield created_pipe
     del created_pipe
-
-
-def test_qwen2_eagle3(pipe, generation_token_limit: int) -> None:
-    """Run a basic prompt against the EAGLE-3 Qwen2 model."""
-    pipe.generation_config.max_new_tokens = None
-    pipe.generation_config.max_length = None
-
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant.",
-        },
-        {
-            "role": "user",
-            "content": "Explain speculative decoding briefly.",
-        },
-    ]
-
-    pipe(messages, max_new_tokens=generation_token_limit)

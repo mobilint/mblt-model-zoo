@@ -74,7 +74,7 @@ def initialize_tree(
     logits_processor: Optional[LogitsProcessorList],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Prefill base model once and initialize the first draft tree."""
-    outputs, logits = model.model.base_model(
+    outputs, logits = model.eagle3_base_model(
         input_ids[:, cache.get_base_seq_length() :],
         cache=cache,
         output_orig=True,
@@ -91,7 +91,7 @@ def initialize_tree(
 
     input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
     hidden_states = outputs["hidden_states"][0].contiguous()
-    draft_tokens, retrieve_indices, tree_mask, tree_position_ids = model.model.draft_model.topk_generate(
+    draft_tokens, retrieve_indices, tree_mask, tree_position_ids = model.eagle3_draft_model.topk_generate(
         hidden_states,
         input_ids=input_ids,
         cache=cache,
@@ -127,7 +127,7 @@ def tree_decoding(
     if position_ids.dim() == 1:
         position_ids = position_ids.unsqueeze(0)
 
-    outputs, tree_logits = model.model.base_model(
+    outputs, tree_logits = model.eagle3_base_model(
         tree_candidates,
         cache=cache,
         output_orig=True,
@@ -140,8 +140,9 @@ def tree_decoding(
         cache.accept_tokens = None
 
     hidden_state = outputs["hidden_states"][0]
+    del retrieve_indices
     tree_logits = tree_logits[:, accepted_prefix_length:]
-    logits = tree_logits[0, retrieve_indices]
+    logits = tree_logits[0]
     return logits, hidden_state[:, accepted_prefix_length:]
 
 
@@ -252,7 +253,7 @@ def update_inference_inputs(
     else:
         token = torch.argmax(sample_p, dim=-1, keepdim=True)[None]
 
-    draft_tokens, retrieve_indices, tree_mask, tree_position_ids = model.model.draft_model.topk_generate(
+    draft_tokens, retrieve_indices, tree_mask, tree_position_ids = model.eagle3_draft_model.topk_generate(
         accepted_hidden_state,
         input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
         cache=cache,
