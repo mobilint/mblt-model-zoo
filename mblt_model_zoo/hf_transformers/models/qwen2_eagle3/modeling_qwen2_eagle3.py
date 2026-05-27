@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM, GenerationConfig
+from transformers.generation.utils import GenerateDecoderOnlyOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
 
@@ -699,6 +700,41 @@ class MobilintQwen2Eagle3ForCausalLM(
     def eagle3_draft_model(self) -> MobilintEagle3DraftModel:
         return self.eagle3_model._modules["draft_model"]
 
+    @staticmethod
+    def _clear_tree_state(cache: Any) -> None:
+        """Clear transient EAGLE-3 tree state on any cache-like object."""
+        clear_tree_state = getattr(cache, "clear_tree_state", None)
+        if callable(clear_tree_state):
+            clear_tree_state()
+            return
+        for attribute in (
+            "accept_tokens",
+            "tree_mask",
+            "retrieve_indices",
+            "tree_position_ids",
+            "pending_draft_tokens",
+        ):
+            if hasattr(cache, attribute):
+                setattr(cache, attribute, None)
+
+    @staticmethod
+    def _sync_draft_seq_length_to_base(cache: Any) -> None:
+        """Align any draft cache length metadata with the committed base length."""
+        get_base_seq_length = getattr(cache, "get_base_seq_length", None)
+        set_draft_seq_length = getattr(cache, "set_draft_seq_length", None)
+        if callable(get_base_seq_length) and callable(set_draft_seq_length):
+            try:
+                set_draft_seq_length(get_base_seq_length())
+            except AttributeError:
+                return
+            return
+        draft_layer = getattr(cache, "draft_layer", None)
+        if draft_layer is not None and callable(get_base_seq_length) and hasattr(draft_layer, "set_seq_length"):
+            try:
+                draft_layer.set_seq_length(get_base_seq_length())
+            except AttributeError:
+                return
+
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[str], *model_args: object, **kwargs: object):
         legacy_embedding_weight = kwargs.pop("embedding_weight", None)
@@ -783,6 +819,7 @@ class MobilintQwen2Eagle3ForCausalLM(
         inputs: Optional[torch.Tensor] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[MobilintEagle3Cache] = None,
         generation_config: Optional[GenerationConfig] = None,
         max_new_tokens: Optional[int] = None,
         do_sample: Optional[bool] = None,
@@ -796,14 +833,17 @@ class MobilintQwen2Eagle3ForCausalLM(
         output_attentions: bool = False,
         num_beams: int = 1,
         assistant_model: Optional[PreTrainedModel] = None,
+        use_cache: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Any,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop.
 
         Args:
             inputs: Optional tensor alias for ``input_ids``.
             input_ids: Prompt token ids.
             attention_mask: Optional attention mask for the prompt.
+            past_key_values: Optional Mobilint EAGLE-3 cache for continuation.
             generation_config: Optional Hugging Face generation config from the pipeline.
             max_new_tokens: Maximum number of new tokens to emit.
             do_sample: Whether to use sampling. ``False`` forces deterministic decoding.
@@ -811,23 +851,27 @@ class MobilintQwen2Eagle3ForCausalLM(
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling threshold.
             streamer: Optional text streamer passed through by the pipeline.
-            return_dict_in_generate: Unsupported Hugging Face generation output mode.
+            return_dict_in_generate: Whether to return a Hugging Face generation output object.
             output_scores: Unsupported Hugging Face generation output mode.
             output_hidden_states: Unsupported Hugging Face generation output mode.
             output_attentions: Unsupported Hugging Face generation output mode.
             num_beams: Beam search width. Only greedy decoding is supported.
             assistant_model: Unsupported Hugging Face assistant model.
+            use_cache: Compatibility flag forwarded by Hugging Face generation helpers.
+            cache_position: Compatibility cache position forwarded by Hugging Face generation helpers.
             **kwargs: Additional generation kwargs.
 
         Returns:
-            The generated token tensor.
+            The generated token tensor, or a Hugging Face generation output when requested.
         """
-        if return_dict_in_generate or output_scores or output_hidden_states or output_attentions:
-            raise NotImplementedError("mobilint-qwen2-eagle3 only returns generated token tensors in v1.")
+        if output_scores or output_hidden_states or output_attentions:
+            raise NotImplementedError("mobilint-qwen2-eagle3 does not support generation diagnostics yet.")
         if num_beams != 1:
             raise NotImplementedError("mobilint-qwen2-eagle3 does not support beam search.")
         if assistant_model is not None:
             raise NotImplementedError("mobilint-qwen2-eagle3 does not support HF assistant_model mixing.")
+        if use_cache is False:
+            raise NotImplementedError("mobilint-qwen2-eagle3 requires use_cache=True.")
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise NotImplementedError(f"Unsupported generate kwargs for mobilint-qwen2-eagle3: {unsupported}")
@@ -837,6 +881,8 @@ class MobilintQwen2Eagle3ForCausalLM(
             raise ValueError("`generate` requires `input_ids` or `inputs`.")
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
             raise NotImplementedError("mobilint-qwen2-eagle3 only supports batch size 1.")
+        if cache_position is not None:
+            del cache_position
 
         generation_config = self.generation_config if generation_config is None else generation_config
         resolved_max_new_tokens = int(
@@ -850,8 +896,14 @@ class MobilintQwen2Eagle3ForCausalLM(
         num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
         self.eagle3_draft_model.total_tokens = max(1, num_assistant_tokens - 1)
 
-        cache = self._get_cache("mobilint-eagle3", 1, 0)
-        cache.reset()
+        cache = past_key_values
+        if cache is None:
+            cache = self._get_cache("mobilint-eagle3", 1, 0)
+            cache.reset()
+        elif not isinstance(cache, MobilintEagle3Cache):
+            raise TypeError("past_key_values must be MobilintEagle3Cache for mobilint-qwen2-eagle3.")
+        self._clear_tree_state(cache)
+        self._sync_draft_seq_length_to_base(cache)
         logits_processor = prepare_logits_processor(
             temperature=0.0 if resolved_temperature is None else resolved_temperature,
             top_p=0.0 if resolved_top_p is None else resolved_top_p,
@@ -860,6 +912,8 @@ class MobilintQwen2Eagle3ForCausalLM(
 
         generated = input_ids.clone()
         eos_token_id = generation_config.eos_token_id
+        if streamer is not None:
+            streamer.put(generated[0].detach().cpu())
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, _ = initialize_tree(
             generated,
             self,
@@ -911,6 +965,10 @@ class MobilintQwen2Eagle3ForCausalLM(
 
         if streamer is not None:
             streamer.end()
+        self._clear_tree_state(cache)
+        self._sync_draft_seq_length_to_base(cache)
+        if return_dict_in_generate:
+            return GenerateDecoderOnlyOutput(sequences=generated, past_key_values=cache)
         return generated
 
 

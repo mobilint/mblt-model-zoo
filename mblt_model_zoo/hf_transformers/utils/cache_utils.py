@@ -325,6 +325,22 @@ class MobilintEagle3Cache(Cache):
     def set_draft_seq_length(self, sequence_length: int) -> None:
         self.draft_layer.set_seq_length(sequence_length)
 
+    def sync_draft_seq_length_to_base(self) -> None:
+        """Align the draft cache length with the committed base cache length."""
+        try:
+            base_seq_length = self.get_base_seq_length()
+        except AttributeError:
+            return
+        draft_layer = getattr(self, "draft_layer", None)
+        if draft_layer is not None and hasattr(draft_layer, "set_seq_length"):
+            draft_layer.set_seq_length(base_seq_length)
+            return
+        set_draft_seq_length = getattr(self, "set_draft_seq_length", None)
+        if callable(set_draft_seq_length):
+            set_draft_seq_length(base_seq_length)
+            return
+        raise AttributeError("draft cache storage is not available on this cache instance")
+
     def update_cache_position(self, cache_position: torch.Tensor, index: int = 0) -> None:
         del index
         self.base_layer.update_cache_position(cache_position)
@@ -339,6 +355,10 @@ class MobilintEagle3Cache(Cache):
         del index
         self.base_layer.fake_prefill(sequence_length)
         self.draft_layer.fake_prefill(sequence_length)
+        self.clear_tree_state()
+
+    def clear_tree_state(self) -> None:
+        """Drop speculative decoding metadata while preserving KV cache state."""
         self.accept_tokens = None
         self.tree_mask = None
         self.retrieve_indices = None
@@ -348,11 +368,7 @@ class MobilintEagle3Cache(Cache):
     def reset(self) -> None:
         self.base_layer.reset()
         self.draft_layer.reset()
-        self.accept_tokens = None
-        self.tree_mask = None
-        self.retrieve_indices = None
-        self.tree_position_ids = None
-        self.pending_draft_tokens = None
+        self.clear_tree_state()
 
     def dump_cache_memory(self) -> None:
         self.base_layer.dump_cache_memory()
