@@ -30,6 +30,7 @@ class MobilintEagle3GenerationProtocol(Protocol):
 
     eagle3_base_model: Any
     eagle3_draft_model: Any
+    eagle3_fc_projector: Any
 
 
 def make_causal_mask(
@@ -83,7 +84,9 @@ class CachedRotaryEmbedding(nn.Module):
         self.base = base
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float() / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
-        self._build_position_table()
+        self.position_table = None
+        if self.inv_freq.device.type != "meta":
+            self._build_position_table()
 
     def _build_position_table(
         self,
@@ -132,10 +135,11 @@ class CachedRotaryEmbedding(nn.Module):
     @torch.no_grad()
     def forward(self, x: torch.Tensor, position_ids: torch.LongTensor) -> np.ndarray:
         seq_len = int(torch.max(position_ids).item()) + 1
-        if seq_len > self.max_seq_len:
+        if self.position_table is None or seq_len > self.max_seq_len:
             self.max_seq_len = seq_len
             self._build_position_table(device=x.device, dtype=x.dtype)
         indices = position_ids.view(-1).cpu().numpy()
+        assert self.position_table is not None
         return self.position_table[indices][None, None, :, :]
 
 
@@ -159,16 +163,8 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
         return torch.from_numpy(result[0]).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1)
 
 
-class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, PreTrainedModel):
-    """Base Qwen2 MXQ wrapper for EAGLE-3."""
-
-    npu_backend_prefix = "base_"
-
-    def __init__(self, config: "MobilintQwen2Eagle3Config", *args: object, **kwargs: object) -> None:
-        super().__init__(config, *args, **kwargs)
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
-        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
-        self.rotary_emb = CachedRotaryEmbedding(head_dim, config.max_position_embeddings)
+class MobilintEagle3BaseModelMixin:
+    """Shared runtime helpers for an EAGLE-3 base model."""
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -306,37 +302,8 @@ class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, PreTrainedModel):
         return {"hidden_states": [hidden_states]}, logits_tensor if output_orig else hidden_states
 
 
-class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, PreTrainedModel):
-    """Draft Qwen2 wrapper for EAGLE-3 tree expansion."""
-
-    npu_backend_prefix = "draft_"
-
-    def __init__(
-        self,
-        config: "MobilintQwen2Eagle3Config",
-        draft_config: "MobilintEagle3DraftConfig",
-        fc_projector: MobilintEagle3FCProjector,
-        *args: object,
-        **kwargs: object,
-    ) -> None:
-        super().__init__(config, *args, **kwargs)
-        self.draft_config = draft_config
-        self.fc_projector = fc_projector
-        self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
-        head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
-        self.rotary_emb = CachedRotaryEmbedding(head_dim, draft_config.max_position_embeddings)
-        self.top_k = int(config.eagle3_tree_top_k)
-        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
-        self.depth = int(config.eagle3_tree_depth)
-        self.hidden_size = draft_config.hidden_size
-        self.logsoftmax = nn.LogSoftmax(dim=-1)
-        draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
-        self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long))
-        self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool))
-        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32)[None, None]
-        self.position_ids = torch.zeros(self.top_k, dtype=torch.long)
-        for param in self.embed_tokens.parameters():
-            param.requires_grad = False
+class MobilintEagle3DraftModelMixin:
+    """Shared runtime helpers for an EAGLE-3 draft model."""
 
     def _prepare_decoder_attention_mask(
         self,
@@ -519,8 +486,8 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, PreTrainedModel):
             draft_token_steps.append(topk_index + self.d2t[topk_index])
             next_input_ids = topk_index + self.d2t[topk_index]
         input_hidden = last_hidden[None].repeat(1, top_k, 1)
-        tree_mask = self.tree_mask_init.to(self.embed_tokens.weight.device)
-        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        tree_mask = self.tree_mask_init.to(hidden_states.device)
+        topk_cs_index = torch.arange(top_k, device=hidden_states.device)
         add_cache_position = 0
         length_position = input_ids.shape[1] - 1
 

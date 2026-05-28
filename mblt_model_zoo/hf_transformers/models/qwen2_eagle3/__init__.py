@@ -17,7 +17,6 @@ def __getattr__(name: str):
 
     if name in {
         "MobilintQwen2Eagle3ForCausalLM",
-        "MobilintQwen2Eagle3Model",
     }:
         module = importlib.import_module(".modeling_qwen2_eagle3", __package__)
         return getattr(module, name)
@@ -28,5 +27,4 @@ def __getattr__(name: str):
 __all__ = [
     "MobilintQwen2Eagle3Config",
     "MobilintQwen2Eagle3ForCausalLM",
-    "MobilintQwen2Eagle3Model",
 ]

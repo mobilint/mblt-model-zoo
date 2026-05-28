@@ -142,23 +142,51 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
     @property
     def eagle3_model(self) -> Any:
-        """Return the nested model object that owns EAGLE-3 child modules."""
-        return self._modules["model"]
+        """Return the object that owns EAGLE-3 child modules."""
+        nested_model = getattr(self, "_modules", {}).get("model")
+        if nested_model is not None and "eagle3_base_model" not in getattr(self, "_modules", {}):
+            return nested_model
+        return self
+
+    def _resolve_eagle3_child(self, attribute_name: str, *fallback_names: str) -> Any:
+        """Resolve a direct or nested EAGLE-3 child module."""
+        candidate_names = (attribute_name, *fallback_names)
+        direct_modules = getattr(self, "_modules", {})
+        for candidate_name in candidate_names:
+            if candidate_name in direct_modules:
+                return direct_modules[candidate_name]
+
+        for candidate_name in candidate_names:
+            direct_child = self.__dict__.get(candidate_name, None)
+            if direct_child is not None:
+                return direct_child
+
+        nested_model = getattr(self, "_modules", {}).get("model")
+        if nested_model is not None:
+            nested_modules = getattr(nested_model, "_modules", {})
+            for candidate_name in candidate_names:
+                if candidate_name in nested_modules:
+                    return nested_modules[candidate_name]
+                nested_child = getattr(nested_model, candidate_name, None)
+                if nested_child is not None:
+                    return nested_child
+
+        raise AttributeError(f"EAGLE-3 child module {attribute_name!r} not found")
 
     @property
     def eagle3_base_model(self) -> Any:
         """Return the base LLM MXQ child model."""
-        return self.eagle3_model._modules["base_model"]
+        return self._resolve_eagle3_child("eagle3_base_model", "base_model")
 
     @property
     def eagle3_draft_model(self) -> Any:
         """Return the draft LLM MXQ child model."""
-        return self.eagle3_model._modules["draft_model"]
+        return self._resolve_eagle3_child("eagle3_draft_model", "draft_model")
 
     @property
     def eagle3_fc_projector(self) -> Any:
         """Return the optional FC projector MXQ child model."""
-        return self.eagle3_model._modules.get("fc_projector", self.eagle3_model.fc_projector)
+        return self._resolve_eagle3_child("eagle3_fc_projector", "fc_projector")
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[str], *model_args: object, **kwargs: object):
@@ -196,7 +224,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
     def get_input_embeddings(self) -> nn.Module:
         """Return the base model input embedding layer."""
-        return self.eagle3_model.get_input_embeddings()
+        return self.eagle3_base_model.get_input_embeddings()
 
     def get_cache_mxq_models(self) -> tuple[qbruntime.Model, qbruntime.Model]:
         """Return MXQ models used by the base and draft cache layers."""
@@ -282,7 +310,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         if not isinstance(past_key_values, MobilintEagle3Cache):
             raise TypeError("past_key_values must be MobilintEagle3Cache for EAGLE-3 models.")
 
-        outputs, logits = self.eagle3_model(
+        outputs, logits = self.eagle3_base_model(
             input_ids=input_ids,
             cache=past_key_values,
             attention_mask=attention_mask,

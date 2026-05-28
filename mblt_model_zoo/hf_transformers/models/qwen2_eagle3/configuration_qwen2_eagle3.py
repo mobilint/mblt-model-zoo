@@ -27,9 +27,6 @@ class MobilintQwen2Eagle3Config(MobilintEagle3ConfigMixin, Qwen2Config):
     sub_configs = {"draft_config": MobilintEagle3DraftConfig}
 
     def __init__(self, draft_config: dict[str, Any] | MobilintEagle3DraftConfig | None = None, **kwargs: Any) -> None:
-        eagle3_tree_depth = kwargs.pop("eagle3_tree_depth", None)
-        eagle3_tree_top_k = kwargs.pop("eagle3_tree_top_k", None)
-        eagle3_npu_chunk_size = kwargs.pop("eagle3_npu_chunk_size", None)
         # Hugging Face may pass nested sub-configs either as an explicit constructor argument
         # or inside kwargs during config round-trips. Prefer the explicit argument when present.
         draft_config_data = draft_config if draft_config is not None else kwargs.pop("draft_config", None)
@@ -42,9 +39,6 @@ class MobilintQwen2Eagle3Config(MobilintEagle3ConfigMixin, Qwen2Config):
 
         super().__init__(**kwargs)
         self.tie_word_embeddings = False
-        self.eagle3_tree_depth = int(eagle3_tree_depth if eagle3_tree_depth is not None else 5)
-        self.eagle3_tree_top_k = int(eagle3_tree_top_k if eagle3_tree_top_k is not None else 8)
-        self.eagle3_npu_chunk_size = int(eagle3_npu_chunk_size if eagle3_npu_chunk_size is not None else 192)
         self.draft_config.name_or_path = self.name_or_path
 
 

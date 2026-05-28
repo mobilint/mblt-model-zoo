@@ -430,6 +430,11 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
     """Config mixin for EAGLE-3 models with base/draft/fc backends."""
 
     sub_configs = {"draft_config": MobilintConfigMixin}
+    _EAGLE3_RUNTIME_FIELDS = (
+        ("eagle3_tree_depth", 5, int),
+        ("eagle3_tree_top_k", 8, int),
+        ("eagle3_npu_chunk_size", 192, int),
+    )
 
     def _ensure_eagle3_npu_backends(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "base_npu_backend"):
@@ -439,12 +444,21 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         if not hasattr(self, "fc_npu_backend"):
             self.fc_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="fc_")
 
+    def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
+        for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:
+            if hasattr(self, field_name):
+                continue
+            value = kwargs.pop(field_name, default_value)
+            self.__dict__[field_name] = int(value) if value is not None else int(default_value)
+
     def __init__(self, **kwargs):
         self._ensure_eagle3_npu_backends(kwargs)
+        self._ensure_eagle3_runtime_fields(kwargs)
         super().__init__(**kwargs)
 
     def __post_init__(self, **kwargs: Any) -> None:
         self._ensure_eagle3_npu_backends(kwargs)
+        self._ensure_eagle3_runtime_fields(kwargs)
         super().__post_init__(**kwargs)
 
     @PretrainedConfig.name_or_path.setter

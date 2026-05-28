@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintEagle3Cache
-from ...utils.eagle3_utils import MobilintEagle3BaseModel, MobilintEagle3DraftModel, MobilintEagle3FCProjector
+from ...utils.eagle3_utils import (
+    CachedRotaryEmbedding,
+    MobilintEagle3BaseModelMixin,
+    MobilintEagle3DraftModelMixin,
+    MobilintEagle3FCProjector,
+    MobilintEagle3ModelMixin,
+)
 from ...utils.generation_utils import MobilintEagle3GenerationMixin
-from .configuration_qwen2_eagle3 import MobilintQwen2Eagle3Config
+from .configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
 
 
 class MobilintQwen2Eagle3PreTrainedModel(PreTrainedModel):
@@ -24,52 +27,49 @@ class MobilintQwen2Eagle3PreTrainedModel(PreTrainedModel):
     main_input_name = "input_ids"
 
 
-class MobilintQwen2Eagle3Model(PretrainedOnlyMixin, MobilintQwen2Eagle3PreTrainedModel):
-    """Nested EAGLE-3 model composition."""
+class MobilintQwen2Eagle3BaseModel(MobilintEagle3BaseModelMixin, MobilintEagle3ModelMixin):
+    """Concrete Qwen2 base backend for EAGLE-3."""
+
+    npu_backend_prefix = "base_"
 
     def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
-        no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
-        self.fc_projector = MobilintEagle3FCProjector(config, _internal_call=True, no_launch=no_launch)
-        self.base_model = MobilintEagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
-        self.draft_model = MobilintEagle3DraftModel(
-            config,
-            draft_config=config.draft_config,
-            fc_projector=self.fc_projector,
-            _internal_call=True,
-            no_launch=no_launch,
-        )
-        self.post_init()
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        self.rotary_emb = CachedRotaryEmbedding(head_dim, config.max_position_embeddings)
 
-    @property
-    def embed_tokens(self) -> nn.Module:
-        return self._modules["base_model"].embed_tokens
 
-    def get_input_embeddings(self) -> nn.Module:
-        return self.base_model.get_input_embeddings()
+class MobilintQwen2Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle3ModelMixin):
+    """Concrete Qwen2 draft backend for EAGLE-3 tree expansion."""
 
-    def forward(
+    npu_backend_prefix = "draft_"
+
+    def __init__(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        *,
-        cache: MobilintEagle3Cache,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_orig: bool = True,
-        requires_all_features_logits: bool = True,
-        count_npu_time: bool = False,
-    ) -> tuple[dict[str, list[torch.Tensor]], torch.Tensor]:
-        return self.base_model(
-            input_ids=input_ids,
-            cache=cache,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            inputs_embeds=inputs_embeds,
-            output_orig=output_orig,
-            requires_all_features_logits=requires_all_features_logits,
-            count_npu_time=count_npu_time,
-        )
+        config: MobilintQwen2Eagle3Config,
+        draft_config: MobilintEagle3DraftConfig,
+        fc_projector: MobilintEagle3FCProjector,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.draft_config = draft_config
+        self.fc_projector = fc_projector
+        self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
+        head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
+        self.rotary_emb = CachedRotaryEmbedding(head_dim, draft_config.max_position_embeddings)
+        self.top_k = int(config.eagle3_tree_top_k)
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
+        self.depth = int(config.eagle3_tree_depth)
+        self.hidden_size = draft_config.hidden_size
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
+        self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long, device="cpu"))
+        self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool, device="cpu"))
+        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32, device="cpu")[None, None]
+        self.position_ids = torch.zeros(self.top_k, dtype=torch.long, device="cpu")
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
 
 
 class MobilintQwen2Eagle3ForCausalLM(
@@ -84,9 +84,49 @@ class MobilintQwen2Eagle3ForCausalLM(
     def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
         no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
-        self.model = MobilintQwen2Eagle3Model(config, _internal_call=True, no_launch=no_launch)
-        self.lm_head = nn.Identity()
+        self._register_load_state_dict_pre_hook(self._remap_legacy_state_dict)
+        fc_projector = MobilintEagle3FCProjector(config, _internal_call=True, no_launch=no_launch)
+        self.eagle3_fc_projector = fc_projector
+        self.eagle3_base_model = MobilintQwen2Eagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
+        self.eagle3_draft_model = MobilintQwen2Eagle3DraftModel(
+            config,
+            draft_config=config.draft_config,
+            fc_projector=fc_projector,
+            _internal_call=True,
+            no_launch=no_launch,
+        )
         self.post_init()
+
+    def get_input_embeddings(self) -> nn.Module:
+        return self.eagle3_base_model.get_input_embeddings()
+
+    @staticmethod
+    def _remap_legacy_state_dict(
+        state_dict: dict[str, torch.Tensor],
+        prefix: str,
+        local_metadata: dict[str, object],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        del prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        legacy_prefix_pairs = (
+            ("model.base_model.", "eagle3_base_model."),
+            ("model.draft_model.", "eagle3_draft_model."),
+            ("model.fc_projector.", "eagle3_fc_projector."),
+            ("base_model.", "eagle3_base_model."),
+            ("draft_model.", "eagle3_draft_model."),
+            ("fc_projector.", "eagle3_fc_projector."),
+        )
+        remapped_keys: list[tuple[str, str]] = []
+        for legacy_prefix, new_prefix in legacy_prefix_pairs:
+            for key in list(state_dict.keys()):
+                if key.startswith(legacy_prefix):
+                    remapped_keys.append((key, new_prefix + key[len(legacy_prefix) :]))
+        for old_key, new_key in remapped_keys:
+            if new_key not in state_dict:
+                state_dict[new_key] = state_dict.pop(old_key)
 
 
 AutoModel.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)
