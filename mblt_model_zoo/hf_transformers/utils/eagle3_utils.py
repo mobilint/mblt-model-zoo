@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol
+import math
+import time
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
+import numpy as np
 import torch
+import torch.nn as nn
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     RepetitionPenaltyLogitsProcessor,
@@ -12,8 +16,13 @@ from transformers.generation.logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
+from transformers.modeling_utils import PreTrainedModel
 
 from .cache_utils import MobilintEagle3Cache
+from .modeling_utils import MobilintEagle3ModelMixin
+
+if TYPE_CHECKING:
+    from ..models.qwen2_eagle3.configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
 
 
 class MobilintEagle3GenerationProtocol(Protocol):
@@ -21,6 +30,587 @@ class MobilintEagle3GenerationProtocol(Protocol):
 
     eagle3_base_model: Any
     eagle3_draft_model: Any
+
+
+def make_causal_mask(
+    input_shape: torch.Size,
+    dtype: torch.dtype,
+    device: torch.device,
+    past_key_values_length: int = 0,
+) -> torch.Tensor:
+    """Build a causal mask compatible with MXQ inputs."""
+    batch_size, target_length = input_shape
+    mask = torch.full((target_length, target_length), torch.finfo(dtype).min, device=device)
+    mask_cond = torch.arange(mask.size(-1), device=device)
+    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+    mask = mask.to(dtype)
+    if past_key_values_length > 0:
+        mask = torch.cat(
+            [torch.zeros(target_length, past_key_values_length, dtype=dtype, device=device), mask],
+            dim=-1,
+        )
+    return mask[None, None, :, :].expand(batch_size, 1, target_length, target_length + past_key_values_length)
+
+
+def expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None) -> torch.Tensor:
+    """Expand a 2D attention mask to decoder shape."""
+    batch_size, src_len = mask.size()
+    target_length = tgt_len if tgt_len is not None else src_len
+    expanded_mask = mask[:, None, None, :].expand(batch_size, 1, target_length, src_len).to(dtype)
+    inverted_mask = 1.0 - expanded_mask
+    return inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(dtype).min)
+
+
+def convert_attention_mask_to_numpy(
+    attention_mask: torch.Tensor,
+    *,
+    squeeze_channel_dim: bool = False,
+) -> np.ndarray:
+    """Convert a decoder attention mask to a float32 numpy payload."""
+    if squeeze_channel_dim:
+        attention_mask = attention_mask.squeeze(1)
+    attention_mask = (attention_mask != 0).to(torch.float32)
+    return attention_mask.contiguous().numpy()
+
+
+class CachedRotaryEmbedding(nn.Module):
+    """Precompute RoPE tables and expose them as MXQ-friendly numpy arrays."""
+
+    def __init__(self, dim: int, max_position_embeddings: int = 2048, base: int = 10000) -> None:
+        super().__init__()
+        self.dim = dim
+        self.max_seq_len = max_position_embeddings
+        self.base = base
+        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float() / self.dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self._build_position_table()
+
+    def _build_position_table(
+        self,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        device = self.inv_freq.device if device is None else device
+        dtype = torch.get_default_dtype() if dtype is None else dtype
+        with torch.no_grad():
+            seq_len = self.max_seq_len
+            positions = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+            freqs = torch.einsum("i,j->ij", positions, self.inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            cos = emb.cos().unsqueeze(0).unsqueeze(0)
+            sin = emb.sin().unsqueeze(0).unsqueeze(0)
+            channels = cos.shape[-1]
+            half_channels = channels // 2
+            rotate_tensor = torch.zeros(1, 1, seq_len, 2 * channels, device=device, dtype=dtype)
+            rotate_tensor[..., 0:channels:2] = cos[..., :half_channels]
+            rotate_tensor[..., 1:channels:2] = -sin[..., :half_channels]
+            rotate_tensor[..., channels : 2 * channels : 2] = sin[..., half_channels:channels]
+            rotate_tensor[..., channels + 1 : 2 * channels : 2] = cos[..., half_channels:channels]
+            target_half = ((channels + 63) // 64) * 64
+            target_size = 2 * target_half
+            if rotate_tensor.shape[-1] != target_size:
+                rotate_tensor = self.pad_rope(rotate_tensor, target_size)
+            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+
+    @staticmethod
+    def pad_rope(rotate_tensor: torch.Tensor, target_len: int) -> torch.Tensor:
+        batch_size, num_heads, seq_len, current_len = rotate_tensor.shape
+        if target_len == current_len:
+            return rotate_tensor
+        if target_len < current_len:
+            return rotate_tensor[..., :target_len]
+        channels = current_len // 2
+        target_half = target_len // 2
+        pad_half = target_half - channels
+        if pad_half <= 0:
+            return rotate_tensor
+        tensor = rotate_tensor.reshape(batch_size, num_heads, seq_len, 2, -1)
+        padding = rotate_tensor.new_zeros(batch_size, num_heads, seq_len, 2, pad_half)
+        tensor = torch.cat([tensor, padding], dim=4)
+        return tensor.reshape(batch_size, num_heads, seq_len, target_len)
+
+    @torch.no_grad()
+    def forward(self, x: torch.Tensor, position_ids: torch.LongTensor) -> np.ndarray:
+        seq_len = int(torch.max(position_ids).item()) + 1
+        if seq_len > self.max_seq_len:
+            self.max_seq_len = seq_len
+            self._build_position_table(device=x.device, dtype=x.dtype)
+        indices = position_ids.view(-1).cpu().numpy()
+        return self.position_table[indices][None, None, :, :]
+
+
+class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
+    """FC projection backend used by the draft model."""
+
+    npu_backend_prefix = "fc_"
+
+    def project(self, hidden_states: torch.Tensor, *, count_npu_time: bool = False) -> torch.Tensor:
+        """Project base hidden states to the draft hidden size."""
+        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        if hidden_states_numpy.ndim == 3:
+            hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
+        if count_npu_time:
+            start_time = time.perf_counter()
+            result = self.get_mxq_model().infer([hidden_states_numpy])
+            self._record_npu_timing("decode", time.perf_counter() - start_time)
+        else:
+            result = self.get_mxq_model().infer([hidden_states_numpy])
+        assert result is not None, "mxq infer result is None!"
+        return torch.from_numpy(result[0]).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1)
+
+
+class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, PreTrainedModel):
+    """Base Qwen2 MXQ wrapper for EAGLE-3."""
+
+    npu_backend_prefix = "base_"
+
+    def __init__(self, config: "MobilintQwen2Eagle3Config", *args: object, **kwargs: object) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        self.rotary_emb = CachedRotaryEmbedding(head_dim, config.max_position_embeddings)
+
+    def get_input_embeddings(self) -> nn.Module:
+        return self.embed_tokens
+
+    def _prepare_decoder_attention_mask(
+        self,
+        attention_mask: Optional[torch.Tensor],
+        input_shape: tuple[int, int],
+        inputs_embeds: torch.Tensor,
+        past_key_values_length: int,
+        cache: MobilintEagle3Cache,
+    ) -> torch.Tensor:
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = make_causal_mask(
+                torch.Size(input_shape),
+                torch.float32,
+                inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+        if attention_mask is not None:
+            expanded_attn_mask = expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(inputs_embeds.device)
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+        if cache.tree_mask is not None and combined_attention_mask is not None:
+            tree_mask = cache.tree_mask
+            tree_len = tree_mask.size(-1)
+            combined_attention_mask[:, :, -tree_len:, -tree_len:][tree_mask == 0] = combined_attention_mask.min()
+        assert combined_attention_mask is not None
+        return combined_attention_mask
+
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        *,
+        cache: MobilintEagle3Cache,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        output_orig: bool = True,
+        requires_all_features_logits: bool = True,
+        count_npu_time: bool = False,
+    ) -> tuple[dict[str, list[torch.Tensor]], torch.Tensor]:
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds.")
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You must specify input_ids or inputs_embeds.")
+
+        if input_ids is not None:
+            batch_size, seq_length = input_ids.shape
+        else:
+            assert inputs_embeds is not None
+            batch_size, seq_length, _ = inputs_embeds.shape
+
+        past_key_values_length = cache.get_base_seq_length()
+        if position_ids is None:
+            device = input_ids.device if input_ids is not None else inputs_embeds.device
+            position_ids = (
+                torch.arange(
+                    past_key_values_length,
+                    seq_length + past_key_values_length,
+                    dtype=torch.long,
+                    device=device,
+                )
+                .unsqueeze(0)
+                .view(-1, seq_length)
+            )
+
+        if inputs_embeds is None:
+            inputs_embeds = self.embed_tokens(input_ids)
+
+        inputs_embeds_numpy = inputs_embeds.cpu().contiguous().float().numpy()
+        if inputs_embeds_numpy.ndim == 3:
+            inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+
+        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids).astype(np.float32, copy=False)
+        if position_embs_numpy.ndim == 3:
+            position_embs_numpy = np.expand_dims(position_embs_numpy, 1)
+
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                (batch_size, seq_length + past_key_values_length),
+                dtype=torch.bool,
+                device=inputs_embeds.device,
+            )
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask,
+            (batch_size, seq_length),
+            inputs_embeds,
+            past_key_values_length,
+            cache,
+        )
+        attention_mask_numpy = convert_attention_mask_to_numpy(attention_mask, squeeze_channel_dim=True)
+        if attention_mask_numpy.ndim == 3:
+            attention_mask_numpy = np.expand_dims(attention_mask_numpy, 1)
+
+        hidden_states_chunks: list[torch.Tensor] = []
+        logits_chunks: list[torch.Tensor] = []
+        chunk_size = self.resolve_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        timing_phase = "prefill" if seq_length > 1 or past_key_values_length == 0 else "decode"
+        for chunk_index in range(math.ceil(seq_length / chunk_size)):
+            seq_start = chunk_index * chunk_size
+            seq_end = min((chunk_index + 1) * chunk_size, seq_length)
+            current_cache_position = past_key_values_length + seq_start
+            infer_inputs = [
+                inputs_embeds_numpy[:, :, seq_start:seq_end, :],
+                attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
+                position_embs_numpy[:, :, seq_start:seq_end, :],
+            ]
+            if count_npu_time:
+                start_time = time.perf_counter()
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+                self._record_npu_timing(timing_phase, time.perf_counter() - start_time)
+            else:
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+            assert result is not None, "mxq infer result is None!"
+            hidden1, hidden2, hidden3, logits = result
+            hidden = torch.from_numpy(np.concatenate([hidden1, hidden2, hidden3], axis=-1)).to(
+                device=inputs_embeds.device,
+                dtype=inputs_embeds.dtype,
+            )
+            if hidden.ndim == 4 and hidden.shape[1] == 1:
+                hidden = hidden.squeeze(1)
+            hidden_states_chunks.append(hidden)
+            if requires_all_features_logits:
+                logits_chunks.append(torch.from_numpy(logits).to(device=inputs_embeds.device, dtype=inputs_embeds.dtype).squeeze(1))
+            elif seq_end == seq_length:
+                logits_chunks.append(
+                    torch.from_numpy(logits[:, :, -1]).to(device=inputs_embeds.device, dtype=inputs_embeds.dtype).squeeze(1)
+                )
+
+        hidden_states = torch.cat(hidden_states_chunks, dim=-2) if len(hidden_states_chunks) > 1 else hidden_states_chunks[0]
+        logits_tensor = torch.cat(logits_chunks, dim=-2) if len(logits_chunks) > 1 else logits_chunks[0]
+        return {"hidden_states": [hidden_states]}, logits_tensor if output_orig else hidden_states
+
+
+class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, PreTrainedModel):
+    """Draft Qwen2 wrapper for EAGLE-3 tree expansion."""
+
+    npu_backend_prefix = "draft_"
+
+    def __init__(
+        self,
+        config: "MobilintQwen2Eagle3Config",
+        draft_config: "MobilintEagle3DraftConfig",
+        fc_projector: MobilintEagle3FCProjector,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.draft_config = draft_config
+        self.fc_projector = fc_projector
+        self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
+        head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
+        self.rotary_emb = CachedRotaryEmbedding(head_dim, draft_config.max_position_embeddings)
+        self.top_k = int(config.eagle3_tree_top_k)
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
+        self.depth = int(config.eagle3_tree_depth)
+        self.hidden_size = draft_config.hidden_size
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
+        self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long))
+        self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool))
+        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32)[None, None]
+        self.position_ids = torch.zeros(self.top_k, dtype=torch.long)
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def _prepare_decoder_attention_mask(
+        self,
+        attention_mask: Optional[torch.Tensor],
+        input_shape: tuple[int, int],
+        hidden_states: torch.Tensor,
+        past_key_values_length: int,
+        cache: MobilintEagle3Cache,
+        tree_mask: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = make_causal_mask(
+                torch.Size(input_shape),
+                torch.float32,
+                hidden_states.device,
+                past_key_values_length=past_key_values_length,
+            )
+        if attention_mask is not None:
+            expanded_attn_mask = expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(hidden_states.device)
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+        if tree_mask is not None and combined_attention_mask is not None:
+            _, _, tree_shape0, tree_shape1 = tree_mask.shape
+            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:][tree_mask == 0] = torch.finfo(torch.float32).min
+        assert combined_attention_mask is not None
+        return combined_attention_mask
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        input_ids: torch.LongTensor,
+        cache: MobilintEagle3Cache,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        requires_all_features: bool = False,
+        add_cache_position: int = 0,
+        tree_mask: Optional[torch.Tensor] = None,
+        count_npu_time: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size, seq_length, _ = hidden_states.shape
+        past_key_values_length = cache.get_draft_seq_length() + add_cache_position
+        seq_length_with_past = seq_length + past_key_values_length
+
+        inputs_embeds = self.embed_tokens(input_ids).to(hidden_states.dtype)
+        if position_ids is None:
+            position_ids = (
+                torch.arange(
+                    past_key_values_length,
+                    seq_length + past_key_values_length,
+                    dtype=torch.long,
+                    device=hidden_states.device,
+                )
+                .unsqueeze(0)
+                .view(-1, seq_length)
+            )
+        else:
+            position_ids = position_ids.view(-1, seq_length).long()
+        position_embs_numpy = self.rotary_emb(inputs_embeds, position_ids).astype(np.float32, copy=False)
+        if position_embs_numpy.ndim == 3:
+            position_embs_numpy = np.expand_dims(position_embs_numpy, 1)
+
+        if attention_mask is None:
+            attention_mask = torch.ones((batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device)
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask,
+            (batch_size, seq_length),
+            hidden_states,
+            past_key_values_length,
+            cache,
+            tree_mask,
+        )
+        attention_mask_numpy = convert_attention_mask_to_numpy(attention_mask)
+        if attention_mask_numpy.ndim == 3:
+            attention_mask_numpy = np.expand_dims(attention_mask_numpy, 1)
+
+        inputs_embeds_numpy = inputs_embeds.cpu().contiguous().float().numpy()
+        if inputs_embeds_numpy.ndim == 3:
+            inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        if hidden_states_numpy.ndim == 3:
+            hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
+        if hidden_states.shape[-1] != inputs_embeds.shape[-1]:
+            hidden_states_numpy = (
+                self.fc_projector.project(hidden_states, count_npu_time=count_npu_time)
+                .cpu()
+                .contiguous()
+                .numpy()
+                .astype(np.float32, copy=False)
+            )
+            if hidden_states_numpy.ndim == 3:
+                hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
+
+        chunk_size = self.resolve_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        hidden_chunks: list[torch.Tensor] = []
+        logits_chunks: list[torch.Tensor] = []
+        base_cache_position = cache.get_draft_seq_length() + add_cache_position
+        timing_phase = "prefill" if seq_length > 1 or base_cache_position == 0 else "decode"
+        for chunk_index in range(math.ceil(seq_length / chunk_size)):
+            seq_start = chunk_index * chunk_size
+            seq_end = min((chunk_index + 1) * chunk_size, seq_length)
+            current_cache_position = base_cache_position + seq_start
+            infer_inputs = [
+                hidden_states_numpy[:, :, seq_start:seq_end, :],
+                inputs_embeds_numpy[:, :, seq_start:seq_end, :],
+                attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
+                position_embs_numpy[:, :, seq_start:seq_end, :],
+            ]
+            if count_npu_time:
+                start_time = time.perf_counter()
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+                self._record_npu_timing(timing_phase, time.perf_counter() - start_time)
+            else:
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+            assert result is not None, "mxq infer result is None!"
+            layer_outputs, last_hidden_logits = result
+            if requires_all_features:
+                hidden_chunks.append(torch.from_numpy(layer_outputs).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1))
+                logits_chunks.append(
+                    torch.from_numpy(last_hidden_logits).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1)
+                )
+            elif seq_end == seq_length:
+                hidden_chunks.append(
+                    torch.from_numpy(layer_outputs[:, :, -1]).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1)
+                )
+                logits_chunks.append(
+                    torch.from_numpy(last_hidden_logits[:, :, -1])
+                    .to(device=hidden_states.device, dtype=hidden_states.dtype)
+                    .squeeze(1)
+                )
+
+        hidden_out = torch.cat(hidden_chunks, dim=-2)
+        logits_out = torch.cat(logits_chunks, dim=-1)
+        return hidden_out, logits_out
+
+    @torch.no_grad()
+    def topk_generate(
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        input_ids: torch.LongTensor,
+        cache: MobilintEagle3Cache,
+        logits_processor: Optional[Any],
+        max_draft_tokens: Optional[int] = None,
+        count_npu_time: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        total_tokens = self.max_draft_tokens if max_draft_tokens is None else min(self.max_draft_tokens, max(1, max_draft_tokens))
+        depth = self.depth
+        top_k = self.top_k
+        sample_token = input_ids[:, -1]
+        scores_list = []
+        parents_list = []
+        draft_token_steps = []
+
+        input_ids_without_prompt_token = input_ids[:, 1:].to(hidden_states.device)
+        input_ids_delta = input_ids_without_prompt_token[:, cache.get_draft_seq_length() :]
+        last_hidden, last_hidden_logits = self(
+            hidden_states,
+            input_ids=input_ids_delta,
+            cache=cache,
+            requires_all_features=False,
+            add_cache_position=0,
+            tree_mask=None,
+            count_npu_time=count_npu_time,
+        )
+        cache.update_draft_seen_tokens(input_ids_delta.shape[1])
+
+        last_p = self.logsoftmax(last_hidden_logits)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values
+        scores = topk_p[0]
+        scores_list.append(scores[None])
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        if self.draft_config.vocab_size == getattr(self.draft_config, "draft_vocab_size", self.draft_config.vocab_size):
+            draft_token_steps.append(topk_index)
+            next_input_ids = topk_index
+        else:
+            draft_token_steps.append(topk_index + self.d2t[topk_index])
+            next_input_ids = topk_index + self.d2t[topk_index]
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        tree_mask = self.tree_mask_init.to(self.embed_tokens.weight.device)
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        add_cache_position = 0
+        length_position = input_ids.shape[1] - 1
+
+        for depth_index in range(depth):
+            position_ids = length_position + self.position_ids.to(hidden_states.device)
+            out_hidden, last_hidden_logits = self(
+                input_hidden,
+                input_ids=next_input_ids,
+                cache=cache,
+                position_ids=position_ids,
+                requires_all_features=True,
+                add_cache_position=add_cache_position,
+                tree_mask=tree_mask,
+                count_npu_time=count_npu_time,
+            )
+            length_position += 1
+            bias1 = top_k if depth_index > 0 else 0
+            bias2 = max(0, depth_index - 1)
+            bias = 1 + top_k**2 * bias2 + bias1
+            parents = topk_cs_index + bias
+            parents_list.append(parents)
+            last_hidden_logits = last_hidden_logits.squeeze(0)
+            last_p = self.logsoftmax(last_hidden_logits)
+            top = torch.topk(last_p, top_k, dim=-1)
+            topk_index, topk_p = top.indices, top.values
+            cumulative_scores = topk_p + scores[:, None]
+            topk_cs = torch.topk(cumulative_scores.view(-1), top_k, dim=-1)
+            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
+            scores = topk_cs_p
+            out_ids = topk_cs_index // top_k
+            input_hidden = out_hidden[:, out_ids]
+            next_input_ids = topk_index.view(-1)[topk_cs_index][None]
+            if self.draft_config.vocab_size == getattr(self.draft_config, "draft_vocab_size", self.draft_config.vocab_size):
+                draft_token_steps.append(topk_index)
+            else:
+                next_input_ids = next_input_ids + self.d2t[next_input_ids]
+                draft_token_steps.append(topk_index + self.d2t[topk_index])
+            scores_list.append(cumulative_scores)
+            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init.to(tree_mask.device)), dim=3)
+            add_cache_position += self.top_k
+
+        scores_list_tensor = torch.cat(scores_list, dim=0).view(-1)
+        draft_step_tensor = torch.cat(draft_token_steps, dim=0).view(-1)
+        top_scores = torch.topk(scores_list_tensor, total_tokens, dim=-1)
+        top_scores_index = torch.sort(top_scores.indices).values
+        draft_tokens = draft_step_tensor[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        tree_mask_tensor = torch.eye(total_tokens + 1).bool()
+        tree_mask_tensor[:, 0] = True
+        for token_index in range(total_tokens):
+            tree_mask_tensor[token_index + 1].add_(tree_mask_tensor[mask_index_list[token_index]])
+        tree_position_ids = torch.sum(tree_mask_tensor, dim=1) - 1
+        tree_mask_tensor = tree_mask_tensor.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        max_depth = torch.max(tree_position_ids) + 1
+        non_leaf_index = set(torch.unique(mask_index).tolist())
+        leaf_count = total_tokens - (len(non_leaf_index) - 1)
+        retrieve_indices = torch.zeros(leaf_count, max_depth.item(), dtype=torch.long) - 1
+        retrieve_index_rows = retrieve_indices.tolist()
+        row_id = 0
+        position_ids_list = tree_position_ids.tolist()
+        for token_index in range(total_tokens + 1):
+            if token_index not in non_leaf_index:
+                current_id = token_index
+                node_depth = position_ids_list[token_index]
+                for depth_index in reversed(range(node_depth + 1)):
+                    retrieve_index_rows[row_id][depth_index] = current_id
+                    current_id = mask_index_list[current_id - 1]
+                row_id += 1
+        if logits_processor is not None:
+            max_item = total_tokens + 5
+
+            def _sort_key(values: list[int]) -> list[int]:
+                return [value if value >= 0 else max_item for value in values]
+
+            retrieve_index_rows = sorted(retrieve_index_rows, key=_sort_key)
+        retrieve_indices = torch.tensor(retrieve_index_rows, dtype=torch.long)
+        return (
+            draft_tokens.to(hidden_states.device),
+            retrieve_indices.to(hidden_states.device),
+            tree_mask_tensor.to(hidden_states.device),
+            tree_position_ids.to(hidden_states.device),
+        )
 
 
 def load_embedding_override(path: str) -> torch.Tensor:
