@@ -84,7 +84,6 @@ class MobilintQwen2Eagle3ForCausalLM(
     def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
         no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
-        self._register_load_state_dict_pre_hook(self._remap_legacy_state_dict)
         fc_projector = MobilintEagle3FCProjector(config, _internal_call=True, no_launch=no_launch)
         self.eagle3_fc_projector = fc_projector
         self.eagle3_base_model = MobilintQwen2Eagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
@@ -99,34 +98,6 @@ class MobilintQwen2Eagle3ForCausalLM(
 
     def get_input_embeddings(self) -> nn.Module:
         return self.eagle3_base_model.get_input_embeddings()
-
-    @staticmethod
-    def _remap_legacy_state_dict(
-        state_dict: dict[str, torch.Tensor],
-        prefix: str,
-        local_metadata: dict[str, object],
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
-        del prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
-        legacy_prefix_pairs = (
-            ("model.base_model.", "eagle3_base_model."),
-            ("model.draft_model.", "eagle3_draft_model."),
-            ("model.fc_projector.", "eagle3_fc_projector."),
-            ("base_model.", "eagle3_base_model."),
-            ("draft_model.", "eagle3_draft_model."),
-            ("fc_projector.", "eagle3_fc_projector."),
-        )
-        remapped_keys: list[tuple[str, str]] = []
-        for legacy_prefix, new_prefix in legacy_prefix_pairs:
-            for key in list(state_dict.keys()):
-                if key.startswith(legacy_prefix):
-                    remapped_keys.append((key, new_prefix + key[len(legacy_prefix) :]))
-        for old_key, new_key in remapped_keys:
-            if new_key not in state_dict:
-                state_dict[new_key] = state_dict.pop(old_key)
 
 
 AutoModel.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)
