@@ -1,4 +1,19 @@
-"""Utilities for Mobilint EAGLE-3 runtime and tree decoding."""
+"""Utilities for Mobilint EAGLE-3 runtime and tree decoding.
+
+This module contains the low-level building blocks for the EAGLE-3 decoding pipeline:
+
+1) Base prefill/decode (`MobilintEagle3BaseModelMixin`)
+2) Draft tree expansion (`MobilintEagle3DraftModelMixin.topk_generate`)
+3) Posterior evaluation and accepted-token update
+
+Typical tensor shapes (batch is currently fixed to 1):
+
+- ``input_ids``: ``[1, prompt_len]``
+- Base logits (single-step): ``[1, vocab]``
+- Draft tokens: ``[1, tree_nodes]`` (first token is the sampled root)
+- ``retrieve_indices``: ``[leaf_count, depth]``
+- Tree mask: ``[1, 1, tree_nodes, tree_nodes]``
+"""
 
 from __future__ import annotations
 
@@ -42,7 +57,12 @@ def make_causal_mask(
     device: torch.device,
     past_key_values_length: int = 0,
 ) -> torch.Tensor:
-    """Build a causal mask compatible with MXQ inputs."""
+    """Build a causal mask compatible with MXQ inputs.
+
+    Shape examples:
+    - input_shape ``(1, 4)``, ``past_key_values_length=8``
+      -> output ``[1, 1, 4, 12]``
+    """
     batch_size, target_length = input_shape
     mask = torch.full((target_length, target_length), torch.finfo(dtype).min, device=device)
     mask_cond = torch.arange(mask.size(-1), device=device)
@@ -70,7 +90,11 @@ def convert_attention_mask_to_numpy(
     *,
     squeeze_channel_dim: bool = False,
 ) -> np.ndarray:
-    """Convert a decoder attention mask to a float32 numpy payload."""
+    """Convert a decoder attention mask to a float32 numpy payload.
+
+    The MXQ runtime consumes dense float arrays where non-zero means masked.
+    We keep the same logical layout and convert to contiguous ``np.float32``.
+    """
     if squeeze_channel_dim:
         attention_mask = attention_mask.squeeze(1)
     attention_mask = (attention_mask != 0).to(torch.float32)
@@ -152,7 +176,14 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
     npu_backend_prefix = "fc_"
 
     def project(self, hidden_states: torch.Tensor, *, count_npu_time: bool = False) -> torch.Tensor:
-        """Project base hidden states to the draft hidden size."""
+        """Project base hidden states to the draft hidden size.
+
+        Args:
+            hidden_states: Base hidden states, typically ``[1, seq, hidden_base]``.
+
+        Returns:
+            Projected hidden states, typically ``[1, seq, hidden_draft]``.
+        """
         hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
@@ -167,7 +198,13 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
 
 
 class MobilintEagle3BaseModelMixin:
-    """Shared runtime helpers for an EAGLE-3 base model."""
+    """Shared runtime helpers for an EAGLE-3 base model.
+
+    Responsibility:
+    - Convert PyTorch tensors to MXQ-compatible numpy payloads.
+    - Run chunked prefill/decode against base MXQ backend.
+    - Reassemble hidden/logits chunks back to torch tensors.
+    """
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -212,6 +249,14 @@ class MobilintEagle3BaseModelMixin:
         requires_all_features_logits: bool = True,
         count_npu_time: bool = False,
     ) -> tuple[dict[str, list[torch.Tensor]], torch.Tensor]:
+        """Run base model forward with chunked MXQ inference.
+
+        Key shapes:
+        - ``inputs_embeds_numpy``: ``[1, 1, seq_chunk, hidden]``
+        - ``attention_mask_numpy``: ``[1, 1, seq_chunk, cache+seq_chunk]``
+        - return hidden: ``{"hidden_states": [ [1, seq, hidden] ]}``
+        - return logits: ``[1, seq, vocab]`` or final-step ``[1, vocab]``
+        """
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds.")
         if input_ids is None and inputs_embeds is None:
@@ -306,7 +351,13 @@ class MobilintEagle3BaseModelMixin:
 
 
 class MobilintEagle3DraftModelMixin:
-    """Shared runtime helpers for an EAGLE-3 draft model."""
+    """Shared runtime helpers for an EAGLE-3 draft model.
+
+    Responsibility:
+    - Consume accepted/base hidden states.
+    - Expand a top-k draft tree up to configured depth.
+    - Return tree metadata consumed by posterior evaluation.
+    """
 
     def _prepare_decoder_attention_mask(
         self,
@@ -349,6 +400,17 @@ class MobilintEagle3DraftModelMixin:
         tree_mask: Optional[torch.Tensor] = None,
         count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run draft model forward with cache-aware tree attention.
+
+        Args:
+            hidden_states: ``[1, seq, hidden_base_or_draft]``.
+            input_ids: ``[1, seq]`` aligned with ``hidden_states``.
+
+        Returns:
+            Tuple of:
+            - hidden features (all steps or last step)
+            - logits (all steps or last step)
+        """
         batch_size, seq_length, _ = hidden_states.shape
         past_key_values_length = cache.get_draft_seq_length() + add_cache_position
         seq_length_with_past = seq_length + past_key_values_length
@@ -455,6 +517,14 @@ class MobilintEagle3DraftModelMixin:
         max_draft_tokens: Optional[int] = None,
         count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build draft tree candidates by iterative top-k expansion.
+
+        Returns:
+            - ``draft_tokens``: ``[1, total_tokens+1]`` (root + selected nodes)
+            - ``retrieve_indices``: ``[leaf_count, depth]`` paths for each leaf
+            - ``tree_mask``: ``[1, 1, total_tokens+1, total_tokens+1]``
+            - ``tree_position_ids``: ``[total_tokens+1]`` depth per node
+        """
         total_tokens = self.max_draft_tokens if max_draft_tokens is None else min(self.max_draft_tokens, max(1, max_draft_tokens))
         depth = self.depth
         top_k = self.top_k
@@ -642,7 +712,13 @@ def initialize_tree(
     remaining_tokens: Optional[int] = None,
     count_npu_time: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Prefill base model once and initialize the first draft tree."""
+    """Prefill base model once and initialize the first draft tree.
+
+    Flow:
+    1. Run base model for prompt delta.
+    2. Sample/select first token from base logits.
+    3. Expand draft tree from updated prefix.
+    """
     outputs, logits = model.eagle3_base_model(
         input_ids[:, cache.get_base_seq_length() :],
         cache=cache,
@@ -687,7 +763,12 @@ def tree_decoding(
     *,
     count_npu_time: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run base-model tree decoding for the current draft tree."""
+    """Run base-model tree decoding for the current draft tree.
+
+    ``tree_candidates`` are flattened tree nodes generated by the draft model.
+    Base model evaluates those nodes in one pass and returns logits used by
+    posterior acceptance.
+    """
     if cache.accept_tokens is not None:
         tree_position_ids = tree_position_ids + cache.accept_tokens.shape[1]
         accept_position_ids = torch.arange(cache.accept_tokens.shape[1], device=tree_position_ids.device)
@@ -728,7 +809,14 @@ def evaluate_posterior(
     logits_processor: Optional[LogitsProcessorList],
     retrieve_indices: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    """Choose the best accepted branch and the next sampling distribution."""
+    """Choose the best accepted branch and the next sampling distribution.
+
+    Returns:
+        - best candidate row index
+        - accepted length (excluding root offset convention in caller)
+        - next-token sampling distribution or logits-derived probabilities
+        - optional sampled top-k indices when sampling mode is enabled
+    """
     if logits.ndim == 1:
         logits = logits.unsqueeze(0)
 
@@ -829,7 +917,13 @@ def update_inference_inputs(
     eos_token_id: Optional[int | list[int]] = None,
     count_npu_time: bool = False,
 ) -> tuple[torch.LongTensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, bool]:
-    """Advance accepted tokens and build the next draft tree."""
+    """Advance accepted tokens and build the next draft tree.
+
+    This function is the state-transition step of EAGLE-3 loop:
+    - append accepted tokens to ``input_ids``
+    - update cache-side accepted token state
+    - sample next root token and regenerate draft tree metadata
+    """
     accept_length_int = int(accept_length.item())
     best_candidate_int = int(best_candidate.item())
     accepted = candidates[None, best_candidate_int, : accept_length_int + 1].to(input_ids.device)

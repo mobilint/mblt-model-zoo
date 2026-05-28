@@ -585,7 +585,15 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             if streamer is not None:
                 for token_id in generated[0, prev_len:]:
                     streamer.put(token_id.unsqueeze(0))
-            if stopping_criteria_list(generated, sample_p):
+            # NOTE:
+            # - HF `StoppingCriteriaList.__call__` expects `(input_ids, scores, **kwargs)`.
+            # - `sample_p` is a posterior/top-k probability artifact used by EAGLE-3 branch
+            #   acceptance logic, not the decoder score tensor contract expected by stopping
+            #   criteria implementations.
+            # - Pass `None` for `scores` to keep behavior compatible with criteria that only
+            #   inspect `input_ids` (e.g., max length / EOS based criteria) and avoid shape/type
+            #   mismatches.
+            if stopping_criteria_list(generated, None):
                 break
             if should_stop:
                 break
