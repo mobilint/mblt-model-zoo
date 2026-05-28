@@ -8,14 +8,14 @@ if TYPE_CHECKING:
 def __getattr__(name: str):
     import importlib
 
-    if name in {"MobilintEagle3DraftConfig", "MobilintQwen2Eagle3Config"}:
+    if name in {
+        "MobilintEagle3DraftConfig",
+        "MobilintQwen2Eagle3Config",
+    }:
         module = importlib.import_module(".configuration_qwen2_eagle3", __package__)
         return getattr(module, name)
 
     if name in {
-        "MobilintEagle3BaseModel",
-        "MobilintEagle3DraftModel",
-        "MobilintEagle3FCProjector",
         "MobilintQwen2Eagle3ForCausalLM",
         "MobilintQwen2Eagle3Model",
     }:
@@ -26,10 +26,6 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "MobilintEagle3DraftConfig",
-    "MobilintEagle3BaseModel",
-    "MobilintEagle3DraftModel",
-    "MobilintEagle3FCProjector",
     "MobilintQwen2Eagle3Config",
     "MobilintQwen2Eagle3ForCausalLM",
     "MobilintQwen2Eagle3Model",
