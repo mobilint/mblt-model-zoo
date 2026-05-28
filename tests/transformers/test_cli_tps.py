@@ -2096,6 +2096,79 @@ def test_cli_tps_eagle3_build_pipeline_uses_prefixed_backend_kwargs(monkeypatch:
     assert model_kwargs["fc_core_mode"] == "global4"
 
 
+def test_cli_tps_eagle3_build_pipeline_preserves_empty_prefixed_targets(monkeypatch: pytest.MonkeyPatch):
+    """Keep explicit empty prefixed targets instead of falling back to shared values."""
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("transformers.pipeline", _fake_pipeline)
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-JPharmatron-7B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(
+            base_target_cores=[],
+            base_target_clusters=[],
+        ),
+        mxq_path=None,
+        core_mode="global8",
+        target_cores=["0:0"],
+        target_clusters=[0, 1],
+    )
+
+    model_kwargs = captured["model_kwargs"]
+    assert model_kwargs["base_core_mode"] == "global8"
+    assert model_kwargs["base_target_cores"] == []
+    assert model_kwargs["base_target_clusters"] == []
+
+
+def test_cli_tps_eagle3_build_pipeline_prefers_prefixed_targets_over_shared(monkeypatch: pytest.MonkeyPatch):
+    """Use prefixed EAGLE-3 target values when both shared and prefixed options are set."""
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("transformers.pipeline", _fake_pipeline)
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-JPharmatron-7B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(
+            base_target_cores=["0:2"],
+            draft_target_clusters=[1],
+            fc_core_mode="single",
+        ),
+        mxq_path=None,
+        core_mode="global8",
+        target_cores=["0:0"],
+        target_clusters=[0, 1],
+    )
+
+    model_kwargs = captured["model_kwargs"]
+    assert model_kwargs["base_target_cores"] == ["0:2"]
+    assert model_kwargs["draft_target_clusters"] == [1]
+    assert model_kwargs["fc_core_mode"] == "single"
+
+
 def test_benchmark_result_iter_rows_pads_missing_latency_values():
     """Verify combined rows survive old JSON-style sweeps without latency arrays."""
     result = BenchmarkResult()

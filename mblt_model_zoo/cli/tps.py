@@ -337,24 +337,27 @@ def _build_pipeline(
             target_clusters=target_clusters,
         )
     elif eagle3_prefix_requested:
+        def _coalesce(preferred: Any, fallback: Any) -> Any:
+            return preferred if preferred is not None else fallback
+
         for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
             (
                 "base",
-                eagle3_options.base_core_mode or core_mode,
-                eagle3_options.base_target_cores or target_cores,
-                eagle3_options.base_target_clusters or target_clusters,
+                _coalesce(eagle3_options.base_core_mode, core_mode),
+                _coalesce(eagle3_options.base_target_cores, target_cores),
+                _coalesce(eagle3_options.base_target_clusters, target_clusters),
             ),
             (
                 "draft",
-                eagle3_options.draft_core_mode or core_mode,
-                eagle3_options.draft_target_cores or target_cores,
-                eagle3_options.draft_target_clusters or target_clusters,
+                _coalesce(eagle3_options.draft_core_mode, core_mode),
+                _coalesce(eagle3_options.draft_target_cores, target_cores),
+                _coalesce(eagle3_options.draft_target_clusters, target_clusters),
             ),
             (
                 "fc",
-                eagle3_options.fc_core_mode or core_mode,
-                eagle3_options.fc_target_cores or target_cores,
-                eagle3_options.fc_target_clusters or target_clusters,
+                _coalesce(eagle3_options.fc_core_mode, core_mode),
+                _coalesce(eagle3_options.fc_target_cores, target_cores),
+                _coalesce(eagle3_options.fc_target_clusters, target_clusters),
             ),
         ):
             model_kwargs = _apply_core_mode_model_kwargs_common(

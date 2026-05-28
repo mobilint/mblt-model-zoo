@@ -157,19 +157,19 @@ def apply_core_mode_model_kwargs(
 ) -> dict[str, Any]:
     key_prefix = f"{prefix}_" if prefix else ""
     if not core_mode:
-        if target_cores:
+        if target_cores is not None:
             model_kwargs[f"{key_prefix}target_cores"] = target_cores
-        if target_clusters:
+        if target_clusters is not None:
             model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
         return model_kwargs
 
     model_kwargs[f"{key_prefix}core_mode"] = core_mode
-    if target_cores:
+    if target_cores is not None:
         model_kwargs[f"{key_prefix}target_cores"] = target_cores
     elif core_mode == "single":
         model_kwargs[f"{key_prefix}target_cores"] = ["0:0"]
 
-    if target_clusters:
+    if target_clusters is not None:
         model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
     elif not target_cores and core_mode == "global4":
         model_kwargs[f"{key_prefix}target_clusters"] = [0]

@@ -448,11 +448,83 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         super().__post_init__(**kwargs)
 
     @PretrainedConfig.name_or_path.setter
-    def name_or_path(self, value):
+    def name_or_path(self, value: str):
         PretrainedConfig.name_or_path.fset(self, value)
         draft_config = getattr(self, "draft_config", None)
         if draft_config is not None:
             draft_config.name_or_path = value
+
+    @property
+    def base_core_mode(self) -> str:
+        return self.base_npu_backend.core_mode
+
+    @base_core_mode.setter
+    def base_core_mode(self, value: str) -> None:
+        self.base_npu_backend.core_mode = value
+
+    @property
+    def draft_core_mode(self) -> str:
+        return self.draft_npu_backend.core_mode
+
+    @draft_core_mode.setter
+    def draft_core_mode(self, value: str) -> None:
+        self.draft_npu_backend.core_mode = value
+
+    @property
+    def fc_core_mode(self) -> str:
+        return self.fc_npu_backend.core_mode
+
+    @fc_core_mode.setter
+    def fc_core_mode(self, value: str) -> None:
+        self.fc_npu_backend.core_mode = value
+
+    @property
+    def base_target_cores(self) -> list:
+        return self.base_npu_backend.target_cores
+
+    @base_target_cores.setter
+    def base_target_cores(self, values: list) -> None:
+        self.base_npu_backend.target_cores = values
+
+    @property
+    def draft_target_cores(self) -> list:
+        return self.draft_npu_backend.target_cores
+
+    @draft_target_cores.setter
+    def draft_target_cores(self, values: list) -> None:
+        self.draft_npu_backend.target_cores = values
+
+    @property
+    def fc_target_cores(self) -> list:
+        return self.fc_npu_backend.target_cores
+
+    @fc_target_cores.setter
+    def fc_target_cores(self, values: list) -> None:
+        self.fc_npu_backend.target_cores = values
+
+    @property
+    def base_target_clusters(self) -> list:
+        return self.base_npu_backend.target_clusters
+
+    @base_target_clusters.setter
+    def base_target_clusters(self, values: list) -> None:
+        self.base_npu_backend.target_clusters = values
+
+    @property
+    def draft_target_clusters(self) -> list:
+        return self.draft_npu_backend.target_clusters
+
+    @draft_target_clusters.setter
+    def draft_target_clusters(self, values: list) -> None:
+        self.draft_npu_backend.target_clusters = values
+
+    @property
+    def fc_target_clusters(self) -> list:
+        return self.fc_npu_backend.target_clusters
+
+    @fc_target_clusters.setter
+    def fc_target_clusters(self, values: list) -> None:
+        self.fc_npu_backend.target_clusters = values
 
     @property
     def base_mxq_path(self) -> str:
