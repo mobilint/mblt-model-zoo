@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM
+from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.base_utils import PretrainedOnlyMixin
@@ -16,7 +17,7 @@ from ...utils.eagle3.eagle3_utils import (
     MobilintEagle3ModelMixin,
 )
 from ...utils.generation_utils import MobilintEagle3GenerationMixin
-from .configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
+from .configuration_qwen2_eagle3 import MobilintQwen2Eagle3Config
 
 
 class MobilintQwen2Eagle3PreTrainedModel(PreTrainedModel):
@@ -47,7 +48,7 @@ class MobilintQwen2Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle
     def __init__(
         self,
         config: MobilintQwen2Eagle3Config,
-        draft_config: MobilintEagle3DraftConfig,
+        draft_config: Qwen2Config,
         fc_projector: MobilintEagle3FCProjector,
         *args: object,
         **kwargs: object,

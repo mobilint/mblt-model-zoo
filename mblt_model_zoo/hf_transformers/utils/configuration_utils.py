@@ -436,6 +436,27 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         ("eagle3_npu_chunk_size", 192, int),
     )
 
+    @classmethod
+    def _get_draft_config_class(cls) -> type[PretrainedConfig]:
+        return MobilintConfigMixin
+
+    def _init_or_coerce_draft_config(self, draft_config: Any | None) -> None:
+        draft_config_cls = self._get_draft_config_class()
+
+        if draft_config is None:
+            coerced_draft_config = draft_config_cls()
+        elif isinstance(draft_config, dict):
+            coerced_draft_config = draft_config_cls(**draft_config)
+        elif isinstance(draft_config, draft_config_cls):
+            coerced_draft_config = draft_config
+        else:
+            raise TypeError(
+                f"draft_config must be None, dict, or {draft_config_cls.__name__}; got {type(draft_config).__name__}"
+            )
+
+        self.draft_config = coerced_draft_config
+        self.draft_config.name_or_path = self.name_or_path
+
     def _ensure_eagle3_npu_backends(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "base_npu_backend"):
             self.base_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="base_")
@@ -452,14 +473,18 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             self.__dict__[field_name] = int(value) if value is not None else int(default_value)
 
     def __init__(self, **kwargs):
+        draft_config = kwargs.pop("draft_config", None)
         self._ensure_eagle3_npu_backends(kwargs)
         self._ensure_eagle3_runtime_fields(kwargs)
         super().__init__(**kwargs)
+        self._init_or_coerce_draft_config(draft_config)
 
     def __post_init__(self, **kwargs: Any) -> None:
+        draft_config = kwargs.pop("draft_config", getattr(self, "draft_config", None))
         self._ensure_eagle3_npu_backends(kwargs)
         self._ensure_eagle3_runtime_fields(kwargs)
         super().__post_init__(**kwargs)
+        self._init_or_coerce_draft_config(draft_config)
 
     @PretrainedConfig.name_or_path.setter
     def name_or_path(self, value: str):
