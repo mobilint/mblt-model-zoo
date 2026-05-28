@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import random
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import torch
 from transformers.generation.logits_process import (
@@ -15,6 +14,13 @@ from transformers.generation.logits_process import (
 )
 
 from .cache_utils import MobilintEagle3Cache
+
+
+class MobilintEagle3GenerationProtocol(Protocol):
+    """Protocol for models that expose the EAGLE-3 generation contract."""
+
+    eagle3_base_model: Any
+    eagle3_draft_model: Any
 
 
 def load_embedding_override(path: str) -> torch.Tensor:
@@ -69,7 +75,7 @@ def softmax_topk_cpu_torch(
 @torch.no_grad()
 def initialize_tree(
     input_ids: torch.LongTensor,
-    model: Any,
+    model: MobilintEagle3GenerationProtocol,
     cache: MobilintEagle3Cache,
     logits_processor: Optional[LogitsProcessorList],
     *,
@@ -112,7 +118,7 @@ def initialize_tree(
 
 @torch.no_grad()
 def tree_decoding(
-    model: Any,
+    model: MobilintEagle3GenerationProtocol,
     cache: MobilintEagle3Cache,
     tree_candidates: torch.LongTensor,
     input_ids: torch.LongTensor,
@@ -220,7 +226,7 @@ def evaluate_posterior(
             seen_tokens.append(token)
             mask = topk_indices == token
             token_prob = topk_probs[mask.nonzero(as_tuple=True)[0].item()] if mask.any() else 0.0
-            if random.random() <= token_prob:
+            if torch.rand((), device=topk_probs.device) <= token_prob:
                 accept_prefix = torch.cat((accept_prefix, candidates[candidate_idx, idx][None]), dim=0)
                 accept_length += 1
                 best_candidate = candidate_idx
@@ -253,7 +259,7 @@ def update_inference_inputs(
     retrieve_indices: torch.Tensor,
     logits_processor: Optional[LogitsProcessorList],
     new_token_count: int,
-    model: Any,
+    model: MobilintEagle3GenerationProtocol,
     cache: MobilintEagle3Cache,
     hidden_state_new: torch.Tensor,
     sample_p: torch.Tensor,
@@ -280,7 +286,15 @@ def update_inference_inputs(
     cache.accept_tokens = accepted
     new_token_count += int(accepted.shape[1])
     if should_stop or (remaining_tokens is not None and int(accepted.shape[1]) >= remaining_tokens):
-        return input_ids, torch.empty(0, dtype=torch.long, device=input_ids.device), retrieve_indices, torch.empty(0), torch.empty(0), new_token_count, True
+        return (
+            input_ids,
+            torch.empty(0, dtype=torch.long, device=input_ids.device),
+            retrieve_indices,
+            torch.empty(0),
+            torch.empty(0),
+            new_token_count,
+            True,
+        )
 
     retrieved_hidden_state = hidden_state_new[:, retrieve_indices]
     accepted_hidden_state = retrieved_hidden_state[:, best_candidate_int, : int(accepted.shape[1])]

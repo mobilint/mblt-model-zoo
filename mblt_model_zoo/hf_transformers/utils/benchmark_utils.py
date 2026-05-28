@@ -215,7 +215,10 @@ def _get_npu_timing_target(model: object) -> object | None:
             continue
         if hasattr(candidate, "npu_backend"):
             return candidate
-        if callable(getattr(candidate, "reset_npu_timing", None)) and callable(getattr(candidate, "get_npu_timing", None)):
+        has_aggregate_timing = callable(getattr(candidate, "reset_npu_timing", None)) and callable(
+            getattr(candidate, "get_npu_timing", None)
+        )
+        if has_aggregate_timing:
             return candidate
     return None
 

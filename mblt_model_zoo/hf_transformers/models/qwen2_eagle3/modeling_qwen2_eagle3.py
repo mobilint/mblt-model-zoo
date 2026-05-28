@@ -4,30 +4,18 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoModelForCausalLM, GenerationConfig
-from transformers.generation.stopping_criteria import StoppingCriteriaList
-from transformers.generation.utils import GenerationMixin
-from transformers.generation.utils import GenerateDecoderOnlyOutput
-from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers import AutoModel, AutoModelForCausalLM
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintEagle3Cache
-from ...utils.eagle3_utils import (
-    evaluate_posterior,
-    initialize_tree,
-    load_embedding_override,
-    prepare_logits_processor,
-    tree_decoding,
-    update_inference_inputs,
-)
-from ...utils.generation_utils import MobilintEagle3GenerationMixin, with_mobilint_generation_signature
-from ...utils.modeling_utils import MobilintModelMixin
+from ...utils.generation_utils import MobilintEagle3GenerationMixin
+from ...utils.modeling_utils import MobilintEagle3ModelMixin
 from .configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
 
 
@@ -132,12 +120,6 @@ class CachedRotaryEmbedding(nn.Module):
             self._build_position_table(device=x.device, dtype=x.dtype)
         indices = position_ids.view(-1).cpu().numpy()
         return self.position_table[indices][None, None, :, :]
-
-
-class MobilintEagle3ModelMixin(MobilintModelMixin):
-    """Base Mobilint model mixin for EAGLE-3 child backends."""
-
-    pass
 
 
 class MobilintQwen2Eagle3PreTrainedModel(PreTrainedModel):
@@ -517,7 +499,9 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         max_draft_tokens: Optional[int] = None,
         count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        total_tokens = self.total_tokens if max_draft_tokens is None else min(self.total_tokens, max(1, max_draft_tokens))
+        total_tokens = (
+            self.total_tokens if max_draft_tokens is None else min(self.total_tokens, max(1, max_draft_tokens))
+        )
         depth = self.depth
         top_k = self.top_k
         sample_token = input_ids[:, -1]
@@ -710,349 +694,6 @@ class MobilintQwen2Eagle3ForCausalLM(
         self.model = MobilintQwen2Eagle3Model(config, _internal_call=True, no_launch=no_launch)
         self.lm_head = nn.Identity()
         self.post_init()
-
-    @property
-    def eagle3_model(self) -> MobilintQwen2Eagle3Model:
-        return self._modules["model"]
-
-    @property
-    def eagle3_base_model(self) -> MobilintEagle3BaseModel:
-        return self.eagle3_model._modules["base_model"]
-
-    @property
-    def eagle3_draft_model(self) -> MobilintEagle3DraftModel:
-        return self.eagle3_model._modules["draft_model"]
-
-    @staticmethod
-    def _clear_tree_state(cache: Any) -> None:
-        """Clear transient EAGLE-3 tree state on any cache-like object."""
-        clear_tree_state = getattr(cache, "clear_tree_state", None)
-        if callable(clear_tree_state):
-            clear_tree_state()
-            return
-        for attribute in (
-            "accept_tokens",
-            "tree_mask",
-            "retrieve_indices",
-            "tree_position_ids",
-            "pending_draft_tokens",
-        ):
-            if hasattr(cache, attribute):
-                setattr(cache, attribute, None)
-
-    @staticmethod
-    def _sync_draft_seq_length_to_base(cache: Any) -> None:
-        """Align any draft cache length metadata with the committed base length."""
-        get_base_seq_length = getattr(cache, "get_base_seq_length", None)
-        set_draft_seq_length = getattr(cache, "set_draft_seq_length", None)
-        if callable(get_base_seq_length) and callable(set_draft_seq_length):
-            try:
-                set_draft_seq_length(get_base_seq_length())
-            except AttributeError:
-                return
-            return
-        draft_layer = getattr(cache, "draft_layer", None)
-        if draft_layer is not None and callable(get_base_seq_length) and hasattr(draft_layer, "set_seq_length"):
-            try:
-                draft_layer.set_seq_length(get_base_seq_length())
-            except AttributeError:
-                return
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Optional[str], *model_args: object, **kwargs: object):
-        legacy_embedding_weight = kwargs.pop("embedding_weight", None)
-        base_embedding_weight = kwargs.pop("base_embedding_weight", None)
-        draft_embedding_weight = kwargs.pop("draft_embedding_weight", None)
-        if legacy_embedding_weight is not None:
-            raise ValueError(
-                "`embedding_weight` is not supported for mobilint-qwen2-eagle3. "
-                "Use `base_embedding_weight` and/or `draft_embedding_weight`."
-            )
-        model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-        if base_embedding_weight is not None:
-            model._inject_embedding_override(model.eagle3_base_model.embed_tokens, base_embedding_weight, "base")
-        if draft_embedding_weight is not None:
-            model._inject_embedding_override(model.eagle3_draft_model.embed_tokens, draft_embedding_weight, "draft")
-        return model
-
-    @staticmethod
-    def _inject_embedding_override(embedding: nn.Embedding, path: str, role: str) -> None:
-        weight = load_embedding_override(path)
-        if weight.ndim != 2:
-            raise ValueError(f"{role} embedding override must be rank 2, got shape {tuple(weight.shape)}")
-        expected_shape = tuple(embedding.weight.shape)
-        if tuple(weight.shape) != expected_shape:
-            raise ValueError(
-                f"{role} embedding override shape mismatch: expected {expected_shape}, got {tuple(weight.shape)}"
-            )
-        with torch.no_grad():
-            embedding.weight.data = weight.to(device=embedding.weight.device, dtype=embedding.weight.dtype)
-
-    def get_input_embeddings(self) -> nn.Module:
-        return self.eagle3_model.get_input_embeddings()
-
-    def get_cache_mxq_models(self) -> tuple[Any, Any]:
-        return self.eagle3_base_model.get_mxq_model(), self.eagle3_draft_model.get_mxq_model()
-
-    def reset_npu_timing(self) -> None:
-        """Reset aggregate NPU timing counters for all EAGLE-3 child backends."""
-        for child in (self.eagle3_base_model, self.eagle3_draft_model, self.eagle3_model.fc_projector):
-            child.reset_npu_timing()
-
-    def get_npu_timing(self) -> dict[str, float | int]:
-        """Return aggregate NPU timing counters across base, draft, and FC backends."""
-        aggregate: dict[str, float | int] = {
-            "prefill_time": 0.0,
-            "decode_time": 0.0,
-            "prefill_calls": 0,
-            "decode_calls": 0,
-        }
-        for child in (self.eagle3_base_model, self.eagle3_draft_model, self.eagle3_model.fc_projector):
-            timing = child.get_npu_timing()
-            aggregate["prefill_time"] = float(aggregate["prefill_time"]) + float(timing.get("prefill_time", 0.0))
-            aggregate["decode_time"] = float(aggregate["decode_time"]) + float(timing.get("decode_time", 0.0))
-            aggregate["prefill_calls"] = int(aggregate["prefill_calls"]) + int(timing.get("prefill_calls", 0))
-            aggregate["decode_calls"] = int(aggregate["decode_calls"]) + int(timing.get("decode_calls", 0))
-        return aggregate
-
-    def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[MobilintEagle3Cache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        count_npu_time: bool = False,
-        output_hidden_states: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        **kwargs: Any,
-    ) -> CausalLMOutputWithPast:
-        del cache_position, output_hidden_states, output_attentions, kwargs
-        if use_cache is False:
-            raise ValueError("mobilint-qwen2-eagle3 requires use_cache=True.")
-        if past_key_values is None:
-            past_key_values = self._get_cache("mobilint-eagle3", 1, 0)
-        if not isinstance(past_key_values, MobilintEagle3Cache):
-            raise TypeError("past_key_values must be MobilintEagle3Cache for mobilint-qwen2-eagle3.")
-        outputs, logits = self.eagle3_model(
-            input_ids=input_ids,
-            cache=past_key_values,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            inputs_embeds=inputs_embeds,
-            output_orig=True,
-            requires_all_features_logits=False,
-            count_npu_time=count_npu_time,
-        )
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=cast(torch.FloatTensor, logits),
-            past_key_values=past_key_values,
-            hidden_states=None if outputs is None else tuple(outputs["hidden_states"]),
-            attentions=None,
-        )
-
-    @torch.no_grad()
-    @with_mobilint_generation_signature(
-        GenerationMixin.generate,
-        "count_npu_time",
-        "prefill_chunk_size",
-    )
-    def generate(
-        self,
-        inputs: Optional[torch.Tensor] = None,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[MobilintEagle3Cache] = None,
-        generation_config: Optional[GenerationConfig] = None,
-        max_new_tokens: Optional[int] = None,
-        do_sample: Optional[bool] = None,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        top_k: Optional[int] = None,
-        streamer: Optional[Any] = None,
-        return_dict_in_generate: bool = False,
-        output_scores: bool = False,
-        output_hidden_states: bool = False,
-        output_attentions: bool = False,
-        num_beams: int = 1,
-        assistant_model: Optional[PreTrainedModel] = None,
-        use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        stopping_criteria: Optional[StoppingCriteriaList | list[Any]] = None,
-        min_new_tokens: Optional[int] = None,
-        pad_token_id: Optional[int] = None,
-        eos_token_id: Optional[int | list[int]] = None,
-        count_npu_time: bool = False,
-        prefill_chunk_size: Optional[int] = None,
-        **kwargs: Any,
-    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
-        """Generate tokens with the Mobilint EAGLE-3 decoding loop.
-
-        Args:
-            inputs: Optional tensor alias for ``input_ids``.
-            input_ids: Prompt token ids.
-            attention_mask: Optional attention mask for the prompt.
-            past_key_values: Optional Mobilint EAGLE-3 cache for continuation.
-            generation_config: Optional Hugging Face generation config from the pipeline.
-            max_new_tokens: Maximum number of new tokens to emit.
-            do_sample: Whether to use sampling. ``False`` forces deterministic decoding.
-            temperature: Sampling temperature.
-            top_p: Nucleus sampling threshold.
-            top_k: Top-k sampling threshold.
-            streamer: Optional text streamer passed through by the pipeline.
-            return_dict_in_generate: Whether to return a Hugging Face generation output object.
-            output_scores: Unsupported Hugging Face generation output mode.
-            output_hidden_states: Unsupported Hugging Face generation output mode.
-            output_attentions: Unsupported Hugging Face generation output mode.
-            num_beams: Beam search width. Only greedy decoding is supported.
-            assistant_model: Unsupported Hugging Face assistant model.
-            use_cache: Compatibility flag forwarded by Hugging Face generation helpers.
-            cache_position: Compatibility cache position forwarded by Hugging Face generation helpers.
-            **kwargs: Additional generation kwargs.
-
-        Returns:
-            The generated token tensor, or a Hugging Face generation output when requested.
-        """
-        if output_scores or output_hidden_states or output_attentions:
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support generation diagnostics yet.")
-        if num_beams != 1:
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support beam search.")
-        if assistant_model is not None:
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support HF assistant_model mixing.")
-        if use_cache is False:
-            raise NotImplementedError("mobilint-qwen2-eagle3 requires use_cache=True.")
-        del attention_mask, min_new_tokens, pad_token_id, prefill_chunk_size
-        logits_processor_arg = kwargs.pop("logits_processor", None)
-        synced_gpus = kwargs.pop("synced_gpus", None)
-        negative_prompt_ids = kwargs.pop("negative_prompt_ids", None)
-        negative_prompt_attention_mask = kwargs.pop("negative_prompt_attention_mask", None)
-        if synced_gpus not in (None, False):
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support synced_gpus generation.")
-        if logits_processor_arg not in (None, []):
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support custom logits_processor yet.")
-        if negative_prompt_ids is not None or negative_prompt_attention_mask is not None:
-            raise NotImplementedError("mobilint-qwen2-eagle3 does not support negative prompts.")
-        if kwargs:
-            unsupported = ", ".join(sorted(kwargs))
-            raise NotImplementedError(f"Unsupported generate kwargs for mobilint-qwen2-eagle3: {unsupported}")
-
-        input_ids = input_ids if input_ids is not None else inputs
-        if input_ids is None:
-            raise ValueError("`generate` requires `input_ids` or `inputs`.")
-        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
-            raise NotImplementedError("mobilint-qwen2-eagle3 only supports batch size 1.")
-        if cache_position is not None:
-            del cache_position
-
-        generation_config = self.generation_config if generation_config is None else generation_config
-        resolved_max_new_tokens = int(
-            max_new_tokens if max_new_tokens is not None else generation_config.max_new_tokens
-        )
-        resolved_do_sample = bool(do_sample if do_sample is not None else getattr(generation_config, "do_sample", False))
-        resolved_temperature = temperature if temperature is not None else getattr(generation_config, "temperature", None)
-        resolved_top_p = top_p if top_p is not None else getattr(generation_config, "top_p", None)
-        resolved_top_k = int(top_k if top_k is not None else getattr(generation_config, "top_k", 0))
-        if not resolved_do_sample:
-            resolved_temperature = 0.0
-        num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
-        self.eagle3_draft_model.total_tokens = max(1, num_assistant_tokens - 1)
-
-        cache = past_key_values
-        if cache is None:
-            cache = self._get_cache("mobilint-eagle3", 1, 0)
-            cache.reset()
-        elif not isinstance(cache, MobilintEagle3Cache):
-            raise TypeError("past_key_values must be MobilintEagle3Cache for mobilint-qwen2-eagle3.")
-        self._clear_tree_state(cache)
-        self._sync_draft_seq_length_to_base(cache)
-        logits_processor = prepare_logits_processor(
-            temperature=0.0 if resolved_temperature is None else resolved_temperature,
-            top_p=0.0 if resolved_top_p is None else resolved_top_p,
-            top_k=resolved_top_k,
-        )
-
-        generated = input_ids.clone()
-        eos_token_id = eos_token_id if eos_token_id is not None else generation_config.eos_token_id
-        if stopping_criteria is None:
-            stopping_criteria_list = StoppingCriteriaList()
-        elif isinstance(stopping_criteria, StoppingCriteriaList):
-            stopping_criteria_list = stopping_criteria
-        else:
-            stopping_criteria_list = StoppingCriteriaList(stopping_criteria)
-        if streamer is not None:
-            streamer.put(generated[0].detach().cpu())
-        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, _ = initialize_tree(
-            generated,
-            self,
-            cache,
-            logits_processor,
-            remaining_tokens=resolved_max_new_tokens,
-            count_npu_time=count_npu_time,
-        )
-        new_token_count = 0
-
-        while new_token_count < resolved_max_new_tokens:
-            remaining_tokens = resolved_max_new_tokens - new_token_count
-            logits, hidden_state_new = tree_decoding(
-                self,
-                cache,
-                draft_tokens.to(generated.device),
-                generated,
-                retrieve_indices,
-                tree_position_ids,
-                count_npu_time=count_npu_time,
-            )
-            padding = torch.full((1, 1), -1, dtype=torch.long, device=generated.device)
-            padded_draft_tokens = torch.cat((draft_tokens.to(generated.device), padding), dim=1)
-            candidates = padded_draft_tokens[0, retrieve_indices].contiguous()
-            best_candidate, accept_length, sample_p, sampled_indices = evaluate_posterior(
-                logits,
-                candidates,
-                logits_processor,
-                retrieve_indices,
-            )
-            prev_len = generated.shape[1]
-            generated, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count, should_stop = (
-                update_inference_inputs(
-                    generated,
-                    candidates,
-                    best_candidate,
-                    accept_length,
-                    retrieve_indices,
-                    logits_processor,
-                    new_token_count,
-                    self,
-                    cache,
-                    hidden_state_new,
-                    sample_p,
-                    sampled_indices,
-                    remaining_tokens=remaining_tokens,
-                    eos_token_id=eos_token_id,
-                    count_npu_time=count_npu_time,
-                )
-            )
-            if streamer is not None:
-                for token_id in generated[0, prev_len:]:
-                    streamer.put(token_id.unsqueeze(0))
-            if stopping_criteria_list(generated, sample_p):
-                break
-            if should_stop:
-                break
-
-        if streamer is not None:
-            streamer.end()
-        self._clear_tree_state(cache)
-        self._sync_draft_seq_length_to_base(cache)
-        if return_dict_in_generate:
-            return GenerateDecoderOnlyOutput(sequences=generated, past_key_values=cache)
-        return generated
 
 
 AutoModel.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)

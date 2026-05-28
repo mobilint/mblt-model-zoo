@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import torch
 from transformers.generation.stopping_criteria import StoppingCriteria
 
-from mblt_model_zoo.hf_transformers.models.qwen2_eagle3 import modeling_qwen2_eagle3 as eagle3_module
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
     MobilintQwen2Eagle3ForCausalLM,
 )
+from mblt_model_zoo.hf_transformers.utils import eagle3_utils as eagle3_module
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3_utils import evaluate_posterior, update_inference_inputs
 
@@ -662,3 +662,29 @@ def test_qwen2_eagle3_evaluate_posterior_handles_greedy_full_accept() -> None:
     assert accept_length.item() == 2
     assert sample_p.shape == (8,)
     assert sampled_indices is None
+
+
+def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeypatch) -> None:
+    """Use torch RNG for sampling-path posterior acceptance."""
+    logits = torch.zeros((2, 8), dtype=torch.float32)
+    candidates = torch.tensor([[3, 4, 5]], dtype=torch.long)
+    retrieve_indices = torch.tensor([[0, 1, -1]], dtype=torch.long)
+
+    monkeypatch.setattr(
+        eagle3_module,
+        "softmax_topk_cpu_torch",
+        lambda *_args, **_kwargs: (torch.tensor([1.0]), torch.tensor([4])),
+    )
+    monkeypatch.setattr(eagle3_module.torch, "rand", lambda *_args, **_kwargs: torch.tensor(0.0))
+
+    best_candidate, accept_length, sample_p, sampled_indices = evaluate_posterior(
+        logits,
+        candidates,
+        [object()],
+        retrieve_indices,
+    )
+
+    assert best_candidate.item() == 0
+    assert accept_length.item() == 2
+    assert torch.equal(sample_p, torch.tensor([1.0]))
+    assert torch.equal(sampled_indices, torch.tensor([4]))

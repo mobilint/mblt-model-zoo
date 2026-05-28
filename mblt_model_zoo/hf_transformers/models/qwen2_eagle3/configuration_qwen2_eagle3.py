@@ -30,6 +30,8 @@ class MobilintQwen2Eagle3Config(MobilintEagle3ConfigMixin, Qwen2Config):
         eagle3_tree_depth = kwargs.pop("eagle3_tree_depth", None)
         eagle3_tree_top_k = kwargs.pop("eagle3_tree_top_k", None)
         eagle3_npu_chunk_size = kwargs.pop("eagle3_npu_chunk_size", None)
+        # Hugging Face may pass nested sub-configs either as an explicit constructor argument
+        # or inside kwargs during config round-trips. Prefer the explicit argument when present.
         draft_config_data = draft_config if draft_config is not None else kwargs.pop("draft_config", None)
         if draft_config_data is None:
             draft_config_data = {}
