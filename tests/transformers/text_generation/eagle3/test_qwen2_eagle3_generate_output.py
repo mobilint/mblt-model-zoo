@@ -12,9 +12,24 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 im
     CachedRotaryEmbedding,
     MobilintQwen2Eagle3ForCausalLM,
 )
-from mblt_model_zoo.hf_transformers.utils import eagle3_utils as eagle3_module
+from mblt_model_zoo.hf_transformers.utils.eagle3 import eagle3_utils as eagle3_module
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
-from mblt_model_zoo.hf_transformers.utils.eagle3_utils import evaluate_posterior, update_inference_inputs
+from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import evaluate_posterior, update_inference_inputs
+
+
+def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
+    """Attach minimal base/draft/fc modules required by EAGLE-3 helpers."""
+    draft = SimpleNamespace(max_draft_tokens=None)
+    eagle3_model = SimpleNamespace(
+        _modules={
+            "base_model": SimpleNamespace(),
+            "draft_model": draft,
+            "fc_projector": SimpleNamespace(),
+        },
+        draft_model=draft,
+        fc_projector=SimpleNamespace(),
+    )
+    object.__setattr__(model, "_modules", {"model": eagle3_model})
 
 
 def test_qwen2_eagle3_generate_returns_hf_output_when_requested(monkeypatch) -> None:
@@ -29,11 +44,7 @@ def test_qwen2_eagle3_generate_returns_hf_output_when_requested(monkeypatch) -> 
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = SimpleNamespace(
         reset=lambda: None,
         clear_tree_state=lambda: None,
@@ -106,11 +117,7 @@ def test_qwen2_eagle3_generate_accepts_past_key_values(monkeypatch) -> None:
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(
         get_seq_length=lambda: 0,
@@ -195,11 +202,7 @@ def test_qwen2_eagle3_generate_clears_stale_tree_state(monkeypatch) -> None:
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(
         get_seq_length=lambda: 0,
@@ -295,11 +298,7 @@ def test_qwen2_eagle3_generate_resets_draft_length_to_committed_base(monkeypatch
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(
         get_seq_length=lambda: 12,
@@ -396,11 +395,7 @@ def test_qwen2_eagle3_generate_primes_streamer_with_prompt(monkeypatch) -> None:
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(get_seq_length=lambda: 0, set_seq_length=lambda _value: None)
     cache.draft_layer = SimpleNamespace(get_seq_length=lambda: 0, set_seq_length=lambda _value: None)
@@ -500,11 +495,7 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = SimpleNamespace(
         reset=lambda: None,
         clear_tree_state=lambda: None,
@@ -596,11 +587,7 @@ def test_qwen2_eagle3_generate_resolves_greedy_and_sampling_processors(monkeypat
             eos_token_id=None,
             num_assistant_tokens=2,
         )
-        object.__setattr__(
-            model,
-            "_modules",
-            {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-        )
+        _attach_minimal_eagle3_modules(model)
         cache = SimpleNamespace(
             reset=lambda: None,
             clear_tree_state=lambda: None,
@@ -769,11 +756,7 @@ def test_qwen2_eagle3_generate_multi_turn_reuses_cache_safely(monkeypatch) -> No
         eos_token_id=None,
         num_assistant_tokens=2,
     )
-    object.__setattr__(
-        model,
-        "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
-    )
+    _attach_minimal_eagle3_modules(model)
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(get_seq_length=lambda: getattr(cache, "_base_seq", 4))
     cache.draft_layer = SimpleNamespace(
@@ -919,3 +902,14 @@ def test_qwen2_eagle3_npu_timing_aggregation_and_reset() -> None:
     assert base.reset_called is True
     assert draft.reset_called is True
     assert fc.reset_called is True
+
+
+def test_qwen2_eagle3_npu_timing_requires_all_components() -> None:
+    """Fail fast when any EAGLE-3 child backend is missing."""
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    object.__setattr__(model, "_modules", {"model": SimpleNamespace(_modules={"base_model": object(), "draft_model": object()})})
+
+    import pytest
+
+    with pytest.raises(ValueError, match="requires all child backends"):
+        model.get_npu_timing()

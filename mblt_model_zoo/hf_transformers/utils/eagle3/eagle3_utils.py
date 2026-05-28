@@ -18,11 +18,14 @@ from transformers.generation.logits_process import (
 )
 from transformers.modeling_utils import PreTrainedModel
 
-from .cache_utils import MobilintEagle3Cache
-from .modeling_utils import MobilintEagle3ModelMixin
+from ..cache_utils import MobilintEagle3Cache
+from ..modeling_utils import MobilintEagle3ModelMixin
 
 if TYPE_CHECKING:
-    from ..models.qwen2_eagle3.configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
+    from ...models.qwen2_eagle3.configuration_qwen2_eagle3 import (
+        MobilintEagle3DraftConfig,
+        MobilintQwen2Eagle3Config,
+    )
 
 
 class MobilintEagle3GenerationProtocol(Protocol):

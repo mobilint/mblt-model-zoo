@@ -25,6 +25,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "MobilintEagle3DraftConfig",
     "MobilintQwen2Eagle3Config",
     "MobilintQwen2Eagle3ForCausalLM",
 ]

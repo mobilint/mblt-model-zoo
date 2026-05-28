@@ -209,7 +209,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
     @staticmethod
     def _inject_embedding_override(embedding: nn.Embedding, path: str, role: str) -> None:
         """Load and validate a role-specific embedding override."""
-        from ..utils.eagle3_utils import load_embedding_override
+        from ..utils.eagle3.eagle3_utils import load_embedding_override
 
         weight = load_embedding_override(path)
         if weight.ndim != 2:
@@ -232,11 +232,13 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
     def reset_npu_timing(self) -> None:
         """Reset aggregate NPU timing counters for all EAGLE-3 child backends."""
+        self._require_eagle3_components()
         for child in (self.eagle3_base_model, self.eagle3_draft_model, self.eagle3_fc_projector):
             child.reset_npu_timing()
 
     def get_npu_timing(self) -> dict[str, float | int]:
         """Return aggregate NPU timing counters across base, draft, and FC backends."""
+        self._require_eagle3_components()
         aggregate: dict[str, float | int] = {
             "prefill_time": 0.0,
             "decode_time": 0.0,
@@ -250,6 +252,18 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             aggregate["prefill_calls"] = int(aggregate["prefill_calls"]) + int(timing.get("prefill_calls", 0))
             aggregate["decode_calls"] = int(aggregate["decode_calls"]) + int(timing.get("decode_calls", 0))
         return aggregate
+
+    def _require_eagle3_components(self) -> None:
+        """Ensure base/draft/fc child backends are all mounted."""
+        missing: list[str] = []
+        for name in ("eagle3_base_model", "eagle3_draft_model", "eagle3_fc_projector"):
+            try:
+                _ = getattr(self, name)
+            except AttributeError:
+                missing.append(name)
+        if missing:
+            joined = ", ".join(missing)
+            raise ValueError(f"EAGLE-3 requires all child backends (base/draft/fc). Missing: {joined}")
 
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintEagle3Cache:
         del cache_implementation, batch_size, max_cache_len, args
@@ -400,6 +414,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
     def _prepare_eagle3_cache(self, past_key_values: Optional[MobilintEagle3Cache]) -> MobilintEagle3Cache:
         """Resolve and normalize the EAGLE-3 cache for a generation call."""
+        self._require_eagle3_components()
         cache = past_key_values
         if cache is None:
             cache = self._get_cache("mobilint-eagle3", 1, 0)
@@ -446,7 +461,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop."""
-        from ..utils.eagle3_utils import (
+        from ..utils.eagle3.eagle3_utils import (
             evaluate_posterior,
             initialize_tree,
             prepare_logits_processor,

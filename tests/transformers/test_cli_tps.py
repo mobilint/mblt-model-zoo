@@ -2,6 +2,8 @@ import argparse
 import importlib
 import inspect
 import json
+import types
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -660,6 +662,99 @@ def test_extract_eagle3_pipeline_kwargs_returns_dataclass() -> None:
     assert options.base_mxq_path == "base.mxq"
     assert options.draft_mxq_path == "draft.mxq"
     assert options.fc_mxq_path == "fc.mxq"
+
+
+def test_build_pipeline_eagle3_prefixed_options_override_global_with_warning(monkeypatch) -> None:
+    """EAGLE-3 prefixed options should override global options and emit warnings on conflicts."""
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", _fake_pipeline)
+
+    eagle3_options = tps_cli.Eagle3PipelineOptions(
+        base_mxq_path="base.mxq",
+        draft_mxq_path="draft.mxq",
+        fc_mxq_path="fc.mxq",
+        base_core_mode="single",
+        draft_core_mode="global4",
+        fc_core_mode="global8",
+        base_target_cores=["npu0"],
+        draft_target_cores=["npu1"],
+        fc_target_cores=["npu2"],
+        base_target_clusters=[0],
+        draft_target_clusters=[1],
+        fc_target_clusters=[2],
+    )
+
+    with pytest.warns(UserWarning, match="Conflicting options detected"):
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/model",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=eagle3_options,
+            mxq_path="global.mxq",
+            core_mode="single",
+            target_cores=["npu9"],
+            target_clusters=[9],
+        )
+
+    model_kwargs = captured.get("model_kwargs")
+    assert isinstance(model_kwargs, dict)
+    assert model_kwargs["base_mxq_path"] == "base.mxq"
+    assert model_kwargs["draft_mxq_path"] == "draft.mxq"
+    assert model_kwargs["fc_mxq_path"] == "fc.mxq"
+    assert model_kwargs["base_target_cores"] == ["npu0"]
+    assert model_kwargs["draft_target_cores"] == ["npu1"]
+    assert model_kwargs["fc_target_cores"] == ["npu2"]
+
+
+def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monkeypatch) -> None:
+    """Conflicts should not warn when global and prefixed values are identical."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+
+    eagle3_options = tps_cli.Eagle3PipelineOptions(
+        base_core_mode="single",
+        draft_core_mode="single",
+        fc_core_mode="single",
+        base_target_cores=["npu0"],
+        draft_target_cores=["npu0"],
+        fc_target_cores=["npu0"],
+        base_target_clusters=[0],
+        draft_target_clusters=[0],
+        fc_target_clusters=[0],
+    )
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/model",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=eagle3_options,
+            mxq_path=None,
+            core_mode="single",
+            target_cores=["npu0"],
+            target_clusters=[0],
+        )
+
+    assert len(record) == 0
 
 
 def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):

@@ -8,7 +8,7 @@ from transformers import AutoModel, AutoModelForCausalLM
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.eagle3_utils import (
+from ...utils.eagle3.eagle3_utils import (
     CachedRotaryEmbedding,
     MobilintEagle3BaseModelMixin,
     MobilintEagle3DraftModelMixin,

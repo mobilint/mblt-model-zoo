@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import sys
+import warnings
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
@@ -75,6 +76,22 @@ class Eagle3PipelineOptions:
     base_target_clusters: list[int] | None = None
     draft_target_clusters: list[int] | None = None
     fc_target_clusters: list[int] | None = None
+
+
+def _warn_eagle3_override(global_name: str, prefixed_name: str, global_value: Any, prefixed_value: Any) -> None:
+    """Warn when a prefixed EAGLE-3 option overrides the corresponding global option."""
+    if global_value is None or prefixed_value is None:
+        return
+    if global_value == prefixed_value:
+        return
+    warnings.warn(
+        (
+            f"Conflicting options detected: `{global_name}` and `{prefixed_name}`. "
+            f"Using `{prefixed_name}` value because EAGLE-3 prefixed options take precedence over global options."
+        ),
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
@@ -337,6 +354,34 @@ def _build_pipeline(
             target_clusters=target_clusters,
         )
     elif eagle3_prefix_requested:
+        _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
+        _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
+        _warn_eagle3_override("--core-mode", "--fc-core-mode", core_mode, eagle3_options.fc_core_mode)
+        _warn_eagle3_override("--target-cores", "--base-target-cores", target_cores, eagle3_options.base_target_cores)
+        _warn_eagle3_override("--target-cores", "--draft-target-cores", target_cores, eagle3_options.draft_target_cores)
+        _warn_eagle3_override("--target-cores", "--fc-target-cores", target_cores, eagle3_options.fc_target_cores)
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--base-target-clusters",
+            target_clusters,
+            eagle3_options.base_target_clusters,
+        )
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--draft-target-clusters",
+            target_clusters,
+            eagle3_options.draft_target_clusters,
+        )
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--fc-target-clusters",
+            target_clusters,
+            eagle3_options.fc_target_clusters,
+        )
+        _warn_eagle3_override("--mxq-path", "--base-mxq-path", mxq_path, eagle3_options.base_mxq_path)
+        _warn_eagle3_override("--mxq-path", "--draft-mxq-path", mxq_path, eagle3_options.draft_mxq_path)
+        _warn_eagle3_override("--mxq-path", "--fc-mxq-path", mxq_path, eagle3_options.fc_mxq_path)
+
         def _coalesce(preferred: Any, fallback: Any) -> Any:
             return preferred if preferred is not None else fallback
 
@@ -2245,7 +2290,7 @@ def add_tps_parser(
         p.add_argument(
             "--mxq-path",
             default=None,
-            help="override mxq_path for pipeline loading",
+            help="override mxq_path for pipeline loading (EAGLE-3 prefix options take precedence)",
         )
         for prefix in ("base", "draft", "fc"):
             p.add_argument(
@@ -2255,7 +2300,7 @@ def add_tps_parser(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, global4, global8)",
+            help="NPU core mode (single, global4, global8). EAGLE-3 prefix options take precedence.",
         )
         p.add_argument(
             "--target-cores",

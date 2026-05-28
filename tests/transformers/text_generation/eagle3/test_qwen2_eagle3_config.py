@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagle3 import (
+    MobilintEagle3DraftConfig,
     MobilintQwen2Eagle3Config,
 )
 
@@ -111,3 +112,29 @@ def test_qwen2_eagle3_config_name_or_path_propagates_to_draft_config() -> None:
     config.name_or_path = "mobilint/EAGLE3-JPharmatron-7B"
 
     assert config.draft_config.name_or_path == "mobilint/EAGLE3-JPharmatron-7B"
+
+
+def test_qwen2_eagle3_config_roundtrip_accepts_draft_config_object() -> None:
+    """Round-trip should preserve draft_config when passed as a config object."""
+    draft = MobilintEagle3DraftConfig(
+        vocab_size=10,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+    )
+    config = MobilintQwen2Eagle3Config(
+        vocab_size=10,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+        draft_config=draft,
+    )
+
+    restored = MobilintQwen2Eagle3Config(**config.to_dict())
+
+    assert isinstance(restored.draft_config, MobilintEagle3DraftConfig)
+    assert restored.draft_config.vocab_size == 10
