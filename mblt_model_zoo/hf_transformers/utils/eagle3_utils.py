@@ -72,6 +72,9 @@ def initialize_tree(
     model: Any,
     cache: MobilintEagle3Cache,
     logits_processor: Optional[LogitsProcessorList],
+    *,
+    remaining_tokens: Optional[int] = None,
+    count_npu_time: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Prefill base model once and initialize the first draft tree."""
     outputs, logits = model.eagle3_base_model(
@@ -79,6 +82,7 @@ def initialize_tree(
         cache=cache,
         output_orig=True,
         requires_all_features_logits=False,
+        count_npu_time=count_npu_time,
     )
     cache.update_base_seen_tokens(input_ids.shape[1] - cache.get_base_seq_length())
 
@@ -96,6 +100,8 @@ def initialize_tree(
         input_ids=input_ids,
         cache=cache,
         logits_processor=logits_processor,
+        max_draft_tokens=None if remaining_tokens is None else max(1, remaining_tokens - 1),
+        count_npu_time=count_npu_time,
     )
     cache.pending_draft_tokens = draft_tokens
     cache.retrieve_indices = retrieve_indices
@@ -112,6 +118,8 @@ def tree_decoding(
     input_ids: torch.LongTensor,
     retrieve_indices: torch.LongTensor,
     tree_position_ids: torch.LongTensor,
+    *,
+    count_npu_time: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run base-model tree decoding for the current draft tree."""
     if cache.accept_tokens is not None:
@@ -133,6 +141,7 @@ def tree_decoding(
         output_orig=True,
         position_ids=position_ids,
         requires_all_features_logits=True,
+        count_npu_time=count_npu_time,
     )
 
     if cache.accept_tokens is not None:
@@ -180,7 +189,8 @@ def evaluate_posterior(
             best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
         else:
             best_candidate = torch.argmax(accepted_lengths).to(torch.long)
-        sample_p = path_logits[best_candidate, accept_length]
+        sample_index = torch.clamp(accept_length, max=path_logits.shape[1] - 1)
+        sample_p = path_logits[best_candidate, sample_index]
         return best_candidate, accept_length, sample_p, None
 
     accept_length = 1
@@ -248,16 +258,32 @@ def update_inference_inputs(
     hidden_state_new: torch.Tensor,
     sample_p: torch.Tensor,
     sampled_indices: Optional[torch.Tensor],
-) -> tuple[torch.LongTensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    *,
+    remaining_tokens: Optional[int] = None,
+    eos_token_id: Optional[int | list[int]] = None,
+    count_npu_time: bool = False,
+) -> tuple[torch.LongTensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, bool]:
     """Advance accepted tokens and build the next draft tree."""
     accept_length_int = int(accept_length.item())
     best_candidate_int = int(best_candidate.item())
     accepted = candidates[None, best_candidate_int, : accept_length_int + 1].to(input_ids.device)
+    if remaining_tokens is not None:
+        accepted = accepted[:, : max(0, remaining_tokens)]
+    should_stop = accepted.numel() == 0
+    if eos_token_id is not None and accepted.numel() > 0:
+        eos_ids = [eos_token_id] if isinstance(eos_token_id, int) else eos_token_id
+        eos_positions = [index for index, token in enumerate(accepted[0].tolist()) if token in eos_ids]
+        if eos_positions:
+            accepted = accepted[:, : eos_positions[0] + 1]
+            should_stop = True
     input_ids = torch.cat([input_ids, accepted], dim=-1)
     cache.accept_tokens = accepted
+    new_token_count += int(accepted.shape[1])
+    if should_stop or (remaining_tokens is not None and int(accepted.shape[1]) >= remaining_tokens):
+        return input_ids, torch.empty(0, dtype=torch.long, device=input_ids.device), retrieve_indices, torch.empty(0), torch.empty(0), new_token_count, True
 
     retrieved_hidden_state = hidden_state_new[:, retrieve_indices]
-    accepted_hidden_state = retrieved_hidden_state[:, best_candidate_int, : accept_length_int + 1]
+    accepted_hidden_state = retrieved_hidden_state[:, best_candidate_int, : int(accepted.shape[1])]
 
     if logits_processor is not None:
         assert sampled_indices is not None
@@ -271,10 +297,11 @@ def update_inference_inputs(
         input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
         cache=cache,
         logits_processor=logits_processor,
+        max_draft_tokens=None if remaining_tokens is None else max(1, remaining_tokens - int(accepted.shape[1]) - 1),
+        count_npu_time=count_npu_time,
     )
     cache.pending_draft_tokens = draft_tokens
     cache.retrieve_indices = retrieve_indices
     cache.tree_mask = tree_mask
     cache.tree_position_ids = tree_position_ids
-    new_token_count += accept_length_int + 1
-    return input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count
+    return input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count, False

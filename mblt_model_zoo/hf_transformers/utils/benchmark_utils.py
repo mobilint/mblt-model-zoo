@@ -211,7 +211,11 @@ def _get_cache_mxq_model(model: object) -> object | None:
 def _get_npu_timing_target(model: object) -> object | None:
     """Resolve the Mobilint object that exposes benchmark NPU timing APIs."""
     for candidate in (model, _get_language_model_candidate(model)):
-        if candidate is not None and hasattr(candidate, "npu_backend"):
+        if candidate is None:
+            continue
+        if hasattr(candidate, "npu_backend"):
+            return candidate
+        if callable(getattr(candidate, "reset_npu_timing", None)) and callable(getattr(candidate, "get_npu_timing", None)):
             return candidate
     return None
 

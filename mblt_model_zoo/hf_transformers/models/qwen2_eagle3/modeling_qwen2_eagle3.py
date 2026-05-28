@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any, Optional, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM, GenerationConfig
+from transformers.generation.stopping_criteria import StoppingCriteriaList
+from transformers.generation.utils import GenerationMixin
 from transformers.generation.utils import GenerateDecoderOnlyOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
@@ -23,7 +26,7 @@ from ...utils.eagle3_utils import (
     tree_decoding,
     update_inference_inputs,
 )
-from ...utils.generation_utils import MobilintEagle3GenerationMixin
+from ...utils.generation_utils import MobilintEagle3GenerationMixin, with_mobilint_generation_signature
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen2_eagle3 import MobilintEagle3DraftConfig, MobilintQwen2Eagle3Config
 
@@ -150,11 +153,17 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, MobilintQwen2Eagle3Pre
 
     npu_backend_prefix = "fc_"
 
-    def project(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def project(self, hidden_states: torch.Tensor, *, count_npu_time: bool = False) -> torch.Tensor:
+        """Project base hidden states to the draft hidden size."""
         hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
-        result = self.get_mxq_model().infer([hidden_states_numpy])
+        if count_npu_time:
+            start_time = time.perf_counter()
+            result = self.get_mxq_model().infer([hidden_states_numpy])
+            self._record_npu_timing("decode", time.perf_counter() - start_time)
+        else:
+            result = self.get_mxq_model().infer([hidden_states_numpy])
         assert result is not None, "mxq infer result is None!"
         return torch.from_numpy(result[0]).to(device=hidden_states.device, dtype=hidden_states.dtype).squeeze(1)
 
@@ -213,6 +222,7 @@ class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreTr
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_orig: bool = True,
         requires_all_features_logits: bool = True,
+        count_npu_time: bool = False,
     ) -> tuple[dict[str, list[torch.Tensor]], torch.Tensor]:
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds.")
@@ -270,19 +280,22 @@ class MobilintEagle3BaseModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreTr
         hidden_states_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
         chunk_size = self.resolve_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        timing_phase = "prefill" if seq_length > 1 or past_key_values_length == 0 else "decode"
         for chunk_index in range(math.ceil(seq_length / chunk_size)):
             seq_start = chunk_index * chunk_size
             seq_end = min((chunk_index + 1) * chunk_size, seq_length)
             current_cache_position = past_key_values_length + seq_start
-            result = self.get_mxq_model().infer(
-                [
-                    inputs_embeds_numpy[:, :, seq_start:seq_end, :],
-                    attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
-                    position_embs_numpy[:, :, seq_start:seq_end, :],
-                ],
-                None,
-                current_cache_position,
-            )
+            infer_inputs = [
+                inputs_embeds_numpy[:, :, seq_start:seq_end, :],
+                attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
+                position_embs_numpy[:, :, seq_start:seq_end, :],
+            ]
+            if count_npu_time:
+                start_time = time.perf_counter()
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+                self._record_npu_timing(timing_phase, time.perf_counter() - start_time)
+            else:
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
             assert result is not None, "mxq infer result is None!"
             hidden1, hidden2, hidden3, logits = result
             hidden = torch.from_numpy(np.concatenate([hidden1, hidden2, hidden3], axis=-1)).to(
@@ -383,6 +396,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         requires_all_features: bool = False,
         add_cache_position: int = 0,
         tree_mask: Optional[torch.Tensor] = None,
+        count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, seq_length, _ = hidden_states.shape
         past_key_values_length = cache.get_draft_seq_length() + add_cache_position
@@ -430,7 +444,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
         if hidden_states.shape[-1] != inputs_embeds.shape[-1]:
             hidden_states_numpy = (
-                self.fc_projector.project(hidden_states)
+                self.fc_projector.project(hidden_states, count_npu_time=count_npu_time)
                 .cpu()
                 .contiguous()
                 .numpy()
@@ -446,20 +460,23 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         hidden_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
         base_cache_position = cache.get_draft_seq_length() + add_cache_position
+        timing_phase = "prefill" if seq_length > 1 or base_cache_position == 0 else "decode"
         for chunk_index in range(math.ceil(seq_length / chunk_size)):
             seq_start = chunk_index * chunk_size
             seq_end = min((chunk_index + 1) * chunk_size, seq_length)
             current_cache_position = base_cache_position + seq_start
-            result = self.get_mxq_model().infer(
-                [
-                    hidden_states_numpy[:, :, seq_start:seq_end, :],
-                    inputs_embeds_numpy[:, :, seq_start:seq_end, :],
-                    attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
-                    position_embs_numpy[:, :, seq_start:seq_end, :],
-                ],
-                None,
-                current_cache_position,
-            )
+            infer_inputs = [
+                hidden_states_numpy[:, :, seq_start:seq_end, :],
+                inputs_embeds_numpy[:, :, seq_start:seq_end, :],
+                attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
+                position_embs_numpy[:, :, seq_start:seq_end, :],
+            ]
+            if count_npu_time:
+                start_time = time.perf_counter()
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
+                self._record_npu_timing(timing_phase, time.perf_counter() - start_time)
+            else:
+                result = self.get_mxq_model().infer(infer_inputs, None, current_cache_position)
             assert result is not None, "mxq infer result is None!"
             layer_outputs, last_hidden_logits = result
             if requires_all_features:
@@ -497,8 +514,10 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         input_ids: torch.LongTensor,
         cache: MobilintEagle3Cache,
         logits_processor: Optional[Any],
+        max_draft_tokens: Optional[int] = None,
+        count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        total_tokens = self.total_tokens
+        total_tokens = self.total_tokens if max_draft_tokens is None else min(self.total_tokens, max(1, max_draft_tokens))
         depth = self.depth
         top_k = self.top_k
         sample_token = input_ids[:, -1]
@@ -515,6 +534,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
             requires_all_features=False,
             add_cache_position=0,
             tree_mask=None,
+            count_npu_time=count_npu_time,
         )
         cache.update_draft_seen_tokens(input_ids_delta.shape[1])
 
@@ -546,6 +566,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
                 requires_all_features=True,
                 add_cache_position=add_cache_position,
                 tree_mask=tree_mask,
+                count_npu_time=count_npu_time,
             )
             length_position += 1
             bias1 = top_k if depth_index > 0 else 0
@@ -660,6 +681,7 @@ class MobilintQwen2Eagle3Model(PretrainedOnlyMixin, MobilintQwen2Eagle3PreTraine
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_orig: bool = True,
         requires_all_features_logits: bool = True,
+        count_npu_time: bool = False,
     ) -> tuple[dict[str, list[torch.Tensor]], torch.Tensor]:
         return self.base_model(
             input_ids=input_ids,
@@ -669,6 +691,7 @@ class MobilintQwen2Eagle3Model(PretrainedOnlyMixin, MobilintQwen2Eagle3PreTraine
             inputs_embeds=inputs_embeds,
             output_orig=output_orig,
             requires_all_features_logits=requires_all_features_logits,
+            count_npu_time=count_npu_time,
         )
 
 
@@ -771,6 +794,27 @@ class MobilintQwen2Eagle3ForCausalLM(
     def get_cache_mxq_models(self) -> tuple[Any, Any]:
         return self.eagle3_base_model.get_mxq_model(), self.eagle3_draft_model.get_mxq_model()
 
+    def reset_npu_timing(self) -> None:
+        """Reset aggregate NPU timing counters for all EAGLE-3 child backends."""
+        for child in (self.eagle3_base_model, self.eagle3_draft_model, self.eagle3_model.fc_projector):
+            child.reset_npu_timing()
+
+    def get_npu_timing(self) -> dict[str, float | int]:
+        """Return aggregate NPU timing counters across base, draft, and FC backends."""
+        aggregate: dict[str, float | int] = {
+            "prefill_time": 0.0,
+            "decode_time": 0.0,
+            "prefill_calls": 0,
+            "decode_calls": 0,
+        }
+        for child in (self.eagle3_base_model, self.eagle3_draft_model, self.eagle3_model.fc_projector):
+            timing = child.get_npu_timing()
+            aggregate["prefill_time"] = float(aggregate["prefill_time"]) + float(timing.get("prefill_time", 0.0))
+            aggregate["decode_time"] = float(aggregate["decode_time"]) + float(timing.get("decode_time", 0.0))
+            aggregate["prefill_calls"] = int(aggregate["prefill_calls"]) + int(timing.get("prefill_calls", 0))
+            aggregate["decode_calls"] = int(aggregate["decode_calls"]) + int(timing.get("decode_calls", 0))
+        return aggregate
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -786,7 +830,7 @@ class MobilintQwen2Eagle3ForCausalLM(
         output_attentions: Optional[bool] = None,
         **kwargs: Any,
     ) -> CausalLMOutputWithPast:
-        del cache_position, count_npu_time, output_hidden_states, output_attentions, kwargs
+        del cache_position, output_hidden_states, output_attentions, kwargs
         if use_cache is False:
             raise ValueError("mobilint-qwen2-eagle3 requires use_cache=True.")
         if past_key_values is None:
@@ -801,6 +845,7 @@ class MobilintQwen2Eagle3ForCausalLM(
             inputs_embeds=inputs_embeds,
             output_orig=True,
             requires_all_features_logits=False,
+            count_npu_time=count_npu_time,
         )
         loss = None
         if labels is not None:
@@ -814,6 +859,11 @@ class MobilintQwen2Eagle3ForCausalLM(
         )
 
     @torch.no_grad()
+    @with_mobilint_generation_signature(
+        GenerationMixin.generate,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
     def generate(
         self,
         inputs: Optional[torch.Tensor] = None,
@@ -835,6 +885,12 @@ class MobilintQwen2Eagle3ForCausalLM(
         assistant_model: Optional[PreTrainedModel] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        stopping_criteria: Optional[StoppingCriteriaList | list[Any]] = None,
+        min_new_tokens: Optional[int] = None,
+        pad_token_id: Optional[int] = None,
+        eos_token_id: Optional[int | list[int]] = None,
+        count_npu_time: bool = False,
+        prefill_chunk_size: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop.
@@ -872,6 +928,17 @@ class MobilintQwen2Eagle3ForCausalLM(
             raise NotImplementedError("mobilint-qwen2-eagle3 does not support HF assistant_model mixing.")
         if use_cache is False:
             raise NotImplementedError("mobilint-qwen2-eagle3 requires use_cache=True.")
+        del attention_mask, min_new_tokens, pad_token_id, prefill_chunk_size
+        logits_processor_arg = kwargs.pop("logits_processor", None)
+        synced_gpus = kwargs.pop("synced_gpus", None)
+        negative_prompt_ids = kwargs.pop("negative_prompt_ids", None)
+        negative_prompt_attention_mask = kwargs.pop("negative_prompt_attention_mask", None)
+        if synced_gpus not in (None, False):
+            raise NotImplementedError("mobilint-qwen2-eagle3 does not support synced_gpus generation.")
+        if logits_processor_arg not in (None, []):
+            raise NotImplementedError("mobilint-qwen2-eagle3 does not support custom logits_processor yet.")
+        if negative_prompt_ids is not None or negative_prompt_attention_mask is not None:
+            raise NotImplementedError("mobilint-qwen2-eagle3 does not support negative prompts.")
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise NotImplementedError(f"Unsupported generate kwargs for mobilint-qwen2-eagle3: {unsupported}")
@@ -888,10 +955,11 @@ class MobilintQwen2Eagle3ForCausalLM(
         resolved_max_new_tokens = int(
             max_new_tokens if max_new_tokens is not None else generation_config.max_new_tokens
         )
-        resolved_temperature = temperature if temperature is not None else generation_config.temperature
-        resolved_top_p = top_p if top_p is not None else generation_config.top_p
-        resolved_top_k = int(top_k if top_k is not None else generation_config.top_k)
-        if do_sample is False:
+        resolved_do_sample = bool(do_sample if do_sample is not None else getattr(generation_config, "do_sample", False))
+        resolved_temperature = temperature if temperature is not None else getattr(generation_config, "temperature", None)
+        resolved_top_p = top_p if top_p is not None else getattr(generation_config, "top_p", None)
+        resolved_top_k = int(top_k if top_k is not None else getattr(generation_config, "top_k", 0))
+        if not resolved_do_sample:
             resolved_temperature = 0.0
         num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
         self.eagle3_draft_model.total_tokens = max(1, num_assistant_tokens - 1)
@@ -911,7 +979,13 @@ class MobilintQwen2Eagle3ForCausalLM(
         )
 
         generated = input_ids.clone()
-        eos_token_id = generation_config.eos_token_id
+        eos_token_id = eos_token_id if eos_token_id is not None else generation_config.eos_token_id
+        if stopping_criteria is None:
+            stopping_criteria_list = StoppingCriteriaList()
+        elif isinstance(stopping_criteria, StoppingCriteriaList):
+            stopping_criteria_list = stopping_criteria
+        else:
+            stopping_criteria_list = StoppingCriteriaList(stopping_criteria)
         if streamer is not None:
             streamer.put(generated[0].detach().cpu())
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, _ = initialize_tree(
@@ -919,10 +993,13 @@ class MobilintQwen2Eagle3ForCausalLM(
             self,
             cache,
             logits_processor,
+            remaining_tokens=resolved_max_new_tokens,
+            count_npu_time=count_npu_time,
         )
         new_token_count = 0
 
         while new_token_count < resolved_max_new_tokens:
+            remaining_tokens = resolved_max_new_tokens - new_token_count
             logits, hidden_state_new = tree_decoding(
                 self,
                 cache,
@@ -930,6 +1007,7 @@ class MobilintQwen2Eagle3ForCausalLM(
                 generated,
                 retrieve_indices,
                 tree_position_ids,
+                count_npu_time=count_npu_time,
             )
             padding = torch.full((1, 1), -1, dtype=torch.long, device=generated.device)
             padded_draft_tokens = torch.cat((draft_tokens.to(generated.device), padding), dim=1)
@@ -941,7 +1019,7 @@ class MobilintQwen2Eagle3ForCausalLM(
                 retrieve_indices,
             )
             prev_len = generated.shape[1]
-            generated, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count = (
+            generated, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count, should_stop = (
                 update_inference_inputs(
                     generated,
                     candidates,
@@ -955,12 +1033,17 @@ class MobilintQwen2Eagle3ForCausalLM(
                     hidden_state_new,
                     sample_p,
                     sampled_indices,
+                    remaining_tokens=remaining_tokens,
+                    eos_token_id=eos_token_id,
+                    count_npu_time=count_npu_time,
                 )
             )
             if streamer is not None:
                 for token_id in generated[0, prev_len:]:
                     streamer.put(token_id.unsqueeze(0))
-            if eos_token_id is not None and eos_token_id in generated[0, input_ids.shape[1] :].tolist():
+            if stopping_criteria_list(generated, sample_p):
+                break
+            if should_stop:
                 break
 
         if streamer is not None:
