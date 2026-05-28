@@ -9,6 +9,7 @@ import torch
 from transformers.generation.stopping_criteria import StoppingCriteria
 
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
+    CachedRotaryEmbedding,
     MobilintQwen2Eagle3ForCausalLM,
 )
 from mblt_model_zoo.hf_transformers.utils import eagle3_utils as eagle3_module
@@ -31,9 +32,13 @@ def test_qwen2_eagle3_generate_returns_hf_output_when_requested(monkeypatch) -> 
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
-    cache = SimpleNamespace(reset=lambda: None)
+    cache = SimpleNamespace(
+        reset=lambda: None,
+        clear_tree_state=lambda: None,
+        sync_draft_seq_length_to_base=lambda: None,
+    )
     model._get_cache = lambda *_args, **_kwargs: cache
 
     monkeypatch.setattr(
@@ -104,9 +109,22 @@ def test_qwen2_eagle3_generate_accepts_past_key_values(monkeypatch) -> None:
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
     cache = object.__new__(FakeEagle3Cache)
+    cache.base_layer = SimpleNamespace(
+        get_seq_length=lambda: 0,
+        set_seq_length=lambda _value: None,
+    )
+    cache.draft_layer = SimpleNamespace(
+        get_seq_length=lambda: 0,
+        set_seq_length=lambda _value: None,
+    )
+    cache.get_base_seq_length = lambda: 0
+    cache.get_draft_seq_length = lambda: 0
+    cache.clear_tree_state = lambda: None
+    cache.sync_draft_seq_length_to_base = lambda: None
+    cache.reset = lambda: None
 
     monkeypatch.setattr(
         eagle3_module,
@@ -180,9 +198,19 @@ def test_qwen2_eagle3_generate_clears_stale_tree_state(monkeypatch) -> None:
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
     cache = object.__new__(FakeEagle3Cache)
+    cache.base_layer = SimpleNamespace(
+        get_seq_length=lambda: 0,
+        set_seq_length=lambda _value: None,
+    )
+    cache.draft_layer = SimpleNamespace(
+        get_seq_length=lambda: 0,
+        set_seq_length=lambda _value: None,
+    )
+    cache.get_base_seq_length = lambda: 0
+    cache.get_draft_seq_length = lambda: 0
     cache.accept_tokens = torch.ones(1, 2, dtype=torch.long)
     cache.tree_mask = torch.ones(1, 1, 2, 2)
     cache.retrieve_indices = torch.ones(1, 2, dtype=torch.long)
@@ -270,7 +298,7 @@ def test_qwen2_eagle3_generate_resets_draft_length_to_committed_base(monkeypatch
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(
@@ -371,7 +399,7 @@ def test_qwen2_eagle3_generate_primes_streamer_with_prompt(monkeypatch) -> None:
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
     cache = object.__new__(FakeEagle3Cache)
     cache.base_layer = SimpleNamespace(get_seq_length=lambda: 0, set_seq_length=lambda _value: None)
@@ -475,9 +503,13 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
     object.__setattr__(
         model,
         "_modules",
-        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
     )
-    cache = SimpleNamespace(reset=lambda: None)
+    cache = SimpleNamespace(
+        reset=lambda: None,
+        clear_tree_state=lambda: None,
+        sync_draft_seq_length_to_base=lambda: None,
+    )
     model._get_cache = lambda *_args, **_kwargs: cache
     criteria = RecordingCriteria()
 
@@ -517,6 +549,32 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
     assert torch.equal(criteria.calls[0], torch.tensor([[1, 2, 4]], dtype=torch.long))
 
 
+def test_qwen2_eagle3_generation_config_updates_max_draft_tokens() -> None:
+    """`num_assistant_tokens`가 draft 모델의 `max_draft_tokens`에 반영되어야 한다."""
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    model.generation_config = SimpleNamespace(
+        max_new_tokens=4,
+        do_sample=False,
+        temperature=1.0,
+        top_p=1.0,
+        top_k=50,
+        num_assistant_tokens=9,
+    )
+    draft_model = SimpleNamespace(max_draft_tokens=0)
+    object.__setattr__(model, "_modules", {"model": SimpleNamespace(_modules={"draft_model": draft_model})})
+
+    model._resolve_eagle3_generation_config(
+        None,
+        max_new_tokens=None,
+        do_sample=None,
+        temperature=None,
+        top_p=None,
+        top_k=None,
+    )
+
+    assert draft_model.max_draft_tokens == 8
+
+
 def test_qwen2_eagle3_generate_resolves_greedy_and_sampling_processors(monkeypatch) -> None:
     """Use greedy by default and sampling only when explicitly enabled."""
     temperatures: list[float] = []
@@ -541,9 +599,13 @@ def test_qwen2_eagle3_generate_resolves_greedy_and_sampling_processors(monkeypat
         object.__setattr__(
             model,
             "_modules",
-            {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(total_tokens=None)})},
+            {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
         )
-        cache = SimpleNamespace(reset=lambda: None)
+        cache = SimpleNamespace(
+            reset=lambda: None,
+            clear_tree_state=lambda: None,
+            sync_draft_seq_length_to_base=lambda: None,
+        )
         model._get_cache = lambda *_args, **_kwargs: cache
         model.generate(torch.tensor([[1, 2]], dtype=torch.long), do_sample=do_sample)
 
@@ -688,3 +750,172 @@ def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeyp
     assert accept_length.item() == 2
     assert torch.equal(sample_p, torch.tensor([1.0]))
     assert torch.equal(sampled_indices, torch.tensor([4]))
+
+
+def test_qwen2_eagle3_generate_multi_turn_reuses_cache_safely(monkeypatch) -> None:
+    """Reuse a single cache across turns while clearing tree state and resyncing draft length."""
+
+    class FakeEagle3Cache(MobilintEagle3Cache):
+        """Lightweight cache stub that satisfies the type check."""
+
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    model.config = SimpleNamespace(vocab_size=16)
+    model.generation_config = SimpleNamespace(
+        max_new_tokens=1,
+        do_sample=False,
+        temperature=1.0,
+        top_p=1.0,
+        top_k=50,
+        eos_token_id=None,
+        num_assistant_tokens=2,
+    )
+    object.__setattr__(
+        model,
+        "_modules",
+        {"model": SimpleNamespace(_modules={"draft_model": SimpleNamespace(max_draft_tokens=None)})},
+    )
+    cache = object.__new__(FakeEagle3Cache)
+    cache.base_layer = SimpleNamespace(get_seq_length=lambda: getattr(cache, "_base_seq", 4))
+    cache.draft_layer = SimpleNamespace(
+        get_seq_length=lambda: getattr(cache, "_draft_seq", 9),
+        set_seq_length=lambda value: setattr(cache, "_draft_seq", int(value)),
+    )
+    cache.get_base_seq_length = lambda: cache.base_layer.get_seq_length()
+    cache.get_draft_seq_length = lambda: cache.draft_layer.get_seq_length()
+    cache.sync_draft_seq_length_to_base = lambda: cache.draft_layer.set_seq_length(cache.get_base_seq_length())
+    cache.clear_tree_state = lambda: (
+        setattr(cache, "accept_tokens", None),
+        setattr(cache, "tree_mask", None),
+        setattr(cache, "retrieve_indices", None),
+        setattr(cache, "tree_position_ids", None),
+        setattr(cache, "pending_draft_tokens", None),
+    )
+    cache.reset = lambda: None
+    cache._base_seq = 4
+    cache._draft_seq = 9
+    cache.accept_tokens = torch.ones(1, 1, dtype=torch.long)
+    cache.tree_mask = torch.ones(1, 1, 1, 1)
+    cache.retrieve_indices = torch.ones(1, 1, dtype=torch.long)
+    cache.tree_position_ids = torch.ones(1, dtype=torch.long)
+    cache.pending_draft_tokens = torch.ones(1, 1, dtype=torch.long)
+
+    init_calls = {"count": 0}
+
+    def _initialize_tree(*_args, **_kwargs):
+        init_calls["count"] += 1
+        assert cache.get_draft_seq_length() == cache.get_base_seq_length()
+        assert cache.accept_tokens is None
+        assert cache.tree_mask is None
+        assert cache.retrieve_indices is None
+        assert cache.tree_position_ids is None
+        assert cache.pending_draft_tokens is None
+        return (
+            torch.tensor([[3]], dtype=torch.long),
+            torch.tensor([0], dtype=torch.long),
+            None,
+            torch.tensor([[0]], dtype=torch.long),
+            None,
+        )
+
+    monkeypatch.setattr(eagle3_module, "initialize_tree", _initialize_tree)
+    monkeypatch.setattr(
+        eagle3_module,
+        "tree_decoding",
+        lambda *_args, **_kwargs: (
+            torch.zeros((1, 1, 16), dtype=torch.float32),
+            torch.zeros((1, 1, 1), dtype=torch.float32),
+        ),
+    )
+    monkeypatch.setattr(
+        eagle3_module,
+        "evaluate_posterior",
+        lambda *_args, **_kwargs: (
+            torch.tensor([4], dtype=torch.long),
+            1,
+            torch.tensor([0.0], dtype=torch.float32),
+            torch.tensor([0], dtype=torch.long),
+        ),
+    )
+    monkeypatch.setattr(
+        eagle3_module,
+        "update_inference_inputs",
+        lambda *_args, **_kwargs: (
+            torch.tensor([[1, 2, 4]], dtype=torch.long),
+            torch.tensor([[3]], dtype=torch.long),
+            torch.tensor([0], dtype=torch.long),
+            None,
+            torch.tensor([[0]], dtype=torch.long),
+            1,
+            True,
+        ),
+    )
+
+    first = model.generate(
+        torch.tensor([[1, 2]], dtype=torch.long),
+        past_key_values=cache,
+        return_dict_in_generate=True,
+    )
+    assert torch.equal(first.sequences, torch.tensor([[1, 2, 4]], dtype=torch.long))
+
+    cache._draft_seq = 99
+    cache.accept_tokens = torch.ones(1, 1, dtype=torch.long)
+    cache.tree_mask = torch.ones(1, 1, 1, 1)
+    second = model.generate(
+        torch.tensor([[1, 2]], dtype=torch.long),
+        past_key_values=cache,
+        return_dict_in_generate=True,
+    )
+
+    assert torch.equal(second.sequences, torch.tensor([[1, 2, 4]], dtype=torch.long))
+    assert init_calls["count"] == 2
+
+
+def test_cached_rotary_embedding_expands_position_table() -> None:
+    """Expand cached RoPE tables when runtime position ids exceed the initial max length."""
+    rope = CachedRotaryEmbedding(dim=8, max_position_embeddings=2)
+    x = torch.zeros((1, 1, 8), dtype=torch.float32)
+    position_ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+    table = rope(x, position_ids)
+
+    assert rope.max_seq_len == 4
+    assert table.shape[2] == 4
+    assert table.shape[-1] % 128 == 0
+
+
+def test_qwen2_eagle3_npu_timing_aggregation_and_reset() -> None:
+    """Aggregate and reset NPU timing counters across base/draft/fc backends."""
+
+    class _TimingChild:
+        def __init__(self, timing: dict[str, float | int]) -> None:
+            self._timing = timing
+            self.reset_called = False
+
+        def get_npu_timing(self) -> dict[str, float | int]:
+            return self._timing
+
+        def reset_npu_timing(self) -> None:
+            self.reset_called = True
+
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    base = _TimingChild({"prefill_time": 1.0, "decode_time": 2.0, "prefill_calls": 3, "decode_calls": 4})
+    draft = _TimingChild({"prefill_time": 0.5, "decode_time": 1.0, "prefill_calls": 1, "decode_calls": 2})
+    fc = _TimingChild({"prefill_time": 0.25, "decode_time": 0.75, "prefill_calls": 2, "decode_calls": 1})
+    eagle3_model = SimpleNamespace(
+        _modules={"base_model": base, "draft_model": draft, "fc_projector": fc},
+        fc_projector=fc,
+    )
+    object.__setattr__(model, "_modules", {"model": eagle3_model})
+
+    timing = model.get_npu_timing()
+    model.reset_npu_timing()
+
+    assert timing == {
+        "prefill_time": 1.75,
+        "decode_time": 3.75,
+        "prefill_calls": 6,
+        "decode_calls": 7,
+    }
+    assert base.reset_called is True
+    assert draft.reset_called is True
+    assert fc.reset_called is True

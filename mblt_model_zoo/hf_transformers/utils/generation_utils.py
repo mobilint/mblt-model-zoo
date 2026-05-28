@@ -160,41 +160,6 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         """Return the optional FC projector MXQ child model."""
         return self.eagle3_model._modules.get("fc_projector", self.eagle3_model.fc_projector)
 
-    @staticmethod
-    def _clear_tree_state(cache: Any) -> None:
-        """Clear transient EAGLE-3 tree state on any cache-like object."""
-        clear_tree_state = getattr(cache, "clear_tree_state", None)
-        if callable(clear_tree_state):
-            clear_tree_state()
-            return
-        for attribute in (
-            "accept_tokens",
-            "tree_mask",
-            "retrieve_indices",
-            "tree_position_ids",
-            "pending_draft_tokens",
-        ):
-            if hasattr(cache, attribute):
-                setattr(cache, attribute, None)
-
-    @staticmethod
-    def _sync_draft_seq_length_to_base(cache: Any) -> None:
-        """Align any draft cache length metadata with the committed base length."""
-        get_base_seq_length = getattr(cache, "get_base_seq_length", None)
-        set_draft_seq_length = getattr(cache, "set_draft_seq_length", None)
-        if callable(get_base_seq_length) and callable(set_draft_seq_length):
-            try:
-                set_draft_seq_length(get_base_seq_length())
-            except AttributeError:
-                return
-            return
-        draft_layer = getattr(cache, "draft_layer", None)
-        if draft_layer is not None and callable(get_base_seq_length) and hasattr(draft_layer, "set_seq_length"):
-            try:
-                draft_layer.set_seq_length(get_base_seq_length())
-            except AttributeError:
-                return
-
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[str], *model_args: object, **kwargs: object):
         """Load an EAGLE-3 model and inject role-specific embedding overrides."""
@@ -402,7 +367,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         if not resolved_do_sample:
             resolved_temperature = 0.0
         num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
-        self.eagle3_draft_model.total_tokens = max(1, num_assistant_tokens - 1)
+        self.eagle3_draft_model.max_draft_tokens = max(1, num_assistant_tokens - 1)
         return generation_config, resolved_max_new_tokens, resolved_temperature, resolved_top_p, resolved_top_k
 
     def _prepare_eagle3_cache(self, past_key_values: Optional[MobilintEagle3Cache]) -> MobilintEagle3Cache:
@@ -413,8 +378,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             cache.reset()
         elif not isinstance(cache, MobilintEagle3Cache):
             raise TypeError("past_key_values must be MobilintEagle3Cache for EAGLE-3 models.")
-        self._clear_tree_state(cache)
-        self._sync_draft_seq_length_to_base(cache)
+        cache.clear_tree_state()
+        cache.sync_draft_seq_length_to_base()
         return cache
 
     @torch.no_grad()
@@ -584,8 +549,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
         if streamer is not None:
             streamer.end()
-        self._clear_tree_state(cache)
-        self._sync_draft_seq_length_to_base(cache)
+        cache.clear_tree_state()
+        cache.sync_draft_seq_length_to_base()
         if return_dict_in_generate:
             return GenerateDecoderOnlyOutput(sequences=generated, past_key_values=cache)
         return generated

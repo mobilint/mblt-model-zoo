@@ -169,3 +169,23 @@ def test_eagle3_cache_copy_preserves_tree_state() -> None:
     assert torch.equal(copied.accept_tokens, cache.accept_tokens)
     assert copied.tree_mask is not None
     assert torch.equal(copied.tree_mask, cache.tree_mask)
+
+
+def test_eagle3_cache_dump_load_roundtrip_restores_base_and_draft_seq_lengths() -> None:
+    """EAGLE-3 cache dump/load round-trip should restore both cache layers."""
+    base_mxq = _FakeMxqModel()
+    draft_mxq = _FakeMxqModel()
+    cache = MobilintEagle3Cache(base_mxq, draft_mxq)
+
+    cache.set_base_seq_length(11)
+    cache.set_draft_seq_length(7)
+    cache.dump_cache_memory()
+    cache.set_base_seq_length(0)
+    cache.set_draft_seq_length(0)
+
+    cache.load_cache_memory()
+
+    assert cache.get_base_seq_length() == 11
+    assert cache.get_draft_seq_length() == 7
+    assert base_mxq.loaded == [(0, [b"cache-0"])]
+    assert draft_mxq.loaded == [(0, [b"cache-0"])]

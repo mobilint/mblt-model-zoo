@@ -577,7 +577,13 @@ def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
                 avg_npu_decode_token_latency=None,
             )
 
-    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    captured_pipeline_kwargs: dict[str, object] = {}
+
+    def _fake_build_pipeline(**kwargs):
+        captured_pipeline_kwargs.update(kwargs)
+        return pipeline
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", _fake_build_pipeline)
     monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
     monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
@@ -624,6 +630,36 @@ def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
 
     assert tps_cli._run_text_measure(args) == 0
     assert calls == [4, 4]
+    assert isinstance(captured_pipeline_kwargs.get("eagle3_options"), tps_cli.Eagle3PipelineOptions)
+
+
+def test_extract_eagle3_pipeline_kwargs_returns_dataclass() -> None:
+    """Return EAGLE-3 pipeline args as a typed dataclass object."""
+    args = argparse.Namespace(
+        base_embedding_path="base.bin",
+        draft_embedding_path="draft.bin",
+        base_mxq_path="base.mxq",
+        draft_mxq_path="draft.mxq",
+        fc_mxq_path="fc.mxq",
+        base_core_mode="single",
+        draft_core_mode="global4",
+        fc_core_mode="global8",
+        base_target_cores=["npu0"],
+        draft_target_cores=["npu1"],
+        fc_target_cores=["npu2"],
+        base_target_clusters=[0],
+        draft_target_clusters=[1],
+        fc_target_clusters=[2],
+    )
+
+    options = tps_cli._extract_eagle3_pipeline_kwargs(args)
+
+    assert isinstance(options, tps_cli.Eagle3PipelineOptions)
+    assert options.base_embedding_path == "base.bin"
+    assert options.draft_embedding_path == "draft.bin"
+    assert options.base_mxq_path == "base.mxq"
+    assert options.draft_mxq_path == "draft.mxq"
+    assert options.fc_mxq_path == "fc.mxq"
 
 
 def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
@@ -1979,20 +2015,7 @@ def test_cli_tps_vlm_build_pipeline_uses_prefixed_core_kwargs(monkeypatch: pytes
         device_map=None,
         revision=None,
         embedding_weight=None,
-        base_embedding_path=None,
-        draft_embedding_path=None,
-        base_mxq_path=None,
-        draft_mxq_path=None,
-        fc_mxq_path=None,
-        base_core_mode=None,
-        draft_core_mode=None,
-        fc_core_mode=None,
-        base_target_cores=None,
-        draft_target_cores=None,
-        fc_target_cores=None,
-        base_target_clusters=None,
-        draft_target_clusters=None,
-        fc_target_clusters=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
         mxq_path=None,
         core_mode="global8",
         target_cores=None,
@@ -2049,22 +2072,15 @@ def test_cli_tps_eagle3_build_pipeline_uses_prefixed_backend_kwargs(monkeypatch:
         device_map=None,
         revision=None,
         embedding_weight=None,
-        base_embedding_path="base.pt",
-        draft_embedding_path="draft.pt",
+        eagle3_options=tps_cli.Eagle3PipelineOptions(
+            base_embedding_path="base.pt",
+            draft_embedding_path="draft.pt",
+            base_mxq_path="base.mxq",
+            draft_mxq_path="draft.mxq",
+            fc_mxq_path="fc.mxq",
+        ),
         mxq_path=None,
-        base_mxq_path="base.mxq",
-        draft_mxq_path="draft.mxq",
-        fc_mxq_path="fc.mxq",
         core_mode="global4",
-        base_core_mode=None,
-        draft_core_mode=None,
-        fc_core_mode=None,
-        base_target_cores=None,
-        draft_target_cores=None,
-        fc_target_cores=None,
-        base_target_clusters=None,
-        draft_target_clusters=None,
-        fc_target_clusters=None,
         target_cores=None,
         target_clusters=None,
     )

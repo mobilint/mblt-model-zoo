@@ -5,7 +5,7 @@ import csv
 import json
 import os
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 from tqdm.auto import tqdm
@@ -55,6 +55,26 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+
+
+@dataclass(frozen=True)
+class Eagle3PipelineOptions:
+    """EAGLE-3 전용 pipeline 옵션 묶음."""
+
+    base_embedding_path: str | None = None
+    draft_embedding_path: str | None = None
+    base_mxq_path: str | None = None
+    draft_mxq_path: str | None = None
+    fc_mxq_path: str | None = None
+    base_core_mode: str | None = None
+    draft_core_mode: str | None = None
+    fc_core_mode: str | None = None
+    base_target_cores: list[str] | None = None
+    draft_target_cores: list[str] | None = None
+    fc_target_cores: list[str] | None = None
+    base_target_clusters: list[int] | None = None
+    draft_target_clusters: list[int] | None = None
+    fc_target_clusters: list[int] | None = None
 
 
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
@@ -254,22 +274,9 @@ def _build_pipeline(
     device_map: Union[str, None],
     revision: Union[str, None],
     embedding_weight: Union[str, None],
-    base_embedding_path: Union[str, None],
-    draft_embedding_path: Union[str, None],
+    eagle3_options: Eagle3PipelineOptions,
     mxq_path: Union[str, None],
-    base_mxq_path: Union[str, None],
-    draft_mxq_path: Union[str, None],
-    fc_mxq_path: Union[str, None],
     core_mode: Union[str, None],
-    base_core_mode: Union[str, None],
-    draft_core_mode: Union[str, None],
-    fc_core_mode: Union[str, None],
-    base_target_cores: Union[list[str], None],
-    draft_target_cores: Union[list[str], None],
-    fc_target_cores: Union[list[str], None],
-    base_target_clusters: Union[list[int], None],
-    draft_target_clusters: Union[list[int], None],
-    fc_target_clusters: Union[list[int], None],
     target_cores: Union[list[str], None],
     target_clusters: Union[list[int], None],
 ) -> Any:
@@ -291,35 +298,35 @@ def _build_pipeline(
     model_kwargs: dict[str, Any] = {}
     if embedding_weight:
         model_kwargs["embedding_weight"] = embedding_weight
-    if base_embedding_path:
-        model_kwargs["base_embedding_weight"] = base_embedding_path
-    if draft_embedding_path:
-        model_kwargs["draft_embedding_weight"] = draft_embedding_path
+    if eagle3_options.base_embedding_path:
+        model_kwargs["base_embedding_weight"] = eagle3_options.base_embedding_path
+    if eagle3_options.draft_embedding_path:
+        model_kwargs["draft_embedding_weight"] = eagle3_options.draft_embedding_path
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
-    if base_mxq_path:
-        model_kwargs["base_mxq_path"] = base_mxq_path
-    if draft_mxq_path:
-        model_kwargs["draft_mxq_path"] = draft_mxq_path
-    if fc_mxq_path:
-        model_kwargs["fc_mxq_path"] = fc_mxq_path
+    if eagle3_options.base_mxq_path:
+        model_kwargs["base_mxq_path"] = eagle3_options.base_mxq_path
+    if eagle3_options.draft_mxq_path:
+        model_kwargs["draft_mxq_path"] = eagle3_options.draft_mxq_path
+    if eagle3_options.fc_mxq_path:
+        model_kwargs["fc_mxq_path"] = eagle3_options.fc_mxq_path
     eagle3_prefix_requested = any(
         value is not None
         for value in (
-            base_embedding_path,
-            draft_embedding_path,
-            base_mxq_path,
-            draft_mxq_path,
-            fc_mxq_path,
-            base_core_mode,
-            draft_core_mode,
-            fc_core_mode,
-            base_target_cores,
-            draft_target_cores,
-            fc_target_cores,
-            base_target_clusters,
-            draft_target_clusters,
-            fc_target_clusters,
+            eagle3_options.base_embedding_path,
+            eagle3_options.draft_embedding_path,
+            eagle3_options.base_mxq_path,
+            eagle3_options.draft_mxq_path,
+            eagle3_options.fc_mxq_path,
+            eagle3_options.base_core_mode,
+            eagle3_options.draft_core_mode,
+            eagle3_options.fc_core_mode,
+            eagle3_options.base_target_cores,
+            eagle3_options.draft_target_cores,
+            eagle3_options.fc_target_cores,
+            eagle3_options.base_target_clusters,
+            eagle3_options.draft_target_clusters,
+            eagle3_options.fc_target_clusters,
         )
     )
     if _is_vlm_task(task):
@@ -333,17 +340,22 @@ def _build_pipeline(
         for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
             (
                 "base",
-                base_core_mode or core_mode,
-                base_target_cores or target_cores,
-                base_target_clusters or target_clusters,
+                eagle3_options.base_core_mode or core_mode,
+                eagle3_options.base_target_cores or target_cores,
+                eagle3_options.base_target_clusters or target_clusters,
             ),
             (
                 "draft",
-                draft_core_mode or core_mode,
-                draft_target_cores or target_cores,
-                draft_target_clusters or target_clusters,
+                eagle3_options.draft_core_mode or core_mode,
+                eagle3_options.draft_target_cores or target_cores,
+                eagle3_options.draft_target_clusters or target_clusters,
             ),
-            ("fc", fc_core_mode or core_mode, fc_target_cores or target_cores, fc_target_clusters or target_clusters),
+            (
+                "fc",
+                eagle3_options.fc_core_mode or core_mode,
+                eagle3_options.fc_target_cores or target_cores,
+                eagle3_options.fc_target_clusters or target_clusters,
+            ),
         ):
             model_kwargs = _apply_core_mode_model_kwargs_common(
                 model_kwargs,
@@ -394,24 +406,24 @@ def _build_pipeline(
         _raise_cuda_nvml_hint(e)
 
 
-def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineOptions:
     """Return EAGLE-3 specific pipeline kwargs from parsed CLI arguments."""
-    return {
-        "base_embedding_path": args.base_embedding_path,
-        "draft_embedding_path": args.draft_embedding_path,
-        "base_mxq_path": args.base_mxq_path,
-        "draft_mxq_path": args.draft_mxq_path,
-        "fc_mxq_path": args.fc_mxq_path,
-        "base_core_mode": args.base_core_mode,
-        "draft_core_mode": args.draft_core_mode,
-        "fc_core_mode": args.fc_core_mode,
-        "base_target_cores": args.base_target_cores,
-        "draft_target_cores": args.draft_target_cores,
-        "fc_target_cores": args.fc_target_cores,
-        "base_target_clusters": args.base_target_clusters,
-        "draft_target_clusters": args.draft_target_clusters,
-        "fc_target_clusters": args.fc_target_clusters,
-    }
+    return Eagle3PipelineOptions(
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
+    )
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
@@ -807,7 +819,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
-        **_extract_eagle3_pipeline_kwargs(args),
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1059,7 +1071,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
-        **_extract_eagle3_pipeline_kwargs(args),
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1287,7 +1299,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
-        **_extract_eagle3_pipeline_kwargs(args),
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1760,7 +1772,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
-        **_extract_eagle3_pipeline_kwargs(args),
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )

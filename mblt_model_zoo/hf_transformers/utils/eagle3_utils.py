@@ -25,7 +25,7 @@ class MobilintEagle3GenerationProtocol(Protocol):
 
 def load_embedding_override(path: str) -> torch.Tensor:
     """Load an embedding override from a torch tensor or state dict file."""
-    data = torch.load(path, map_location="cpu")
+    data = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(data, torch.Tensor):
         return data
     if isinstance(data, dict):
@@ -216,14 +216,14 @@ def evaluate_posterior(
             logits_processor=logits_processor,
         )
         sampled_indices = topk_indices
-        seen_tokens: list[int] = []
+        seen_tokens: set[int] = set()
         for candidate_idx in range(candidates.shape[0]):
             if not matching[candidate_idx]:
                 continue
             token = candidates[candidate_idx, idx].item()
             if token in seen_tokens or token == -1:
                 continue
-            seen_tokens.append(token)
+            seen_tokens.add(token)
             mask = topk_indices == token
             token_prob = topk_probs[mask.nonzero(as_tuple=True)[0].item()] if mask.any() else 0.0
             if torch.rand((), device=topk_probs.device) <= token_prob:

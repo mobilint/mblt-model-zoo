@@ -327,19 +327,7 @@ class MobilintEagle3Cache(Cache):
 
     def sync_draft_seq_length_to_base(self) -> None:
         """Align the draft cache length with the committed base cache length."""
-        try:
-            base_seq_length = self.get_base_seq_length()
-        except AttributeError:
-            return
-        draft_layer = getattr(self, "draft_layer", None)
-        if draft_layer is not None and hasattr(draft_layer, "set_seq_length"):
-            draft_layer.set_seq_length(base_seq_length)
-            return
-        set_draft_seq_length = getattr(self, "set_draft_seq_length", None)
-        if callable(set_draft_seq_length):
-            set_draft_seq_length(base_seq_length)
-            return
-        raise AttributeError("draft cache storage is not available on this cache instance")
+        self.draft_layer.set_seq_length(self.get_base_seq_length())
 
     def update_cache_position(self, cache_position: torch.Tensor, index: int = 0) -> None:
         del index

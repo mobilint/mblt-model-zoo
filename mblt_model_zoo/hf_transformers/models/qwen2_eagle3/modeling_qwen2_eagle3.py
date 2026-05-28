@@ -72,7 +72,11 @@ class CachedRotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self._build_position_table()
 
-    def _build_position_table(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None) -> None:
+    def _build_position_table(
+        self,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
         device = self.inv_freq.device if device is None else device
         dtype = torch.get_default_dtype() if dtype is None else dtype
         with torch.no_grad():
@@ -325,7 +329,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
         self.rotary_emb = CachedRotaryEmbedding(head_dim, draft_config.max_position_embeddings)
         self.top_k = int(config.eagle3_tree_top_k)
-        self.total_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
         self.depth = int(config.eagle3_tree_depth)
         self.hidden_size = draft_config.hidden_size
         self.logsoftmax = nn.LogSoftmax(dim=-1)
@@ -500,7 +504,9 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         count_npu_time: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         total_tokens = (
-            self.total_tokens if max_draft_tokens is None else min(self.total_tokens, max(1, max_draft_tokens))
+            self.max_draft_tokens
+            if max_draft_tokens is None
+            else min(self.max_draft_tokens, max(1, max_draft_tokens))
         )
         depth = self.depth
         top_k = self.top_k
@@ -601,7 +607,7 @@ class MobilintEagle3DraftModel(MobilintEagle3ModelMixin, MobilintQwen2Eagle3PreT
         draft_tokens = draft_tokens[None]
 
         max_depth = torch.max(tree_position_ids) + 1
-        non_leaf_index = torch.unique(mask_index).tolist()
+        non_leaf_index = set(torch.unique(mask_index).tolist())
         leaf_count = total_tokens - (len(non_leaf_index) - 1)
         retrieve_indices = torch.zeros(leaf_count, max_depth.item(), dtype=torch.long) - 1
         retrieve_index_rows = retrieve_indices.tolist()
