@@ -478,10 +478,13 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
     class RecordingCriteria(StoppingCriteria):
         def __init__(self) -> None:
             self.calls: list[torch.Tensor] = []
+            self.score_shapes: list[tuple[int, ...]] = []
 
         def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: object) -> bool:
-            del scores, kwargs
+            del kwargs
             self.calls.append(input_ids.clone())
+            assert isinstance(scores, torch.Tensor)
+            self.score_shapes.append(tuple(scores.shape))
             return True
 
     model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
@@ -538,6 +541,7 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
     assert torch.equal(output, torch.tensor([[1, 2, 4]], dtype=torch.long))
     assert len(criteria.calls) == 1
     assert torch.equal(criteria.calls[0], torch.tensor([[1, 2, 4]], dtype=torch.long))
+    assert criteria.score_shapes == [(1, 16)]
 
 
 def test_qwen2_eagle3_generation_config_updates_max_draft_tokens() -> None:
@@ -700,7 +704,7 @@ def test_qwen2_eagle3_evaluate_posterior_handles_greedy_full_accept() -> None:
     candidates = torch.tensor([[3, 4, 5]], dtype=torch.long)
     retrieve_indices = torch.tensor([[0, 1, -1]], dtype=torch.long)
 
-    best_candidate, accept_length, sample_p, sampled_indices = evaluate_posterior(
+    best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
         logits,
         candidates,
         None,
@@ -708,7 +712,7 @@ def test_qwen2_eagle3_evaluate_posterior_handles_greedy_full_accept() -> None:
     )
 
     assert best_candidate.item() == 0
-    assert accept_length.item() == 2
+    assert accepted_draft_count.item() == 2
     assert sample_p.shape == (8,)
     assert sampled_indices is None
 
@@ -726,7 +730,7 @@ def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeyp
     )
     monkeypatch.setattr(eagle3_module.torch, "rand", lambda *_args, **_kwargs: torch.tensor(0.0))
 
-    best_candidate, accept_length, sample_p, sampled_indices = evaluate_posterior(
+    best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
         logits,
         candidates,
         [object()],
@@ -734,7 +738,7 @@ def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeyp
     )
 
     assert best_candidate.item() == 0
-    assert accept_length.item() == 2
+    assert accepted_draft_count.item() == 2
     assert torch.equal(sample_p, torch.tensor([1.0]))
     assert torch.equal(sampled_indices, torch.tensor([4]))
 

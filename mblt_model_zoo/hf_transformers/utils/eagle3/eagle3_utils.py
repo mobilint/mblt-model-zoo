@@ -935,7 +935,7 @@ def evaluate_posterior(
 
     Returns:
         - best candidate row index
-        - accepted length (excluding root offset convention in caller)
+        - accepted draft token count (root token 제외)
         - next-token sampling distribution or logits-derived probabilities
         - optional sampled top-k indices when sampling mode is enabled
     """
@@ -959,17 +959,17 @@ def evaluate_posterior(
         candidate_targets = candidates[:, 1:].to(logits.device)
         valid_mask = (path_positions >= 0) & (candidate_targets >= 0)
         posterior_mask = ((candidate_targets == greedy_tokens) & valid_mask).int()
-        accepted_lengths = torch.cumprod(posterior_mask, dim=1).sum(dim=1)
-        accept_length = accepted_lengths.max()
-        if accept_length == 0:
+        accepted_draft_counts = torch.cumprod(posterior_mask, dim=1).sum(dim=1)
+        accepted_draft_count = accepted_draft_counts.max()
+        if accepted_draft_count == 0:
             best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
         else:
-            best_candidate = torch.argmax(accepted_lengths).to(torch.long)
-        sample_index = torch.clamp(accept_length, max=path_logits.shape[1] - 1)
+            best_candidate = torch.argmax(accepted_draft_counts).to(torch.long)
+        sample_index = torch.clamp(accepted_draft_count, max=path_logits.shape[1] - 1)
         sample_p = path_logits[best_candidate, sample_index]
-        return best_candidate, accept_length, sample_p, None
+        return best_candidate, accepted_draft_count, sample_p, None
 
-    accept_length = 1
+    accepted_candidate_length = 1
     accept_prefix = candidates[0][:1]
     best_candidate = 0
     retrieve_idx = retrieve_indices[0, :1]
@@ -977,9 +977,9 @@ def evaluate_posterior(
     adjusted = False
 
     for idx in range(1, candidates.shape[1]):
-        if idx != accept_length:
+        if idx != accepted_candidate_length:
             break
-        matching = (candidates[:, :accept_length] == accept_prefix).all(dim=1)
+        matching = (candidates[:, :accepted_candidate_length] == accept_prefix).all(dim=1)
         topk_probs, topk_indices = softmax_topk_cpu_torch(
             select_token_logits(logits, retrieve_idx),
             10,
@@ -998,7 +998,7 @@ def evaluate_posterior(
             token_prob = topk_probs[mask.nonzero(as_tuple=True)[0].item()] if mask.any() else 0.0
             if torch.rand((), device=topk_probs.device) <= token_prob:
                 accept_prefix = torch.cat((accept_prefix, candidates[candidate_idx, idx][None]), dim=0)
-                accept_length += 1
+                accepted_candidate_length += 1
                 best_candidate = candidate_idx
                 retrieve_idx = retrieve_indices[candidate_idx, idx]
                 break
@@ -1007,17 +1007,18 @@ def evaluate_posterior(
                 topk_probs = topk_probs / topk_probs.sum()
                 adjusted = True
 
-    if adjusted and accept_length != candidates.shape[1]:
+    if adjusted and accepted_candidate_length != candidates.shape[1]:
         sample_p = topk_probs
     else:
-        sample_logits = select_token_logits(logits, retrieve_indices[best_candidate, accept_length - 1])
+        sample_logits = select_token_logits(logits, retrieve_indices[best_candidate, accepted_candidate_length - 1])
         sample_p, sampled_indices = softmax_topk_cpu_torch(
             sample_logits,
             10,
             logits_processor=logits_processor,
         )
 
-    return torch.tensor(best_candidate), torch.tensor(accept_length - 1), sample_p, sampled_indices
+    accepted_draft_count = max(0, accepted_candidate_length - 1)
+    return torch.tensor(best_candidate), torch.tensor(accepted_draft_count), sample_p, sampled_indices
 
 
 @torch.no_grad()
@@ -1025,7 +1026,7 @@ def update_inference_inputs(
     input_ids: torch.LongTensor,
     candidates: torch.Tensor,
     best_candidate: torch.Tensor,
-    accept_length: torch.Tensor,
+    accepted_draft_count: torch.Tensor,
     retrieve_indices: torch.Tensor,
     logits_processor: Optional[LogitsProcessorList],
     new_token_count: int,
@@ -1046,9 +1047,10 @@ def update_inference_inputs(
     - update cache-side accepted token state
     - sample next root token and regenerate draft tree metadata
     """
-    accept_length_int = int(accept_length.item())
+    accepted_draft_count_int = int(accepted_draft_count.item())
     best_candidate_int = int(best_candidate.item())
-    accepted = candidates[None, best_candidate_int, : accept_length_int + 1].to(input_ids.device)
+    accepted_candidate_length = accepted_draft_count_int + 1
+    accepted = candidates[None, best_candidate_int, :accepted_candidate_length].to(input_ids.device)
     if remaining_tokens is not None:
         accepted = accepted[:, : max(0, remaining_tokens)]
     should_stop = accepted.numel() == 0

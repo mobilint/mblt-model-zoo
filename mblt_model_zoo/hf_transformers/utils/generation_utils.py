@@ -460,6 +460,31 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         cache.sync_draft_seq_length_to_base()
         return cache
 
+    @staticmethod
+    def _eagle3_stopping_scores_adapter(
+        logits: torch.Tensor,
+        *,
+        generated: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        """Adapt EAGLE-3 logits to HF ``StoppingCriteriaList`` score contract.
+
+        HF stopping criteria receives ``scores`` shaped as ``[batch, vocab]``.
+        EAGLE-3 tree decoding can return various intermediate layouts, so this
+        helper normalizes them to a stable 2D tensor.
+        """
+        if logits.ndim == 0:
+            return logits.view(1, 1).to(dtype=torch.float32)
+        if logits.ndim == 1:
+            return logits.unsqueeze(0).to(dtype=torch.float32)
+        if logits.ndim == 2:
+            # Prefer last candidate distribution to match current-step semantics.
+            return logits[-1:, :].to(dtype=torch.float32)
+        # Fallback for unexpected higher-rank tensors.
+        flattened = logits.reshape(-1, logits.shape[-1])
+        if flattened.shape[0] == 0:
+            return torch.zeros((generated.shape[0], 1), device=generated.device, dtype=torch.float32)
+        return flattened[-1:, :].to(dtype=torch.float32)
+
     @torch.no_grad()
     @with_mobilint_generation_signature(
         GenerationMixin.generate,
@@ -594,7 +619,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             padding = torch.full((1, 1), -1, dtype=torch.long, device=generated.device)
             padded_draft_tokens = torch.cat((draft_tokens.to(generated.device), padding), dim=1)
             candidates = padded_draft_tokens[0, retrieve_indices].contiguous()
-            best_candidate, accept_length, sample_p, sampled_indices = evaluate_posterior(
+            best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
                 logits,
                 candidates,
                 logits_processor,
@@ -602,7 +627,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             )
             candidate_width = int(candidates.shape[-1]) if candidates.ndim >= 2 else 1
             candidate_draft_tokens = max(1, candidate_width - 1)
-            accepted_tokens = max(0, int(accept_length))
+            accepted_tokens = max(0, int(accepted_draft_count))
             acceptance_steps += 1
             acceptance_tokens_sum += accepted_tokens
             acceptance_ratio_sum += float(accepted_tokens) / float(candidate_draft_tokens)
@@ -612,7 +637,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                     generated,
                     candidates,
                     best_candidate,
-                    accept_length,
+                    accepted_draft_count,
                     retrieve_indices,
                     logits_processor,
                     new_token_count,
@@ -629,15 +654,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             if streamer is not None:
                 for token_id in generated[0, prev_len:]:
                     streamer.put(token_id.unsqueeze(0))
-            # NOTE:
-            # - HF `StoppingCriteriaList.__call__` expects `(input_ids, scores, **kwargs)`.
-            # - `sample_p` is a posterior/top-k probability artifact used by EAGLE-3 branch
-            #   acceptance logic, not the decoder score tensor contract expected by stopping
-            #   criteria implementations.
-            # - Pass `None` for `scores` to keep behavior compatible with criteria that only
-            #   inspect `input_ids` (e.g., max length / EOS based criteria) and avoid shape/type
-            #   mismatches.
-            if stopping_criteria_list(generated, None):
+            stopping_scores = self._eagle3_stopping_scores_adapter(logits, generated=generated)
+            if stopping_criteria_list(generated, stopping_scores):
                 break
             if should_stop:
                 break
