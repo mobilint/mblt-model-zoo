@@ -439,7 +439,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             temperature if temperature is not None else getattr(generation_config, "temperature", None)
         )
         resolved_top_p = top_p if top_p is not None else getattr(generation_config, "top_p", None)
-        resolved_top_k = int(top_k if top_k is not None else getattr(generation_config, "top_k", 0))
+        raw_top_k = top_k if top_k is not None else getattr(generation_config, "top_k", 0)
+        resolved_top_k = int(raw_top_k) if raw_top_k is not None else 0
         if not resolved_do_sample:
             resolved_temperature = 0.0
         num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
@@ -575,6 +576,9 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             count_npu_time=count_npu_time,
         )
         new_token_count = 0
+        acceptance_steps = 0
+        acceptance_tokens_sum = 0
+        acceptance_ratio_sum = 0.0
 
         while new_token_count < max_tokens:
             remaining_tokens = max_tokens - new_token_count
@@ -596,6 +600,12 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 logits_processor,
                 retrieve_indices,
             )
+            candidate_width = int(candidates.shape[-1]) if candidates.ndim >= 2 else 1
+            candidate_draft_tokens = max(1, candidate_width - 1)
+            accepted_tokens = max(0, int(accept_length))
+            acceptance_steps += 1
+            acceptance_tokens_sum += accepted_tokens
+            acceptance_ratio_sum += float(accepted_tokens) / float(candidate_draft_tokens)
             prev_len = generated.shape[1]
             generated, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count, should_stop = (
                 update_inference_inputs(
@@ -634,6 +644,14 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
         if streamer is not None:
             streamer.end()
+        acceptance_avg = (float(acceptance_tokens_sum) / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
+        acceptance_ratio = (acceptance_ratio_sum / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
+        self._last_eagle3_acceptance_stats = {
+            "steps": int(acceptance_steps),
+            "accepted_tokens_sum": int(acceptance_tokens_sum),
+            "accepted_tokens_avg": float(acceptance_avg),
+            "acceptance_ratio": float(acceptance_ratio),
+        }
         cache.clear_tree_state()
         cache.sync_draft_seq_length_to_base()
         if return_dict_in_generate:

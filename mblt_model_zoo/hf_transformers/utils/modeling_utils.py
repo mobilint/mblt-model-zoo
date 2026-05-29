@@ -189,9 +189,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         mxq_model = self.npu_backend.mxq_model
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
-        timing_phase: Literal["prefill", "decode"] = (
-            "prefill" if inputs_embeds_numpy.shape[2] > 1 or initial_cache_size == 0 else "decode"
-        )
+        timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
         for i in range(num_of_chunks):
             start_index = i * resolved_prefill_chunk_size

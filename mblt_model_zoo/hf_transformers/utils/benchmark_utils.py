@@ -165,6 +165,7 @@ def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]
 
     Returns:
         NPU latency percentage, or ``None`` when the value cannot be computed.
+
     """
     if total_latency is None or npu_latency is None:
         return None
@@ -449,6 +450,10 @@ class SingleMeasurement:
     decode_j_per_token: Optional[float] = None
     total_tokens_per_j: Optional[float] = None
     total_j_per_token: Optional[float] = None
+    acceptance_steps: Optional[int] = None
+    acceptance_tokens_sum: Optional[int] = None
+    acceptance_tokens_avg: Optional[float] = None
+    acceptance_ratio: Optional[float] = None
     decode_prefill_mode: str = "real"
 
     def __post_init__(self) -> None:
@@ -754,6 +759,23 @@ class TPSMeasurer:
     def _supports_npu_timing(self) -> bool:
         return _get_npu_timing_target(self.model) is not None
 
+    def _get_eagle3_acceptance_stats(self) -> dict[str, Optional[float | int]]:
+        """Return latest EAGLE-3 acceptance stats when available."""
+        stats = getattr(self.model, "_last_eagle3_acceptance_stats", None)
+        if not isinstance(stats, dict):
+            return {
+                "acceptance_steps": None,
+                "acceptance_tokens_sum": None,
+                "acceptance_tokens_avg": None,
+                "acceptance_ratio": None,
+            }
+        return {
+            "acceptance_steps": cast(Optional[int], stats.get("steps")),
+            "acceptance_tokens_sum": cast(Optional[int], stats.get("accepted_tokens_sum")),
+            "acceptance_tokens_avg": cast(Optional[float], stats.get("accepted_tokens_avg")),
+            "acceptance_ratio": cast(Optional[float], stats.get("acceptance_ratio")),
+        }
+
     @staticmethod
     def _start_trace(trace_path: Union[str, None]):
         if not trace_path:
@@ -867,6 +889,7 @@ class TPSMeasurer:
         )
         total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
 
+        acceptance_stats = self._get_eagle3_acceptance_stats()
         return SingleMeasurement(
             num_prefill=num_prefill,
             num_decode=decode_count,
@@ -893,6 +916,10 @@ class TPSMeasurer:
             avg_total_decode_token_latency_ns=decode_duration_ns // total_decode_tokens
             if total_decode_tokens > 0
             else 0,
+            acceptance_steps=cast(Optional[int], acceptance_stats["acceptance_steps"]),
+            acceptance_tokens_sum=cast(Optional[int], acceptance_stats["acceptance_tokens_sum"]),
+            acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
+            acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
             decode_prefill_mode="fake" if fake_prefill else "real",
         )
 
@@ -900,6 +927,7 @@ class TPSMeasurer:
         self,
         num_prefill=512,
         num_decode=128,
+        input_ids: Optional[torch.Tensor] = None,
         prefill_chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
@@ -916,15 +944,28 @@ class TPSMeasurer:
             assert num_decode > 0, "num_decode should be positive! num_decode: %d" % num_decode
             batch_size = _validate_batch_size(batch_size)
 
-            # 1. Synthetic Input
-            vocab_size = _resolve_config_vocab_size(self.model.config)
-            low = 100 if vocab_size > 100 else 0
-            input_ids = torch.randint(low, vocab_size, (batch_size, num_prefill))
-            input_ids = input_ids.to(self.device)
+            # 1. Input
+            if input_ids is None:
+                vocab_size = _resolve_config_vocab_size(self.model.config)
+                low = 100 if vocab_size > 100 else 0
+                measure_input_ids = torch.randint(low, vocab_size, (batch_size, num_prefill))
+            else:
+                measure_input_ids = input_ids
+                if measure_input_ids.ndim != 2:
+                    raise ValueError(f"input_ids must be rank-2 [batch, seq], got shape {tuple(measure_input_ids.shape)}")
+                if int(measure_input_ids.shape[0]) != batch_size:
+                    raise ValueError(
+                        f"input_ids batch size mismatch: expected {batch_size}, got {int(measure_input_ids.shape[0])}"
+                    )
+                if int(measure_input_ids.shape[1]) != int(num_prefill):
+                    raise ValueError(
+                        f"input_ids sequence length mismatch: expected {num_prefill}, got {int(measure_input_ids.shape[1])}"
+                    )
+            measure_input_ids = measure_input_ids.to(self.device)
 
             if batch_size > 1:
                 return self._measure_batch_generate(
-                    input_ids=input_ids,
+                    input_ids=measure_input_ids,
                     num_prefill=num_prefill,
                     num_decode=num_decode,
                     prefill_chunk_size=prefill_chunk_size,
@@ -938,7 +979,7 @@ class TPSMeasurer:
             # 2. Setup
             streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
             gen_kwargs = dict(
-                input_ids=input_ids,
+                input_ids=measure_input_ids,
                 streamer=streamer,
                 min_new_tokens=num_decode + 1,
                 max_new_tokens=num_decode + 1,
@@ -960,7 +1001,7 @@ class TPSMeasurer:
             )
             _with_first_token_stopping_criteria(
                 gen_kwargs,
-                prompt_length=int(input_ids.shape[1]),
+                prompt_length=int(measure_input_ids.shape[1]),
                 phase_callbacks=phase_callbacks,
             )
 
@@ -1067,6 +1108,7 @@ class TPSMeasurer:
             )
             total_npu_time = (npu_prefill_time + npu_decode_time) if has_npu_time else None
 
+            acceptance_stats = self._get_eagle3_acceptance_stats()
             return SingleMeasurement(
                 num_prefill=num_prefill,
                 num_decode=num_decode,
@@ -1095,6 +1137,10 @@ class TPSMeasurer:
                 total_time_ns=total_time_ns,
                 avg_total_prefill_token_latency_ns=avg_total_prefill_token_latency_ns,
                 avg_total_decode_token_latency_ns=avg_total_decode_token_latency_ns,
+                acceptance_steps=cast(Optional[int], acceptance_stats["acceptance_steps"]),
+                acceptance_tokens_sum=cast(Optional[int], acceptance_stats["acceptance_tokens_sum"]),
+                acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
+                acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
             )
         finally:
             self._stop_trace(trace_handle)

@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 import os
 import sys
 import warnings
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
+import torch
 from tqdm.auto import tqdm
 
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -878,10 +880,56 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
+
+    def _build_measure_input_ids() -> torch.Tensor | None:
+        def _tokenize_prompt_text(text: str) -> torch.Tensor:
+            encoded = pipeline.tokenizer(
+                text,
+                return_tensors="pt",
+                add_special_tokens=True,
+            )
+            return encoded["input_ids"]
+
+        input_mode = str(getattr(args, "input_mode", "random"))
+        if input_mode == "random":
+            return None
+
+        if input_mode == "synthetic-text":
+            if not args.prompt_text:
+                raise ValueError("--input-mode synthetic-text requires --prompt-text.")
+            return _tokenize_prompt_text(args.prompt_text)
+
+        if input_mode == "file":
+            if not args.prompt_file:
+                raise ValueError("--input-mode file requires --prompt-file.")
+            with open(args.prompt_file, encoding="utf-8") as handle:
+                prompts = [line.strip() for line in handle if line.strip()]
+            if not prompts:
+                raise ValueError(f"No non-empty prompt found in file: {args.prompt_file}")
+
+            strategy = str(getattr(args, "prompt_file_strategy", "first"))
+            if strategy == "first":
+                selected = prompts[0]
+            elif strategy == "random":
+                rng = random.Random(args.prompt_file_seed)
+                selected = rng.choice(prompts)
+            else:
+                raise ValueError(f"Unsupported --prompt-file-strategy: {strategy}")
+
+            return _tokenize_prompt_text(selected)
+
+        raise ValueError(f"Unsupported input mode: {input_mode}")
+
+    measure_input_ids = _build_measure_input_ids()
+    measure_num_prefill = int(args.prefill)
+    if measure_input_ids is not None:
+        measure_num_prefill = int(measure_input_ids.shape[1])
+
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=args.prefill,
+            num_prefill=measure_num_prefill,
             num_decode=args.decode,
+            input_ids=measure_input_ids,
             prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
@@ -895,8 +943,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         decode_metric: dict[str, Optional[float]] = {}
         try:
             run = measurer.measure(
-                num_prefill=args.prefill,
+                num_prefill=measure_num_prefill,
                 num_decode=args.decode,
+                input_ids=measure_input_ids,
                 prefill_chunk_size=args.prefill_chunk_size,
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
@@ -991,6 +1040,12 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
     prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
     decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
+    acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
+    acceptance_tokens_sum = [float(r.acceptance_tokens_sum) for r in runs if r.acceptance_tokens_sum is not None]
+    acceptance_tokens_avg = [r.acceptance_tokens_avg for r in runs if r.acceptance_tokens_avg is not None]
+    acceptance_ratio_pct = [
+        (r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None
+    ]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -1005,6 +1060,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     _print_summary("prefill_npu_latency", prefill_npu_latency_pct, "%")
     _print_summary("decode_npu_latency", decode_npu_latency_pct, "%")
     _print_summary("total_npu_latency", total_npu_latency_pct, "%")
+    _print_summary("accept_steps", acceptance_steps, "count")
+    _print_summary("accept_tok_sum", acceptance_tokens_sum, "tok")
+    _print_summary("accept_tok_avg", acceptance_tokens_avg, "tok")
+    _print_summary("accept_ratio", acceptance_ratio_pct, "%")
     if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
@@ -1058,6 +1117,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
                 "decode_npu_latency_pct": _summary(decode_npu_latency_pct),
                 "total_npu_latency_pct": _summary(total_npu_latency_pct),
+                "acceptance_steps": _summary(acceptance_steps),
+                "acceptance_tokens_sum": _summary(acceptance_tokens_sum),
+                "acceptance_tokens_avg": _summary(acceptance_tokens_avg),
+                "acceptance_ratio_pct": _summary(acceptance_ratio_pct),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
                 "prefill_avg_power_w": _summary(prefill_avg_power_w),
@@ -2372,6 +2435,34 @@ def add_tps_parser(
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
     p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--input-mode",
+        choices=["random", "synthetic-text", "file"],
+        default="random",
+        help="text-only 입력 생성 모드 (random|synthetic-text|file)",
+    )
+    p_measure.add_argument(
+        "--prompt-text",
+        default=None,
+        help="--input-mode synthetic-text 일 때 사용할 단일 프롬프트",
+    )
+    p_measure.add_argument(
+        "--prompt-file",
+        default=None,
+        help="--input-mode file 일 때 사용할 텍스트 파일 경로",
+    )
+    p_measure.add_argument(
+        "--prompt-file-strategy",
+        choices=["first", "random"],
+        default="first",
+        help="--input-mode file 일 때 non-empty line 선택 전략(first|random)",
+    )
+    p_measure.add_argument(
+        "--prompt-file-seed",
+        type=int,
+        default=0,
+        help="--prompt-file-strategy random 일 때 사용할 random seed",
+    )
     p_measure.add_argument(
         "--image-resolution",
         type=_parse_positive_int,
