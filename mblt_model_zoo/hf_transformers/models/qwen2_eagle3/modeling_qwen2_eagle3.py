@@ -5,10 +5,12 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM
+from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers.modeling_utils import PreTrainedModel
 
 from ...utils.base_utils import PretrainedOnlyMixin
+from ...utils.cache_utils import MobilintEagle3Cache
 from ...utils.eagle3.eagle3_utils import (
     CachedRotaryEmbedding,
     MobilintEagle3BaseModelMixin,
@@ -16,7 +18,7 @@ from ...utils.eagle3.eagle3_utils import (
     MobilintEagle3FCProjector,
     MobilintEagle3ModelMixin,
 )
-from ...utils.generation_utils import MobilintEagle3GenerationMixin
+from ...utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
 from .configuration_qwen2_eagle3 import MobilintQwen2Eagle3Config
 
 
@@ -99,6 +101,38 @@ class MobilintQwen2Eagle3ForCausalLM(
 
     def get_input_embeddings(self) -> nn.Module:
         return self.eagle3_base_model.get_input_embeddings()
+
+    def forward(
+        self,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: MobilintEagle3Cache | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        count_npu_time: bool = False,
+        output_hidden_states: bool | None = None,
+        output_attentions: bool | None = None,
+        **kwargs: object,
+    ) -> CausalLMOutputWithPast:
+        """Run EAGLE-3 forward by delegating shared logic to utility helper."""
+        return llm_eagle3_forward(
+            self,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            count_npu_time=count_npu_time,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+            **kwargs,
+        )
 
 
 AutoModel.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)

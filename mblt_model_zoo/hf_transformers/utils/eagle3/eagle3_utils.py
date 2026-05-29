@@ -534,7 +534,15 @@ class MobilintEagle3DraftModelMixin:
         draft_token_steps = []
 
         input_ids_without_prompt_token = input_ids[:, 1:].to(hidden_states.device)
-        input_ids_delta = input_ids_without_prompt_token[:, cache.get_draft_seq_length() :]
+        draft_seq_length = cache.get_draft_seq_length()
+        # `input_ids` may already be a prompt-delta sequence when `past_key_values`
+        # is reused across turns. In that case, slicing by absolute draft cache
+        # length would incorrectly produce an empty tensor.
+        input_ids_delta = (
+            input_ids_without_prompt_token[:, draft_seq_length:]
+            if input_ids_without_prompt_token.shape[1] > draft_seq_length
+            else input_ids_without_prompt_token
+        )
         last_hidden, last_hidden_logits = self(
             hidden_states,
             input_ids=input_ids_delta,
@@ -719,14 +727,22 @@ def initialize_tree(
     2. Sample/select first token from base logits.
     3. Expand draft tree from updated prefix.
     """
+    base_seq_length = cache.get_base_seq_length()
+    prompt_delta_input_ids = input_ids[:, base_seq_length:] if input_ids.shape[1] > base_seq_length else input_ids
+    if prompt_delta_input_ids.shape[1] == 0:
+        raise ValueError(
+            "EAGLE-3 generate received empty prompt delta. "
+            "When reusing `past_key_values`, provide at least one new input token."
+        )
+
     outputs, logits = model.eagle3_base_model(
-        input_ids[:, cache.get_base_seq_length() :],
+        prompt_delta_input_ids,
         cache=cache,
         output_orig=True,
         requires_all_features_logits=False,
         count_npu_time=count_npu_time,
     )
-    cache.update_base_seen_tokens(input_ids.shape[1] - cache.get_base_seq_length())
+    cache.update_base_seen_tokens(prompt_delta_input_ids.shape[1])
 
     if logits_processor is not None:
         probabilities, indices = softmax_topk_cpu_torch(logits, 10, logits_processor=logits_processor)

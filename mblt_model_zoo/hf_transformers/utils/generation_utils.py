@@ -18,6 +18,60 @@ from ..utils.modeling_utils import MobilintModelMixin
 logger = logging.get_logger(__name__)
 
 
+def llm_eagle3_forward(
+    model: Any,
+    *,
+    input_ids: Optional[torch.LongTensor] = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_values: Optional[MobilintEagle3Cache] = None,
+    inputs_embeds: Optional[torch.FloatTensor] = None,
+    labels: Optional[torch.LongTensor] = None,
+    use_cache: Optional[bool] = None,
+    cache_position: Optional[torch.LongTensor] = None,
+    count_npu_time: bool = False,
+    output_hidden_states: Optional[bool] = None,
+    output_attentions: Optional[bool] = None,
+    **kwargs: Any,
+) -> CausalLMOutputWithPast:
+    """Run the shared EAGLE-3 forward path for causal LM wrappers."""
+    if output_attentions:
+        logger.warning("output_attentions is not supported.")
+    if output_hidden_states:
+        logger.warning("output_hidden_states is not supported.")
+    if cache_position is not None:
+        logger.warning("cache_position is not supported.")
+    if kwargs:
+        logger.warning("Unsupported forward kwargs are ignored: %s" % ", ".join(sorted(kwargs)))
+    if use_cache is False:
+        raise ValueError("EAGLE-3 models require use_cache=True.")
+    if past_key_values is None:
+        past_key_values = model._get_cache("mobilint-eagle3", 1, 0)
+    if not isinstance(past_key_values, MobilintEagle3Cache):
+        raise TypeError("past_key_values must be MobilintEagle3Cache for EAGLE-3 models.")
+
+    outputs, logits = model.eagle3_base_model(
+        input_ids=input_ids,
+        cache=past_key_values,
+        attention_mask=attention_mask,
+        position_ids=position_ids,
+        inputs_embeds=inputs_embeds,
+        output_orig=True,
+        requires_all_features_logits=False,
+        count_npu_time=count_npu_time,
+    )
+    loss = None
+    if labels is not None:
+        loss = model.loss_function(logits=logits, labels=labels, vocab_size=model.config.vocab_size)
+    return CausalLMOutputWithPast(
+        loss=loss,
+        logits=cast(torch.FloatTensor, logits),
+        past_key_values=past_key_values,
+        hidden_states=None if outputs is None else tuple(outputs["hidden_states"]),
+        attentions=None,
+    )
+
+
 def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: str) -> Callable:
     """Preserve an upstream generation hook signature while adding Mobilint kwargs.
 
@@ -308,41 +362,21 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         output_attentions: Optional[bool] = None,
         **kwargs: Any,
     ) -> CausalLMOutputWithPast:
-        """Run the EAGLE-3 base model forward path."""
-        if output_attentions:
-            logger.warning("output_attentions is not supported.")
-        if output_hidden_states:
-            logger.warning("output_hidden_states is not supported.")
-        if cache_position is not None:
-            logger.warning("cache_position is not supported.")
-        if kwargs:
-            logger.warning("Unsupported forward kwargs are ignored: %s" % ", ".join(sorted(kwargs)))
-        if use_cache is False:
-            raise ValueError("EAGLE-3 models require use_cache=True.")
-        if past_key_values is None:
-            past_key_values = self._get_cache("mobilint-eagle3", 1, 0)
-        if not isinstance(past_key_values, MobilintEagle3Cache):
-            raise TypeError("past_key_values must be MobilintEagle3Cache for EAGLE-3 models.")
-
-        outputs, logits = self.eagle3_base_model(
+        """Run the shared EAGLE-3 base forward path."""
+        return llm_eagle3_forward(
+            self,
             input_ids=input_ids,
-            cache=past_key_values,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            inputs_embeds=inputs_embeds,
-            output_orig=True,
-            requires_all_features_logits=False,
-            count_npu_time=count_npu_time,
-        )
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size)
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=cast(torch.FloatTensor, logits),
             past_key_values=past_key_values,
-            hidden_states=None if outputs is None else tuple(outputs["hidden_states"]),
-            attentions=None,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            count_npu_time=count_npu_time,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+            **kwargs,
         )
 
     def _validate_eagle3_generate_request(
