@@ -21,7 +21,7 @@ def test_qwen2_eagle3_multi_turn_chat(pipe, generation_token_limit: int) -> None
         },
         {
             "role": "user",
-            "content": "Explain speculative decoding briefly.",
+            "content": "Count from 10 to 1.",
         },
     ]
     first_turn_prompt = tokenizer.apply_chat_template(
@@ -58,7 +58,7 @@ def test_qwen2_eagle3_multi_turn_chat(pipe, generation_token_limit: int) -> None
         },
         {
             "role": "user",
-            "content": "Now compare it with greedy decoding in one sentence.",
+            "content": "Now count 1 to 10.",
         },
     ]
     second_turn_prompt = tokenizer.apply_chat_template(
