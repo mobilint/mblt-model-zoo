@@ -13,6 +13,7 @@ from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintEagle3Cache
 from ...utils.eagle3.eagle3_utils import (
     CachedRotaryEmbedding,
+    ScaledCachedRotaryEmbedding,
     MobilintEagle3BaseModelMixin,
     MobilintEagle3DraftModelMixin,
     MobilintEagle3FCProjector,
@@ -39,7 +40,11 @@ class MobilintQwen2Eagle3BaseModel(MobilintEagle3BaseModelMixin, MobilintEagle3M
         super().__init__(config, *args, **kwargs)
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
-        self.rotary_emb = CachedRotaryEmbedding(head_dim, config.max_position_embeddings)
+        self.rotary_emb = ScaledCachedRotaryEmbedding(
+            dim=head_dim,
+            max_position_embeddings=config.max_position_embeddings,
+            config=config,
+        )
 
 
 class MobilintQwen2Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle3ModelMixin):

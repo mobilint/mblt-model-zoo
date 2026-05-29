@@ -31,6 +31,7 @@ from transformers.generation.logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
+from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from transformers.modeling_utils import PreTrainedModel
 
 from ..cache_utils import MobilintEagle3Cache
@@ -158,6 +159,117 @@ class CachedRotaryEmbedding(nn.Module):
         seq_len = int(torch.max(position_ids).item()) + 1
         if self.position_table is None or seq_len > self.max_seq_len:
             self.max_seq_len = seq_len
+            self._build_position_table(device=x.device, dtype=x.dtype)
+        indices = position_ids.view(-1).cpu().numpy()
+        assert self.position_table is not None
+        return self.position_table[indices][None, None, :, :]
+
+
+class ScaledCachedRotaryEmbedding(nn.Module):
+    """RoPE table cache supporting config-driven scaling for base MXQ models.
+
+    This implementation mirrors JPharmatron-style base RoPE behavior:
+    - supports ``config.rope_scaling`` via ``ROPE_INIT_FUNCTIONS``
+    - applies runtime ``attention_scaling`` to cos/sin tables
+    - keeps MXQ-friendly output shape ``[B, 1, T, pe_size]``
+    """
+
+    def __init__(
+        self,
+        dim: int | None = None,
+        max_position_embeddings: int = 2048,
+        base: int = 10000,
+        rope_type: str = "default",
+        config: Optional[Any] = None,
+        max_length: Optional[int] = None,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        self.rope_kwargs: dict[str, Any] = {}
+
+        if config is None:
+            self.rope_type = rope_type
+            self.rope_kwargs = {
+                "rope_type": rope_type,
+                "factor": 1.0,
+                "dim": dim,
+                "base": base,
+                "max_position_embeddings": max_position_embeddings,
+            }
+            self.max_seq_len = (
+                max_position_embeddings if max_length is None or max_length < max_position_embeddings else max_length
+            )
+        else:
+            rope_scaling = getattr(config, "rope_scaling", None)
+            if rope_scaling is not None:
+                self.rope_type = rope_scaling.get("rope_type", rope_scaling.get("type", "default"))
+            else:
+                self.rope_type = "default"
+            config_max_pos = int(getattr(config, "max_position_embeddings", max_position_embeddings))
+            self.max_seq_len = config_max_pos if max_length is None or max_length < config_max_pos else max_length
+
+        self.original_max_seq_len = self.max_seq_len
+        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, None, **self.rope_kwargs)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.original_inv_freq = self.inv_freq.clone()
+        self.position_table: Optional[np.ndarray] = None
+        if self.inv_freq.device.type != "meta":
+            self._build_position_table()
+
+    def _build_position_table(
+        self,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        device = self.inv_freq.device if device is None else device
+        dtype = torch.get_default_dtype() if dtype is None else dtype
+        with torch.no_grad():
+            seq_len = self.max_seq_len
+            position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
+            inv_freq_expanded = self.inv_freq[None, :, None].float()
+            position_ids_expanded = position_ids[:, None, :].float()
+            freqs = (inv_freq_expanded @ position_ids_expanded).transpose(1, 2)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            cos = emb.cos() * self.attention_scaling
+            sin = emb.sin() * self.attention_scaling
+            cos = cos.unsqueeze(1)
+            sin = sin.unsqueeze(1)
+            channels = cos.shape[-1]
+            half_channels = channels // 2
+            rotate_tensor = torch.zeros(1, 1, seq_len, 2 * channels, device=device, dtype=dtype)
+            rotate_tensor[..., 0:channels:2] = cos[..., :half_channels]
+            rotate_tensor[..., 1:channels:2] = -sin[..., :half_channels]
+            rotate_tensor[..., channels : 2 * channels : 2] = sin[..., half_channels:channels]
+            rotate_tensor[..., channels + 1 : 2 * channels : 2] = cos[..., half_channels:channels]
+            target_half = ((channels + 63) // 64) * 64
+            target_size = 2 * target_half
+            if rotate_tensor.shape[-1] != target_size:
+                rotate_tensor = CachedRotaryEmbedding.pad_rope(rotate_tensor, target_size)
+            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+
+    def _dynamic_frequency_update(self, position_ids: torch.LongTensor, device: torch.device) -> None:
+        seq_len = int(torch.max(position_ids).item()) + 1
+        if seq_len > self.max_seq_len:
+            inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
+            self.register_buffer("inv_freq", inv_freq, persistent=False)
+            self.max_seq_len = seq_len
+            self._build_position_table(device=self.inv_freq.device)
+        if seq_len < self.original_max_seq_len and self.max_seq_len > self.original_max_seq_len:
+            self.register_buffer("inv_freq", self.original_inv_freq, persistent=False)
+            self.max_seq_len = self.original_max_seq_len
+            self._build_position_table(device=self.inv_freq.device)
+
+    @torch.no_grad()
+    def forward(self, x: torch.Tensor, position_ids: torch.LongTensor) -> np.ndarray:
+        if "dynamic" in self.rope_type:
+            self._dynamic_frequency_update(position_ids, device=x.device)
+        seq_len = int(torch.max(position_ids).item()) + 1
+        if seq_len > self.max_seq_len and "dynamic" not in self.rope_type:
+            raise ValueError(
+                f"Sequence length {seq_len} exceeds cached max_seq_len {self.max_seq_len} for non-dynamic RoPE."
+            )
+        if self.position_table is None:
             self._build_position_table(device=x.device, dtype=x.dtype)
         indices = position_ids.view(-1).cpu().numpy()
         assert self.position_table is not None
