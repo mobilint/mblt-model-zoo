@@ -56,6 +56,36 @@ def _normalize_probs_or_fallback_uniform(probs: torch.Tensor) -> torch.Tensor:
     return normalized
 
 
+def _apply_logits_processor(
+    logits: torch.Tensor,
+    logits_processor: Optional[LogitsProcessorList],
+) -> torch.Tensor:
+    """Apply logits processors/warpers to logits with shape-safe handling.
+
+    Args:
+        logits: 1D or 2D logits tensor.
+        logits_processor: Optional HF logits processor list.
+
+    Returns:
+        Processed logits tensor with the same shape as input.
+    """
+    if logits_processor is None:
+        return logits
+    if logits.ndim == 1:
+        return logits_processor(None, logits.unsqueeze(0))[0]
+    return logits_processor(None, logits)
+
+
+def _commit_accept_tokens_to_base(cache: MobilintEagle3Cache) -> None:
+    """Commit accepted tokens into base cache length and clear pending state."""
+    if cache.accept_tokens is None:
+        return
+    accepted_prefix_length = int(cache.accept_tokens.shape[1])
+    if accepted_prefix_length > 0:
+        cache.update_base_seen_tokens(accepted_prefix_length)
+    cache.accept_tokens = None
+
+
 def prepare_logits_processor(
     temperature: float = 0.0,
     repetition_penalty: float = 0.0,
@@ -95,11 +125,10 @@ def softmax_topk_cpu_torch(
           - ``topk_indices``: ``torch.long`` tensor.
     """
     x = logits.float()
-    topk_vals, topk_idx = torch.topk(x, k, dim=-1, largest=True, sorted=True)
-    if logits_processor is not None:
-        topk_vals = logits_processor(None, topk_vals)
-    max_val = x.max(dim=-1, keepdim=True).values
-    denom = torch.exp(x - max_val).sum(dim=-1, keepdim=True)
+    processed_logits = _apply_logits_processor(x, logits_processor)
+    topk_vals, topk_idx = torch.topk(processed_logits, k, dim=-1, largest=True, sorted=True)
+    max_val = processed_logits.max(dim=-1, keepdim=True).values
+    denom = torch.exp(processed_logits - max_val).sum(dim=-1, keepdim=True)
     probs = torch.exp(topk_vals - max_val) / denom
     return probs, topk_idx
 
@@ -191,8 +220,7 @@ def tree_decoding(
     )
 
     if cache.accept_tokens is not None:
-        cache.update_base_seen_tokens(accepted_prefix_length)
-        cache.accept_tokens = None
+        _commit_accept_tokens_to_base(cache)
 
     hidden_state = outputs["hidden_states"][0]
     del retrieve_indices
@@ -341,6 +369,7 @@ def update_inference_inputs(
     cache.accept_tokens = accepted
     new_token_count += int(accepted.shape[1])
     if should_stop or (remaining_tokens is not None and int(accepted.shape[1]) >= remaining_tokens):
+        _commit_accept_tokens_to_base(cache)
         return (
             input_ids,
             torch.empty(0, dtype=torch.long, device=input_ids.device),
