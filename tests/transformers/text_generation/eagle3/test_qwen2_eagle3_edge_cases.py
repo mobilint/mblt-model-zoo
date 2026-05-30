@@ -11,6 +11,9 @@ import torch
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
     MobilintQwen2Eagle3ForCausalLM,
 )
+from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagle3 import (
+    MobilintQwen2Eagle3Config,
+)
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
@@ -266,3 +269,53 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
         [[[0.0, 100.0, 200.0], [1.0, 101.0, 201.0], [2.0, 102.0, 202.0], [3.0, 103.0, 203.0], [4.0, 104.0, 204.0]]]
     )
     assert torch.equal(logits_out, expected)
+
+
+def test_eagle3_global_backend_options_apply_to_all_child_backends() -> None:
+    """Shared backend kwargs should propagate to base/draft/fc backends."""
+    config = MobilintQwen2Eagle3Config(
+        mxq_path="shared.mxq",
+        core_mode="global4",
+        dev_no=3,
+        max_batch_size=4,
+        target_clusters=[0],
+    )
+
+    assert config.base_mxq_path == "shared.mxq"
+    assert config.draft_mxq_path == "shared.mxq"
+    assert config.fc_mxq_path == "shared.mxq"
+
+    assert config.base_core_mode == "global4"
+    assert config.draft_core_mode == "global4"
+    assert config.fc_core_mode == "global4"
+
+    assert config.base_npu_backend.dev_no == 3
+    assert config.draft_npu_backend.dev_no == 3
+    assert config.fc_npu_backend.dev_no == 3
+
+    assert config.base_npu_backend.max_batch_size == 4
+    assert config.draft_npu_backend.max_batch_size == 4
+    assert config.fc_npu_backend.max_batch_size == 4
+
+
+def test_eagle3_prefixed_backend_options_override_shared_defaults() -> None:
+    """Prefixed backend kwargs should take precedence over shared kwargs."""
+    config = MobilintQwen2Eagle3Config(
+        mxq_path="shared.mxq",
+        core_mode="global4",
+        base_core_mode="single",
+        draft_mxq_path="draft.mxq",
+        fc_dev_no=7,
+    )
+
+    assert config.base_core_mode == "single"
+    assert config.draft_core_mode == "global4"
+    assert config.fc_core_mode == "global4"
+
+    assert config.base_mxq_path == "shared.mxq"
+    assert config.draft_mxq_path == "draft.mxq"
+    assert config.fc_mxq_path == "shared.mxq"
+
+    assert config.base_npu_backend.dev_no == 0
+    assert config.draft_npu_backend.dev_no == 0
+    assert config.fc_npu_backend.dev_no == 7

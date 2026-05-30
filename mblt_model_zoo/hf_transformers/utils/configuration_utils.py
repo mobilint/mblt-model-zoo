@@ -430,6 +430,16 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
     """Config mixin for EAGLE-3 models with base/draft/fc backends."""
 
     sub_configs = {"draft_config": MobilintConfigMixin}
+    _EAGLE3_BACKEND_FIELDS = (
+        "mxq_path",
+        "dev_no",
+        "max_batch_size",
+        "core_mode",
+        "target_cores",
+        "target_clusters",
+        "revision",
+        "commit_hash",
+    )
     _EAGLE3_RUNTIME_FIELDS = (
         ("eagle3_tree_depth", 5, int),
         ("eagle3_tree_top_k", 8, int),
@@ -458,12 +468,27 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         self.draft_config.name_or_path = self.name_or_path
 
     def _ensure_eagle3_npu_backends(self, kwargs: dict[str, Any]) -> None:
+        def _resolve_backend_kwargs(prefix: str) -> dict[str, Any]:
+            backend_kwargs: dict[str, Any] = {}
+            for field_name in self._EAGLE3_BACKEND_FIELDS:
+                prefixed_key = f"{prefix}{field_name}"
+                if prefixed_key in kwargs:
+                    backend_kwargs[prefixed_key] = kwargs[prefixed_key]
+                    continue
+
+                if field_name in kwargs:
+                    backend_kwargs[prefixed_key] = kwargs[field_name]
+            return backend_kwargs
+
         if not hasattr(self, "base_npu_backend"):
-            self.base_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="base_")
+            self.base_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("base_"), prefix="base_")
         if not hasattr(self, "draft_npu_backend"):
-            self.draft_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="draft_")
+            self.draft_npu_backend = MobilintNPUBackend.from_dict(
+                _resolve_backend_kwargs("draft_"),
+                prefix="draft_",
+            )
         if not hasattr(self, "fc_npu_backend"):
-            self.fc_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="fc_")
+            self.fc_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("fc_"), prefix="fc_")
 
     def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
         for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:
