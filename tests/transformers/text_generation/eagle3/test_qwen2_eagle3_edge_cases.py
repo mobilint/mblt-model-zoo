@@ -14,7 +14,7 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 im
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
-from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior
+from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, initialize_tree
 from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3DraftModelMixin
 
 
@@ -141,6 +141,30 @@ def test_generate_raises_for_empty_prompt_delta_with_reused_cache(monkeypatch) -
 
     with pytest.raises(ValueError, match="empty prompt delta"):
         model.generate(torch.tensor([[1, 2]], dtype=torch.long), past_key_values=cache)
+
+
+def test_initialize_tree_raises_for_empty_prompt_delta_with_equal_cache_length() -> None:
+    """When cache length equals input length, prompt delta must be empty and raise."""
+
+    class _DummyBaseModel:
+        def __call__(self, *_args, **_kwargs):
+            raise AssertionError("Base model must not be called for empty prompt delta.")
+
+    class _DummyModel:
+        eagle3_base_model = _DummyBaseModel()
+
+    class _DummyCache:
+        def get_base_seq_length(self) -> int:
+            return 2
+
+    input_ids = torch.tensor([[1, 2]], dtype=torch.long)
+    with pytest.raises(ValueError, match="empty prompt delta"):
+        initialize_tree(
+            input_ids,
+            _DummyModel(),
+            _DummyCache(),
+            logits_processor=None,
+        )
 
 
 def test_generate_stops_with_eos_list(monkeypatch) -> None:
