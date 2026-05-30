@@ -103,6 +103,33 @@ def test_evaluate_posterior_sampling_zero_sum_probs_fallback(monkeypatch) -> Non
     assert sampled_indices is not None
 
 
+def test_evaluate_posterior_uses_leaf_logits_after_full_path_accept() -> None:
+    """Greedy posterior should sample from leaf logits when full draft path is accepted."""
+    logits = torch.tensor(
+        [
+            [0.0, 10.0, 0.0, 0.0],   # pos 0 -> greedy token 1
+            [0.0, 0.0, 10.0, 0.0],   # pos 1 -> greedy token 2
+            [0.0, 0.0, 0.0, 10.0],   # pos 2 -> greedy token 3
+            [9.0, 1.0, 2.0, 3.0],    # leaf pos to be used for next-token sampling
+        ],
+        dtype=torch.float32,
+    )
+    candidates = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+    retrieve_indices = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+    best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
+        logits,
+        candidates,
+        logits_processor=None,
+        retrieve_indices=retrieve_indices,
+    )
+
+    assert best_candidate.item() == 0
+    assert accepted_draft_count.item() == 3
+    assert sampled_indices is None
+    assert torch.equal(sample_p, logits[3])
+
+
 def test_generate_raises_for_empty_prompt_delta_with_reused_cache(monkeypatch) -> None:
     """Reuse cache with no new token delta should raise a clear error."""
     model = object.__new__(MobilintQwen2Eagle3ForCausalLM)

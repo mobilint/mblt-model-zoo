@@ -267,8 +267,13 @@ def evaluate_posterior(
             best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
         else:
             best_candidate = torch.argmax(accepted_draft_counts).to(torch.long)
-        sample_index = torch.clamp(accepted_draft_count, max=path_logits.shape[1] - 1)
-        sample_p = path_logits[best_candidate, sample_index]
+
+        leaf_position = retrieve_indices[best_candidate, accepted_draft_count].to(logits.device)
+        if 0 <= int(leaf_position.item()) < logits.shape[0]:
+            sample_p = logits[leaf_position]
+        else:
+            sample_index = torch.clamp(accepted_draft_count, max=path_logits.shape[1] - 1)
+            sample_p = path_logits[best_candidate, sample_index]
         return best_candidate, accepted_draft_count, sample_p, None
 
     accepted_candidate_length = 1
