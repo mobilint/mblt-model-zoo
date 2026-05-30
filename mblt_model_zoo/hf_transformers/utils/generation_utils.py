@@ -68,6 +68,15 @@ def llm_eagle3_forward(
         requires_all_features_logits=False,
         count_npu_time=count_npu_time,
     )
+
+    consumed_tokens = 0
+    if input_ids is not None:
+        consumed_tokens = int(input_ids.shape[1])
+    elif inputs_embeds is not None:
+        consumed_tokens = int(inputs_embeds.shape[1])
+    if consumed_tokens > 0:
+        past_key_values.update_base_seen_tokens(consumed_tokens)
+
     loss = None
     if labels is not None:
         loss = model.loss_function(logits=logits, labels=labels, vocab_size=model.config.vocab_size)
