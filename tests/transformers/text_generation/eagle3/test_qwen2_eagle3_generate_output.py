@@ -625,6 +625,79 @@ def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
     assert criteria.score_shapes == [(1, 16)]
 
 
+def test_qwen2_eagle3_generate_commits_pending_accept_tokens_on_stopping_criteria(monkeypatch) -> None:
+    """Commit pending accepted tokens before breaking on custom stopping criteria."""
+
+    class StopNowCriteria(StoppingCriteria):
+        def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: object) -> bool:
+            del input_ids, scores, kwargs
+            return True
+
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    model.config = SimpleNamespace(vocab_size=16)
+    model.generation_config = SimpleNamespace(
+        max_new_tokens=4,
+        do_sample=False,
+        temperature=1.0,
+        top_p=1.0,
+        top_k=50,
+        eos_token_id=None,
+        num_assistant_tokens=2,
+    )
+    _attach_minimal_eagle3_modules(model)
+
+    cache = SimpleNamespace(
+        _base_seq=2,
+        accept_tokens=None,
+        reset=lambda: None,
+        clear_tree_state=lambda: None,
+        sync_draft_seq_length_to_base=lambda: None,
+        update_base_seen_tokens=lambda n: setattr(cache, "_base_seq", cache._base_seq + int(n)),
+        get_base_seq_length=lambda: cache._base_seq,
+    )
+    model._get_cache = lambda *_args, **_kwargs: cache
+
+    monkeypatch.setattr(
+        decoding_module,
+        "initialize_tree",
+        lambda *_args, **_kwargs: (torch.tensor([[3]]), torch.tensor([0]), None, torch.tensor([[0]]), None),
+    )
+    monkeypatch.setattr(
+        decoding_module,
+        "tree_decoding",
+        lambda *_args, **_kwargs: (torch.zeros((1, 1, 16)), torch.zeros((1, 1, 1))),
+    )
+    monkeypatch.setattr(
+        decoding_module,
+        "evaluate_posterior",
+        lambda *_args, **_kwargs: (torch.tensor(0), torch.tensor(0), torch.zeros(16), None),
+    )
+
+    def _update_inference_inputs(*_args, **_kwargs):
+        cache.accept_tokens = torch.tensor([[4]], dtype=torch.long)
+        return (
+            torch.tensor([[1, 2, 4]], dtype=torch.long),
+            torch.tensor([[3]], dtype=torch.long),
+            torch.tensor([0]),
+            None,
+            torch.tensor([[0]]),
+            1,
+            False,
+        )
+
+    monkeypatch.setattr(decoding_module, "update_inference_inputs", _update_inference_inputs)
+
+    output = model.generate(
+        torch.tensor([[1, 2]], dtype=torch.long),
+        stopping_criteria=[StopNowCriteria()],
+        return_dict_in_generate=True,
+    )
+
+    assert torch.equal(output.sequences, torch.tensor([[1, 2, 4]], dtype=torch.long))
+    assert cache.get_base_seq_length() == 3
+    assert cache.accept_tokens is None
+
+
 def test_qwen2_eagle3_generation_config_updates_max_draft_tokens() -> None:
     """`num_assistant_tokens`가 draft 모델의 `max_draft_tokens`에 반영되어야 한다."""
     model = object.__new__(MobilintQwen2Eagle3ForCausalLM)

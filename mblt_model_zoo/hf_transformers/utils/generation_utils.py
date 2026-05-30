@@ -684,6 +684,12 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                     streamer.put(token_id.unsqueeze(0))
             stopping_scores = self._eagle3_stopping_scores_adapter(logits, generated=generated)
             if stopping_criteria_list(generated, stopping_scores):
+                accept_tokens = getattr(cache, "accept_tokens", None)
+                if accept_tokens is not None:
+                    accepted_prefix_length = int(accept_tokens.shape[1])
+                    if accepted_prefix_length > 0:
+                        cache.update_base_seen_tokens(accepted_prefix_length)
+                    cache.accept_tokens = None
                 break
             if should_stop:
                 break
