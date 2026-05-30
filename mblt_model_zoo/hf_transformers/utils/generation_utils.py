@@ -452,6 +452,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         self,
         generation_config: Optional[GenerationConfig],
         *,
+        prompt_length: int,
         max_new_tokens: Optional[int],
         do_sample: Optional[bool],
         temperature: Optional[float],
@@ -460,9 +461,26 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
     ) -> tuple[GenerationConfig, int, Optional[float], Optional[float], int]:
         """Resolve generation config values used by the EAGLE-3 loop."""
         generation_config = self.generation_config if generation_config is None else generation_config
-        resolved_max_new_tokens = int(
-            max_new_tokens if max_new_tokens is not None else generation_config.max_new_tokens
-        )
+        if max_new_tokens is not None:
+            resolved_max_new_tokens = int(max_new_tokens)
+        elif getattr(generation_config, "max_new_tokens", None) is not None:
+            resolved_max_new_tokens = int(generation_config.max_new_tokens)
+        else:
+            resolved_max_length = getattr(generation_config, "max_length", None)
+            if resolved_max_length is None:
+                resolved_max_length = getattr(self.config, "max_position_embeddings", None)
+            if resolved_max_length is None:
+                raise ValueError(
+                    "Unable to resolve generation length for EAGLE-3. "
+                    "Set `max_new_tokens`, `generation_config.max_length`, or "
+                    "`config.max_position_embeddings`."
+                )
+            resolved_max_new_tokens = int(resolved_max_length) - int(prompt_length)
+        if resolved_max_new_tokens <= 0:
+            raise ValueError(
+                "Resolved max_new_tokens must be > 0 for EAGLE-3 generate, "
+                f"got {resolved_max_new_tokens}."
+            )
         resolved_do_sample = bool(
             do_sample if do_sample is not None else getattr(generation_config, "do_sample", False)
         )
@@ -605,6 +623,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         generation_config, max_tokens, resolved_temperature, resolved_top_p, resolved_top_k = (
             self._resolve_eagle3_generation_config(
                 generation_config,
+                prompt_length=int(input_ids.shape[1]),
                 max_new_tokens=max_new_tokens,
                 do_sample=do_sample,
                 temperature=temperature,

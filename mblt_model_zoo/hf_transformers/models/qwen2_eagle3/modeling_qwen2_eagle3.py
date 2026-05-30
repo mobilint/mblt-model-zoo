@@ -85,7 +85,20 @@ class MobilintQwen2Eagle3ForCausalLM(
     MobilintQwen2Eagle3PreTrainedModel,
     MobilintEagle3GenerationMixin,
 ):
-    """Top-level Mobilint EAGLE-3 causal LM."""
+    """Top-level Mobilint EAGLE-3 causal LM.
+
+    Generation compatibility notes:
+    - Ignored with warning: ``attention_mask``, ``min_new_tokens``,
+      ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``.
+    - Not supported (hard error): beam search, ``assistant_model``,
+      ``use_cache=False``, custom ``logits_processor``, negative prompts,
+      and unknown ``generate`` kwargs.
+    - ``max_new_tokens`` resolution priority:
+      1) explicit ``max_new_tokens`` argument,
+      2) ``generation_config.max_new_tokens``,
+      3) ``generation_config.max_length - prompt_length``,
+      4) ``config.max_position_embeddings - prompt_length``.
+    """
 
     config_class = MobilintQwen2Eagle3Config
 
