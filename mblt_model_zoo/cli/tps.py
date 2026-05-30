@@ -104,6 +104,32 @@ def _warn_eagle3_override(
     )
 
 
+def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
+    """Warn once with the final EAGLE-3 backend-prefixed options.
+
+    This helps users understand the effective option set when shared and
+    prefixed CLI options are mixed.
+    """
+    tracked_keys = [
+        "base_core_mode",
+        "draft_core_mode",
+        "fc_core_mode",
+        "base_target_cores",
+        "draft_target_cores",
+        "fc_target_cores",
+        "base_target_clusters",
+        "draft_target_clusters",
+        "fc_target_clusters",
+        "base_mxq_path",
+        "draft_mxq_path",
+        "fc_mxq_path",
+    ]
+    applied = {key: model_kwargs[key] for key in tracked_keys if key in model_kwargs}
+    if not applied:
+        return
+    warnings.warn(f"Applied EAGLE-3 backend options: {applied}", UserWarning, stacklevel=2)
+
+
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
     """Return the NPU latency percentage of total latency."""
     if total_latency is None or npu_latency is None:
@@ -422,6 +448,7 @@ def _build_pipeline(
                 target_clusters=prefix_target_clusters,
                 prefix=prefix,
             )
+        _warn_eagle3_applied_options_summary(model_kwargs)
     else:
         model_kwargs = _apply_core_mode_model_kwargs_common(
             model_kwargs,

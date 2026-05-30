@@ -754,7 +754,8 @@ def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monk
             target_clusters=[0],
         )
 
-    assert len(record) == 0
+    conflict_warnings = [w for w in record if "Conflicting options detected" in str(w.message)]
+    assert len(conflict_warnings) == 0
 
 
 def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
@@ -2465,3 +2466,84 @@ def test_cli_tps_parser_epilog_contains_examples() -> None:
     assert "Examples:" in tps_parser.epilog
     assert "--base-core-mode" in tps_parser.epilog
     assert "--input-mode file" in tps_parser.epilog
+
+
+def test_build_pipeline_warns_with_applied_eagle3_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Emit a one-shot summary warning for effective EAGLE-3 backend options."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr("transformers.pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+
+    with pytest.warns(UserWarning, match="Applied EAGLE-3 backend options"):
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/model",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_core_mode="single", draft_target_clusters=[1]),
+            mxq_path=None,
+            core_mode="global8",
+            target_cores=["0:0"],
+            target_clusters=[0],
+        )
+
+
+def test_run_text_measure_file_mode_raises_on_empty_prompt_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Fail fast when file-mode prompt source contains no non-empty lines."""
+    empty_prompt = tmp_path / "empty_prompts.txt"
+    empty_prompt.write_text("\n\n", encoding="utf-8")
+
+    pipeline = _DummyTextPipeline(_DummyGenerateNPUModel())
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **_kwargs: pipeline)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        warmup=0,
+        repeat=0,
+        prefill=8,
+        decode=2,
+        prefill_chunk_size=None,
+        trace=None,
+        json=None,
+        batch_size=1,
+        input_mode="file",
+        prompt_text=None,
+        prompt_file=str(empty_prompt),
+        prompt_file_strategy="first",
+        prompt_file_seed=0,
+        device_metrics=False,
+        device_backend="none",
+    )
+
+    with pytest.raises(ValueError, match="No non-empty prompt found in file"):
+        tps_cli._run_text_measure(args)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, TypeAlias
 
 import torch
 from transformers.generation.logits_process import (
@@ -22,6 +22,38 @@ class MobilintEagle3GenerationProtocol(Protocol):
     eagle3_base_model: Any
     eagle3_draft_model: Any
     eagle3_fc_projector: Any
+
+
+PosteriorResult: TypeAlias = tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]
+UpdateInputsResult: TypeAlias = tuple[
+    torch.LongTensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    int,
+    bool,
+]
+
+
+def _normalize_probs_or_fallback_uniform(probs: torch.Tensor) -> torch.Tensor:
+    """Normalize a probability tensor and guard against zero/NaN denominators.
+
+    Args:
+        probs: 1D probability-like tensor of dtype float.
+
+    Returns:
+        A normalized probability tensor whose sum is 1.0.
+    """
+    total = probs.sum()
+    if not torch.isfinite(total) or total <= 0:
+        if probs.numel() == 0:
+            return probs
+        return torch.full_like(probs, 1.0 / float(probs.numel()))
+    normalized = probs / total
+    if not torch.isfinite(normalized).all():
+        return torch.full_like(probs, 1.0 / float(max(1, probs.numel())))
+    return normalized
 
 
 def prepare_logits_processor(
@@ -50,7 +82,18 @@ def softmax_topk_cpu_torch(
     k: int,
     logits_processor: Optional[LogitsProcessorList] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return top-k probabilities and indices from logits."""
+    """Return top-k probabilities and indices from logits.
+
+    Args:
+        logits: Logits tensor with float-like dtype.
+        k: Number of top candidates.
+        logits_processor: Optional HF logits processor list.
+
+    Returns:
+        Tuple of ``(probs, topk_indices)`` where:
+          - ``probs``: float tensor.
+          - ``topk_indices``: ``torch.long`` tensor.
+    """
     x = logits.float()
     topk_vals, topk_idx = torch.topk(x, k, dim=-1, largest=True, sorted=True)
     if logits_processor is not None:
@@ -164,8 +207,13 @@ def evaluate_posterior(
     candidates: torch.Tensor,
     logits_processor: Optional[LogitsProcessorList],
     retrieve_indices: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    """Choose the best accepted branch and the next sampling distribution."""
+) -> PosteriorResult:
+    """Choose the best accepted branch and the next sampling distribution.
+
+    Returns:
+        Tuple of ``(best_candidate, accepted_draft_count, sample_p, sampled_indices)``.
+        ``best_candidate`` and ``accepted_draft_count`` are ``torch.long`` scalars.
+    """
     if logits.ndim == 1:
         logits = logits.unsqueeze(0)
 
@@ -230,7 +278,7 @@ def evaluate_posterior(
                 break
             if mask.any():
                 topk_probs[mask.nonzero(as_tuple=True)[0].item()] = 0
-                topk_probs = topk_probs / topk_probs.sum()
+                topk_probs = _normalize_probs_or_fallback_uniform(topk_probs)
                 adjusted = True
 
     if adjusted and accepted_candidate_length != candidates.shape[1]:
@@ -266,7 +314,16 @@ def update_inference_inputs(
     eos_token_id: Optional[int | list[int]] = None,
     count_npu_time: bool = False,
 ) -> tuple[torch.LongTensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int, bool]:
-    """Advance accepted tokens and build the next draft tree."""
+    """Advance accepted tokens and build the next draft tree.
+
+    Args:
+        input_ids: ``torch.long`` prompt+generated token IDs.
+        candidates: Candidate token tree tensor (token IDs are expected to be integer-like).
+        sample_p: Sampling distribution tensor (float).
+
+    Returns:
+        Updated generation state tuple.
+    """
     accepted_draft_count_int = int(accepted_draft_count.item())
     best_candidate_int = int(best_candidate.item())
     accepted_candidate_length = accepted_draft_count_int + 1
