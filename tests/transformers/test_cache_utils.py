@@ -153,8 +153,8 @@ def test_eagle3_cache_reset_clears_tree_state() -> None:
     assert cache.pending_draft_tokens is None
 
 
-def test_eagle3_cache_copy_preserves_tree_state() -> None:
-    """EAGLE-3 cache copy should preserve speculative state snapshots."""
+def test_eagle3_cache_copy_clears_tree_state_but_preserves_seq_lengths() -> None:
+    """EAGLE-3 cache copy should drop transient tree state and keep committed lengths."""
     cache = MobilintEagle3Cache(_FakeMxqModel(), _FakeMxqModel())
     cache.set_base_seq_length(4)
     cache.set_draft_seq_length(3)
@@ -165,10 +165,11 @@ def test_eagle3_cache_copy_preserves_tree_state() -> None:
 
     assert copied.get_base_seq_length() == 4
     assert copied.get_draft_seq_length() == 3
-    assert copied.accept_tokens is not None
-    assert torch.equal(copied.accept_tokens, cache.accept_tokens)
-    assert copied.tree_mask is not None
-    assert torch.equal(copied.tree_mask, cache.tree_mask)
+    assert copied.accept_tokens is None
+    assert copied.tree_mask is None
+    assert copied.retrieve_indices is None
+    assert copied.tree_position_ids is None
+    assert copied.pending_draft_tokens is None
 
 
 def test_eagle3_cache_dump_load_roundtrip_restores_base_and_draft_seq_lengths() -> None:

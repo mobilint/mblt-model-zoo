@@ -16,6 +16,7 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 im
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
+from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, update_inference_inputs
 
 
@@ -998,6 +999,105 @@ def test_qwen2_eagle3_npu_timing_requires_all_components() -> None:
 
     with pytest.raises(ValueError, match="requires all child backends"):
         model.get_npu_timing()
+
+
+def test_eagle3_validate_generate_request_ignores_unknown_kwargs_with_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Ignore unknown generate kwargs and emit a warning instead of raising."""
+
+    class _DummyEagle3(MobilintEagle3GenerationMixin):
+        pass
+
+    model = _DummyEagle3()
+
+    with caplog.at_level("WARNING"):
+        model._validate_eagle3_generate_request(
+            output_scores=False,
+            output_hidden_states=False,
+            output_attentions=False,
+            num_beams=1,
+            assistant_model=None,
+            use_cache=True,
+            synced_gpus=None,
+            logits_processor_arg=None,
+            negative_prompt_ids=None,
+            negative_prompt_attention_mask=None,
+            kwargs={"foo": 1, "bar": 2},
+        )
+
+    assert "Unsupported generate kwargs are ignored for EAGLE-3 models: bar, foo" in caplog.text
+
+
+def test_llm_eagle3_forward_accepts_dict_hidden_states() -> None:
+    """Return tuple hidden_states when base output is dict-like."""
+
+    class _DummyModel:
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(vocab_size=8)
+
+        def _get_cache(self, *_args, **_kwargs):
+            return object.__new__(MobilintEagle3Cache)
+
+        def eagle3_base_model(self, **kwargs):
+            del kwargs
+            outputs = {"hidden_states": [torch.zeros((1, 1, 4)), torch.ones((1, 1, 4))]}
+            logits = torch.zeros((1, 1, 8), dtype=torch.float32)
+            return outputs, logits
+
+        def loss_function(self, **kwargs):
+            del kwargs
+            return torch.tensor(0.0)
+
+    model = _DummyModel()
+    cache = object.__new__(MobilintEagle3Cache)
+
+    output = llm_eagle3_forward(model, input_ids=torch.tensor([[1]], dtype=torch.long), past_key_values=cache)
+
+    assert output.hidden_states is not None
+    assert isinstance(output.hidden_states, tuple)
+    assert len(output.hidden_states) == 2
+
+
+def test_llm_eagle3_forward_accepts_object_hidden_states_and_missing_hidden_states() -> None:
+    """Handle object outputs with/without hidden_states attribute."""
+
+    class _DummyOutput:
+        def __init__(self, hidden_states=None) -> None:
+            self.hidden_states = hidden_states
+
+    class _DummyModel:
+        def __init__(self, with_hidden_states: bool) -> None:
+            self.with_hidden_states = with_hidden_states
+            self.config = SimpleNamespace(vocab_size=8)
+
+        def _get_cache(self, *_args, **_kwargs):
+            return object.__new__(MobilintEagle3Cache)
+
+        def eagle3_base_model(self, **kwargs):
+            del kwargs
+            hidden_states = [torch.zeros((1, 1, 4))] if self.with_hidden_states else None
+            outputs = _DummyOutput(hidden_states=hidden_states)
+            logits = torch.zeros((1, 1, 8), dtype=torch.float32)
+            return outputs, logits
+
+        def loss_function(self, **kwargs):
+            del kwargs
+            return torch.tensor(0.0)
+
+    cache = object.__new__(MobilintEagle3Cache)
+    with_hidden = llm_eagle3_forward(
+        _DummyModel(with_hidden_states=True),
+        input_ids=torch.tensor([[1]], dtype=torch.long),
+        past_key_values=cache,
+    )
+    without_hidden = llm_eagle3_forward(
+        _DummyModel(with_hidden_states=False),
+        input_ids=torch.tensor([[1]], dtype=torch.long),
+        past_key_values=cache,
+    )
+
+    assert isinstance(with_hidden.hidden_states, tuple)
+    assert len(with_hidden.hidden_states) == 1
+    assert without_hidden.hidden_states is None
 
 
 def test_qwen2_eagle3_generate_ignored_args_emit_stable_warning_messages(monkeypatch, caplog) -> None:

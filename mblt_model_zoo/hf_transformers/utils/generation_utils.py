@@ -71,11 +71,19 @@ def llm_eagle3_forward(
     loss = None
     if labels is not None:
         loss = model.loss_function(logits=logits, labels=labels, vocab_size=model.config.vocab_size)
+    hidden_states: tuple[torch.Tensor, ...] | None = None
+    if isinstance(outputs, dict):
+        raw_hidden_states = outputs.get("hidden_states")
+    else:
+        raw_hidden_states = getattr(outputs, "hidden_states", None)
+    if raw_hidden_states is not None:
+        hidden_states = tuple(raw_hidden_states)
+
     return CausalLMOutputWithPast(
         loss=loss,
         logits=cast(torch.FloatTensor, logits),
         past_key_values=past_key_values,
-        hidden_states=None if outputs is None else tuple(outputs["hidden_states"]),
+        hidden_states=hidden_states,
         attentions=None,
     )
 
@@ -445,8 +453,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         if negative_prompt_ids is not None or negative_prompt_attention_mask is not None:
             raise NotImplementedError("EAGLE-3 models do not support negative prompts.")
         if kwargs:
-            unsupported = ", ".join(sorted(kwargs))
-            raise NotImplementedError(f"Unsupported generate kwargs for EAGLE-3 models: {unsupported}")
+            ignored = ", ".join(sorted(kwargs))
+            logger.warning("Unsupported generate kwargs are ignored for EAGLE-3 models: %s", ignored)
 
     def _resolve_eagle3_generation_config(
         self,

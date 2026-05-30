@@ -518,51 +518,51 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         self.fc_npu_backend.core_mode = value
 
     @property
-    def base_target_cores(self) -> list:
+    def base_target_cores(self) -> list[str]:
         return self.base_npu_backend.target_cores
 
     @base_target_cores.setter
-    def base_target_cores(self, values: list) -> None:
+    def base_target_cores(self, values: list[str]) -> None:
         self.base_npu_backend.target_cores = values
 
     @property
-    def draft_target_cores(self) -> list:
+    def draft_target_cores(self) -> list[str]:
         return self.draft_npu_backend.target_cores
 
     @draft_target_cores.setter
-    def draft_target_cores(self, values: list) -> None:
+    def draft_target_cores(self, values: list[str]) -> None:
         self.draft_npu_backend.target_cores = values
 
     @property
-    def fc_target_cores(self) -> list:
+    def fc_target_cores(self) -> list[str]:
         return self.fc_npu_backend.target_cores
 
     @fc_target_cores.setter
-    def fc_target_cores(self, values: list) -> None:
+    def fc_target_cores(self, values: list[str]) -> None:
         self.fc_npu_backend.target_cores = values
 
     @property
-    def base_target_clusters(self) -> list:
+    def base_target_clusters(self) -> list[int]:
         return self.base_npu_backend.target_clusters
 
     @base_target_clusters.setter
-    def base_target_clusters(self, values: list) -> None:
+    def base_target_clusters(self, values: list[int]) -> None:
         self.base_npu_backend.target_clusters = values
 
     @property
-    def draft_target_clusters(self) -> list:
+    def draft_target_clusters(self) -> list[int]:
         return self.draft_npu_backend.target_clusters
 
     @draft_target_clusters.setter
-    def draft_target_clusters(self, values: list) -> None:
+    def draft_target_clusters(self, values: list[int]) -> None:
         self.draft_npu_backend.target_clusters = values
 
     @property
-    def fc_target_clusters(self) -> list:
+    def fc_target_clusters(self) -> list[int]:
         return self.fc_npu_backend.target_clusters
 
     @fc_target_clusters.setter
-    def fc_target_clusters(self, values: list) -> None:
+    def fc_target_clusters(self, values: list[int]) -> None:
         self.fc_npu_backend.target_clusters = values
 
     @property

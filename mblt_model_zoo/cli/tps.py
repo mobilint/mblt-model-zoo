@@ -105,7 +105,7 @@ def _warn_eagle3_override(
 
 
 def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
-    """Warn once with the final EAGLE-3 backend-prefixed options.
+    """Print once with the final EAGLE-3 backend-prefixed options.
 
     This helps users understand the effective option set when shared and
     prefixed CLI options are mixed.
@@ -127,7 +127,8 @@ def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
     applied = {key: model_kwargs[key] for key in tracked_keys if key in model_kwargs}
     if not applied:
         return
-    warnings.warn(f"Applied EAGLE-3 backend options: {applied}", UserWarning, stacklevel=2)
+    if os.environ.get("MBLT_EAGLE3_VERBOSE", "0") == "1":
+        print(f"[Mobilint][EAGLE-3] Applied backend options: {applied}", file=sys.stderr)
 
 
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
