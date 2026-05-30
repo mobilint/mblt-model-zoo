@@ -470,7 +470,23 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             if hasattr(self, field_name):
                 continue
             value = kwargs.pop(field_name, default_value)
-            self.__dict__[field_name] = int(value) if value is not None else int(default_value)
+            self.__dict__[field_name] = self._coerce_positive_runtime_int(
+                field_name,
+                value,
+                default_value=default_value,
+            )
+
+    @staticmethod
+    def _coerce_positive_runtime_int(field_name: str, value: Any, *, default_value: int) -> int:
+        """Coerce runtime integer fields and reject invalid ranges."""
+        candidate = default_value if value is None else value
+        try:
+            coerced = int(candidate)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be an integer, got {candidate!r}") from exc
+        if coerced <= 0:
+            raise ValueError(f"{field_name} must be > 0, got {coerced}")
+        return coerced
 
     def __init__(self, **kwargs):
         draft_config = kwargs.pop("draft_config", None)

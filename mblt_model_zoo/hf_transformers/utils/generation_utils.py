@@ -542,91 +542,33 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             return torch.zeros((generated.shape[0], 1), device=generated.device, dtype=torch.float32)
         return flattened[-1:, :].to(dtype=torch.float32)
 
-    @torch.no_grad()
-    @with_mobilint_generation_signature(
-        GenerationMixin.generate,
-        "count_npu_time",
-        "prefill_chunk_size",
-    )
-    def generate(
+    @staticmethod
+    def _build_stopping_criteria_list(
+        stopping_criteria: Optional[StoppingCriteriaList | list[Any]],
+    ) -> StoppingCriteriaList:
+        """Normalize stopping criteria input to ``StoppingCriteriaList``."""
+        if stopping_criteria is None:
+            return StoppingCriteriaList()
+        if isinstance(stopping_criteria, StoppingCriteriaList):
+            return stopping_criteria
+        return StoppingCriteriaList(stopping_criteria)
+
+    def _prepare_eagle3_generate_context(
         self,
-        inputs: Optional[torch.Tensor] = None,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[MobilintEagle3Cache] = None,
-        generation_config: Optional[GenerationConfig] = None,
-        max_new_tokens: Optional[int] = None,
-        do_sample: Optional[bool] = None,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        top_k: Optional[int] = None,
-        streamer: Optional[Any] = None,
-        return_dict_in_generate: bool = False,
-        output_scores: bool = False,
-        output_hidden_states: bool = False,
-        output_attentions: bool = False,
-        num_beams: int = 1,
-        assistant_model: Optional[PreTrainedModel] = None,
-        use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        stopping_criteria: Optional[StoppingCriteriaList | list[Any]] = None,
-        min_new_tokens: Optional[int] = None,
-        pad_token_id: Optional[int] = None,
-        eos_token_id: Optional[int | list[int]] = None,
-        count_npu_time: bool = False,
-        prefill_chunk_size: Optional[int] = None,
-        **kwargs: Any,
-    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
-        """Generate tokens with the Mobilint EAGLE-3 decoding loop.
-
-        Compatibility policy:
-        - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
-          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``.
-        - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
-          custom ``logits_processor``, negative prompts, unknown kwargs.
-        """
-        from ..utils.eagle3.decoding import (
-            evaluate_posterior,
-            initialize_tree,
-            prepare_logits_processor,
-            tree_decoding,
-            update_inference_inputs,
-        )
-
-        if attention_mask is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])
-        if min_new_tokens is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["min_new_tokens"])
-        if pad_token_id is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["pad_token_id"])
-        if prefill_chunk_size is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["prefill_chunk_size"])
-        if cache_position is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["cache_position"])
-
-        logits_processor_arg = kwargs.pop("logits_processor", None)
-        synced_gpus = kwargs.pop("synced_gpus", None)
-        negative_prompt_ids = kwargs.pop("negative_prompt_ids", None)
-        negative_prompt_attention_mask = kwargs.pop("negative_prompt_attention_mask", None)
-        self._validate_eagle3_generate_request(
-            output_scores=output_scores,
-            output_hidden_states=output_hidden_states,
-            output_attentions=output_attentions,
-            num_beams=num_beams,
-            assistant_model=assistant_model,
-            use_cache=use_cache,
-            synced_gpus=synced_gpus,
-            logits_processor_arg=logits_processor_arg,
-            negative_prompt_ids=negative_prompt_ids,
-            negative_prompt_attention_mask=negative_prompt_attention_mask,
-            kwargs=kwargs,
-        )
-
-        input_ids = input_ids if input_ids is not None else inputs
-        if input_ids is None:
-            raise ValueError("`generate` requires `input_ids` or `inputs`.")
-        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
-            raise NotImplementedError("EAGLE-3 models only support batch size 1.")
+        *,
+        input_ids: torch.Tensor,
+        generation_config: Optional[GenerationConfig],
+        max_new_tokens: Optional[int],
+        do_sample: Optional[bool],
+        temperature: Optional[float],
+        top_p: Optional[float],
+        top_k: Optional[int],
+        past_key_values: Optional[MobilintEagle3Cache],
+        stopping_criteria: Optional[StoppingCriteriaList | list[Any]],
+        eos_token_id: Optional[int | list[int]],
+    ) -> tuple[GenerationConfig, int, Any, MobilintEagle3Cache, torch.LongTensor, Optional[int | list[int]], StoppingCriteriaList]:
+        """Prepare shared state used by the EAGLE-3 decoding loop."""
+        from ..utils.eagle3.decoding import prepare_logits_processor
 
         generation_config, max_tokens, resolved_temperature, resolved_top_p, resolved_top_k = (
             self._resolve_eagle3_generation_config(
@@ -645,17 +587,38 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             top_p=0.0 if resolved_top_p is None else resolved_top_p,
             top_k=resolved_top_k,
         )
-
         generated = input_ids.clone()
-        eos_token_id = eos_token_id if eos_token_id is not None else generation_config.eos_token_id
-        if stopping_criteria is None:
-            stopping_criteria_list = StoppingCriteriaList()
-        elif isinstance(stopping_criteria, StoppingCriteriaList):
-            stopping_criteria_list = stopping_criteria
-        else:
-            stopping_criteria_list = StoppingCriteriaList(stopping_criteria)
-        if streamer is not None:
-            streamer.put(generated[0].detach().cpu())
+        resolved_eos_token_id = eos_token_id if eos_token_id is not None else generation_config.eos_token_id
+        stopping_criteria_list = self._build_stopping_criteria_list(stopping_criteria)
+        return (
+            generation_config,
+            max_tokens,
+            logits_processor,
+            cache,
+            generated,
+            resolved_eos_token_id,
+            stopping_criteria_list,
+        )
+
+    def _run_eagle3_decode_loop(
+        self,
+        *,
+        generated: torch.LongTensor,
+        cache: MobilintEagle3Cache,
+        logits_processor: Any,
+        max_tokens: int,
+        eos_token_id: Optional[int | list[int]],
+        stopping_criteria_list: StoppingCriteriaList,
+        streamer: Optional[Any],
+        count_npu_time: bool,
+    ) -> torch.LongTensor:
+        """Execute the EAGLE-3 speculative decode loop and update acceptance stats."""
+        from ..utils.eagle3.decoding import (
+            evaluate_posterior,
+            initialize_tree,
+            tree_decoding,
+            update_inference_inputs,
+        )
 
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, _ = initialize_tree(
             generated,
@@ -725,8 +688,6 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             if should_stop:
                 break
 
-        if streamer is not None:
-            streamer.end()
         acceptance_avg = (float(acceptance_tokens_sum) / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
         acceptance_ratio = (acceptance_ratio_sum / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
         self._eagle3_acceptance_stats = {
@@ -735,6 +696,115 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             "accepted_tokens_avg": float(acceptance_avg),
             "acceptance_ratio": float(acceptance_ratio),
         }
+        return generated
+
+    @torch.no_grad()
+    @with_mobilint_generation_signature(
+        GenerationMixin.generate,
+        "count_npu_time",
+        "prefill_chunk_size",
+    )
+    def generate(
+        self,
+        inputs: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[MobilintEagle3Cache] = None,
+        generation_config: Optional[GenerationConfig] = None,
+        max_new_tokens: Optional[int] = None,
+        do_sample: Optional[bool] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        streamer: Optional[Any] = None,
+        return_dict_in_generate: bool = False,
+        output_scores: bool = False,
+        output_hidden_states: bool = False,
+        output_attentions: bool = False,
+        num_beams: int = 1,
+        assistant_model: Optional[PreTrainedModel] = None,
+        use_cache: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        stopping_criteria: Optional[StoppingCriteriaList | list[Any]] = None,
+        min_new_tokens: Optional[int] = None,
+        pad_token_id: Optional[int] = None,
+        eos_token_id: Optional[int | list[int]] = None,
+        count_npu_time: bool = False,
+        prefill_chunk_size: Optional[int] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
+        """Generate tokens with the Mobilint EAGLE-3 decoding loop.
+
+        Compatibility policy:
+        - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
+          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``.
+        - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
+          custom ``logits_processor``, negative prompts, unknown kwargs.
+        """
+        if attention_mask is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])
+        if min_new_tokens is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["min_new_tokens"])
+        if pad_token_id is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["pad_token_id"])
+        if prefill_chunk_size is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["prefill_chunk_size"])
+        if cache_position is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["cache_position"])
+
+        logits_processor_arg = kwargs.pop("logits_processor", None)
+        synced_gpus = kwargs.pop("synced_gpus", None)
+        negative_prompt_ids = kwargs.pop("negative_prompt_ids", None)
+        negative_prompt_attention_mask = kwargs.pop("negative_prompt_attention_mask", None)
+        self._validate_eagle3_generate_request(
+            output_scores=output_scores,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+            num_beams=num_beams,
+            assistant_model=assistant_model,
+            use_cache=use_cache,
+            synced_gpus=synced_gpus,
+            logits_processor_arg=logits_processor_arg,
+            negative_prompt_ids=negative_prompt_ids,
+            negative_prompt_attention_mask=negative_prompt_attention_mask,
+            kwargs=kwargs,
+        )
+
+        input_ids = input_ids if input_ids is not None else inputs
+        if input_ids is None:
+            raise ValueError("`generate` requires `input_ids` or `inputs`.")
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise NotImplementedError("EAGLE-3 models only support batch size 1.")
+
+        generation_config, max_tokens, logits_processor, cache, generated, eos_token_id, stopping_criteria_list = (
+            self._prepare_eagle3_generate_context(
+                input_ids=input_ids,
+                generation_config=generation_config,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                past_key_values=past_key_values,
+                stopping_criteria=stopping_criteria,
+                eos_token_id=eos_token_id,
+            )
+        )
+        if streamer is not None:
+            streamer.put(generated[0].detach().cpu())
+        generated = self._run_eagle3_decode_loop(
+            generated=generated,
+            cache=cache,
+            logits_processor=logits_processor,
+            max_tokens=max_tokens,
+            eos_token_id=eos_token_id,
+            stopping_criteria_list=stopping_criteria_list,
+            streamer=streamer,
+            count_npu_time=count_npu_time,
+        )
+
+        if streamer is not None:
+            streamer.end()
         cache.clear_tree_state()
         cache.sync_draft_seq_length_to_base()
         if return_dict_in_generate:

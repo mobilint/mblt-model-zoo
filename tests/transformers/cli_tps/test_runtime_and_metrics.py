@@ -2119,8 +2119,3 @@ def test_cli_tps_positive_int_enforced(argv: list[str]):
     with pytest.raises(SystemExit) as excinfo:
         parser.parse_args(argv)
     assert excinfo.value.code == 2
-
-
-
-
-

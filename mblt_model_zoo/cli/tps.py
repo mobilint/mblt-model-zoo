@@ -512,6 +512,52 @@ def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineO
     )
 
 
+def _resolve_text_measure_inputs(args: argparse.Namespace, pipeline: Any) -> tuple[torch.Tensor | None, int, str | None]:
+    """Resolve text-measure input ids/prefill length from CLI input-mode options."""
+
+    def _tokenize_prompt_text(text: str) -> torch.Tensor:
+        encoded = pipeline.tokenizer(
+            text,
+            return_tensors="pt",
+            add_special_tokens=True,
+        )
+        return encoded["input_ids"]
+
+    selected_prompt_text: str | None = None
+    input_mode = str(getattr(args, "input_mode", "random"))
+    if input_mode == "random":
+        return None, int(args.prefill), None
+
+    if input_mode == "synthetic-text":
+        if not args.prompt_text:
+            raise ValueError("--input-mode synthetic-text requires --prompt-text.")
+        selected_prompt_text = args.prompt_text
+        input_ids = _tokenize_prompt_text(args.prompt_text)
+        return input_ids, int(input_ids.shape[1]), selected_prompt_text
+
+    if input_mode == "file":
+        if not args.prompt_file:
+            raise ValueError("--input-mode file requires --prompt-file.")
+        with open(args.prompt_file, encoding="utf-8") as handle:
+            prompts = [line.strip() for line in handle if line.strip()]
+        if not prompts:
+            raise ValueError(f"No non-empty prompt found in file: {args.prompt_file}")
+
+        strategy = str(getattr(args, "prompt_file_strategy", "first"))
+        if strategy == "first":
+            selected_prompt_text = prompts[0]
+        elif strategy == "random":
+            rng = random.Random(args.prompt_file_seed)
+            selected_prompt_text = rng.choice(prompts)
+        else:
+            raise ValueError(f"Unsupported --prompt-file-strategy: {strategy}")
+
+        input_ids = _tokenize_prompt_text(selected_prompt_text)
+        return input_ids, int(input_ids.shape[1]), selected_prompt_text
+
+    raise ValueError(f"Unsupported input mode: {input_mode}")
+
+
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
     def _optional_values(values: Sequence[Any], length: int) -> list[Any]:
         return [values[idx] if idx < len(values) else None for idx in range(length)]
@@ -917,55 +963,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
 
-    selected_prompt_text: str | None = None
-
-    def _build_measure_input_ids() -> torch.Tensor | None:
-        def _tokenize_prompt_text(text: str) -> torch.Tensor:
-            encoded = pipeline.tokenizer(
-                text,
-                return_tensors="pt",
-                add_special_tokens=True,
-            )
-            return encoded["input_ids"]
-
-        nonlocal selected_prompt_text
-
-        input_mode = str(getattr(args, "input_mode", "random"))
-        if input_mode == "random":
-            return None
-
-        if input_mode == "synthetic-text":
-            if not args.prompt_text:
-                raise ValueError("--input-mode synthetic-text requires --prompt-text.")
-            selected_prompt_text = args.prompt_text
-            return _tokenize_prompt_text(args.prompt_text)
-
-        if input_mode == "file":
-            if not args.prompt_file:
-                raise ValueError("--input-mode file requires --prompt-file.")
-            with open(args.prompt_file, encoding="utf-8") as handle:
-                prompts = [line.strip() for line in handle if line.strip()]
-            if not prompts:
-                raise ValueError(f"No non-empty prompt found in file: {args.prompt_file}")
-
-            strategy = str(getattr(args, "prompt_file_strategy", "first"))
-            if strategy == "first":
-                selected = prompts[0]
-            elif strategy == "random":
-                rng = random.Random(args.prompt_file_seed)
-                selected = rng.choice(prompts)
-            else:
-                raise ValueError(f"Unsupported --prompt-file-strategy: {strategy}")
-
-            selected_prompt_text = selected
-            return _tokenize_prompt_text(selected)
-
-        raise ValueError(f"Unsupported input mode: {input_mode}")
-
-    measure_input_ids = _build_measure_input_ids()
-    measure_num_prefill = int(args.prefill)
-    if measure_input_ids is not None:
-        measure_num_prefill = int(measure_input_ids.shape[1])
+    measure_input_ids, measure_num_prefill, selected_prompt_text = _resolve_text_measure_inputs(args, pipeline)
 
     selected_prompt_sha256 = (
         hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
