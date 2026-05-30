@@ -605,7 +605,7 @@ class MobilintEagle3DraftModelMixin:
                 )
 
         hidden_out = torch.cat(hidden_chunks, dim=-2)
-        logits_out = torch.cat(logits_chunks, dim=-1)
+        logits_out = torch.cat(logits_chunks, dim=-2)
         return hidden_out, logits_out
 
     @torch.no_grad()

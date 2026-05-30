@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -14,6 +15,7 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior
+from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3DraftModelMixin
 
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
@@ -161,3 +163,55 @@ def test_generate_stops_with_eos_list(monkeypatch) -> None:
 
     out = model.generate(torch.tensor([[1, 2]], dtype=torch.long), eos_token_id=[5, 7], return_dict_in_generate=True)
     assert out.sequences.shape[1] >= 3
+
+
+def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None:
+    """Chunked draft logits should be concatenated on sequence axis, not vocab axis."""
+
+    class _DummyMxqModel:
+        def __init__(self) -> None:
+            self.token_offset = 0
+
+        def infer(self, infer_inputs, *_args):
+            chunk_len = int(infer_inputs[0].shape[2])
+            hidden = np.zeros((1, 1, chunk_len, 4), dtype=np.float32)
+            logits = np.zeros((1, 1, chunk_len, 3), dtype=np.float32)
+            for i in range(chunk_len):
+                token_pos = self.token_offset + i
+                logits[0, 0, i, :] = np.array([token_pos, token_pos + 100, token_pos + 200], dtype=np.float32)
+            self.token_offset += chunk_len
+            return hidden, logits
+
+    class _DummyDraftModel(MobilintEagle3DraftModelMixin):
+        def __init__(self) -> None:
+            self.config = SimpleNamespace(eagle3_npu_chunk_size=2)
+            self._mxq = _DummyMxqModel()
+            self.embed_tokens = lambda ids: torch.zeros((ids.shape[0], ids.shape[1], 4), dtype=torch.float32, device=ids.device)
+            self.rotary_emb = lambda _x, position_ids: np.zeros((1, position_ids.numel(), 8), dtype=np.float32)
+
+        def resolve_prefill_chunk_size(self, chunk_size: int) -> int:
+            return chunk_size
+
+        def get_mxq_model(self):
+            return self._mxq
+
+        def _record_npu_timing(self, *_args, **_kwargs) -> None:
+            return None
+
+    dummy_model = _DummyDraftModel()
+    cache = SimpleNamespace(get_draft_seq_length=lambda: 0)
+    hidden_states = torch.zeros((1, 5, 4), dtype=torch.float32)
+    input_ids = torch.zeros((1, 5), dtype=torch.long)
+
+    _, logits_out = dummy_model.forward(
+        hidden_states,
+        input_ids=input_ids,
+        cache=cache,
+        requires_all_features=True,
+    )
+
+    assert logits_out.shape == (1, 5, 3)
+    expected = torch.tensor(
+        [[[0.0, 100.0, 200.0], [1.0, 101.0, 201.0], [2.0, 102.0, 202.0], [3.0, 103.0, 203.0], [4.0, 104.0, 204.0]]]
+    )
+    assert torch.equal(logits_out, expected)
