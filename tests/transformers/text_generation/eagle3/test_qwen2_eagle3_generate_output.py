@@ -1118,7 +1118,3 @@ def test_mobilint_eagle3_cache_copy_drops_transient_tree_state() -> None:
     assert copied.retrieve_indices is None
     assert copied.tree_position_ids is None
     assert copied.pending_draft_tokens is None
-
-
-
-
