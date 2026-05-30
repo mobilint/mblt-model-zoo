@@ -793,7 +793,11 @@ def test_qwen2_eagle3_generate_resolves_greedy_and_sampling_processors(monkeypat
 
 def test_qwen2_eagle3_update_inference_inputs_caps_remaining_tokens() -> None:
     """Truncate an accepted EAGLE-3 block to the remaining generation budget."""
-    cache = SimpleNamespace(accept_tokens=None)
+    base_seen_tokens = {"count": 0}
+    cache = SimpleNamespace(
+        accept_tokens=None,
+        update_base_seen_tokens=lambda n: base_seen_tokens.__setitem__("count", base_seen_tokens["count"] + int(n)),
+    )
     input_ids = torch.tensor([[1, 2]], dtype=torch.long)
     candidates = torch.tensor([[4, 5, 6]], dtype=torch.long)
     retrieve_indices = torch.tensor([[0, 1, 2]], dtype=torch.long)
@@ -816,14 +820,19 @@ def test_qwen2_eagle3_update_inference_inputs_caps_remaining_tokens() -> None:
     )
 
     assert torch.equal(output, torch.tensor([[1, 2, 4, 5]], dtype=torch.long))
-    assert torch.equal(cache.accept_tokens, torch.tensor([[4, 5]], dtype=torch.long))
+    assert cache.accept_tokens is None
+    assert base_seen_tokens["count"] == 2
     assert new_token_count == 2
     assert should_stop is True
 
 
 def test_qwen2_eagle3_update_inference_inputs_stops_at_mid_block_eos() -> None:
     """Stop at the first EOS token inside a multi-token accepted block."""
-    cache = SimpleNamespace(accept_tokens=None)
+    base_seen_tokens = {"count": 0}
+    cache = SimpleNamespace(
+        accept_tokens=None,
+        update_base_seen_tokens=lambda n: base_seen_tokens.__setitem__("count", base_seen_tokens["count"] + int(n)),
+    )
     input_ids = torch.tensor([[1, 2]], dtype=torch.long)
     candidates = torch.tensor([[4, 5, 6]], dtype=torch.long)
     retrieve_indices = torch.tensor([[0, 1, 2]], dtype=torch.long)
@@ -847,6 +856,8 @@ def test_qwen2_eagle3_update_inference_inputs_stops_at_mid_block_eos() -> None:
     )
 
     assert torch.equal(output, torch.tensor([[1, 2, 4, 5]], dtype=torch.long))
+    assert cache.accept_tokens is None
+    assert base_seen_tokens["count"] == 2
     assert new_token_count == 2
     assert should_stop is True
 
@@ -1120,8 +1131,12 @@ def test_llm_eagle3_forward_accepts_dict_hidden_states() -> None:
             del kwargs
             return torch.tensor(0.0)
 
+    class _FakeEagle3Cache(MobilintEagle3Cache):
+        """Type-check compatible cache stub for llm_eagle3_forward tests."""
+
     model = _DummyModel()
-    cache = object.__new__(MobilintEagle3Cache)
+    cache = object.__new__(_FakeEagle3Cache)
+    cache.base_layer = SimpleNamespace(update_seen_tokens=lambda _n: None)
 
     output = llm_eagle3_forward(model, input_ids=torch.tensor([[1]], dtype=torch.long), past_key_values=cache)
 
@@ -1156,7 +1171,11 @@ def test_llm_eagle3_forward_accepts_object_hidden_states_and_missing_hidden_stat
             del kwargs
             return torch.tensor(0.0)
 
-    cache = object.__new__(MobilintEagle3Cache)
+    class _FakeEagle3Cache(MobilintEagle3Cache):
+        """Type-check compatible cache stub for llm_eagle3_forward tests."""
+
+    cache = object.__new__(_FakeEagle3Cache)
+    cache.base_layer = SimpleNamespace(update_seen_tokens=lambda _n: None)
     with_hidden = llm_eagle3_forward(
         _DummyModel(with_hidden_states=True),
         input_ids=torch.tensor([[1]], dtype=torch.long),

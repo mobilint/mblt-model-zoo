@@ -68,10 +68,9 @@ def test_qwen2_eagle3_multi_turn_chat(pipe, generation_token_limit: int) -> None
     )
     second_turn_inputs = tokenizer(second_turn_prompt, return_tensors="pt")
     second_turn_input_ids = second_turn_inputs["input_ids"]
-    second_turn_delta_input_ids = second_turn_input_ids[:, input_ids.shape[1] :]
 
     second_turn_outputs = model.generate(
-        input_ids=second_turn_delta_input_ids,
+        input_ids=second_turn_input_ids,
         past_key_values=first_turn_cache,
         max_new_tokens=generation_token_limit,
         streamer=streamer,
@@ -82,5 +81,5 @@ def test_qwen2_eagle3_multi_turn_chat(pipe, generation_token_limit: int) -> None
     assert hasattr(second_turn_outputs, "past_key_values")
     second_turn_sequences = second_turn_outputs.sequences
     assert isinstance(second_turn_sequences, torch.Tensor)
-    assert second_turn_sequences.shape[1] > second_turn_delta_input_ids.shape[1]
+    assert second_turn_sequences.shape[1] > second_turn_input_ids.shape[1]
     assert second_turn_outputs.past_key_values is first_turn_cache
