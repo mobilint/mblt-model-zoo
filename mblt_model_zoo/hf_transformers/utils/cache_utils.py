@@ -382,15 +382,15 @@ class MobilintEagle3Cache(Cache):
         self.draft_layer.load_cache_memory_from(str(Path(cache_dir) / "draft"))
 
     def copy(self) -> "MobilintEagle3Cache":
+        """Return a copy preserving committed KV cache state only.
+
+        Speculative tree metadata is intentionally not copied because it is
+        per-generation-call transient state and should be reconstructed by
+        ``initialize_tree``.
+        """
         copied = MobilintEagle3Cache(self.base_mxq_model, self.draft_mxq_model)
         copied.base_layer = self.base_layer.copy()
         copied.draft_layer = self.draft_layer.copy()
         copied.layers = [copied.base_layer]
-        copied.accept_tokens = None if self.accept_tokens is None else self.accept_tokens.clone()
-        copied.tree_mask = None if self.tree_mask is None else self.tree_mask.clone()
-        copied.retrieve_indices = None if self.retrieve_indices is None else self.retrieve_indices.clone()
-        copied.tree_position_ids = None if self.tree_position_ids is None else self.tree_position_ids.clone()
-        copied.pending_draft_tokens = (
-            None if self.pending_draft_tokens is None else self.pending_draft_tokens.clone()
-        )
+        copied.clear_tree_state()
         return copied

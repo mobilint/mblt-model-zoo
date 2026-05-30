@@ -17,6 +17,14 @@ from ..utils.modeling_utils import MobilintModelMixin
 
 logger = logging.get_logger(__name__)
 
+_EAGLE3_GENERATE_IGNORED_ARGS_MSG = {
+    "attention_mask": "attention_mask is not supported and will be ignored.",
+    "min_new_tokens": "min_new_tokens is not supported and will be ignored.",
+    "pad_token_id": "pad_token_id is not supported and will be ignored.",
+    "prefill_chunk_size": "prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored.",
+    "cache_position": "cache_position is not supported and will be ignored.",
+}
+
 
 def llm_eagle3_forward(
     model: Any,
@@ -394,7 +402,12 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         negative_prompt_attention_mask: Optional[torch.Tensor],
         kwargs: dict[str, Any],
     ) -> None:
-        """Validate or warn for generation kwargs unsupported by EAGLE-3."""
+        """Validate unsupported options for EAGLE-3 generation.
+
+        Policy:
+        - 일부 인자는 warning 후 무시한다 (``generate`` 본문에서 처리).
+        - 동작 의미를 바꾸는 인자는 ``NotImplementedError``로 즉시 실패한다.
+        """
         if output_scores:
             logger.warning("output_scores is not supported.")
         if output_hidden_states:
@@ -520,8 +533,15 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         prefill_chunk_size: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
-        """Generate tokens with the Mobilint EAGLE-3 decoding loop."""
-        from ..utils.eagle3.eagle3_utils import (
+        """Generate tokens with the Mobilint EAGLE-3 decoding loop.
+
+        Compatibility policy:
+        - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
+          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``.
+        - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
+          custom ``logits_processor``, negative prompts, unknown kwargs.
+        """
+        from ..utils.eagle3.decoding import (
             evaluate_posterior,
             initialize_tree,
             prepare_logits_processor,
@@ -530,15 +550,15 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         )
 
         if attention_mask is not None:
-            logger.warning("attention_mask is not supported.")
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])
         if min_new_tokens is not None:
-            logger.warning("min_new_tokens is not supported.")
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["min_new_tokens"])
         if pad_token_id is not None:
-            logger.warning("pad_token_id is not supported.")
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["pad_token_id"])
         if prefill_chunk_size is not None:
-            logger.warning("prefill_chunk_size is not supported by EAGLE-3 generate.")
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["prefill_chunk_size"])
         if cache_position is not None:
-            logger.warning("cache_position is not supported.")
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["cache_position"])
 
         logits_processor_arg = kwargs.pop("logits_processor", None)
         synced_gpus = kwargs.pop("synced_gpus", None)

@@ -2450,3 +2450,18 @@ def test_cli_tps_positive_int_enforced(argv: list[str]):
     with pytest.raises(SystemExit) as excinfo:
         parser.parse_args(argv)
     assert excinfo.value.code == 2
+
+
+def test_cli_tps_parser_epilog_contains_examples() -> None:
+    """Expose practical TPS usage examples in the top-level help epilog."""
+    parser = build_parser()
+
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+
+    assert args.tps_cmd == "measure"
+    assert parser.epilog is None
+    tps_parser = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction)).choices["tps"]
+    assert tps_parser.epilog is not None
+    assert "Examples:" in tps_parser.epilog
+    assert "--base-core-mode" in tps_parser.epilog
+    assert "--input-mode file" in tps_parser.epilog

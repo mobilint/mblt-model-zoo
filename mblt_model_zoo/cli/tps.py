@@ -80,7 +80,14 @@ class Eagle3PipelineOptions:
     fc_target_clusters: list[int] | None = None
 
 
-def _warn_eagle3_override(global_name: str, prefixed_name: str, global_value: Any, prefixed_value: Any) -> None:
+def _warn_eagle3_override(
+    global_name: str,
+    prefixed_name: str,
+    global_value: Any,
+    prefixed_value: Any,
+    *,
+    stacklevel: int = 2,
+) -> None:
     """Warn when a prefixed EAGLE-3 option overrides the corresponding global option."""
     if global_value is None or prefixed_value is None:
         return
@@ -92,7 +99,7 @@ def _warn_eagle3_override(global_name: str, prefixed_name: str, global_value: An
             f"Using `{prefixed_name}` value because EAGLE-3 prefixed options take precedence over global options."
         ),
         UserWarning,
-        stacklevel=3,
+        stacklevel=stacklevel,
     )
 
 
@@ -2323,6 +2330,12 @@ def add_tps_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("tps", help="Measure/sweep tokens-per-second")
+    parser.epilog = (
+        "Examples:\n"
+        "  mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 128 --decode 32\n"
+        "  mblt-model-zoo tps measure --model <eagle3-model> --base-core-mode single --draft-core-mode global4\n"
+        "  mblt-model-zoo tps measure --model <model> --input-mode file --prompt-file prompts.txt --prompt-file-strategy random --prompt-file-seed 7"
+    )
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
