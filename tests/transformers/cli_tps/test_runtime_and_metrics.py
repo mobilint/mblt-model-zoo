@@ -148,6 +148,23 @@ class _DummyTextPipeline:
         self.tokenizer = _DummyTokenizer()
 
 
+class _DummyEagle3AcceptanceModel:
+    """Model double exposing EAGLE-3 acceptance stats through the public property."""
+
+    def __init__(self) -> None:
+        self.device = torch.device("cpu")
+        self.last_eagle3_acceptance_stats = {
+            "steps": 3,
+            "accepted_tokens_sum": 7,
+            "accepted_tokens_avg": 7.0 / 3.0,
+            "acceptance_ratio": 0.5,
+        }
+
+    def eval(self) -> "_DummyEagle3AcceptanceModel":
+        """Match the minimal model API used by TPSMeasurer."""
+        return self
+
+
 class _DummyNonNPUModel:
     """Non-NPU model marker without Mobilint cache support."""
 
@@ -870,6 +887,21 @@ def test_npu_latency_pct_handles_supported_and_unsupported_values():
     assert npu_latency_pct(0.0, 0.25) is None
     assert npu_latency_pct(None, 0.25) is None
     assert npu_latency_pct(0.5, None) is None
+
+
+def test_tps_measurer_reads_eagle3_acceptance_stats_from_public_property_only():
+    """Read acceptance stats from `last_eagle3_acceptance_stats` public property."""
+    pipeline = SimpleNamespace(model=_DummyEagle3AcceptanceModel(), tokenizer=_DummyTokenizer())
+    measurer = TPSMeasurer(pipeline)
+
+    stats = measurer._get_eagle3_acceptance_stats()
+
+    assert stats == {
+        "acceptance_steps": 3,
+        "acceptance_tokens_sum": 7,
+        "acceptance_tokens_avg": pytest.approx(7.0 / 3.0),
+        "acceptance_ratio": 0.5,
+    }
 
 
 def test_single_measurement_json_exposes_npu_latency_pct():

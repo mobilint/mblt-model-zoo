@@ -737,9 +737,10 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
         Compatibility policy:
         - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
-          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``.
+          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``,
+          unknown kwargs.
         - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
-          custom ``logits_processor``, negative prompts, unknown kwargs.
+          custom ``logits_processor``, negative prompts.
         """
         if attention_mask is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])

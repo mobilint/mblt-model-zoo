@@ -761,7 +761,7 @@ class TPSMeasurer:
 
     def _get_eagle3_acceptance_stats(self) -> dict[str, Optional[float | int]]:
         """Return latest EAGLE-3 acceptance stats when available."""
-        stats = getattr(self.model, "_last_eagle3_acceptance_stats", None)
+        stats = getattr(self.model, "last_eagle3_acceptance_stats", None)
         if not isinstance(stats, dict):
             return {
                 "acceptance_steps": None,

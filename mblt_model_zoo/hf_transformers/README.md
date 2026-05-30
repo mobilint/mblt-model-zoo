@@ -295,8 +295,8 @@ generation options.
 
 |Category|Arguments|Behavior|
 |---|---|---|
-|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `prefill_chunk_size`, `cache_position`|The call continues and emits a warning message for each argument.|
-|Hard error (`NotImplementedError`)|`num_beams != 1`, `assistant_model`, `use_cache=False`, custom `logits_processor`, `negative_prompt_ids`, `negative_prompt_attention_mask`, unknown `**kwargs`|The call fails immediately to prevent ambiguous runtime behavior.|
+|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `prefill_chunk_size`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
+|Hard error (`NotImplementedError`)|`num_beams != 1`, `assistant_model`, `use_cache=False`, custom `logits_processor`, `negative_prompt_ids`, `negative_prompt_attention_mask`|The call fails immediately to prevent ambiguous runtime behavior.|
 
 Examples:
 
