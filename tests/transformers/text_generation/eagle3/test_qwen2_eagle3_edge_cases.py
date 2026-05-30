@@ -319,3 +319,76 @@ def test_eagle3_prefixed_backend_options_override_shared_defaults() -> None:
     assert config.base_npu_backend.dev_no == 0
     assert config.draft_npu_backend.dev_no == 0
     assert config.fc_npu_backend.dev_no == 7
+
+
+def test_topk_generate_respects_max_tree_depth_contract() -> None:
+    """`depth` should mean max tree depth, not additional expansion rounds."""
+
+    class _DepthContractDraftModel(MobilintEagle3DraftModelMixin):
+        def __init__(self, depth: int) -> None:
+            self.max_draft_tokens = 1
+            self.depth = depth
+            self.top_k = 1
+            self.draft_config = SimpleNamespace(vocab_size=8, draft_vocab_size=8)
+            self.logsoftmax = lambda x: x
+            self.tree_mask_init = torch.ones((1, 1, 1, 1), dtype=torch.float32)
+            self.position_ids = torch.tensor([0], dtype=torch.long)
+            self.d2t = torch.zeros(8, dtype=torch.long)
+            self.forward_call_count = 0
+
+        def __call__(
+            self,
+            hidden_states: torch.Tensor,
+            *,
+            input_ids: torch.LongTensor,
+            cache,
+            attention_mask=None,
+            position_ids=None,
+            requires_all_features=False,
+            add_cache_position=0,
+            tree_mask=None,
+            count_npu_time=False,
+        ):
+            del input_ids, cache, attention_mask, position_ids, add_cache_position, tree_mask, count_npu_time
+            self.forward_call_count += 1
+            if requires_all_features:
+                out_hidden = torch.zeros((1, 1, 1), dtype=torch.float32, device=hidden_states.device)
+                logits = torch.zeros((1, 1, 8), dtype=torch.float32, device=hidden_states.device)
+                return out_hidden, logits
+            last_hidden = torch.zeros((1, 1), dtype=torch.float32, device=hidden_states.device)
+            last_hidden_logits = torch.zeros((1, 8), dtype=torch.float32, device=hidden_states.device)
+            return last_hidden, last_hidden_logits
+
+    class _DummyCache:
+        def __init__(self) -> None:
+            self._draft_seq_len = 0
+
+        def get_draft_seq_length(self) -> int:
+            return self._draft_seq_len
+
+        def update_draft_seen_tokens(self, delta: int) -> None:
+            self._draft_seq_len += int(delta)
+
+    hidden_states = torch.zeros((1, 1, 1), dtype=torch.float32)
+    input_ids = torch.tensor([[1]], dtype=torch.long)
+
+    depth1_model = _DepthContractDraftModel(depth=1)
+    depth1_model.topk_generate(
+        hidden_states,
+        input_ids=input_ids,
+        cache=_DummyCache(),
+        logits_processor=None,
+    )
+
+    depth2_model = _DepthContractDraftModel(depth=2)
+    depth2_model.topk_generate(
+        hidden_states,
+        input_ids=input_ids,
+        cache=_DummyCache(),
+        logits_processor=None,
+    )
+
+    # One pre-loop call is always required to create the first depth level.
+    assert depth1_model.forward_call_count == 1
+    # depth=2 must add exactly one extra expansion call.
+    assert depth2_model.forward_call_count == 2

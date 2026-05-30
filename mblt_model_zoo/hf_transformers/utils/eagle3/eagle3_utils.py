@@ -674,7 +674,10 @@ class MobilintEagle3DraftModelMixin:
         add_cache_position = 0
         length_position = input_ids.shape[1] - 1
 
-        for depth_index in range(depth):
+        # The first draft depth level is already created above from
+        # `last_hidden_logits` via initial top-k selection, so this loop should
+        # only perform the remaining expansion rounds.
+        for depth_index in range(max(0, depth - 1)):
             position_ids = length_position + self.position_ids.to(hidden_states.device)
             out_hidden, last_hidden_logits = self(
                 input_hidden,
