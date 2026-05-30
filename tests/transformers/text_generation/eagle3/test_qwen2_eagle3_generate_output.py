@@ -13,9 +13,9 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 im
     MobilintQwen2Eagle3ForCausalLM,
 )
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
-from mblt_model_zoo.hf_transformers.utils.eagle3 import eagle3_utils as eagle3_module
+from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
-from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import evaluate_posterior, update_inference_inputs
+from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, update_inference_inputs
 
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
@@ -99,6 +99,84 @@ def test_qwen2_eagle3_generate_returns_hf_output_when_requested(monkeypatch) -> 
     output = model.generate(torch.tensor([[1, 2]], dtype=torch.long), return_dict_in_generate=True)
 
     assert torch.equal(output.sequences, torch.tensor([[1, 2, 4]], dtype=torch.long))
+
+
+def test_qwen2_eagle3_acceptance_stats_getter_defaults_and_updates(monkeypatch) -> None:
+    """Expose acceptance stats through read-only getter with safe defaults."""
+    model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
+    assert model.last_eagle3_acceptance_stats == {
+        "steps": 0,
+        "accepted_tokens_sum": 0,
+        "accepted_tokens_avg": 0.0,
+        "acceptance_ratio": 0.0,
+    }
+
+    model.config = SimpleNamespace(vocab_size=16)
+    model.generation_config = SimpleNamespace(
+        max_new_tokens=1,
+        temperature=None,
+        top_p=None,
+        top_k=1,
+        eos_token_id=None,
+        num_assistant_tokens=2,
+    )
+    _attach_minimal_eagle3_modules(model)
+    cache = SimpleNamespace(
+        reset=lambda: None,
+        clear_tree_state=lambda: None,
+        sync_draft_seq_length_to_base=lambda: None,
+    )
+    model._get_cache = lambda *_args, **_kwargs: cache
+
+    monkeypatch.setattr(
+        decoding_module,
+        "initialize_tree",
+        lambda *_args, **_kwargs: (
+            torch.tensor([[3]], dtype=torch.long),
+            torch.tensor([0], dtype=torch.long),
+            None,
+            torch.tensor([[0]], dtype=torch.long),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        decoding_module,
+        "tree_decoding",
+        lambda *_args, **_kwargs: (
+            torch.zeros((1, 1, 16), dtype=torch.float32),
+            torch.zeros((1, 1, 1), dtype=torch.float32),
+        ),
+    )
+    monkeypatch.setattr(
+        decoding_module,
+        "evaluate_posterior",
+        lambda *_args, **_kwargs: (
+            torch.tensor([4], dtype=torch.long),
+            1,
+            torch.tensor([0.0], dtype=torch.float32),
+            torch.tensor([0], dtype=torch.long),
+        ),
+    )
+    monkeypatch.setattr(
+        decoding_module,
+        "update_inference_inputs",
+        lambda *_args, **_kwargs: (
+            torch.tensor([[1, 2, 4]], dtype=torch.long),
+            torch.tensor([[3]], dtype=torch.long),
+            torch.tensor([0], dtype=torch.long),
+            None,
+            torch.tensor([[0]], dtype=torch.long),
+            1,
+            True,
+        ),
+    )
+
+    output = model.generate(torch.tensor([[1, 2]], dtype=torch.long), return_dict_in_generate=True)
+    stats = model.last_eagle3_acceptance_stats
+    assert stats["steps"] == 1
+    assert stats["accepted_tokens_sum"] == 1
+    assert stats["accepted_tokens_avg"] == 1.0
+    assert stats["acceptance_ratio"] == 1.0
     assert output.past_key_values is cache
 
 
@@ -725,11 +803,11 @@ def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeyp
     retrieve_indices = torch.tensor([[0, 1, -1]], dtype=torch.long)
 
     monkeypatch.setattr(
-        eagle3_module,
+        tree_decoding_module,
         "softmax_topk_cpu_torch",
         lambda *_args, **_kwargs: (torch.tensor([1.0]), torch.tensor([4])),
     )
-    monkeypatch.setattr(eagle3_module.torch, "rand", lambda *_args, **_kwargs: torch.tensor(0.0))
+    monkeypatch.setattr(tree_decoding_module.torch, "rand", lambda *_args, **_kwargs: torch.tensor(0.0))
 
     best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
         logits,

@@ -3,7 +3,7 @@
 This module is a stable import surface for tree-decoding primitives.
 """
 
-from .eagle3_utils import (
+from .tree_decoding import (
     evaluate_posterior,
     initialize_tree,
     prepare_logits_processor,

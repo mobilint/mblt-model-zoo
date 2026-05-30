@@ -203,6 +203,24 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
     """Custom generation mixin for Mobilint EAGLE-3 models."""
 
     @property
+    def last_eagle3_acceptance_stats(self) -> dict[str, float | int]:
+        """Return acceptance statistics from the most recent EAGLE-3 generate call.
+
+        Returns zero-valued defaults when generate has not been called yet.
+        """
+        stats = getattr(
+            self,
+            "_eagle3_acceptance_stats",
+            {
+                "steps": 0,
+                "accepted_tokens_sum": 0,
+                "accepted_tokens_avg": 0.0,
+                "acceptance_ratio": 0.0,
+            },
+        )
+        return dict(stats)
+
+    @property
     def eagle3_model(self) -> Any:
         """Return the object that owns EAGLE-3 child modules."""
         nested_model = getattr(self, "_modules", {}).get("model")
@@ -684,7 +702,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             streamer.end()
         acceptance_avg = (float(acceptance_tokens_sum) / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
         acceptance_ratio = (acceptance_ratio_sum / float(acceptance_steps)) if acceptance_steps > 0 else 0.0
-        self._last_eagle3_acceptance_stats = {
+        self._eagle3_acceptance_stats = {
             "steps": int(acceptance_steps),
             "accepted_tokens_sum": int(acceptance_tokens_sum),
             "accepted_tokens_avg": float(acceptance_avg),

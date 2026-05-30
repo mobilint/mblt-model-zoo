@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import random
 import os
@@ -62,7 +63,7 @@ _SWEEP_WARMUP_DECODE = 32
 
 @dataclass(frozen=True)
 class Eagle3PipelineOptions:
-    """EAGLE-3 전용 pipeline 옵션 묶음."""
+    """Bundle EAGLE-3-specific pipeline options."""
 
     base_embedding_path: str | None = None
     draft_embedding_path: str | None = None
@@ -464,7 +465,7 @@ def _build_pipeline(
 
 
 def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineOptions:
-    """Return EAGLE-3 specific pipeline kwargs from parsed CLI arguments."""
+    """Return EAGLE-3-specific pipeline kwargs from parsed CLI arguments."""
     return Eagle3PipelineOptions(
         base_embedding_path=args.base_embedding_path,
         draft_embedding_path=args.draft_embedding_path,
@@ -888,6 +889,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
 
+    selected_prompt_text: str | None = None
+
     def _build_measure_input_ids() -> torch.Tensor | None:
         def _tokenize_prompt_text(text: str) -> torch.Tensor:
             encoded = pipeline.tokenizer(
@@ -897,6 +900,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             )
             return encoded["input_ids"]
 
+        nonlocal selected_prompt_text
+
         input_mode = str(getattr(args, "input_mode", "random"))
         if input_mode == "random":
             return None
@@ -904,6 +909,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         if input_mode == "synthetic-text":
             if not args.prompt_text:
                 raise ValueError("--input-mode synthetic-text requires --prompt-text.")
+            selected_prompt_text = args.prompt_text
             return _tokenize_prompt_text(args.prompt_text)
 
         if input_mode == "file":
@@ -923,6 +929,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             else:
                 raise ValueError(f"Unsupported --prompt-file-strategy: {strategy}")
 
+            selected_prompt_text = selected
             return _tokenize_prompt_text(selected)
 
         raise ValueError(f"Unsupported input mode: {input_mode}")
@@ -931,6 +938,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     measure_num_prefill = int(args.prefill)
     if measure_input_ids is not None:
         measure_num_prefill = int(measure_input_ids.shape[1])
+
+    selected_prompt_sha256 = (
+        hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
+    )
 
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
@@ -1114,6 +1125,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         payload = {
             "repeat": args.repeat,
             "batch_size": batch_size,
+            "input": {
+                "mode": str(getattr(args, "input_mode", "random")),
+                "prompt_sha256": selected_prompt_sha256,
+            },
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "prefill_tps": _summary(prefill_tps),
@@ -2452,29 +2467,29 @@ def add_tps_parser(
         "--input-mode",
         choices=["random", "synthetic-text", "file"],
         default="random",
-        help="text-only 입력 생성 모드 (random|synthetic-text|file)",
+        help="text-only input generation mode (random|synthetic-text|file)",
     )
     p_measure.add_argument(
         "--prompt-text",
         default=None,
-        help="--input-mode synthetic-text 일 때 사용할 단일 프롬프트",
+        help="single prompt used when --input-mode is synthetic-text",
     )
     p_measure.add_argument(
         "--prompt-file",
         default=None,
-        help="--input-mode file 일 때 사용할 텍스트 파일 경로",
+        help="text file path used when --input-mode is file",
     )
     p_measure.add_argument(
         "--prompt-file-strategy",
         choices=["first", "random"],
         default="first",
-        help="--input-mode file 일 때 non-empty line 선택 전략(first|random)",
+        help="non-empty line selection strategy for --input-mode file (first|random)",
     )
     p_measure.add_argument(
         "--prompt-file-seed",
         type=int,
         default=0,
-        help="--prompt-file-strategy random 일 때 사용할 random seed",
+        help="random seed used when --prompt-file-strategy is random",
     )
     p_measure.add_argument(
         "--image-resolution",
