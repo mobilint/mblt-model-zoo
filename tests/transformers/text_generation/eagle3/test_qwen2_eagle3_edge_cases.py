@@ -15,6 +15,7 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagl
     MobilintQwen2Eagle3Config,
 )
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, initialize_tree
@@ -191,28 +192,92 @@ def test_generate_raises_for_empty_prompt_delta_with_reused_cache(monkeypatch) -
         model.generate(torch.tensor([[1, 2]], dtype=torch.long), past_key_values=cache)
 
 
-def test_initialize_tree_raises_for_empty_prompt_delta_with_equal_cache_length() -> None:
-    """When cache length equals input length, prompt delta must be empty and raise."""
+def test_initialize_tree_accepts_delta_only_input_with_reused_cache() -> None:
+    """Cache reuse should accept HF-style delta-only input_ids."""
 
     class _DummyBaseModel:
-        def __call__(self, *_args, **_kwargs):
-            raise AssertionError("Base model must not be called for empty prompt delta.")
+        def __call__(self, input_ids, *_args, **_kwargs):
+            assert tuple(input_ids.shape) == (1, 1)
+            return {"hidden_states": [torch.zeros((1, 1, 4), dtype=torch.float32)]}, torch.zeros((1, 8), dtype=torch.float32)
+
+    class _DummyDraftModel:
+        def topk_generate(self, *_args, **_kwargs):
+            return (
+                torch.tensor([[3]], dtype=torch.long),
+                torch.tensor([[0]], dtype=torch.long),
+                torch.ones((1, 1, 1, 1), dtype=torch.float32),
+                torch.tensor([0], dtype=torch.long),
+            )
 
     class _DummyModel:
         eagle3_base_model = _DummyBaseModel()
+        eagle3_draft_model = _DummyDraftModel()
 
     class _DummyCache:
-        def get_base_seq_length(self) -> int:
-            return 2
+        def __init__(self) -> None:
+            self._base_seq_len = 2
+            self.pending_draft_tokens = None
+            self.retrieve_indices = None
+            self.tree_mask = None
+            self.tree_position_ids = None
 
-    input_ids = torch.tensor([[1, 2]], dtype=torch.long)
-    with pytest.raises(ValueError, match="empty prompt delta"):
-        initialize_tree(
-            input_ids,
-            _DummyModel(),
-            _DummyCache(),
-            logits_processor=None,
-        )
+        def get_base_seq_length(self) -> int:
+            return self._base_seq_len
+
+        def update_base_seen_tokens(self, delta: int) -> None:
+            self._base_seq_len += int(delta)
+
+        def get_draft_seq_length(self) -> int:
+            return 0
+
+    input_ids = torch.tensor([[9]], dtype=torch.long)
+    draft_tokens, retrieve_indices, tree_mask, tree_position_ids, _ = initialize_tree(
+        input_ids,
+        _DummyModel(),
+        _DummyCache(),
+        logits_processor=None,
+    )
+
+    assert draft_tokens.shape == (1, 1)
+    assert retrieve_indices.shape == (1, 1)
+    assert tree_mask.shape == (1, 1, 1, 1)
+    assert tree_position_ids.shape == (1,)
+
+
+def test_llm_forward_counts_single_token_first_call_as_prefill() -> None:
+    """Single-token first call (empty cache) should be timed as prefill."""
+
+    class _DummyMxq:
+        def infer(self, inputs, *_args):
+            return [np.zeros((1, inputs[0].shape[2], 4), dtype=np.float32)]
+
+    class _DummyModel:
+        llm_forward = MobilintModelMixin.llm_forward
+
+        def __init__(self) -> None:
+            self.npu_backend = SimpleNamespace(mxq_model=_DummyMxq())
+            self.config = SimpleNamespace()
+            self.npu_time = None
+            self.logged_phases: list[str] = []
+
+        def resolve_prefill_chunk_size(self, value):
+            return 128 if value is None else int(value)
+
+        def _record_npu_timing(self, phase, _elapsed):
+            self.logged_phases.append(phase)
+
+    model = _DummyModel()
+    inputs_embeds = torch.zeros((1, 1, 4), dtype=torch.float32)
+    cache_position = torch.tensor([0], dtype=torch.long)
+
+    model.llm_forward(
+        inputs_embeds,
+        past_key_values=None,
+        cache_position=cache_position,
+        count_npu_time=True,
+    )
+
+    assert model.logged_phases == ["prefill"]
 
 
 def test_generate_stops_with_eos_list(monkeypatch) -> None:

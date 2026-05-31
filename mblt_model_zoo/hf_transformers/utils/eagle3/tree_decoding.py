@@ -145,7 +145,11 @@ def initialize_tree(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Prefill base model once and initialize the first draft tree."""
     base_seq_length = cache.get_base_seq_length()
-    prompt_delta_input_ids = input_ids[:, base_seq_length:]
+    # Support both HF-style delta-only inputs and full-sequence inputs when cache is reused.
+    if input_ids.shape[1] > base_seq_length:
+        prompt_delta_input_ids = input_ids[:, base_seq_length:]
+    else:
+        prompt_delta_input_ids = input_ids
     if prompt_delta_input_ids.shape[1] == 0:
         raise ValueError(
             "EAGLE-3 generate received empty prompt delta. "
