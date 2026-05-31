@@ -48,7 +48,12 @@ class MobilintQwen2Eagle3BaseModel(MobilintEagle3BaseModelMixin, MobilintEagle3M
 
 
 class MobilintQwen2Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle3ModelMixin):
-    """Concrete Qwen2 draft backend for EAGLE-3 tree expansion."""
+    """Concrete draft backend for EAGLE-3 tree expansion.
+
+    The draft backend is intentionally lightweight and uses a single-block draft
+    architecture (for example, a draft distilled from the original model or a
+    Llama-family 1-block draft), rather than the full base-model stack.
+    """
 
     npu_backend_prefix = "draft_"
 

@@ -290,6 +290,10 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
 ### EAGLE-3 generate compatibility policy
 
+For Mobilint EAGLE-3 models, the draft backend is intentionally lightweight and
+uses a single-block draft architecture (for example, a draft distilled from the
+original model or a Llama-family 1-block draft), rather than the full base-model stack.
+
 `MobilintEagle3GenerationMixin.generate(...)` follows an explicit compatibility policy for unsupported Hugging Face
 generation options.
 
