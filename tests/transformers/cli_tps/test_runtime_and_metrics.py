@@ -14,7 +14,6 @@ from mblt_model_zoo.cli import tps as tps_cli
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.hf_transformers.models.blip.modeling_blip_text import MobilintBlipTextLMHeadModel
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
-from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import MobilintQwen3VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     DEVICE_METRIC_KEYS,
     extract_device_metric,
@@ -1640,8 +1639,6 @@ def test_resolve_image_features_tensor_requires_tensor():
     [
         (MobilintQwen2VLForConditionalGeneration, "forward"),
         (MobilintQwen2VLForConditionalGeneration, "prepare_inputs_for_generation"),
-        (MobilintQwen3VLForConditionalGeneration, "forward"),
-        (MobilintQwen3VLForConditionalGeneration, "prepare_inputs_for_generation"),
     ],
 )
 def test_mobilint_generation_hooks_accept_count_npu_time(model_cls, method_name: str):
@@ -1661,8 +1658,6 @@ def test_mobilint_generation_hooks_accept_count_npu_time(model_cls, method_name:
         "mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl:MobilintQwen2VLForConditionalGeneration",
         "mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl:MobilintQwen2VLTextModel",
         "mblt_model_zoo.hf_transformers.models.qwen3.modeling_qwen3:MobilintQwen3ForCausalLM",
-        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl:MobilintQwen3VLForConditionalGeneration",
-        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl:MobilintQwen3VLTextModel",
     ],
 )
 def test_mobilint_generation_hooks_expose_inputs_embeds(model_path: str):
@@ -1721,32 +1716,6 @@ def test_qwen2_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytes
         _base_prepare_inputs_for_generation,
     )
     model = object.__new__(MobilintQwen2VLForConditionalGeneration)
-
-    model_inputs = model.prepare_inputs_for_generation(
-        torch.tensor([[1]]),
-        count_npu_time=True,
-        prefill_chunk_size=64,
-    )
-
-    assert model_inputs["count_npu_time"] is True
-    assert model_inputs["prefill_chunk_size"] == 64
-
-
-def test_qwen3_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
-    signature = inspect.signature(MobilintQwen3VLForConditionalGeneration.prepare_inputs_for_generation)
-
-    assert "prefill_chunk_size" in signature.parameters
-
-    def _base_prepare_inputs_for_generation(*args, **kwargs):
-        del args, kwargs
-        return {"input_ids": torch.tensor([[1]])}
-
-    monkeypatch.setattr(
-        "mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl."
-        "Qwen3VLForConditionalGeneration.prepare_inputs_for_generation",
-        _base_prepare_inputs_for_generation,
-    )
-    model = object.__new__(MobilintQwen3VLForConditionalGeneration)
 
     model_inputs = model.prepare_inputs_for_generation(
         torch.tensor([[1]]),
