@@ -188,8 +188,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
         mxq_model = self.npu_backend.mxq_model
-        initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
-        timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
+        num_input_tokens = inputs_embeds_numpy.shape[2]
+        timing_phase: Literal["prefill", "decode"] = "prefill" if num_input_tokens > 1 else "decode"
 
         for i in range(num_of_chunks):
             start_index = i * resolved_prefill_chunk_size

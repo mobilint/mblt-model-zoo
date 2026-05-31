@@ -717,7 +717,19 @@ class MobilintEagle3DraftModelMixin:
 
         scores_list_tensor = torch.cat(scores_list, dim=0).view(-1)
         draft_step_tensor = torch.cat(draft_token_steps, dim=0).view(-1)
-        top_scores = torch.topk(scores_list_tensor, total_tokens, dim=-1)
+        available_candidates = int(scores_list_tensor.numel())
+        effective_total_tokens = min(total_tokens, available_candidates)
+        if effective_total_tokens < total_tokens:
+            logger.warning(
+                (
+                    "Requested draft tokens (%d) exceed available tree candidates (%d). "
+                    "Capping to %d."
+                ),
+                total_tokens,
+                available_candidates,
+                effective_total_tokens,
+            )
+        top_scores = torch.topk(scores_list_tensor, effective_total_tokens, dim=-1)
         top_scores_index = torch.sort(top_scores.indices).values
         draft_tokens = draft_step_tensor[top_scores_index]
         draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
@@ -727,9 +739,9 @@ class MobilintEagle3DraftModelMixin:
         mask_index[draft_parents == 0] = -1
         mask_index = mask_index + 1
         mask_index_list = mask_index.tolist()
-        tree_mask_tensor = torch.eye(total_tokens + 1).bool()
+        tree_mask_tensor = torch.eye(effective_total_tokens + 1).bool()
         tree_mask_tensor[:, 0] = True
-        for token_index in range(total_tokens):
+        for token_index in range(effective_total_tokens):
             tree_mask_tensor[token_index + 1].add_(tree_mask_tensor[mask_index_list[token_index]])
         tree_position_ids = torch.sum(tree_mask_tensor, dim=1) - 1
         tree_mask_tensor = tree_mask_tensor.float()[None, None]
@@ -737,12 +749,12 @@ class MobilintEagle3DraftModelMixin:
 
         max_depth = torch.max(tree_position_ids) + 1
         non_leaf_index = set(torch.unique(mask_index).tolist())
-        leaf_count = total_tokens - (len(non_leaf_index) - 1)
+        leaf_count = effective_total_tokens - (len(non_leaf_index) - 1)
         retrieve_indices = torch.zeros(leaf_count, max_depth.item(), dtype=torch.long) - 1
         retrieve_index_rows = retrieve_indices.tolist()
         row_id = 0
         position_ids_list = tree_position_ids.tolist()
-        for token_index in range(total_tokens + 1):
+        for token_index in range(effective_total_tokens + 1):
             if token_index not in non_leaf_index:
                 current_id = token_index
                 node_depth = position_ids_list[token_index]
@@ -751,7 +763,7 @@ class MobilintEagle3DraftModelMixin:
                     current_id = mask_index_list[current_id - 1]
                 row_id += 1
         if logits_processor is not None:
-            max_item = total_tokens + 5
+            max_item = effective_total_tokens + 5
 
             def _sort_key(values: list[int]) -> list[int]:
                 return [value if value >= 0 else max_item for value in values]
