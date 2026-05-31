@@ -179,6 +179,17 @@ class VisionTextNpuSweepSpec:
         return ",".join(parts) if parts else "default"
 
 
+@dataclass(frozen=True)
+class Eagle3NpuSweepSpec:
+    """Parametrized core mode shared across EAGLE-3 backends."""
+
+    core_mode: str | None
+
+    def id(self) -> str:
+        """Return the pytest id fragment for this sweep spec."""
+        return f"eagle3={self.core_mode}" if self.core_mode is not None else "default"
+
+
 def option_flag(prefix: str, option_name: str) -> str:
     """Return the CLI flag name for a backend option."""
     if prefix:
@@ -246,6 +257,28 @@ def build_base_specs(config: pytest.Config) -> list[BaseNpuSweepSpec]:
     if not should_expand_core_matrix(config):
         return [BaseNpuSweepSpec(base_core_mode="single")]
     return [BaseNpuSweepSpec(base_core_mode=mode) for mode in expand_core_modes(config.getoption("--core-mode"))]
+
+
+def build_eagle3_specs(config: pytest.Config) -> list[Eagle3NpuSweepSpec]:
+    """Build synchronized sweep specs for EAGLE-3 backends."""
+    if not should_expand_core_matrix(config, prefixes=("base", "draft", "fc")):
+        return [Eagle3NpuSweepSpec(core_mode="single")]
+
+    base_raw = config.getoption("--base-core-mode")
+    draft_raw = config.getoption("--draft-core-mode")
+    fc_raw = config.getoption("--fc-core-mode")
+    shared_raw = config.getoption("--core-mode")
+    base_explicit = option_value_was_provided(config, "base", "core_mode")
+    draft_explicit = option_value_was_provided(config, "draft", "core_mode")
+    fc_explicit = option_value_was_provided(config, "fc", "core_mode")
+    shared_explicit = option_value_was_provided(config, "", "core_mode")
+    use_shared_defaults = shared_explicit or full_matrix_enabled(config)
+
+    if use_shared_defaults and not base_explicit and not draft_explicit and not fc_explicit:
+        return [Eagle3NpuSweepSpec(core_mode=mode) for mode in expand_core_modes(shared_raw)]
+
+    # If any EAGLE-3 backend is explicitly configured, preserve the existing direct kwarg path.
+    return [Eagle3NpuSweepSpec(core_mode=None)]
 
 
 def build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpuSweepSpec]:
@@ -347,12 +380,14 @@ def build_eagle3_npu_params(
     config: pytest.Config,
     base_embedding_path: str | None,
     draft_embedding_path: str | None,
+    *,
+    core_mode_override: str | None = None,
 ) -> Eagle3NpuParams:
     """Build backend kwargs for EAGLE-3 models."""
     provided_prefixes = collect_provided_prefixes(config, None)
     warn_unused_prefixes(provided_prefixes, {"base", "draft", "fc"})
 
-    shared_kwargs, _ = collect_npu_kwargs(config, "")
+    shared_kwargs, _ = collect_npu_kwargs(config, "", core_mode_override=core_mode_override)
 
     model_kwargs: dict[str, Any] = {}
     for prefix in ("base", "draft", "fc"):

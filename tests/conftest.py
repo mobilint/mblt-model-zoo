@@ -7,6 +7,7 @@ import pytest
 from tests.npu_backend_options import (
     BaseNpuParams,
     BaseNpuSweepSpec,
+    Eagle3NpuSweepSpec,
     Eagle3NpuParams,
     EncoderDecoderNpuParams,
     EncoderDecoderNpuSweepSpec,
@@ -15,6 +16,7 @@ from tests.npu_backend_options import (
     build_base_npu_params,
     build_base_specs,
     build_eagle3_npu_params,
+    build_eagle3_specs,
     build_encoder_decoder_specs,
     build_vision_text_specs,
     collect_npu_kwargs,
@@ -46,6 +48,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         specs = build_vision_text_specs(metafunc.config)
         metafunc.parametrize(
             "_vision_text_npu_sweep_spec",
+            specs,
+            ids=[spec.id() for spec in specs],
+            scope="module",
+        )
+
+    if "_eagle3_npu_sweep_spec" in metafunc.fixturenames:
+        specs = build_eagle3_specs(metafunc.config)
+        metafunc.parametrize(
+            "_eagle3_npu_sweep_spec",
             specs,
             ids=[spec.id() for spec in specs],
             scope="module",
@@ -321,6 +332,12 @@ def _vision_text_npu_sweep_spec(request) -> VisionTextNpuSweepSpec:
 
 
 @pytest.fixture(scope="module")
+def _eagle3_npu_sweep_spec(request) -> Eagle3NpuSweepSpec:
+    """Return the parametrized EAGLE-3 NPU sweep spec."""
+    return request.param
+
+
+@pytest.fixture(scope="module")
 def base_npu_params(
     request,
     embedding_weight,
@@ -339,12 +356,14 @@ def eagle3_npu_params(
     request,
     base_embedding_path,
     draft_embedding_path,
+    _eagle3_npu_sweep_spec: Eagle3NpuSweepSpec,
 ) -> Eagle3NpuParams:
     """Return NPU kwargs for EAGLE-3 models."""
     return build_eagle3_npu_params(
         request.config,
         base_embedding_path,
         draft_embedding_path,
+        core_mode_override=_eagle3_npu_sweep_spec.core_mode,
     )
 
 

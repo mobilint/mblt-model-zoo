@@ -260,6 +260,41 @@ def test_full_matrix_restores_default_vision_text_core_sweep():
     ]
 
 
+def test_default_eagle3_specs_use_single_core_without_full_matrix():
+    config = _make_config()
+
+    specs = conftest.build_eagle3_specs(config)
+
+    assert specs == [conftest.Eagle3NpuSweepSpec(core_mode="single")]
+
+
+def test_shared_eagle3_all_stays_synchronized():
+    config = _make_config(
+        shared_core_mode="all",
+        explicit_args=("--core-mode=all",),
+    )
+
+    specs = conftest.build_eagle3_specs(config)
+
+    assert specs == [
+        conftest.Eagle3NpuSweepSpec(core_mode="single"),
+        conftest.Eagle3NpuSweepSpec(core_mode="global4"),
+        conftest.Eagle3NpuSweepSpec(core_mode="global8"),
+    ]
+
+
+def test_full_matrix_restores_default_eagle3_core_sweep():
+    config = _make_config(full_matrix=True)
+
+    specs = conftest.build_eagle3_specs(config)
+
+    assert specs == [
+        conftest.Eagle3NpuSweepSpec(core_mode="single"),
+        conftest.Eagle3NpuSweepSpec(core_mode="global4"),
+        conftest.Eagle3NpuSweepSpec(core_mode="global8"),
+    ]
+
+
 def test_full_matrix_with_explicit_vision_override_keeps_text_default_sweep():
     config = _make_config(
         full_matrix=True,
@@ -363,6 +398,41 @@ def test_build_eagle3_npu_params_prefixed_values_override_shared_defaults():
     assert params.model["fc_core_mode"] == "global4"
     assert params.model["draft_core_mode"] == "single"
     assert params.model["draft_target_cores"] == ["0:2"]
+
+
+def test_build_eagle3_npu_params_can_force_single_mode_from_shared_all():
+    config = _make_config(
+        shared_core_mode="all",
+        explicit_args=("--core-mode=all", "--mxq-path=shared.mxq", "--dev-no=7"),
+    )
+    config._options["--mxq-path"] = "shared.mxq"
+    config._options["--dev-no"] = 7
+
+    params = npu_backend_options.build_eagle3_npu_params(
+        config,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        core_mode_override="single",
+    )
+
+    assert params.model["base_core_mode"] == "single"
+    assert params.model["draft_core_mode"] == "single"
+    assert params.model["fc_core_mode"] == "single"
+    assert params.model["base_target_cores"] == ["0:0"]
+    assert params.model["draft_target_cores"] == ["0:0"]
+    assert params.model["fc_target_cores"] == ["0:0"]
+
+
+def test_build_eagle3_specs_preserve_explicit_prefixed_override_path():
+    config = _make_config(
+        shared_core_mode="all",
+        explicit_args=("--draft-core-mode=single",),
+    )
+    config._options["--draft-core-mode"] = "single"
+
+    specs = conftest.build_eagle3_specs(config)
+
+    assert specs == [conftest.Eagle3NpuSweepSpec(core_mode=None)]
 
 
 def test_single_only_core_mode_validation_allows_default_all():
