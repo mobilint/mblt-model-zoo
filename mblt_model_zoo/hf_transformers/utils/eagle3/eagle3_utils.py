@@ -185,6 +185,8 @@ class ScaledCachedRotaryEmbedding(nn.Module):
         super().__init__()
         self.config = config
         self.rope_kwargs: dict[str, Any] = {}
+        self.dim = dim
+        self.base = base
 
         if config is None:
             self.rope_type = rope_type
@@ -202,19 +204,72 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             rope_scaling = getattr(config, "rope_scaling", None)
             if rope_scaling is not None:
                 self.rope_type = rope_scaling.get("rope_type", rope_scaling.get("type", "default"))
+                self.rope_kwargs = dict(rope_scaling)
             else:
                 self.rope_type = "default"
             config_max_pos = int(getattr(config, "max_position_embeddings", max_position_embeddings))
             self.max_seq_len = config_max_pos if max_length is None or max_length < config_max_pos else max_length
 
+        if "rope_type" not in self.rope_kwargs:
+            self.rope_kwargs["rope_type"] = self.rope_type
+        if dim is not None and "dim" not in self.rope_kwargs:
+            self.rope_kwargs["dim"] = dim
+        if "base" not in self.rope_kwargs:
+            self.rope_kwargs["base"] = base
+        if "max_position_embeddings" not in self.rope_kwargs:
+            self.rope_kwargs["max_position_embeddings"] = self.max_seq_len
+
         self.original_max_seq_len = self.max_seq_len
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
-        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, None, **self.rope_kwargs)
+        self.rope_init_fn = self._resolve_rope_init_fn()
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, None, seq_len=self.max_seq_len, **self.rope_kwargs)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.original_inv_freq = self.inv_freq.clone()
         self.position_table: Optional[np.ndarray] = None
         if self.inv_freq.device.type != "meta":
             self._build_position_table()
+
+    def _resolve_rope_init_fn(self):
+        if self.rope_type in (None, "default"):
+            return self.compute_default_rope_parameters
+        return ROPE_INIT_FUNCTIONS[self.rope_type]
+
+    def compute_default_rope_parameters(
+        self,
+        config: Optional[Any] = None,
+        device: Optional[torch.device] = None,
+        seq_len: Optional[int] = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, float]:
+        del seq_len
+        return self._compute_default_rope_parameters(config=config or self.config, device=device, **kwargs)
+
+    def _compute_default_rope_parameters(
+        self,
+        config: Optional[Any] = None,
+        device: Optional[torch.device] = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, float]:
+        del kwargs
+        resolved_config = config or self.config
+        head_dim = self.dim
+        if head_dim is None and resolved_config is not None:
+            head_dim = getattr(resolved_config, "head_dim", resolved_config.hidden_size // resolved_config.num_attention_heads)
+        if head_dim is None:
+            raise ValueError("ScaledCachedRotaryEmbedding requires `dim` or a config with head-dimension metadata.")
+
+        partial_rotary_factor = 1.0
+        if resolved_config is not None:
+            partial_rotary_factor = float(getattr(resolved_config, "partial_rotary_factor", 1.0))
+        rotary_dim = int(head_dim * partial_rotary_factor)
+
+        rope_theta = self.base
+        if resolved_config is not None:
+            rope_theta = float(getattr(resolved_config, "rope_theta", rope_theta))
+
+        inv_freq = 1.0 / (
+            rope_theta ** (torch.arange(0, rotary_dim, 2, dtype=torch.float32, device=device) / float(rotary_dim))
+        )
+        return inv_freq, 1.0
 
     def _build_position_table(
         self,
@@ -248,6 +303,8 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             self.position_table = rotate_tensor.cpu().numpy()[0, 0]
 
     def _dynamic_frequency_update(self, position_ids: torch.LongTensor, device: torch.device) -> None:
+        if self.rope_type in (None, "default"):
+            return
         seq_len = int(torch.max(position_ids).item()) + 1
         if seq_len > self.max_seq_len:
             inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
