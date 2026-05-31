@@ -89,9 +89,16 @@ def test_evaluate_posterior_sampling_zero_sum_probs_fallback(monkeypatch) -> Non
     monkeypatch.setattr(
         tree_decoding_module,
         "softmax_topk_cpu_torch",
-        lambda *_args, **_kwargs: (torch.tensor([1.0], dtype=torch.float32), torch.tensor([4], dtype=torch.long)),
+        lambda *_args, **_kwargs: (
+            torch.tensor([1.0], dtype=torch.float32),
+            torch.tensor([4], dtype=torch.long),
+        ),
     )
-    monkeypatch.setattr(tree_decoding_module.torch, "rand", lambda *_args, **_kwargs: torch.tensor(1.0))
+    monkeypatch.setattr(
+        tree_decoding_module.torch,
+        "rand",
+        lambda *_args, **_kwargs: torch.tensor(1.0),
+    )
 
     best_candidate, accepted_draft_count, sample_p, sampled_indices = evaluate_posterior(
         logits,
@@ -152,8 +159,14 @@ def test_generate_raises_for_empty_prompt_delta_with_reused_cache(monkeypatch) -
         """Lightweight cache stub that satisfies the type check."""
 
     cache = object.__new__(FakeEagle3Cache)
-    cache.base_layer = SimpleNamespace(get_seq_length=lambda: 2, set_seq_length=lambda _value: None)
-    cache.draft_layer = SimpleNamespace(get_seq_length=lambda: 2, set_seq_length=lambda _value: None)
+    cache.base_layer = SimpleNamespace(
+        get_seq_length=lambda: 2,
+        set_seq_length=lambda _value: None,
+    )
+    cache.draft_layer = SimpleNamespace(
+        get_seq_length=lambda: 2,
+        set_seq_length=lambda _value: None,
+    )
     cache.get_base_seq_length = lambda: 2
     cache.get_draft_seq_length = lambda: 2
     cache.clear_tree_state = lambda: None
@@ -165,7 +178,11 @@ def test_generate_raises_for_empty_prompt_delta_with_reused_cache(monkeypatch) -
         decoding_module,
         "initialize_tree",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("EAGLE-3 generate received empty prompt delta. When reusing `past_key_values`, provide at least one new input token.")
+            ValueError(
+                "EAGLE-3 generate received empty prompt delta. "
+                "When reusing `past_key_values`, provide at least one "
+                "new input token."
+            )
         ),
     )
 
@@ -211,11 +228,19 @@ def test_generate_stops_with_eos_list(monkeypatch) -> None:
         num_assistant_tokens=2,
     )
     _attach_minimal_eagle3_modules(model)
-    cache = SimpleNamespace(reset=lambda: None, clear_tree_state=lambda: None, sync_draft_seq_length_to_base=lambda: None)
+    cache = SimpleNamespace(
+        reset=lambda: None,
+        clear_tree_state=lambda: None,
+        sync_draft_seq_length_to_base=lambda: None,
+    )
     model._get_cache = lambda *_args, **_kwargs: cache
     _patch_minimal_generate_dependencies(monkeypatch)
 
-    out = model.generate(torch.tensor([[1, 2]], dtype=torch.long), eos_token_id=[5, 7], return_dict_in_generate=True)
+    out = model.generate(
+        torch.tensor([[1, 2]], dtype=torch.long),
+        eos_token_id=[5, 7],
+        return_dict_in_generate=True,
+    )
     assert out.sequences.shape[1] >= 3
 
 
@@ -240,8 +265,15 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
         def __init__(self) -> None:
             self.config = SimpleNamespace(eagle3_npu_chunk_size=2)
             self._mxq = _DummyMxqModel()
-            self.embed_tokens = lambda ids: torch.zeros((ids.shape[0], ids.shape[1], 4), dtype=torch.float32, device=ids.device)
-            self.rotary_emb = lambda _x, position_ids: np.zeros((1, position_ids.numel(), 8), dtype=np.float32)
+            self.embed_tokens = lambda ids: torch.zeros(
+                (ids.shape[0], ids.shape[1], 4),
+                dtype=torch.float32,
+                device=ids.device,
+            )
+            self.rotary_emb = lambda _x, position_ids: np.zeros(
+                (1, position_ids.numel(), 8),
+                dtype=np.float32,
+            )
 
         def resolve_prefill_chunk_size(self, chunk_size: int) -> int:
             return chunk_size
@@ -266,7 +298,15 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
 
     assert logits_out.shape == (1, 5, 3)
     expected = torch.tensor(
-        [[[0.0, 100.0, 200.0], [1.0, 101.0, 201.0], [2.0, 102.0, 202.0], [3.0, 103.0, 203.0], [4.0, 104.0, 204.0]]]
+        [
+            [
+                [0.0, 100.0, 200.0],
+                [1.0, 101.0, 201.0],
+                [2.0, 102.0, 202.0],
+                [3.0, 103.0, 203.0],
+                [4.0, 104.0, 204.0],
+            ]
+        ]
     )
     assert torch.equal(logits_out, expected)
 
@@ -352,7 +392,11 @@ def test_topk_generate_respects_max_tree_depth_contract() -> None:
             del input_ids, cache, attention_mask, position_ids, add_cache_position, tree_mask, count_npu_time
             self.forward_call_count += 1
             if requires_all_features:
-                out_hidden = torch.zeros((1, 1, 1), dtype=torch.float32, device=hidden_states.device)
+                out_hidden = torch.zeros(
+                    (1, 1, 1),
+                    dtype=torch.float32,
+                    device=hidden_states.device,
+                )
                 logits = torch.zeros((1, 1, 8), dtype=torch.float32, device=hidden_states.device)
                 return out_hidden, logits
             last_hidden = torch.zeros((1, 1), dtype=torch.float32, device=hidden_states.device)
@@ -433,7 +477,11 @@ def test_topk_generate_caps_oversized_draft_token_request_without_name_error(cap
             )
             last_hidden = torch.zeros((1, 1), dtype=torch.float32, device=hidden_states.device)
             # With top_k=2, only two initial candidates are available.
-            last_hidden_logits = torch.tensor([[3.0, 2.0, 1.0, 0.0]], dtype=torch.float32, device=hidden_states.device)
+            last_hidden_logits = torch.tensor(
+                [[3.0, 2.0, 1.0, 0.0]],
+                dtype=torch.float32,
+                device=hidden_states.device,
+            )
             return last_hidden, last_hidden_logits
 
     class _DummyCache:
