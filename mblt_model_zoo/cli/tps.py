@@ -4,8 +4,8 @@ import argparse
 import csv
 import hashlib
 import json
-import random
 import os
+import random
 import sys
 import warnings
 from dataclasses import asdict, dataclass
@@ -512,7 +512,10 @@ def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineO
     )
 
 
-def _resolve_text_measure_inputs(args: argparse.Namespace, pipeline: Any) -> tuple[torch.Tensor | None, int, str | None]:
+def _resolve_text_measure_inputs(
+    args: argparse.Namespace,
+    pipeline: Any,
+) -> tuple[torch.Tensor | None, int, str | None]:
     """Resolve text-measure input ids/prefill length from CLI input-mode options."""
 
     def _tokenize_prompt_text(text: str) -> torch.Tensor:
@@ -2384,7 +2387,9 @@ def add_tps_parser(
         "Examples:\n"
         "  mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 128 --decode 32\n"
         "  mblt-model-zoo tps measure --model <eagle3-model> --base-core-mode single --draft-core-mode global4\n"
-        "  mblt-model-zoo tps measure --model <model> --input-mode file --prompt-file prompts.txt --prompt-file-strategy random --prompt-file-seed 7"
+        "  mblt-model-zoo tps measure --model <model> --input-mode file "
+        "--prompt-file prompts.txt --prompt-file-strategy random "
+        "--prompt-file-seed 7"
     )
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
 
