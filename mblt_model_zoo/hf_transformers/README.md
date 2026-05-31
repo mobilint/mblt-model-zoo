@@ -290,7 +290,7 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
 ### EAGLE-3 generate compatibility policy
 
-`MobilintEagle3GenerationMixin.generate(...)` follows a strict compatibility policy for unsupported Hugging Face
+`MobilintEagle3GenerationMixin.generate(...)` follows an explicit compatibility policy for unsupported Hugging Face
 generation options.
 
 |Category|Arguments|Behavior|
