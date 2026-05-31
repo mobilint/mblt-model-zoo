@@ -262,7 +262,7 @@ def build_base_specs(config: pytest.Config) -> list[BaseNpuSweepSpec]:
 def build_eagle3_specs(config: pytest.Config) -> list[Eagle3NpuSweepSpec]:
     """Build synchronized sweep specs for EAGLE-3 backends."""
     if not should_expand_core_matrix(config, prefixes=("base", "draft", "fc")):
-        return [Eagle3NpuSweepSpec(core_mode="single")]
+        return [Eagle3NpuSweepSpec(core_mode="global4")]
 
     base_raw = config.getoption("--base-core-mode")
     draft_raw = config.getoption("--draft-core-mode")

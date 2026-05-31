@@ -716,6 +716,7 @@ def test_qwen2_eagle3_generation_config_updates_max_draft_tokens() -> None:
         None,
         prompt_length=1,
         max_new_tokens=None,
+        max_length=None,
         do_sample=None,
         temperature=None,
         top_p=None,
