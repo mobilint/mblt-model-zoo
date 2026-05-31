@@ -471,6 +471,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         *,
         prompt_length: int,
         max_new_tokens: Optional[int],
+        max_length: Optional[int],
         do_sample: Optional[bool],
         temperature: Optional[float],
         top_p: Optional[float],
@@ -479,17 +480,22 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         """Resolve generation config values used by the EAGLE-3 loop."""
         generation_config = self.generation_config if generation_config is None else generation_config
         if max_new_tokens is not None:
+            if max_length is not None:
+                logger.warning(
+                    "Both `max_new_tokens` and `max_length` were provided for EAGLE-3 generate. "
+                    "Following Hugging Face behavior, `max_new_tokens` takes precedence."
+                )
             resolved_max_new_tokens = int(max_new_tokens)
         elif getattr(generation_config, "max_new_tokens", None) is not None:
             resolved_max_new_tokens = int(generation_config.max_new_tokens)
         else:
-            resolved_max_length = getattr(generation_config, "max_length", None)
+            resolved_max_length = max_length if max_length is not None else getattr(generation_config, "max_length", None)
             if resolved_max_length is None:
                 resolved_max_length = getattr(self.config, "max_position_embeddings", None)
             if resolved_max_length is None:
                 raise ValueError(
                     "Unable to resolve generation length for EAGLE-3. "
-                    "Set `max_new_tokens`, `generation_config.max_length`, or "
+                    "Set `max_new_tokens`, `max_length`, `generation_config.max_length`, or "
                     "`config.max_position_embeddings`."
                 )
             resolved_max_new_tokens = int(resolved_max_length) - int(prompt_length)
@@ -568,6 +574,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         input_ids: torch.Tensor,
         generation_config: Optional[GenerationConfig],
         max_new_tokens: Optional[int],
+        max_length: Optional[int],
         do_sample: Optional[bool],
         temperature: Optional[float],
         top_p: Optional[float],
@@ -584,6 +591,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 generation_config,
                 prompt_length=int(input_ids.shape[1]),
                 max_new_tokens=max_new_tokens,
+                max_length=max_length,
                 do_sample=do_sample,
                 temperature=temperature,
                 top_p=top_p,
@@ -727,6 +735,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         past_key_values: Optional[MobilintEagle3Cache] = None,
         generation_config: Optional[GenerationConfig] = None,
         max_new_tokens: Optional[int] = None,
+        max_length: Optional[int] = None,
         do_sample: Optional[bool] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
@@ -797,6 +806,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 input_ids=input_ids,
                 generation_config=generation_config,
                 max_new_tokens=max_new_tokens,
+                max_length=max_length,
                 do_sample=do_sample,
                 temperature=temperature,
                 top_p=top_p,
