@@ -49,6 +49,21 @@ def _make_config(
             "--core-mode": shared_core_mode,
             "--target-cores": None,
             "--target-clusters": None,
+            "--base-mxq-path": None,
+            "--base-dev-no": None,
+            "--base-core-mode": None,
+            "--base-target-cores": None,
+            "--base-target-clusters": None,
+            "--draft-mxq-path": None,
+            "--draft-dev-no": None,
+            "--draft-core-mode": None,
+            "--draft-target-cores": None,
+            "--draft-target-clusters": None,
+            "--fc-mxq-path": None,
+            "--fc-dev-no": None,
+            "--fc-core-mode": None,
+            "--fc-target-cores": None,
+            "--fc-target-clusters": None,
             "--encoder-mxq-path": None,
             "--encoder-dev-no": None,
             "--encoder-core-mode": encoder_core_mode,
@@ -297,6 +312,57 @@ def test_build_base_npu_params_can_force_single_mode():
         "core_mode": "single",
         "target_cores": ["0:0"],
     }
+
+
+def test_build_eagle3_npu_params_applies_shared_defaults_to_all_children():
+    config = _make_config(
+        shared_core_mode="global4",
+        explicit_args=("--core-mode=global4", "--mxq-path=shared.mxq", "--dev-no=3"),
+    )
+    config._options["--mxq-path"] = "shared.mxq"
+    config._options["--dev-no"] = 3
+
+    params = npu_backend_options.build_eagle3_npu_params(
+        config,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+    )
+
+    assert params.model["base_mxq_path"] == "shared.mxq"
+    assert params.model["draft_mxq_path"] == "shared.mxq"
+    assert params.model["fc_mxq_path"] == "shared.mxq"
+    assert params.model["base_dev_no"] == 3
+    assert params.model["draft_dev_no"] == 3
+    assert params.model["fc_dev_no"] == 3
+    assert params.model["base_core_mode"] == "global4"
+    assert params.model["draft_core_mode"] == "global4"
+    assert params.model["fc_core_mode"] == "global4"
+
+
+def test_build_eagle3_npu_params_prefixed_values_override_shared_defaults():
+    config = _make_config(
+        shared_core_mode="global4",
+        explicit_args=(
+            "--core-mode=global4",
+            "--mxq-path=shared.mxq",
+            "--draft-core-mode=single",
+            "--draft-target-cores=0:2",
+        ),
+    )
+    config._options["--mxq-path"] = "shared.mxq"
+    config._options["--draft-core-mode"] = "single"
+    config._options["--draft-target-cores"] = "0:2"
+
+    params = npu_backend_options.build_eagle3_npu_params(
+        config,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+    )
+
+    assert params.model["base_core_mode"] == "global4"
+    assert params.model["fc_core_mode"] == "global4"
+    assert params.model["draft_core_mode"] == "single"
+    assert params.model["draft_target_cores"] == ["0:2"]
 
 
 def test_single_only_core_mode_validation_allows_default_all():

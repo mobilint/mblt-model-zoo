@@ -352,10 +352,21 @@ def build_eagle3_npu_params(
     provided_prefixes = collect_provided_prefixes(config, None)
     warn_unused_prefixes(provided_prefixes, {"base", "draft", "fc"})
 
+    shared_kwargs, _ = collect_npu_kwargs(config, "")
+
     model_kwargs: dict[str, Any] = {}
     for prefix in ("base", "draft", "fc"):
+        merged_kwargs = {
+            f"{prefix}_mxq_path": shared_kwargs.get("mxq_path"),
+            f"{prefix}_dev_no": shared_kwargs.get("dev_no"),
+            f"{prefix}_core_mode": shared_kwargs.get("core_mode"),
+            f"{prefix}_target_cores": shared_kwargs.get("target_cores"),
+            f"{prefix}_target_clusters": shared_kwargs.get("target_clusters"),
+        }
+        merged_kwargs = {key: value for key, value in merged_kwargs.items() if value is not None}
         prefix_kwargs, _ = collect_npu_kwargs(config, prefix)
-        model_kwargs.update(prefix_kwargs)
+        merged_kwargs.update(prefix_kwargs)
+        model_kwargs.update(merged_kwargs)
 
     if base_embedding_path:
         model_kwargs["base_embedding_weight"] = base_embedding_path
