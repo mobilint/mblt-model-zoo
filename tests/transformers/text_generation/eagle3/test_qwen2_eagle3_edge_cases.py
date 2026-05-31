@@ -392,3 +392,77 @@ def test_topk_generate_respects_max_tree_depth_contract() -> None:
     assert depth1_model.forward_call_count == 1
     # depth=2 must add exactly one extra expansion call.
     assert depth2_model.forward_call_count == 2
+
+
+def test_topk_generate_caps_oversized_draft_token_request_without_name_error(caplog) -> None:
+    """Oversized draft-token requests should warn and cap instead of crashing."""
+
+    class _OversizedDraftModel(MobilintEagle3DraftModelMixin):
+        def __init__(self) -> None:
+            self.max_draft_tokens = 8
+            self.depth = 1
+            self.top_k = 2
+            self.draft_config = SimpleNamespace(vocab_size=8, draft_vocab_size=8)
+            self.logsoftmax = lambda x: x
+            self.tree_mask_init = torch.ones((1, 1, 1, 1), dtype=torch.float32)
+            self.position_ids = torch.tensor([0], dtype=torch.long)
+            self.d2t = torch.zeros(8, dtype=torch.long)
+
+        def __call__(
+            self,
+            hidden_states: torch.Tensor,
+            *,
+            input_ids: torch.LongTensor,
+            cache,
+            attention_mask=None,
+            position_ids=None,
+            requires_all_features=False,
+            add_cache_position=0,
+            tree_mask=None,
+            count_npu_time=False,
+        ):
+            del (
+                input_ids,
+                cache,
+                attention_mask,
+                position_ids,
+                requires_all_features,
+                add_cache_position,
+                tree_mask,
+                count_npu_time,
+            )
+            last_hidden = torch.zeros((1, 1), dtype=torch.float32, device=hidden_states.device)
+            # With top_k=2, only two initial candidates are available.
+            last_hidden_logits = torch.tensor([[3.0, 2.0, 1.0, 0.0]], dtype=torch.float32, device=hidden_states.device)
+            return last_hidden, last_hidden_logits
+
+    class _DummyCache:
+        def __init__(self) -> None:
+            self._draft_seq_len = 0
+
+        def get_draft_seq_length(self) -> int:
+            return self._draft_seq_len
+
+        def update_draft_seen_tokens(self, delta: int) -> None:
+            self._draft_seq_len += int(delta)
+
+    model = _OversizedDraftModel()
+    cache = _DummyCache()
+    hidden_states = torch.zeros((1, 1, 1), dtype=torch.float32)
+    input_ids = torch.tensor([[1]], dtype=torch.long)
+
+    with caplog.at_level("WARNING"):
+        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = model.topk_generate(
+            hidden_states,
+            input_ids=input_ids,
+            cache=cache,
+            logits_processor=None,
+            max_draft_tokens=64,
+        )
+
+    assert "exceed available tree candidates" in caplog.text
+    # root token + capped draft candidates(2)
+    assert draft_tokens.shape == (1, 3)
+    assert retrieve_indices.numel() > 0
+    assert tree_mask.shape[-1] == 3
+    assert tree_position_ids.shape[0] == 3

@@ -29,9 +29,12 @@ from transformers.generation.logits_process import (
 )
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from transformers.modeling_utils import PreTrainedModel
+from transformers.utils import logging
 
 from ..cache_utils import MobilintEagle3Cache
 from ..modeling_utils import MobilintEagle3ModelMixin
+
+logger = logging.get_logger(__name__)
 
 
 class MobilintEagle3GenerationProtocol(Protocol):
