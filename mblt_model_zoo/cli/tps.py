@@ -964,6 +964,15 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     _print_device_status(args, tracker_prefill)
 
     measure_input_ids, measure_num_prefill, selected_prompt_text = _resolve_text_measure_inputs(args, pipeline)
+    if measure_input_ids is not None:
+        resolved_batch = int(measure_input_ids.shape[0])
+        if resolved_batch == 1 and batch_size > 1:
+            measure_input_ids = measure_input_ids.repeat(batch_size, 1)
+        elif resolved_batch != batch_size:
+            raise ValueError(
+                "Resolved prompt input batch size does not match effective batch size: "
+                f"input_ids batch={resolved_batch}, effective batch_size={batch_size}."
+            )
 
     selected_prompt_sha256 = (
         hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
