@@ -330,6 +330,13 @@ class MobilintEagle3BaseModelMixin:
                 inputs_embeds.device,
                 past_key_values_length=past_key_values_length,
             )
+        else:
+            batch_size, target_length = input_shape
+            combined_attention_mask = torch.zeros(
+                (batch_size, 1, target_length, past_key_values_length + target_length),
+                dtype=torch.float32,
+                device=inputs_embeds.device,
+            )
         if attention_mask is not None:
             expanded_attn_mask = expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(inputs_embeds.device)
             combined_attention_mask = (
@@ -480,6 +487,13 @@ class MobilintEagle3DraftModelMixin:
                 torch.float32,
                 hidden_states.device,
                 past_key_values_length=past_key_values_length,
+            )
+        else:
+            batch_size, target_length = input_shape
+            combined_attention_mask = torch.zeros(
+                (batch_size, 1, target_length, past_key_values_length + target_length),
+                dtype=torch.float32,
+                device=hidden_states.device,
             )
         if attention_mask is not None:
             expanded_attn_mask = expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(hidden_states.device)

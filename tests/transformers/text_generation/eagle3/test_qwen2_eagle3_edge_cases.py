@@ -19,6 +19,7 @@ from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_mod
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, initialize_tree
 from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3DraftModelMixin
+from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3BaseModelMixin
 
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
@@ -309,6 +310,50 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
         ]
     )
     assert torch.equal(logits_out, expected)
+
+
+def test_base_prepare_decoder_attention_mask_single_token_creates_all_keep_mask() -> None:
+    """Base path should create an all-keep mask for single-token decode."""
+
+    class _DummyBaseModel(MobilintEagle3BaseModelMixin):
+        pass
+
+    model = _DummyBaseModel()
+    inputs_embeds = torch.zeros((2, 1, 4), dtype=torch.float32)
+    cache = SimpleNamespace(tree_mask=None)
+
+    mask = model._prepare_decoder_attention_mask(
+        attention_mask=None,
+        input_shape=(2, 1),
+        inputs_embeds=inputs_embeds,
+        past_key_values_length=3,
+        cache=cache,
+    )
+
+    assert mask.shape == (2, 1, 1, 4)
+    assert torch.all(mask == 0)
+
+
+def test_draft_prepare_decoder_attention_mask_single_token_creates_all_keep_mask() -> None:
+    """Draft path should create an all-keep mask for single-token decode."""
+
+    class _DummyDraftModel(MobilintEagle3DraftModelMixin):
+        pass
+
+    model = _DummyDraftModel()
+    hidden_states = torch.zeros((2, 1, 4), dtype=torch.float32)
+
+    mask = model._prepare_decoder_attention_mask(
+        attention_mask=None,
+        input_shape=(2, 1),
+        hidden_states=hidden_states,
+        past_key_values_length=5,
+        cache=SimpleNamespace(),
+        tree_mask=None,
+    )
+
+    assert mask.shape == (2, 1, 1, 6)
+    assert torch.all(mask == 0)
 
 
 def test_eagle3_global_backend_options_apply_to_all_child_backends() -> None:
