@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
+from mblt_model_zoo.vision.utils.postprocess.build_post import build_postprocess
 from mblt_model_zoo.vision.wrapper import MODEL_CONFIG_DIR, MBLT_Engine
 
 
@@ -63,3 +65,24 @@ def test_legacy_model_config_aliases_do_not_keep_duplicate_yaml_files() -> None:
 
     for config_name in duplicate_config_names:
         assert not (MODEL_CONFIG_DIR / config_name).exists()
+
+
+def test_yolo_postprocess_uses_yaml_threshold_defaults_and_allows_reset() -> None:
+    """Initialize YOLO thresholds from YAML and allow explicit overrides later."""
+
+    config_path = MODEL_CONFIG_DIR / "YOLO11m.yaml"
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+
+    postprocessor = build_postprocess(config["DEFAULT"]["pre_cfg"], config["DEFAULT"]["post_cfg"])
+
+    assert postprocessor.conf_thres == pytest.approx(0.001)
+    assert postprocessor.iou_thres == pytest.approx(0.7)
+
+    postprocessor.set_threshold(conf_thres=0.25)
+    assert postprocessor.conf_thres == pytest.approx(0.25)
+    assert postprocessor.iou_thres == pytest.approx(0.7)
+
+    postprocessor.set_threshold(iou_thres=0.45)
+    assert postprocessor.conf_thres == pytest.approx(0.25)
+    assert postprocessor.iou_thres == pytest.approx(0.45)

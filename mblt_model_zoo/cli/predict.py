@@ -27,4 +27,4 @@ def add_predict_parser(
         handler=_cmd_predict,
     )
     parser.add_argument("--topk", type=int, default=5, help="Number of classification labels to show.")
-    add_threshold_args(parser)
+    add_threshold_args(parser, conf_default=0.25, iou_default=None)

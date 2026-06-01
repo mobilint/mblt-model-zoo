@@ -42,8 +42,8 @@ DEFAULT:
       - 380
       - 925
       - 792
-    conf_thres: 0.6
-    iou_thres: 0.001
+    conf_thres: 0.001
+    iou_thres: 0.6
 TURBO:
   update: DEFAULT
   file_cfg:

@@ -98,15 +98,21 @@ def format_coco_results(
     return results
 
 
-def eval_coco(model: MBLT_Engine, data_path: str, batch_size: int, conf_thres: float, iou_thres: float) -> float:
+def eval_coco(
+    model: MBLT_Engine,
+    data_path: str,
+    batch_size: int,
+    conf_thres: float | None = None,
+    iou_thres: float | None = None,
+) -> float:
     """Evaluates a model on the COCO dataset.
 
     Args:
         model (MBLT_Engine): The model engine to evaluate.
         data_path (str): Path to the COCO dataset.
         batch_size (int): Batch size for evaluation.
-        conf_thres (float): Confidence threshold for detection.
-        iou_thres (float): IoU threshold for NMS.
+        conf_thres (float | None): Optional confidence threshold override.
+        iou_thres (float | None): Optional IoU threshold override.
 
     Returns:
         float: The mAP score (average precision at IoU=0.50:0.95).
@@ -125,6 +131,7 @@ def eval_coco(model: MBLT_Engine, data_path: str, batch_size: int, conf_thres: f
         raise NotImplementedError(f"Task {model.post_cfg['task']} is not supported")
 
     dataloader = get_coco_loader(dataset, batch_size, model.preprocess)
+    model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)
 
     results = []
     num_data = len(dataset)
@@ -143,7 +150,7 @@ def eval_coco(model: MBLT_Engine, data_path: str, batch_size: int, conf_thres: f
         out_npu = model(input_npu)
         inference_time += time() - tic
 
-        nms_outs = model.postprocess(out_npu, conf_thres=conf_thres, iou_thres=iou_thres)
+        nms_outs = model.postprocess(out_npu)
         infer_post_time += time() - tic
         results.extend(
             format_coco_results(

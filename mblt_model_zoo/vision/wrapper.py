@@ -7,7 +7,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Sequence, cast
 
 import torch
 import yaml
@@ -24,6 +24,24 @@ from .utils.types import TensorLike
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
 CoreMode = Literal["single", "multi", "global4", "global8"]
+
+
+def normalize_core_mode(core_mode: str) -> CoreMode:
+    """Narrow a validated core mode string to the ``CoreMode`` literal type.
+
+    Args:
+            core_mode: Core mode string from user input or configuration.
+
+    Returns:
+            The same value narrowed to ``CoreMode``.
+
+    Raises:
+            ValueError: If ``core_mode`` is not one of the supported values.
+    """
+    valid_modes = {"single", "multi", "global4", "global8"}
+    if core_mode not in valid_modes:
+        raise ValueError(f"Invalid core mode '{core_mode}'. Expected one of {sorted(valid_modes)}.")
+    return cast(CoreMode, core_mode)
 
 
 class MBLT_Engine:
@@ -228,7 +246,31 @@ class MBLT_Engine:
                 Postprocessed results.
         """
         pre_result = self.postprocessor(x, **kwargs)
-        return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
+        result_kwargs = dict(kwargs)
+        conf_thres = getattr(self.postprocessor, "conf_thres", None)
+        iou_thres = getattr(self.postprocessor, "iou_thres", None)
+        if "conf_thres" not in result_kwargs and conf_thres is not None:
+            result_kwargs["conf_thres"] = conf_thres
+        if "iou_thres" not in result_kwargs and iou_thres is not None:
+            result_kwargs["iou_thres"] = iou_thres
+        return Results(self.pre_cfg, self.post_cfg, pre_result, **result_kwargs)
+
+    def set_postprocess_thresholds(self, conf_thres: float | None = None, iou_thres: float | None = None) -> None:
+        """Updates configurable postprocess thresholds for the current model.
+
+        Args:
+                conf_thres: Optional confidence threshold override.
+                iou_thres: Optional IoU threshold override.
+
+        Raises:
+                NotImplementedError: If the current postprocessor does not support thresholds.
+        """
+        set_threshold = getattr(self.postprocessor, "set_threshold", None)
+        if set_threshold is None:
+            raise NotImplementedError(
+                f"Threshold overrides are not supported for task `{self.post_cfg.get('task', 'unknown')}`."
+            )
+        set_threshold(conf_thres=conf_thres, iou_thres=iou_thres)
 
     def to(
         self,

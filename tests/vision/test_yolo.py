@@ -1,43 +1,64 @@
 """
 Test script for YOLO11m model.
-Test script for YOLO11m model.
 
-This script tests the YOLO11m model by running inference on a sample image.
 This script tests the YOLO11m model by running inference on a sample image.
 It can be run as a pytest test or as a standalone script.
 """
 
 import argparse
 import os
+import sys
 from pathlib import Path
+from typing import Generator
+
+# Add project root to sys.path for standalone run
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pytest
 
 from mblt_model_zoo.vision import MBLT_Engine
+from mblt_model_zoo.vision.wrapper import normalize_core_mode
+from tests.npu_backend_options import BaseNpuParams
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
-def pytest_model():
-    """Fixture to initialize and dispose of the YOLO11m model."""
-    model = MBLT_Engine(
-        model_cls="yolo11m",
-        mxq_path="",
-        model_type="DEFAULT",
-        core_mode="global8",
-    )
+def pytest_model(base_npu_params: BaseNpuParams) -> Generator[MBLT_Engine, None, None]:
+    """Fixture to initialize and dispose of the YOLO11m model.
+
+    Args:
+        base_npu_params: NPU backend options collected from CLI.
+
+    Yields:
+        The initialized model engine.
+    """
+    model_kwargs = {
+        "model_cls": "yolo11m",
+        "mxq_path": "",
+        "model_type": "DEFAULT",
+        "core_mode": "global8",
+    }
+    model_kwargs.update(base_npu_params.base)
+    model = MBLT_Engine(**model_kwargs)
     yield model
     model.dispose()
 
 
-def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
+def run_inference(
+    model: MBLT_Engine,
+    image_path: str,
+    save_path: str,
+    conf_thres: float = 0.25,
+    iou_thres: float | None = None,
+) -> None:
     """Run inference with the given model and image."""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     input_img = model.preprocess(image_path)
     output = model(input_img)
-    result = model.postprocess(output, conf_thres=conf_thres, iou_thres=iou_thres)
+    model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)
+    result = model.postprocess(output)
 
     result.plot(
         source_path=image_path,
@@ -45,7 +66,7 @@ def run_inference(model, image_path, save_path, conf_thres=0.5, iou_thres=0.5):
     )
 
 
-def test_yolo(pytest_model):
+def test_yolo(pytest_model: MBLT_Engine) -> None:
     """Test YOLO11m inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "cr7.jpg")
     save_path = os.path.join(
@@ -73,11 +94,11 @@ if __name__ == "__main__":
         help="Model type",
     )
     parser.add_argument(
-        "--infer-mode",
+        "--core-mode",
         type=str,
         default="global8",
         choices=["single", "multi", "global4", "global8"],
-        help="Inference mode",
+        help="Inference core mode",
     )
     parser.add_argument(
         "--product",
@@ -100,13 +121,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--conf-thres",
         type=float,
-        default=0.5,
+        default=0.25,
         help="Confidence threshold",
     )
     parser.add_argument(
         "--iou-thres",
         type=float,
-        default=0.5,
+        default=None,
         help="IoU threshold",
     )
 
@@ -117,10 +138,9 @@ if __name__ == "__main__":
         model_cls=args.model_cls,
         mxq_path=args.mxq_path,
         model_type=args.model_type,
-        core_mode=args.core_mode,
+        core_mode=normalize_core_mode(args.core_mode),
     )
     if args.save_path is None:
-        args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}")
         args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}")
 
     try:

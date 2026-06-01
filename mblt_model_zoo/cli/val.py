@@ -160,6 +160,7 @@ def _run_validation(args: argparse.Namespace) -> float:
     try:
         from mblt_model_zoo.vision import MBLT_Engine
         from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_imagenet
+        from mblt_model_zoo.vision.wrapper import normalize_core_mode
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -169,7 +170,7 @@ def _run_validation(args: argparse.Namespace) -> float:
         model_type=args.model_type,
         mxq_path=args.mxq_path,
         dev_no=args.dev_no,
-        core_mode=args.core_mode,
+        core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -179,7 +180,7 @@ def _run_validation(args: argparse.Namespace) -> float:
 
         if task == "image_classification":
             score = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
-            print(f"Validation score (Top-1 accuracy): {score:.6f}")
+            print(f"Validation score (Top-1 accuracy): {score:.5f}")
             return score
 
         if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
@@ -190,7 +191,7 @@ def _run_validation(args: argparse.Namespace) -> float:
                 conf_thres=args.conf_thres,
                 iou_thres=args.iou_thres,
             )
-            print(f"Validation score (mAP 50-95): {score:.6f}")
+            print(f"Validation score (mAP 50-95): {score:.5f}")
             return score
 
         if task == "face_detection":
@@ -263,4 +264,4 @@ def add_val_parser(
         "--annotation-dir",
         help="Local archive path or download URL for dataset annotations used by automatic organization.",
     )
-    add_threshold_args(parser)
+    add_threshold_args(parser, conf_default=None, iou_default=None)

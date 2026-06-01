@@ -108,10 +108,18 @@ finally:
     model.dispose()
 ```
 
-For object detection models such as YOLO, pass task-specific thresholds to `postprocess()`:
+For object detection models such as YOLO, postprocessing thresholds are initialized from the model
+YAML. You can either use those defaults directly:
 
 ```python
-result = model.postprocess(output, conf_thres=0.5, iou_thres=0.5)
+result = model.postprocess(output)
+```
+
+or override them once on the model before calling `postprocess()`:
+
+```python
+model.set_postprocess_thresholds(conf_thres=0.25)
+result = model.postprocess(output)
 ```
 
 Available vision models are documented in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).

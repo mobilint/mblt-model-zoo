@@ -7,24 +7,40 @@ It can be run as a pytest test or as a standalone script.
 
 import argparse
 import os
+import sys
 from pathlib import Path
+from typing import Generator
+
+# Add project root to sys.path for standalone run
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pytest
 
 from mblt_model_zoo.vision import MBLT_Engine
+from mblt_model_zoo.vision.wrapper import normalize_core_mode
+from tests.npu_backend_options import BaseNpuParams
 
 TEST_DIR = Path(__file__).parent
 
 
 @pytest.fixture
-def pytest_model():
-    """Fixture to initialize and dispose of the ResNet50 model."""
-    model = MBLT_Engine(
-        model_cls="resnet50",
-        mxq_path="",
-        model_type="DEFAULT",
-        core_mode="global8",
-    )
+def pytest_model(base_npu_params: BaseNpuParams) -> Generator[MBLT_Engine, None, None]:
+    """Fixture to initialize and dispose of the ResNet50 model.
+
+    Args:
+        base_npu_params: NPU backend options collected from CLI.
+
+    Yields:
+        The initialized model engine.
+    """
+    model_kwargs = {
+        "model_cls": "resnet50",
+        "mxq_path": "",
+        "model_type": "DEFAULT",
+        "core_mode": "global8",
+    }
+    model_kwargs.update(base_npu_params.base)
+    model = MBLT_Engine(**model_kwargs)
     yield model
     model.dispose()
 
@@ -54,7 +70,7 @@ def run_inference(
     )
 
 
-def test_image_classification(pytest_model):
+def test_image_classification(pytest_model: MBLT_Engine) -> None:
     """Test ResNet50 inference on a sample image."""
     image_path = os.path.join(TEST_DIR, "rc", "volcano.jpg")
     save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(image_path)}")
@@ -104,7 +120,7 @@ if __name__ == "__main__":
         model_cls=args.model_cls,
         mxq_path=args.mxq_path,
         model_type=args.model_type,
-        core_mode=args.core_mode,
+        core_mode=normalize_core_mode(args.core_mode),
     )
     if args.save_path is None:
         args.save_path = os.path.join(TEST_DIR, "tmp", f"resnet50_{os.path.basename(args.input_path)}")

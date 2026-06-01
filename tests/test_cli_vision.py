@@ -18,7 +18,18 @@ def test_cli_predict_example_parses() -> None:
     assert args.core_mode == "global8"
     assert args.topk == 5
     assert args.conf_thres == 0.25
-    assert args.iou_thres == 0.45
+    assert args.iou_thres is None
+
+
+def test_cli_val_defaults_to_model_thresholds() -> None:
+    """Leave validation thresholds unset so model YAML defaults are used."""
+
+    parser = build_parser()
+    args = parser.parse_args(["val", "--model", "yolo11m"])
+
+    assert args.core_mode == "global8"
+    assert args.conf_thres is None
+    assert args.iou_thres is None
 
 
 @pytest.mark.parametrize(

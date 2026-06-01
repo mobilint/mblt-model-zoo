@@ -59,11 +59,16 @@ def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_threshold_args(parser: argparse.ArgumentParser) -> None:
+def add_threshold_args(
+    parser: argparse.ArgumentParser,
+    *,
+    conf_default: float | None = 0.25,
+    iou_default: float | None = None,
+) -> None:
     """Adds postprocess threshold arguments for dense vision tasks."""
 
-    parser.add_argument("--conf-thres", type=float, default=0.25, help="Confidence threshold.")
-    parser.add_argument("--iou-thres", type=float, default=0.45, help="IoU threshold.")
+    parser.add_argument("--conf-thres", type=float, default=conf_default, help="Confidence threshold.")
+    parser.add_argument("--iou-thres", type=float, default=iou_default, help="IoU threshold.")
 
 
 def add_vision_parser(
@@ -117,6 +122,7 @@ def run_vision_inference(
 
     try:
         from mblt_model_zoo.vision import MBLT_Engine
+        from mblt_model_zoo.vision.wrapper import normalize_core_mode
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -126,7 +132,7 @@ def run_vision_inference(
         model_type=args.model_type,
         mxq_path=args.mxq_path,
         dev_no=args.dev_no,
-        core_mode=args.core_mode,
+        core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -137,7 +143,7 @@ def run_vision_inference(
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk
         elif actual_task in {"object_detection", "instance_segmentation", "pose_estimation"}:
-            postprocess_kwargs = {"conf_thres": args.conf_thres, "iou_thres": args.iou_thres}
+            model.set_postprocess_thresholds(conf_thres=args.conf_thres, iou_thres=args.iou_thres)
 
         input_img = model.preprocess(args.source)
         output = model(input_img)

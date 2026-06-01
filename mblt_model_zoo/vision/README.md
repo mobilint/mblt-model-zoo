@@ -27,11 +27,32 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./resu
 
 The `predict` command accepts classification and dense prediction options. `--topk` is used for
 image classification models. `--conf-thres` and `--iou-thres` are used for object detection,
-instance segmentation, and pose estimation models.
+instance segmentation, and pose estimation models. For dense prediction tasks, each model loads its
+default thresholds from its YAML file under [models](models/), and the CLI overrides those values
+when you pass explicit threshold arguments. The default CLI behavior is to use `0.25` for
+confidence and keep the model's YAML IoU threshold.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --iou-thres 0.5
+```
+
+From Python, dense prediction models also use the YAML thresholds by default:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="yolo11m", core_mode="global8")
+input_img = model.preprocess("./street.jpg")
+output = model(input_img)
+result = model.postprocess(output)
+```
+
+When you want custom thresholds, set them once on the model before postprocessing:
+
+```python
+model.set_postprocess_thresholds(conf_thres=0.25)
+result = model.postprocess(output)
 ```
 
 Common options are available for all vision commands:
@@ -76,6 +97,9 @@ command to an already organized dataset with `--data-path`.
 mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
 ```
+
+If you omit `--conf-thres` and `--iou-thres`, validation uses the model's YAML thresholds. Pass
+explicit values when you want to override them.
 
 You can override the automatic dataset sources with local archives or custom URLs:
 

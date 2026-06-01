@@ -19,8 +19,8 @@ DEFAULT:
     nc: 80
     nl: 2
     reg_max: 16
-    conf_thres: 0.65
-    iou_thres: 0.001
+    conf_thres: 0.001
+    iou_thres: 0.65
 TURBO:
   update: DEFAULT
   file_cfg:

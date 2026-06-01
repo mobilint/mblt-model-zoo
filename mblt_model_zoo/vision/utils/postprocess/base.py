@@ -100,6 +100,9 @@ class YOLOPostBase(PostBase):
         if task is None:
             raise ValueError("task should be provided in post_cfg")
         self.task: str = task
+        self.conf_thres = float(post_cfg.get("conf_thres", 0.25))
+        self.iou_thres = float(post_cfg.get("iou_thres", 0.7))
+        self.set_threshold()
 
     def anchors_as_list(self) -> list[Any]:
         """Return anchors as the configured anchor list."""
@@ -119,15 +122,20 @@ class YOLOPostBase(PostBase):
             raise TypeError("stride should be a tensor for anchor-free YOLO postprocessing.")
         return cast(torch.Tensor, self.stride)
 
-    def __call__(self, x: TensorLike | ListTensorLike, conf_thres: float, iou_thres: float) -> list[Any]:
+    def __call__(
+        self,
+        x: TensorLike | ListTensorLike,
+        conf_thres: float | None = None,
+        iou_thres: float | None = None,
+    ) -> list[Any]:
         """Executes YOLO postprocessing.
 
         Includes rearranging, decoding, and NMS.
 
         Args:
             x (TensorLike | ListTensorLike): Raw model outputs.
-            conf_thres (float): Confidence threshold for detection.
-            iou_thres (float): IoU threshold for NMS.
+            conf_thres (float | None): Confidence threshold for detection.
+            iou_thres (float | None): IoU threshold for NMS.
 
         Returns:
             list: List of detections per image.
@@ -211,9 +219,8 @@ class YOLOPostBase(PostBase):
             conf_thres (float, optional): Confidence threshold.
             iou_thres (float, optional): IoU threshold.
         """
-        assert conf_thres is not None and iou_thres is not None, (
-            "conf_thres and iou_thres should be provided in yolo_postprocess "
-        )
+        conf_thres = self.conf_thres if conf_thres is None else conf_thres
+        iou_thres = self.iou_thres if iou_thres is None else iou_thres
         assert 0 < conf_thres < 1, "conf_thres should be in (0, 1)"
         assert 0 < iou_thres < 1, "iou_thres should be in (0, 1)"
         self.conf_thres = conf_thres
