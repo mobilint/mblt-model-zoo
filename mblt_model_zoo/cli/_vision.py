@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from transformers import HfArgumentParser
-
 DEFAULT_OUTPUT_DIR = Path("runs") / "vision"
 
 
@@ -69,7 +67,7 @@ def add_threshold_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_vision_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     command: str,
     help_text: str,

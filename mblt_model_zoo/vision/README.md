@@ -53,6 +53,48 @@ manual placement, pass semicolon-separated values with `--target-cores`, such as
 For backward compatibility, `classify`, `detect`, `pose`, and `segment` are accepted as aliases for
 `predict`.
 
+## CLI Validation
+
+The vision CLI also provides a unified validation command:
+
+```bash
+mblt-model-zoo val --model resnet50
+```
+
+The command loads the model, infers its task, and validates it on the associated benchmark dataset:
+
+- Image classification models use ImageNet.
+- Object detection, instance segmentation, and pose estimation models use COCO.
+
+If the organized dataset is not already available under the default cache directory, the CLI
+automatically prepares it before validation. Before downloading anything, it first looks for raw
+archives or extracted dataset directories near the target dataset path, including the dataset
+directory itself, its parent directory, and the current working directory. You can also point the
+command to an already organized dataset with `--data-path`.
+
+```bash
+mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
+mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+```
+
+You can override the automatic dataset sources with local archives or custom URLs:
+
+```bash
+mblt-model-zoo val \
+  --model resnet50 \
+  --image-dir /path/to/ILSVRC2012_img_val.tar \
+  --xml-dir /path/to/ILSVRC2012_bbox_val_v3.tgz
+
+mblt-model-zoo val \
+  --model yolo11m \
+  --image-dir /path/to/val2017.zip \
+  --annotation-dir /path/to/annotations_trainval2017.zip
+```
+
+Use `--force-organize`, `--force`, or `--reload` to rebuild the organized dataset and allow
+redownloading even when local sources are already available. Face detection validation is not yet
+available because WiderFace evaluation is still pending in the current codebase.
+
 ## Pre-Trained Vision Models
 
 This section lists the publicly pre-trained models supported by the vision framework.
@@ -61,115 +103,133 @@ This section lists the publicly pre-trained models supported by the vision frame
 
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| AlexNet | (224,224,3) | 56.118 | 56.556 | 1.43 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) | |
-| CAFormer_S18 | (224,224,3) | 82.636 | 83.626 | 9.10 | 26.35 |  [Link](https://huggingface.co/timm/caformer_s18.sail_in1k) | sail_in1k |
-| CAFormer_S36 | (224,224,3) | 82.764 | 84.440 | 17.67 | 39.32 |  [Link](https://huggingface.co/timm/caformer_s36.sail_in1k) | sail_in1k |
-| CAFormer_M36 | (224,224,3) | 83.616 | 85.232 | 28.80 | 56.23 |  [Link](https://huggingface.co/timm/caformer_m36.sail_in1k) | sail_in1k |
-| CAFormer_B36 | (224,224,3) | 84.342 | 85.482 | 49.41 | 98.78 |  [Link](https://huggingface.co/timm/caformer_b36.sail_in1k) | sail_in1k |
-| CoAtNet_0_RW_224 | (224,224,3) | 81.080 | 82.418 | 10.06 | 30.46 |  [Link](https://huggingface.co/timm/coatnet_0_rw_224.sw_in1k) | sw_in1k |
-| CoAtNet_1_RW_224 | (224,224,3) | 83.094 | 83.600 | 18.17 | 47.91 |  [Link](https://huggingface.co/timm/coatnet_1_rw_224.sw_in1k) | sw_in1k |
-| CoAtNet_2_RW_224 | (224,224,3) | 84.952 | 86.534 | 32.80 | 82.11 |  [Link](https://huggingface.co/timm/coatnet_2_rw_224.sw_in12k_ft_in1k) | sw_in12k_ft_in1k |
-| ConvFormer S18 | (224,224,3) | 81.946 | 82.866 | 8.59 | 26.77 | [Link](https://huggingface.co/timm/convformer_s18.sail_in1k) | sail_in1k |
-| ConvFormer S36 | (224,224,3) | 83.216 | 84.016 | 16.66 | 40.01 |  [Link](https://huggingface.co/timm/caformer_s36.sail_in1k) | sail_in1k |
-| ConvFormer M36 | (224,224,3) | 84.084 | 84.448 | 27.58 | 57.05 |  [Link](https://huggingface.co/timm/caformer_m36.sail_in1k) | sail_in1k |
-| ConvFormer B36 | (224,224,3) | 84.384 | 84.830 | 49.79 | 99.88 |  [Link](https://huggingface.co/timm/caformer_b36.sail_in1k) | sail_in1k |
-| ConvNeXt_Tiny | (224,224,3) | 82.352 | 82.458 | 9.11 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) | |
-| ConvNeXt_Small | (224,224,3) | 83.486 | 83.560 | 17.68 | 50.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_small.html) | |
-| ConvNeXt_Base | (224,224,3) | 83.986 | 84.048 | 31.13 | 88.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_base.html) | |
-| ConvNeXt_Large | (224,224,3) | 84.348 | 84.410 | 69.35 | 197.77 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_large.html) | |
-| DeiT_Tiny_Patch16_224 | (224,224,3) | 71.998 | 72.030 | 2.66 | 5.72 | [Link](https://huggingface.co/timm/deit_tiny_patch16_224.fb_in1k) | fb_in1k |
-| DeiT_Small_Patch16_224 | (224,224,3) | 79.806 | 79.790 | 9.50 | 22.05 | [Link](https://huggingface.co/timm/deit_small_patch16_224.fb_in1k) | fb_in1k |
+| AlexNet | (224,224,3) | 56.084 | 56.556 | 1.43 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |
+| CAFormer_S18 | (224,224,3) | 82.592 | 83.626 | 9.10 | 26.34 | [Link](https://huggingface.co/timm/caformer_s18.sail_in1k) | sail_in1k |
+| CAFormer_B36 | (224,224,3) | 83.938 | 85.482 | 49.41 | 98.75 | [Link](https://huggingface.co/timm/caformer_b36.sail_in1k) | sail_in1k |
+| CoAtNet_0_RW_224 | (224,224,3) | 81.842 | 82.418 | 10.06 | 30.46 | [Link](https://huggingface.co/timm/coatnet_0_rw_224.sw_in1k) | sw_in1k |
+| CoAtNet_1_RW_224 | (224,224,3) | 83.506 | 83.600 | 18.17 | 47.91 | [Link](https://huggingface.co/timm/coatnet_1_rw_224.sw_in1k) | sw_in1k |
+| CoAtNet_2_RW_224 | (224,224,3) | 86.084 | 86.534 | 32.80 | 82.11 | [Link](https://huggingface.co/timm/coatnet_2_rw_224.sw_in12k_ft_in1k) | sw_in12k_ft_in1k |
+| ConvFormer S36 | (224,224,3) | 83.360 | 84.016 | 16.66 | 40.01 | [Link](https://huggingface.co/timm/convformer_s36.sail_in1k) | sail_in1k |
+| ConvFormer M36 | (224,224,3) | 84.014 | 84.448 | 27.58 | 57.05 | [Link](https://huggingface.co/timm/convformer_m36.sail_in1k) | sail_in1k |
+| ConvFormer B36 | (224,224,3) | 84.244 | 84.830 | 47.79 | 99.88 | [Link](https://huggingface.co/timm/convformer_b36.sail_in1k) | sail_in1k |
+| ConvNeXt_Tiny | (224,224,3) | 82.354 | 82.458 | 9.11 | 28.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_tiny.html) |  |
+| ConvNeXt_Small | (224,224,3) | 83.434 | 83.560 | 17.68 | 50.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_small.html) |  |
+| ConvNeXt_Base | (224,224,3) | 83.940 | 84.048 | 31.13 | 88.59 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_base.html) |  |
+| ConvNeXt_Large | (224,224,3) | 84.316 | 84.410 | 69.35 | 197.77 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.convnext_large.html) |  |
+| DeiT_Tiny_Patch16_224 | (224,224,3) | 71.944 | 72.030 | 2.66 | 5.72 | [Link](https://huggingface.co/timm/deit_tiny_patch16_224.fb_in1k) | fb_in1k |
+| DeiT_Small_Patch16_224 | (224,224,3) | 79.722 | 79.790 | 9.50 | 22.05 | [Link](https://huggingface.co/timm/deit_small_patch16_224.fb_in1k) | fb_in1k |
 | DeiT_Base_Patch16_224 | (224,224,3) | 81.932 | 81.980 | 35.73 | 86.57 | [Link](https://huggingface.co/timm/deit_base_patch16_224.fb_in1k) | fb_in1k |
-| DeiT_Base_Patch16_384 | (384,384,3) | 83.108 | 83.100 | 115.00 | 86.86 | [Link](https://huggingface.co/timm/deit_base_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Small_Patch16_224 | (224,224,3) | 81.346 | 81.390 | 9.50 | 22.06 | [Link](https://huggingface.co/timm/deit3_small_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Small_Patch16_384 | (384,384,3) | 83.462 | 83.420 | 33.01 | 22.21 | [Link](https://huggingface.co/timm/deit3_small_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Medium_Patch16_224 | (224,224,3) | 83.034 | 83.044 | 16.39 | 38.85 | [Link](https://huggingface.co/timm/deit3_medium_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Base_Patch16_224 | (224,224,3) | 83.772 | 83.766 | 35.74 | 86.59 | [Link](https://huggingface.co/timm/deit3_base_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Base_Patch16_384 | (384,384,3) | 85.052 | 85.064 | 115.02 | 86.88 | [Link](https://huggingface.co/timm/deit3_base_patch16_384.fb_in1k) | fb_in1k |
-| DeiT3_Large_Patch16_224 | (224,224,3) | 84.696 | 84.736 | 124.73 | 304.38 | [Link](https://huggingface.co/timm/deit3_large_patch16_224.fb_in1k) | fb_in1k |
-| DeiT3_Large_Patch16_384 | (384,384,3) | 85.820 | 85.826 | 392.94 | 304.76 | [Link](https://huggingface.co/timm/deit3_large_patch16_384.fb_in1k) | fb_in1k |
-| DenseNet121 | (224,224,3) | 74.186 | 74.422 | 6.37 | 8.04 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) | |
-| DenseNet161 | (224,224,3) | 77.200 | 77.142 | 16.85 | 28.86 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet161.html) | |
-| DenseNet169 | (224,224,3) | 75.530 | 75.568 | 7.62 | 14.28 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) | |
-| DenseNet201 | (224,224,3) | 76.760 | 76.882 | 9.82 | 20.21 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) | |
-| FlexiViT_Small | (240,240,3) | 82.376 | 82.536 | 11.05 | 22.06 | [Link](https://huggingface.co/timm/flexivit_small.1200ep_in1k) | 1200ep_in1k |
-| FlexiViT_Base | (240,240,3) | 84.726 | 84.664 | 41.30 | 86.59 | [Link](https://huggingface.co/timm/flexivit_base.1200ep_in1k) | 1200ep_in1k |
-| FlexiViT_Large | (240,240,3) | 85.640 | 85.658 | 143.89 | 304.36 | [Link](https://huggingface.co/timm/flexivit_large.1200ep_in1k) | 1200ep_in1k |
-| GoogLeNet | (224,224,3) | 69.850 | 69.778 | 3.04 | 6.62 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.googlenet.html) | |
-| Inception_V3 | (299,299,3) | 77.222 | 77.278 | 11.51 | 23.82 | [Link](https://docs.pytorch.org/vision/main/models/generated/torchvision.models.inception_v3.html) | |
-| MNASNet1_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_0.html) | |
-| MNASNet1_3 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_3.html) | |
-| MobileNet_V2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mobilenet_v2.html) | IMAGENET1K_V2 |
-| RegNet_X_400MF | (224,224,3) | 72.494 | 72.908 | 0.84 | 5.48 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V1 |
-| RegNet_X_400MF | (224,224,3) | 74.218 | 74.860 | 0.84 | 5.48 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V2 |
-| RegNet_X_800MF | (224,224,3) | 74.958 | 74.210 | 1.62 | 7.24 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V1 |
-| RegNet_X_800MF | (224,224,3) | 77.096 | 77.496 | 1.62 | 7.24 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V2 |
-| RegNet_X_1_6GF | (224,224,3) | 76.866 | 77.084 | 3.24 | 9.17 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V1 |
-| RegNet_X_1_6GF | (224,224,3) | 79.150 | 79.676 | 3.24 | 9.17 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V2 |
-| RegNet_X_3_2GF | (224,224,3) | 78.164 | 78.342 | 6.40 | 15.27 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V1 |
-| RegNet_X_3_2GF | (224,224,3) | 80.832 | 81.194 | 6.40 | 15.27 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V2 |
-| RegNet_X_8GF | (224,224,3) | 79.300 | 79.372 | 16.05 | 39.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V1 |
-| RegNet_X_8GF | (224,224,3) | 81.368 | 81.692 | 16.05 | 39.52 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V2 |
-| RegNet_X_16GF | (224,224,3) | 79.922 | 80.092 | 31.99 | 54.22 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V1 |
-| RegNet_X_16GF | (224,224,3) | 82.438 | 82.712 | 31.99 | 54.22 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V2 |
-| RegNet_X_32GF | (224,224,3) | 80.532 | 80.592 | 63.63 | 107.73 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V1 |
-| RegNet_X_32GF | (224,224,3) | 82.868 | 83.022 | 63.63 | 107.73 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V2 |
-| RegNet_Y_400MF | (224,224,3) | 73.672 | 74.004 | 0.82 | 4.33 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V1 |
-| RegNet_Y_400MF | (224,224,3) | 75.306 | 75.802 | 0.82 | 4.33 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V2 |
-| RegNet_Y_800MF | (224,224,3) | 76.188 | 76.396 | 1.70 | 6.42 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V1 |
-| RegNet_Y_800MF | (224,224,3) | 78.430 | 78.890 | 1.70 | 6.42 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V2 |
-| RegNet_Y_1_6GF | (224,224,3) | 77.424 | 77.926 | 3.27 | 11.18 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V1 |
-| RegNet_Y_1_6GF | (224,224,3) | 80.496 | 80.882 | 3.27 | 11.18 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V2 |
-| RegNet_Y_3_2GF | (224,224,3) | 78.642 | 78.962 | 6.41 | 19.40 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V1 |
-| RegNet_Y_3_2GF | (224,224,3) | 81.514 | 82.018 | 6.41 | 19.40 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V2 |
-| RegNet_Y_8GF | (224,224,3) | 79.856 | 80.052 | 17.05 | 39.34 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V1 |
-| RegNet_Y_8GF | (224,224,3) | 82.556 | 82.824 | 17.05 | 39.34 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V2 |
-| RegNet_Y_16GF | (224,224,3) | 80.278 | 80.424 | 31.95 | 83.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html) | IMAGENET1K_V1 |
-| RegNet_Y_16GF | (224,224,3) | 82.464 | 82.862 | 31.95 | 83.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html) | IMAGENET1K_V2 |
-| RegNet_Y_32GF | (224,224,3) | 80.696 | 80.834 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V1 |
-| RegNet_Y_32GF | (224,224,3) | 82.892 | 83.362 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V2 |
-| ResNet18 | (224,224,3) | 69.570 | 69.778 | 3.64 | 11.68 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) | |
-| ResNet34 | (224,224,3) | 73.156 | 73.304 | 7.35 | 21.79 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) | |
-| ResNet50 | (224,224,3) | 75.976 | 76.116 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
-| ResNet50 | (224,224,3) | 80.598 | 80.852 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
-| ResNet101 | (224,224,3) | 77.148 | 77.350 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
-| ResNet101 | (224,224,3) | 81.516 | 81.914 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V2 |
-| ResNet152 | (224,224,3) | 78.064 | 78.306 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V1 |
-| ResNet152 | (224,224,3) | 82.014 | 82.272 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V2 |
-| ResNeXt50_32X4D | (224,224,3) | 77.552 | 77.634 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V1 |
-| ResNeXt50_32X4D | (224,224,3) | 80.858 | 81.212 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V2 |
-| ResNeXt101_32X8D | (224,224,3) | 79.186 | 79.290 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V1 |
-| ResNeXt101_32X8D | (224,224,3) | 82.616 | 82.784 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V2 |
-| ResNeXt101_64X4D | (224,224,3) | 82.994 | 83.234 | 31.06 | 83.35 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_64x4d.html) | |
-| ShuffleNet_V2_X1_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_0.html) | |
-| ShuffleNet_V2_X1_5 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_5.html) | |
-| ShuffleNet_V2_X2_0 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x2_0.html) | |
-| VGG11 | (224,224,3) | 68.770 | 68.974 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11.html) | |
-| VGG11_BN | (224,224,3) | 70.062 | 70.328 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11_bn.html) | |
-| VGG13 | (224,224,3) | 69.738 | 69.888 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13.html) | |
-| VGG13_BN | (224,224,3) | 71.398 | 71.564 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13_bn.html) | |
-| VGG16 | (224,224,3) | 71.504 | 71.616 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16.html) | |
-| VGG16_BN | (224,224,3) | 73.296 | 73.406 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) | |
-| VGG19 | (224,224,3) | 72.246 | 72.386 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) | |
-| VGG19_BN | (224,224,3) | 74.056 | 74.170 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) | |
-| ViT_Tiny_Patch16_224 | (224,224,3) | 75.414 | 75.456 | 2.66 | 5.72 | [Link](https://huggingface.co/timm/vit_tiny_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Tiny_Patch16_384 | (384,384,3) | 78.376 | 78.470 | 10.37 | 5.79 | [Link](https://huggingface.co/timm/vit_tiny_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch16_224 | (224,224,3) | 81.434 | 81.412 | 9.50 | 22.05 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch16_384 | (384,384,3) | 83.774 | 83.782 | 33.00 | 22.20 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch32_224 | (224,224,3) | 75.926 | 75.922 | 2.32 | 22.88 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Small_Patch32_384 | (384,384,3) | 80.450 | 80.452 | 7.07 | 22.92 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch8_224 | (224,224,3) | 86.342 | 86.268 | 163.48 | 86.58 | [Link](https://huggingface.co/timm/vit_base_patch8_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
-| ViT_Base_Patch16_224 | (224,224,3) | 85.118 | 85.112 | 35.73 | 86.57 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
-| ViT_Base_Patch16_384 | (384,384,3) | 86.074 | 86.018 | 115.00 | 86.86 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch32_224 | (224,224,3) | 80.672 | 80.698 | 8.89 | 88.22 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Base_Patch32_384 | (384,384,3) | 83.422 | 83.398 | 26.45 | 88.30 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch16_224 | (224,224,3) | 85.920 | 85.870 | 124.71 | 304.33 | [Link](https://huggingface.co/timm/vit_large_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch16_384 | (384,384,3) | 87.076 | 87.086 | 392.88 | 304.72 | [Link](https://huggingface.co/timm/vit_large_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
-| ViT_Large_Patch32_384 | (384,384,3) | 81.562 | 81.512 | 91.52 | 306.63 | [Link](https://huggingface.co/timm/vit_large_patch32_384.orig_in21k_ft_in1k) | orig_in21k_ft_in1k |
-| Wide_ResNet50_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V1 |
-| Wide_ResNet50_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V2 |
-| Wide_ResNet101_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
-| Wide_ResNet101_2 | (224,224,3) |  |  |  |  | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
+| DeiT_Base_Patch16_384 | (384,384,3) | 83.046 | 83.100 | 115.00 | 86.86 | [Link](https://huggingface.co/timm/deit_base_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Small_Patch16_224 | (224,224,3) | 81.368 | 81.390 | 9.50 | 22.06 | [Link](https://huggingface.co/timm/deit3_small_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Small_Patch16_384 | (384,384,3) | 83.350 | 83.420 | 33.01 | 22.21 | [Link](https://huggingface.co/timm/deit3_small_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Medium_Patch16_224 | (224,224,3) | 83.020 | 83.044 | 16.39 | 38.85 | [Link](https://huggingface.co/timm/deit3_medium_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Base_Patch16_224 | (224,224,3) | 83.708 | 83.766 | 35.74 | 86.59 | [Link](https://huggingface.co/timm/deit3_base_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Base_Patch16_384 | (384,384,3) | 84.986 | 85.064 | 115.02 | 86.88 | [Link](https://huggingface.co/timm/deit3_base_patch16_384.fb_in1k) | fb_in1k |
+| DeiT3_Large_Patch16_224 | (224,224,3) | 84.734 | 84.736 | 124.73 | 304.37 | [Link](https://huggingface.co/timm/deit3_large_patch16_224.fb_in1k) | fb_in1k |
+| DeiT3_Large_Patch16_384 | (384,384,3) | 85.806 | 85.826 | 392.94 | 304.76 | [Link](https://huggingface.co/timm/deit3_large_patch16_384.fb_in1k) | fb_in1k |
+| ConvFormer S18 | (224,224,3) | 81.862 | 82.866 | 8.59 | 26.77 | [Link](https://huggingface.co/timm/convformer_s18.sail_in1k) | sail_in1k |
+| EfficientFormer_L7 | (224,224,3) | 82.526 | 83.352 | 20.67 | 82.14 | [Link](https://huggingface.co/timm/efficientformer_l7.snap_dist_in1k) | snap_dist_in1k |
+| DenseNet121 | (224,224,3) | 74.320 | 74.422 | 6.37 | 8.04 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet121.html) |  |
+| DenseNet161 | (224,224,3) | 77.200 | 77.142 | 16.85 | 28.86 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet161.html) |  |
+| DenseNet169 | (224,224,3) | 75.554 | 75.568 | 7.62 | 14.28 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet169.html) |  |
+| DenseNet201 | (224,224,3) | 76.742 | 76.882 | 9.82 | 20.21 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.densenet201.html) |  |
+| FlexiViT_Small | (240,240,3) | 82.150 | 82.536 | 11.05 | 22.06 | [Link](https://huggingface.co/timm/flexivit_small.1200ep_in1k) | 1200ep_in1k |
+| FlexiViT_Base | (240,240,3) | 84.484 | 84.664 | 41.30 | 86.59 | [Link](https://huggingface.co/timm/flexivit_base.1200ep_in1k) | 1200ep_in1k |
+| FlexiViT_Large | (240,240,3) | 85.540 | 85.658 | 143.89 | 304.36 | [Link](https://huggingface.co/timm/flexivit_large.1200ep_in1k) | 1200ep_in1k |
+| Inception_V3 | (299,299,3) | 77.246 | 77.278 | 11.51 | 23.82 | [Link](https://docs.pytorch.org/vision/main/models/generated/torchvision.models.inception_v3.html) |  |
+| LeViT_Conv_128 | (224,224,3) | 77.282 | 78.488 | 0.88 | 9.19 | [Link](https://huggingface.co/timm/levit_conv_128.fb_dist_in1k) | fb_dist_in1k |
+| LeViT_Conv_128S | (224,224,3) | 75.204 | 76.574 | 0.65 | 7.76 | [Link](https://huggingface.co/timm/levit_conv_128s.fb_dist_in1k) | fb_dist_in1k |
+| LeViT_Conv_192 | (224,224,3) | 79.138 | 79.876 | 1.38 | 10.92 | [Link](https://huggingface.co/timm/levit_conv_192.fb_dist_in1k) | fb_dist_in1k |
+| LeViT_Conv_256 | (224,224,3) | 80.960 | 81.538 | 2.34 | 18.86 | [Link](https://huggingface.co/timm/levit_conv_256.fb_dist_in1k) | fb_dist_in1k |
+| LeViT_Conv_384 | (224,224,3) | 82.170 | 82.582 | 4.83 | 39.08 | [Link](https://huggingface.co/timm/levit_conv_384.fb_dist_in1k) | fb_dist_in1k |
+| MNASNet1_0 | (224,224,3) | 72.806 | 73.416 | 0.65 | 4.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mnasnet1_0.html) |  |
+| MobileNet_V2 | (224,224,3) | 71.728 | 72.142 | 0.64 | 3.49 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.mobilenet_v2.html) | IMAGENET1K_V2 |
+| RegNet_X_400MF | (224,224,3) | 72.530 | 72.908 | 0.84 | 5.48 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V1 |
+| RegNet_X_400MF | (224,224,3) | 74.182 | 74.860 | 0.84 | 5.48 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_400mf.html) | IMAGENET1K_V2 |
+| RegNet_X_800MF | (224,224,3) | 74.972 | 75.210 | 1.62 | 7.24 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V1 |
+| RegNet_X_800MF | (224,224,3) | 77.056 | 77.496 | 1.62 | 7.24 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_800mf.html) | IMAGENET1K_V2 |
+| RegNet_X_1_6GF | (224,224,3) | 76.900 | 77.084 | 3.24 | 9.17 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V1 |
+| RegNet_X_1_6GF | (224,224,3) | 79.254 | 79.676 | 3.24 | 9.17 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_1_6gf.html) | IMAGENET1K_V2 |
+| RegNet_X_3_2GF | (224,224,3) | 78.142 | 78.342 | 6.40 | 15.27 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V1 |
+| RegNet_X_3_2GF | (224,224,3) | 80.888 | 81.194 | 6.40 | 15.27 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_x_3_2gf.html) | IMAGENET1K_V2 |
+| RegNet_X_8GF | (224,224,3) | 79.338 | 79.372 | 16.05 | 39.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V1 |
+| RegNet_X_8GF | (224,224,3) | 81.386 | 81.692 | 16.05 | 39.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_8gf.html) | IMAGENET1K_V2 |
+| RegNet_X_16GF | (224,224,3) | 79.932 | 80.092 | 31.99 | 54.22 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V1 |
+| RegNet_X_16GF | (224,224,3) | 82.434 | 82.712 | 31.99 | 54.22 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_16gf.html) | IMAGENET1K_V2 |
+| RegNet_X_32GF | (224,224,3) | 80.550 | 80.592 | 63.63 | 107.73 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V1 |
+| RegNet_X_32GF | (224,224,3) | 82.856 | 83.022 | 63.63 | 107.73 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_x_32gf.html) | IMAGENET1K_V2 |
+| RegNet_Y_400MF | (224,224,3) | 73.690 | 74.004 | 0.82 | 4.33 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V1 |
+| RegNet_Y_400MF | (224,224,3) | 75.312 | 75.802 | 0.82 | 4.33 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_400mf.html) | IMAGENET1K_V2 |
+| RegNet_Y_800MF | (224,224,3) | 76.100 | 76.396 | 1.70 | 6.42 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V1 |
+| RegNet_Y_800MF | (224,224,3) | 78.448 | 78.890 | 1.70 | 6.42 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.regnet_y_800mf.html) | IMAGENET1K_V2 |
+| RegNet_Y_1_6GF | (224,224,3) | 77.370 | 77.926 | 3.27 | 11.18 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V1 |
+| RegNet_Y_1_6GF | (224,224,3) | 80.490 | 80.882 | 3.27 | 11.18 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_1_6gf.html) | IMAGENET1K_V2 |
+| RegNet_Y_3_2GF | (224,224,3) | 78.744 | 78.962 | 6.41 | 19.40 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V1 |
+| RegNet_Y_3_2GF | (224,224,3) | 81.454 | 82.018 | 6.41 | 19.40 | [Link](https://docs.pytorch.org//vision/2.0/models/generated/torchvision.models.regnet_y_3_2gf.html) | IMAGENET1K_V2 |
+| RegNet_Y_8GF | (224,224,3) | 79.874 | 80.052 | 17.05 | 39.34 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V1 |
+| RegNet_Y_8GF | (224,224,3) | 82.546 | 82.824 | 17.05 | 39.34 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_8gf.html) | IMAGENET1K_V2 |
+| RegNet_Y_16GF | (224,224,3) | 80.326 | 80.424 | 31.95 | 83.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html) | IMAGENET1K_V1 |
+| RegNet_Y_16GF | (224,224,3) | 82.470 | 82.862 | 31.95 | 83.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_16gf.html) | IMAGENET1K_V2 |
+| RegNet_Y_32GF | (224,224,3) | 80.700 | 80.834 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V1 |
+| RegNet_Y_32GF | (224,224,3) | 82.890 | 83.362 | 64.72 | 144.97 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.regnet_y_32gf.html) | IMAGENET1K_V2 |
+| ResNet18 | (224,224,3) | 69.558 | 69.778 | 3.64 | 11.68 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet18.html) |  |
+| ResNet34 | (224,224,3) | 73.166 | 73.304 | 7.35 | 21.79 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet34.html) |  |
+| ResNet50 | (224,224,3) | 75.980 | 76.116 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V1 |
+| ResNet50 | (224,224,3) | 80.574 | 80.852 | 8.23 | 25.53 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet50.html) | IMAGENET1K_V2 |
+| ResNet101 | (224,224,3) | 77.076 | 77.350 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V1 |
+| ResNet101 | (224,224,3) | 81.534 | 81.914 | 15.69 | 44.50 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet101.html) | IMAGENET1K_V2 |
+| ResNet152 | (224,224,3) | 78.044 | 78.306 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V1 |
+| ResNet152 | (224,224,3) | 81.952 | 82.272 | 23.14 | 60.12 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnet152.html) | IMAGENET1K_V2 |
+| ResNeXt50_32X4D | (224,224,3) | 77.568 | 77.634 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V1 |
+| ResNeXt50_32X4D | (224,224,3) | 80.896 | 81.212 | 8.53 | 24.99 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext50_32x4d.html) | IMAGENET1K_V2 |
+| ResNeXt101_32X8D | (224,224,3) | 79.234 | 79.290 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V1 |
+| ResNeXt101_32X8D | (224,224,3) | 82.598 | 82.784 | 32.97 | 88.69 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_32x8d.html) | IMAGENET1K_V2 |
+| ResNeXt101_64X4D | (224,224,3) | 82.980 | 83.234 | 31.06 | 83.35 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.resnext101_64x4d.html) |  |
+| ShuffleNet_V2_X1_0 | (224,224,3) | 68.734 | 69.312 | 0.30 | 2.27 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_0.html) |  |
+| ShuffleNet_V2_X1_5 | (224,224,3) | 72.458 | 72.966 | 0.60 | 3.49 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x1_5.html) |  |
+| ShuffleNet_V2_X2_0 | (224,224,3) | 75.614 | 76.224 | 1.18 | 7.38 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.shufflenet_v2_x2_0.html) |  |
+| Swin_B | (224,224,3) | 83.254 | 83.562 | 31.58 | 88.61 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.swin_b.html) |  |
+| Swin_S | (224,224,3) | 82.848 | 83.180 | 18.02 | 50.24 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.swin_s.html) |  |
+| Swin_T | (224,224,3) | 81.076 | 81.444 | 9.32 | 28.60 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.swin_t.html) |  |
+| VGG11 | (224,224,3) | 68.706 | 68.974 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11.html) |  |
+| VGG11_BN | (224,224,3) | 70.074 | 70.328 | 15.26 | 132.86 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg11_bn.html) |  |
+| VGG13 | (224,224,3) | 69.742 | 69.888 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13.html) |  |
+| VGG13_BN | (224,224,3) | 71.370 | 71.564 | 22.68 | 133.05 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg13_bn.html) |  |
+| VGG16 | (224,224,3) | 71.526 | 71.616 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16.html) |  |
+| VGG16_BN | (224,224,3) | 73.276 | 73.406 | 31.01 | 138.36 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg16_bn.html) |  |
+| VGG19 | (224,224,3) | 72.284 | 72.386 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19.html) |  |
+| VGG19_BN | (224,224,3) | 74.022 | 74.170 | 39.34 | 143.67 | [Link](https://docs.pytorch.org//vision/stable/models/generated/torchvision.models.vgg19_bn.html) |  |
+| ViT_B_16 | (224,224,3) | 81.002 | 81.040 | 35.73 | 86.57 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.vit_b_16.html) | IMAGENET1K_V1 |
+| ViT_B_16 | (384,384,3) | 85.118 | 85.276 | 115.01 | 86.86 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.vit_b_16.html) | IMAGENET1K_SWAG_E2E_V1 |
+| ViT_B_16 | (224,224,3) | 81.516 | 81.926 | 35.73 | 86.57 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.vit_b_16.html) | IMAGENET1K_SWAG_LINEAR_V1 |
+| ViT_B_32 | (224,224,3) | 75.680 | 75.908 | 8.90 | 88.22 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.vit_b_32.html) |  |
+| RepViT_M1 | (224,224,3) | 77.668 | 78.510 | 1.70 | 5.46 | [Link](https://huggingface.co/timm/repvit_m1.dist_in1k) | dist_in1k |
+| RepViT_M1_0 | (224,224,3) | 79.210 | 80.198 | 2.39 | 7.29 | [Link](https://huggingface.co/timm/repvit_m1_0.dist_300e_in1k) | dist_300e_in1k |
+| RepViT_M1_1 | (224,224,3) | 79.838 | 80.828 | 2.87 | 8.79 | [Link](https://huggingface.co/timm/repvit_m1_1.dist_300e_in1k) | dist_300e_in1k |
+| RepViT_M1_5 | (224,224,3) | 81.532 | 82.374 | 4.88 | 14.62 | [Link](https://huggingface.co/timm/repvit_m1_5.dist_300e_in1k) | dist_300e_in1k |
+| RepViT_M2 | (224,224,3) | 79.882 | 80.526 | 2.77 | 8.77 | [Link](https://huggingface.co/timm/repvit_m2.dist_in1k) | dist_in1k |
+| RepViT_M2_3 | (224,224,3) | 82.960 | 83.466 | 9.59 | 23.66 | [Link](https://huggingface.co/timm/repvit_m2_3.dist_300e_in1k) | dist_300e_in1k |
+| RepViT_M3 | (224,224,3) | 80.896 | 81.478 | 3.85 | 10.65 | [Link](https://huggingface.co/timm/repvit_m3.dist_in1k) | dist_in1k |
+| VisFormer_Small | (224,224,3) | 81.586 | 82.106 | 10.05 | 40.24 | [Link](https://huggingface.co/timm/visformer_small.in1k) | in1k |
+| VisFormer_Tiny | (224,224,3) | 77.564 | 78.262 | 2.68 | 10.33 | [Link](https://huggingface.co/timm/visformer_tiny.in1k) | in1k |
+| ViT_Tiny_Patch16_224 | (224,224,3) | 74.568 | 75.456 | 2.66 | 5.72 | [Link](https://huggingface.co/timm/vit_tiny_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Tiny_Patch16_384 | (384,384,3) | 77.312 | 78.470 | 10.37 | 5.79 | [Link](https://huggingface.co/timm/vit_tiny_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch16_224 | (224,224,3) | 81.404 | 81.412 | 9.50 | 22.05 | [Link](https://huggingface.co/timm/vit_small_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch16_384 | (384,384,3) | 83.560 | 83.782 | 33.00 | 22.20 | [Link](https://huggingface.co/timm/vit_small_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch32_224 | (224,224,3) | 75.792 | 75.922 | 2.32 | 22.88 | [Link](https://huggingface.co/timm/vit_small_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Small_Patch32_384 | (384,384,3) | 80.092 | 80.452 | 7.07 | 22.92 | [Link](https://huggingface.co/timm/vit_small_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch8_224 | (224,224,3) | 86.302 | 86.268 | 163.48 | 86.58 | [Link](https://huggingface.co/timm/vit_base_patch8_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
+| ViT_Base_Patch16_224 | (224,224,3) | 85.080 | 85.112 | 35.73 | 86.57 | [Link](https://huggingface.co/timm/vit_base_patch16_224.augreg2_in21k_ft_in1k) | augreg2_in21k_ft_in1k |
+| ViT_Base_Patch16_384 | (384,384,3) | 85.860 | 86.018 | 115.00 | 86.86 | [Link](https://huggingface.co/timm/vit_base_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch32_224 | (224,224,3) | 80.612 | 80.698 | 8.89 | 88.22 | [Link](https://huggingface.co/timm/vit_base_patch32_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Base_Patch32_384 | (384,384,3) | 83.138 | 83.398 | 26.45 | 88.30 | [Link](https://huggingface.co/timm/vit_base_patch32_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch16_224 | (224,224,3) | 85.880 | 85.870 | 124.71 | 304.33 | [Link](https://huggingface.co/timm/vit_large_patch16_224.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch16_384 | (384,384,3) | 86.980 | 87.086 | 392.88 | 304.72 | [Link](https://huggingface.co/timm/vit_large_patch16_384.augreg_in21k_ft_in1k) | augreg_in21k_ft_in1k |
+| ViT_Large_Patch32_384 | (384,384,3) | 81.122 | 81.512 | 91.52 | 306.63 | [Link](https://huggingface.co/timm/vit_large_patch32_384.orig_in21k_ft_in1k) | orig_in21k_ft_in1k |
+| Wide_ResNet50_2 | (224,224,3) | 78.402 | 78.488 | 22.87 | 68.85 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V1 |
+| Wide_ResNet50_2 | (224,224,3) | 81.268 | 81.630 | 22.87 | 68.85 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet50_2.html) | IMAGENET1K_V2 |
+| Wide_ResNet101_2 | (224,224,3) | 78.500 | 78.830 | 45.61 | 126.82 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V1 |
+| Wide_ResNet101_2 | (224,224,3) | 82.358 | 82.510 | 45.61 | 126.82 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.wide_resnet101_2.html) | IMAGENET1K_V2 |
 | YOLOv5n-cls | (224,224,3) | 63.538 | 63.982 | 0.43 | 2.49 | [Link](https://docs.ultralytics.com/models/yolov5/) | |
 | YOLOv5s-cls | (224,224,3) | 70.698 | 70.854 | 1.42 | 5.45 | [Link](https://docs.ultralytics.com/models/yolov5/) | |
 | YOLOv5m-cls | (224,224,3) | 75.348 | 75.418 | 4.03 | 12.95 | [Link](https://docs.ultralytics.com/models/yolov5/) | |

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from transformers import HfArgumentParser
-
 from ._vision import add_threshold_args, add_vision_parser, run_vision_inference
 
 
@@ -17,7 +15,7 @@ def _cmd_predict(args: argparse.Namespace) -> int:
 
 
 def add_predict_parser(
-    subparsers: argparse._SubParsersAction[HfArgumentParser],
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Registers the unified vision prediction CLI command."""
 

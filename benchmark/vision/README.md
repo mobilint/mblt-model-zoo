@@ -6,8 +6,12 @@ You can run the benchmark as the following steps:
 2. Prepare the model for benchmark.
 3. Run the benchmark and evaluate the performance.
 
-> ⚠️ **Warning:** Mobilint does not provide the vision benchmark dataset or direct download link due to the terms of use of the dataset.
-Mobilint model zoo provides utilities on dataset organization, model preparation, and benchmark evaluation, therefore you can easily reproduce the [published benchmark results](../../../mblt_model_zoo/vision/README.md).
+> ⚠️ **Warning:** Mobilint does not host the vision benchmark datasets.
+> The organizer scripts use the datasets' official downloadable sources by default and can also
+> work with local archives that you downloaded yourself.
+> Mobilint model zoo provides utilities on dataset organization, model preparation, and benchmark
+> evaluation, therefore you can easily reproduce the
+> [published benchmark results](../../../mblt_model_zoo/vision/README.md).
 
 Furthermore, you can simply run the benchmark with the model you compiled with custom quantization recipe.
 
@@ -15,18 +19,20 @@ Furthermore, you can simply run the benchmark with the model you compiled with c
 
 ### Download the ImageNet Dataset
 
-To download the ImageNet dataset, visit the [ImageNet website](https://image-net.org/) and download the dataset with the following steps:
-
-0. Login with your account. If you don't have an account, you can register a new account. (Using `.edu` email is highly recommended)
-1. Click on the "Download" button on the menu bar.
-2. Go to "ImageNet Large-scale Visual Recognition Challenge (ILSVRC)" section, and click 2012 button.
-3. Download the following files:
-    - ILSVRC2012_img_val.tar: Displayes as "Validation images (all tasks)" with MD5 checksum `29b22e2961454d5413ddabcf34fc5622`.
-    - ILSVRC2012_bbox_val_v3.tgz: Displayes as "Validation bounding box annotations (all tasks)" with MD5 checksum `f4cd18b5ea29fe6bbea62ec9c20d80f0`.
+The organizer uses ImageNet's official validation image and annotation archives by default. If you
+already downloaded those files yourself, you can point the script to the local archive paths
+instead.
 
 ### Organize the ImageNet Dataset
 
 You can organize the ImageNet dataset with the following command:
+
+```bash
+python benchmark/vision/organize_imagenet.py \
+  --output-dir ~/.mblt_model_zoo/datasets/imagenet
+```
+
+If you want to use local archives instead of the built-in download sources:
 
 ```bash
 python benchmark/vision/organize_imagenet.py \
@@ -84,15 +90,19 @@ python benchmark/vision/benchmark_imagenet.py \
 
 ### Download the COCO Dataset
 
-To download the COCO dataset, visit the [COCO website](https://cocodataset.org/) and download the dataset with the following steps:
-
-1. Click on the "Dataset" button on the menu bar, and click "Download" button.
-2. On the "Images" column, click "2017 Val images" button to download `val2017.zip` file.
-3. On the "Annotations" column, click "2017 Train/Val annotations" button to download `annotations_trainval2017.zip` file.
+The organizer uses COCO's official validation image and annotation archives by default. If you
+already downloaded those files yourself, you can pass the local archive paths instead.
 
 ### Organize the COCO Dataset
 
 You can organize the COCO dataset with the following command:
+
+```bash
+python benchmark/vision/organize_coco.py \
+  --output-dir ~/.mblt_model_zoo/datasets/coco
+```
+
+To use local archives:
 
 ```bash
 python benchmark/vision/organize_coco.py \
@@ -152,17 +162,25 @@ python benchmark/vision/benchmark_coco.py \
 
 ### Download the WiderFace Dataset
 
-To download the WiderFace dataset, visit the [WiderFace's Hugging Face page](https://huggingface.co/datasets/CUHK-CSE/wider_face) and download the dataset with the following steps:
-
-1. Go to the "Files and versions" section, and click "data" folder.
-2. Download "WIDER_val.zip" file and "wider_face_split.zip" file.
+The organizer uses the official WiderFace validation image and split archives by default. If you
+already downloaded those files yourself, you can pass the local archive paths instead.
 
 ### Organize the WiderFace Dataset
 
 You can organize the WiderFace dataset with the following command:
 
 ```bash
-python organize_widerface.py --image_dir {path_to_WIDER_val.zip} --annotation_dir {path_to_wider_face_split.zip} --output_dir ~/.mblt_model_zoo/datasets/widerface
+python benchmark/vision/organize_widerface.py \
+  --output-dir ~/.mblt_model_zoo/datasets/widerface
+```
+
+To use local archives:
+
+```bash
+python benchmark/vision/organize_widerface.py \
+  --image-dir {path_to_WIDER_val.zip} \
+  --annotation-dir {path_to_wider_face_split.zip} \
+  --output-dir ~/.mblt_model_zoo/datasets/widerface
 ```
 
 This will organize the dataset into the following structure:
@@ -195,24 +213,25 @@ Pending
 
 ### Download the DOTAv1 Dataset
 
-To download the DOTAv1 dataset, run the following command:
-
-```bash
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip
-```
+The organizer uses the official DOTAv1 archive by default. If you already downloaded the archive
+or extracted it locally, you can pass that local path instead.
 
 ### Organize the DOTAv1 Dataset
 
 You can organize the DOTAv1 validation dataset with the following command:
 
 ```bash
-python organize_dotav1.py \
-  --dataset-path ./DOTAv1.zip \
+python benchmark/vision/organize_dotav1.py \
   --output-dir ~/.mblt_model_zoo/datasets/dotav1
 ```
 
-This command is intended to run from the repository root. If your current directory is already
-`benchmark/vision`, run `cd /workspace/mblt-model-zoo` first.
+To use a local archive or extracted dataset directory:
+
+```bash
+python benchmark/vision/organize_dotav1.py \
+  --dataset-path {path_to_DOTAv1.zip_or_directory} \
+  --output-dir ~/.mblt_model_zoo/datasets/dotav1
+```
 
 This keeps only the validation split and organizes the dataset into the following structure:
 

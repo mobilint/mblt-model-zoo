@@ -1,8 +1,9 @@
 """
 Script to organize the DOTAv1 validation dataset.
 
-This script takes the raw DOTAv1 zip file or extracted directory and organizes
-only the validation split into a structure suitable for the model zoo.
+This script takes a local archive, extracted directory, or downloadable source
+for DOTAv1 and organizes only the validation split into a structure suitable for
+the model zoo.
 """
 
 import argparse
@@ -10,13 +11,15 @@ import os
 
 from mblt_model_zoo.vision.utils.datasets import organize_dotav1
 
+DEFAULT_DOTAV1_SOURCE = "https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip"
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize DOTAv1 validation dataset")
     parser.add_argument(
         "--dataset-path",
         type=str,
-        required=True,
-        help="Path to the DOTAv1 zip file or directory",
+        default=DEFAULT_DOTAV1_SOURCE,
+        help="Local path or download URL for the DOTAv1 zip file or directory",
     )
     parser.add_argument(
         "--output-dir",
