@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+import random
 import sys
-from dataclasses import asdict
+import warnings
+from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
+import torch
 from tqdm.auto import tqdm
 
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -55,6 +59,76 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+
+
+@dataclass(frozen=True)
+class Eagle3PipelineOptions:
+    """Bundle EAGLE-3-specific pipeline options."""
+
+    base_embedding_path: str | None = None
+    draft_embedding_path: str | None = None
+    base_mxq_path: str | None = None
+    draft_mxq_path: str | None = None
+    fc_mxq_path: str | None = None
+    base_core_mode: str | None = None
+    draft_core_mode: str | None = None
+    fc_core_mode: str | None = None
+    base_target_cores: list[str] | None = None
+    draft_target_cores: list[str] | None = None
+    fc_target_cores: list[str] | None = None
+    base_target_clusters: list[int] | None = None
+    draft_target_clusters: list[int] | None = None
+    fc_target_clusters: list[int] | None = None
+
+
+def _warn_eagle3_override(
+    global_name: str,
+    prefixed_name: str,
+    global_value: Any,
+    prefixed_value: Any,
+    *,
+    stacklevel: int = 2,
+) -> None:
+    """Warn when a prefixed EAGLE-3 option overrides the corresponding global option."""
+    if global_value is None or prefixed_value is None:
+        return
+    if global_value == prefixed_value:
+        return
+    warnings.warn(
+        (
+            f"Conflicting options detected: `{global_name}` and `{prefixed_name}`. "
+            f"Using `{prefixed_name}` value because EAGLE-3 prefixed options take precedence over global options."
+        ),
+        UserWarning,
+        stacklevel=stacklevel,
+    )
+
+
+def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
+    """Print once with the final EAGLE-3 backend-prefixed options.
+
+    This helps users understand the effective option set when shared and
+    prefixed CLI options are mixed.
+    """
+    tracked_keys = [
+        "base_core_mode",
+        "draft_core_mode",
+        "fc_core_mode",
+        "base_target_cores",
+        "draft_target_cores",
+        "fc_target_cores",
+        "base_target_clusters",
+        "draft_target_clusters",
+        "fc_target_clusters",
+        "base_mxq_path",
+        "draft_mxq_path",
+        "fc_mxq_path",
+    ]
+    applied = {key: model_kwargs[key] for key in tracked_keys if key in model_kwargs}
+    if not applied:
+        return
+    if os.environ.get("MBLT_EAGLE3_VERBOSE", "0") == "1":
+        print(f"[Mobilint][EAGLE-3] Applied backend options: {applied}", file=sys.stderr)
 
 
 def npu_latency_pct(total_latency: Optional[float], npu_latency: Optional[float]) -> Optional[float]:
@@ -254,6 +328,7 @@ def _build_pipeline(
     device_map: Union[str, None],
     revision: Union[str, None],
     embedding_weight: Union[str, None],
+    eagle3_options: Eagle3PipelineOptions,
     mxq_path: Union[str, None],
     core_mode: Union[str, None],
     target_cores: Union[list[str], None],
@@ -277,8 +352,37 @@ def _build_pipeline(
     model_kwargs: dict[str, Any] = {}
     if embedding_weight:
         model_kwargs["embedding_weight"] = embedding_weight
+    if eagle3_options.base_embedding_path:
+        model_kwargs["base_embedding_weight"] = eagle3_options.base_embedding_path
+    if eagle3_options.draft_embedding_path:
+        model_kwargs["draft_embedding_weight"] = eagle3_options.draft_embedding_path
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
+    if eagle3_options.base_mxq_path:
+        model_kwargs["base_mxq_path"] = eagle3_options.base_mxq_path
+    if eagle3_options.draft_mxq_path:
+        model_kwargs["draft_mxq_path"] = eagle3_options.draft_mxq_path
+    if eagle3_options.fc_mxq_path:
+        model_kwargs["fc_mxq_path"] = eagle3_options.fc_mxq_path
+    eagle3_prefix_requested = any(
+        value is not None
+        for value in (
+            eagle3_options.base_embedding_path,
+            eagle3_options.draft_embedding_path,
+            eagle3_options.base_mxq_path,
+            eagle3_options.draft_mxq_path,
+            eagle3_options.fc_mxq_path,
+            eagle3_options.base_core_mode,
+            eagle3_options.draft_core_mode,
+            eagle3_options.fc_core_mode,
+            eagle3_options.base_target_cores,
+            eagle3_options.draft_target_cores,
+            eagle3_options.fc_target_cores,
+            eagle3_options.base_target_clusters,
+            eagle3_options.draft_target_clusters,
+            eagle3_options.fc_target_clusters,
+        )
+    )
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
             model_kwargs,
@@ -286,6 +390,66 @@ def _build_pipeline(
             target_cores=target_cores,
             target_clusters=target_clusters,
         )
+    elif eagle3_prefix_requested:
+        _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
+        _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
+        _warn_eagle3_override("--core-mode", "--fc-core-mode", core_mode, eagle3_options.fc_core_mode)
+        _warn_eagle3_override("--target-cores", "--base-target-cores", target_cores, eagle3_options.base_target_cores)
+        _warn_eagle3_override("--target-cores", "--draft-target-cores", target_cores, eagle3_options.draft_target_cores)
+        _warn_eagle3_override("--target-cores", "--fc-target-cores", target_cores, eagle3_options.fc_target_cores)
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--base-target-clusters",
+            target_clusters,
+            eagle3_options.base_target_clusters,
+        )
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--draft-target-clusters",
+            target_clusters,
+            eagle3_options.draft_target_clusters,
+        )
+        _warn_eagle3_override(
+            "--target-clusters",
+            "--fc-target-clusters",
+            target_clusters,
+            eagle3_options.fc_target_clusters,
+        )
+        _warn_eagle3_override("--mxq-path", "--base-mxq-path", mxq_path, eagle3_options.base_mxq_path)
+        _warn_eagle3_override("--mxq-path", "--draft-mxq-path", mxq_path, eagle3_options.draft_mxq_path)
+        _warn_eagle3_override("--mxq-path", "--fc-mxq-path", mxq_path, eagle3_options.fc_mxq_path)
+
+        def _coalesce(preferred: Any, fallback: Any) -> Any:
+            return preferred if preferred is not None else fallback
+
+        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
+            (
+                "base",
+                _coalesce(eagle3_options.base_core_mode, core_mode),
+                _coalesce(eagle3_options.base_target_cores, target_cores),
+                _coalesce(eagle3_options.base_target_clusters, target_clusters),
+            ),
+            (
+                "draft",
+                _coalesce(eagle3_options.draft_core_mode, core_mode),
+                _coalesce(eagle3_options.draft_target_cores, target_cores),
+                _coalesce(eagle3_options.draft_target_clusters, target_clusters),
+            ),
+            (
+                "fc",
+                _coalesce(eagle3_options.fc_core_mode, core_mode),
+                _coalesce(eagle3_options.fc_target_cores, target_cores),
+                _coalesce(eagle3_options.fc_target_clusters, target_clusters),
+            ),
+        ):
+            model_kwargs = _apply_core_mode_model_kwargs_common(
+                model_kwargs,
+                prefix_core_mode,
+                target_cores=prefix_target_cores,
+                target_clusters=prefix_target_clusters,
+                prefix=prefix,
+            )
+        _warn_eagle3_applied_options_summary(model_kwargs)
     else:
         model_kwargs = _apply_core_mode_model_kwargs_common(
             model_kwargs,
@@ -326,6 +490,75 @@ def _build_pipeline(
         return hf_pipeline(**pipeline_kwargs)
     except Exception as e:
         _raise_cuda_nvml_hint(e)
+
+
+def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineOptions:
+    """Return EAGLE-3-specific pipeline kwargs from parsed CLI arguments."""
+    return Eagle3PipelineOptions(
+        base_embedding_path=args.base_embedding_path,
+        draft_embedding_path=args.draft_embedding_path,
+        base_mxq_path=args.base_mxq_path,
+        draft_mxq_path=args.draft_mxq_path,
+        fc_mxq_path=args.fc_mxq_path,
+        base_core_mode=args.base_core_mode,
+        draft_core_mode=args.draft_core_mode,
+        fc_core_mode=args.fc_core_mode,
+        base_target_cores=args.base_target_cores,
+        draft_target_cores=args.draft_target_cores,
+        fc_target_cores=args.fc_target_cores,
+        base_target_clusters=args.base_target_clusters,
+        draft_target_clusters=args.draft_target_clusters,
+        fc_target_clusters=args.fc_target_clusters,
+    )
+
+
+def _resolve_text_measure_inputs(
+    args: argparse.Namespace,
+    pipeline: Any,
+) -> tuple[torch.Tensor | None, int, str | None]:
+    """Resolve text-measure input ids/prefill length from CLI input-mode options."""
+
+    def _tokenize_prompt_text(text: str) -> torch.Tensor:
+        encoded = pipeline.tokenizer(
+            text,
+            return_tensors="pt",
+            add_special_tokens=True,
+        )
+        return encoded["input_ids"]
+
+    selected_prompt_text: str | None = None
+    input_mode = str(getattr(args, "input_mode", "random"))
+    if input_mode == "random":
+        return None, int(args.prefill), None
+
+    if input_mode == "synthetic-text":
+        if not args.prompt_text:
+            raise ValueError("--input-mode synthetic-text requires --prompt-text.")
+        selected_prompt_text = args.prompt_text
+        input_ids = _tokenize_prompt_text(args.prompt_text)
+        return input_ids, int(input_ids.shape[1]), selected_prompt_text
+
+    if input_mode == "file":
+        if not args.prompt_file:
+            raise ValueError("--input-mode file requires --prompt-file.")
+        with open(args.prompt_file, encoding="utf-8") as handle:
+            prompts = [line.strip() for line in handle if line.strip()]
+        if not prompts:
+            raise ValueError(f"No non-empty prompt found in file: {args.prompt_file}")
+
+        strategy = str(getattr(args, "prompt_file_strategy", "first"))
+        if strategy == "first":
+            selected_prompt_text = prompts[0]
+        elif strategy == "random":
+            rng = random.Random(args.prompt_file_seed)
+            selected_prompt_text = rng.choice(prompts)
+        else:
+            raise ValueError(f"Unsupported --prompt-file-strategy: {strategy}")
+
+        input_ids = _tokenize_prompt_text(selected_prompt_text)
+        return input_ids, int(input_ids.shape[1]), selected_prompt_text
+
+    raise ValueError(f"Unsupported input mode: {input_mode}")
 
 
 def _iter_rows_for_csv(result: Any) -> Iterable[dict[str, Any]]:
@@ -721,6 +954,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -731,10 +965,27 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     measurer = TPSMeasurer(pipeline)
     tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker_prefill)
+
+    measure_input_ids, measure_num_prefill, selected_prompt_text = _resolve_text_measure_inputs(args, pipeline)
+    if measure_input_ids is not None:
+        resolved_batch = int(measure_input_ids.shape[0])
+        if resolved_batch == 1 and batch_size > 1:
+            measure_input_ids = measure_input_ids.repeat(batch_size, 1)
+        elif resolved_batch != batch_size:
+            raise ValueError(
+                "Resolved prompt input batch size does not match effective batch size: "
+                f"input_ids batch={resolved_batch}, effective batch_size={batch_size}."
+            )
+
+    selected_prompt_sha256 = (
+        hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
+    )
+
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
-            num_prefill=args.prefill,
+            num_prefill=measure_num_prefill,
             num_decode=args.decode,
+            input_ids=measure_input_ids,
             prefill_chunk_size=args.prefill_chunk_size,
             trace_path=None,
             show_progress=True,
@@ -748,8 +999,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         decode_metric: dict[str, Optional[float]] = {}
         try:
             run = measurer.measure(
-                num_prefill=args.prefill,
+                num_prefill=measure_num_prefill,
                 num_decode=args.decode,
+                input_ids=measure_input_ids,
                 prefill_chunk_size=args.prefill_chunk_size,
                 trace_path=args.trace if i == 0 else None,
                 show_progress=True,
@@ -844,6 +1096,12 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
     prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
     decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
+    acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
+    acceptance_tokens_sum = [float(r.acceptance_tokens_sum) for r in runs if r.acceptance_tokens_sum is not None]
+    acceptance_tokens_avg = [r.acceptance_tokens_avg for r in runs if r.acceptance_tokens_avg is not None]
+    acceptance_ratio_pct = [
+        (r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None
+    ]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -858,6 +1116,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     _print_summary("prefill_npu_latency", prefill_npu_latency_pct, "%")
     _print_summary("decode_npu_latency", decode_npu_latency_pct, "%")
     _print_summary("total_npu_latency", total_npu_latency_pct, "%")
+    _print_summary("accept_steps", acceptance_steps, "count")
+    _print_summary("accept_tok_sum", acceptance_tokens_sum, "tok")
+    _print_summary("accept_tok_avg", acceptance_tokens_avg, "tok")
+    _print_summary("accept_ratio", acceptance_ratio_pct, "%")
     if args.device_metrics:
         _print_summary("avg_power", avg_power_w, "W")
         _print_summary("p99_power", p99_power_w, "W")
@@ -901,6 +1163,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         payload = {
             "repeat": args.repeat,
             "batch_size": batch_size,
+            "input": {
+                "mode": str(getattr(args, "input_mode", "random")),
+                "prompt_sha256": selected_prompt_sha256,
+            },
             "runs": [asdict(r) for r in runs],
             "summary": {
                 "prefill_tps": _summary(prefill_tps),
@@ -911,6 +1177,10 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "prefill_npu_latency_pct": _summary(prefill_npu_latency_pct),
                 "decode_npu_latency_pct": _summary(decode_npu_latency_pct),
                 "total_npu_latency_pct": _summary(total_npu_latency_pct),
+                "acceptance_steps": _summary(acceptance_steps),
+                "acceptance_tokens_sum": _summary(acceptance_tokens_sum),
+                "acceptance_tokens_avg": _summary(acceptance_tokens_avg),
+                "acceptance_ratio_pct": _summary(acceptance_ratio_pct),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
                 "prefill_avg_power_w": _summary(prefill_avg_power_w),
@@ -972,6 +1242,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1199,6 +1470,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -1671,6 +1943,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         embedding_weight=args.embedding_weight,
         mxq_path=args.mxq_path,
         core_mode=args.core_mode,
+        eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
     )
@@ -2110,6 +2383,14 @@ def add_tps_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("tps", help="Measure/sweep tokens-per-second")
+    parser.epilog = (
+        "Examples:\n"
+        "  mblt-model-zoo tps measure --model mobilint/Llama-3.2-3B-Instruct --prefill 128 --decode 32\n"
+        "  mblt-model-zoo tps measure --model <eagle3-model> --base-core-mode single --draft-core-mode global4\n"
+        "  mblt-model-zoo tps measure --model <model> --input-mode file "
+        "--prompt-file prompts.txt --prompt-file-strategy random "
+        "--prompt-file-seed 7"
+    )
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
@@ -2135,16 +2416,22 @@ def add_tps_parser(
             default=None,
             help="path to custom embedding weights",
         )
+        p.add_argument("--base-embedding-path", default=None, help="path to custom base embedding weights")
+        p.add_argument("--draft-embedding-path", default=None, help="path to custom draft embedding weights")
         p.add_argument(
             "--mxq-path",
             default=None,
-            help="override mxq_path for pipeline loading",
+            help="override mxq_path for pipeline loading (EAGLE-3 prefix options take precedence)",
         )
+        for prefix in ("base", "draft", "fc"):
+            p.add_argument(
+                f"--{prefix}-mxq-path", default=None, help=f"override {prefix} mxq_path for pipeline loading"
+            )
         p.add_argument(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, global4, global8)",
+            help="NPU core mode (single, global4, global8). EAGLE-3 prefix options take precedence.",
         )
         p.add_argument(
             "--target-cores",
@@ -2158,6 +2445,25 @@ def add_tps_parser(
             default=None,
             help='Target clusters (e.g., "0;1")',
         )
+        for prefix in ("base", "draft", "fc"):
+            p.add_argument(
+                f"--{prefix}-core-mode",
+                choices=list(_CORE_MODE_CHOICES),
+                default=None,
+                help=f"{prefix} NPU core mode (single, global4, global8)",
+            )
+            p.add_argument(
+                f"--{prefix}-target-cores",
+                type=_parse_target_cores,
+                default=None,
+                help=f'{prefix} target cores (e.g., "0:0;0:1")',
+            )
+            p.add_argument(
+                f"--{prefix}-target-clusters",
+                type=_parse_target_clusters,
+                default=None,
+                help=f'{prefix} target clusters (e.g., "0;1")',
+            )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
         p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")
         p.add_argument(
@@ -2197,6 +2503,34 @@ def add_tps_parser(
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
     p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--input-mode",
+        choices=["random", "synthetic-text", "file"],
+        default="random",
+        help="text-only input generation mode (random|synthetic-text|file)",
+    )
+    p_measure.add_argument(
+        "--prompt-text",
+        default=None,
+        help="single prompt used when --input-mode is synthetic-text",
+    )
+    p_measure.add_argument(
+        "--prompt-file",
+        default=None,
+        help="text file path used when --input-mode is file",
+    )
+    p_measure.add_argument(
+        "--prompt-file-strategy",
+        choices=["first", "random"],
+        default="first",
+        help="non-empty line selection strategy for --input-mode file (first|random)",
+    )
+    p_measure.add_argument(
+        "--prompt-file-seed",
+        type=int,
+        default=0,
+        help="random seed used when --prompt-file-strategy is random",
+    )
     p_measure.add_argument(
         "--image-resolution",
         type=_parse_positive_int,

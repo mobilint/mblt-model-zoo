@@ -103,8 +103,13 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             inputs_embeds = self.get_input_embeddings()(input_ids)
         
         assert inputs_embeds is not None
+        image_features: Union[torch.FloatTensor, None] = None
 
-        if pixel_values is not None:
+        has_image_placeholders = True
+        if input_ids is not None:
+            has_image_placeholders = bool((input_ids == self.config.image_token_id).any().item())
+
+        if pixel_values is not None and has_image_placeholders:
             image_features = self.get_image_features(
                 pixel_values=pixel_values,
                 vision_feature_layer=vision_feature_layer,
@@ -146,7 +151,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             attentions=outputs.attentions,
             image_hidden_states=cast(
                 Union[torch.FloatTensor, None],
-                image_features if pixel_values is not None else None,
+                image_features,
             ),
         )
     
@@ -184,6 +189,8 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
 
         if is_prefill_step or not kwargs.get("use_cache", True):
             model_inputs["pixel_values"] = pixel_values
+        else:
+            model_inputs.pop("pixel_values", None)
 
         return model_inputs
 

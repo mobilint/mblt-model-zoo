@@ -16,11 +16,12 @@ def register_mobilint_models(args: Namespace, transformers):
 
     if model_type.startswith("mobilint-") or arch_name.startswith("Mobilint"):
         original_model_type = model_type[len("mobilint-") :] if model_type.startswith("mobilint-") else model_type
+        module_model_type = original_model_type.replace("-", "_")
 
         import importlib
 
         module = importlib.import_module(
-            f"mblt_model_zoo.hf_transformers.models.{original_model_type}.modeling_{original_model_type}"
+            f"mblt_model_zoo.hf_transformers.models.{module_model_type}.modeling_{module_model_type}"
         )
         setattr(
             transformers,

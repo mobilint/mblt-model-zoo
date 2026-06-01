@@ -7,12 +7,16 @@ import pytest
 from tests.npu_backend_options import (
     BaseNpuParams,
     BaseNpuSweepSpec,
+    Eagle3NpuSweepSpec,
+    Eagle3NpuParams,
     EncoderDecoderNpuParams,
     EncoderDecoderNpuSweepSpec,
     VisionTextNpuParams,
     VisionTextNpuSweepSpec,
     build_base_npu_params,
     build_base_specs,
+    build_eagle3_npu_params,
+    build_eagle3_specs,
     build_encoder_decoder_specs,
     build_vision_text_specs,
     collect_npu_kwargs,
@@ -44,6 +48,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         specs = build_vision_text_specs(metafunc.config)
         metafunc.parametrize(
             "_vision_text_npu_sweep_spec",
+            specs,
+            ids=[spec.id() for spec in specs],
+            scope="module",
+        )
+
+    if "_eagle3_npu_sweep_spec" in metafunc.fixturenames:
+        specs = build_eagle3_specs(metafunc.config)
+        metafunc.parametrize(
+            "_eagle3_npu_sweep_spec",
             specs,
             ids=[spec.id() for spec in specs],
             scope="module",
@@ -89,7 +102,7 @@ def pytest_addoption(parser):
         default=None,
         help='Target clusters (e.g., "0;1").',
     )
-    for prefix in ("encoder", "decoder", "vision", "text"):
+    for prefix in ("base", "draft", "fc", "encoder", "decoder", "vision", "text"):
         parser.addoption(
             f"--{prefix}-mxq-path",
             action="store",
@@ -132,6 +145,18 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="Path to custom embedding weights.",
+    )
+    parser.addoption(
+        "--base-embedding-path",
+        action="store",
+        default=None,
+        help="Path to custom base embedding weights.",
+    )
+    parser.addoption(
+        "--draft-embedding-path",
+        action="store",
+        default=None,
+        help="Path to custom draft embedding weights.",
     )
 
 
@@ -277,6 +302,18 @@ def embedding_weight(request):
 
 
 @pytest.fixture(scope="module")
+def base_embedding_path(request):
+    """Return the optional base embedding weight path."""
+    return request.config.getoption("--base-embedding-path")
+
+
+@pytest.fixture(scope="module")
+def draft_embedding_path(request):
+    """Return the optional draft embedding weight path."""
+    return request.config.getoption("--draft-embedding-path")
+
+
+@pytest.fixture(scope="module")
 def _base_npu_sweep_spec(request) -> BaseNpuSweepSpec:
     """Return the parametrized base-only NPU sweep spec."""
     return request.param
@@ -295,6 +332,12 @@ def _vision_text_npu_sweep_spec(request) -> VisionTextNpuSweepSpec:
 
 
 @pytest.fixture(scope="module")
+def _eagle3_npu_sweep_spec(request) -> Eagle3NpuSweepSpec:
+    """Return the parametrized EAGLE-3 NPU sweep spec."""
+    return request.param
+
+
+@pytest.fixture(scope="module")
 def base_npu_params(
     request,
     embedding_weight,
@@ -305,6 +348,22 @@ def base_npu_params(
         request.config,
         embedding_weight,
         core_mode_override=_base_npu_sweep_spec.base_core_mode,
+    )
+
+
+@pytest.fixture(scope="module")
+def eagle3_npu_params(
+    request,
+    base_embedding_path,
+    draft_embedding_path,
+    _eagle3_npu_sweep_spec: Eagle3NpuSweepSpec,
+) -> Eagle3NpuParams:
+    """Return NPU kwargs for EAGLE-3 models."""
+    return build_eagle3_npu_params(
+        request.config,
+        base_embedding_path,
+        draft_embedding_path,
+        core_mode_override=_eagle3_npu_sweep_spec.core_mode,
     )
 
 

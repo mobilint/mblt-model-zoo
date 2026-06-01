@@ -10,7 +10,7 @@ import pytest
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
-ALL_PREFIXES = ("base", "encoder", "decoder", "vision", "text")
+ALL_PREFIXES = ("base", "draft", "fc", "encoder", "decoder", "vision", "text")
 
 
 def parse_target_cores(value: str | None) -> list[str] | None:
@@ -128,6 +128,13 @@ class VisionTextNpuParams:
 
 
 @dataclass(frozen=True)
+class Eagle3NpuParams:
+    """NPU backend kwargs for EAGLE-3 models."""
+
+    model: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class BaseNpuSweepSpec:
     """Parametrized core mode for base-only models."""
 
@@ -170,6 +177,17 @@ class VisionTextNpuSweepSpec:
         if self.text_core_mode is not None:
             parts.append(f"text={self.text_core_mode}")
         return ",".join(parts) if parts else "default"
+
+
+@dataclass(frozen=True)
+class Eagle3NpuSweepSpec:
+    """Parametrized core mode shared across EAGLE-3 backends."""
+
+    core_mode: str | None
+
+    def id(self) -> str:
+        """Return the pytest id fragment for this sweep spec."""
+        return f"eagle3={self.core_mode}" if self.core_mode is not None else "default"
 
 
 def option_flag(prefix: str, option_name: str) -> str:
@@ -239,6 +257,28 @@ def build_base_specs(config: pytest.Config) -> list[BaseNpuSweepSpec]:
     if not should_expand_core_matrix(config):
         return [BaseNpuSweepSpec(base_core_mode="single")]
     return [BaseNpuSweepSpec(base_core_mode=mode) for mode in expand_core_modes(config.getoption("--core-mode"))]
+
+
+def build_eagle3_specs(config: pytest.Config) -> list[Eagle3NpuSweepSpec]:
+    """Build synchronized sweep specs for EAGLE-3 backends."""
+    if not should_expand_core_matrix(config, prefixes=("base", "draft", "fc")):
+        return [Eagle3NpuSweepSpec(core_mode="global4")]
+
+    base_raw = config.getoption("--base-core-mode")
+    draft_raw = config.getoption("--draft-core-mode")
+    fc_raw = config.getoption("--fc-core-mode")
+    shared_raw = config.getoption("--core-mode")
+    base_explicit = option_value_was_provided(config, "base", "core_mode")
+    draft_explicit = option_value_was_provided(config, "draft", "core_mode")
+    fc_explicit = option_value_was_provided(config, "fc", "core_mode")
+    shared_explicit = option_value_was_provided(config, "", "core_mode")
+    use_shared_defaults = shared_explicit or full_matrix_enabled(config)
+
+    if use_shared_defaults and not base_explicit and not draft_explicit and not fc_explicit:
+        return [Eagle3NpuSweepSpec(core_mode=mode) for mode in expand_core_modes(shared_raw)]
+
+    # If any EAGLE-3 backend is explicitly configured, preserve the existing direct kwarg path.
+    return [Eagle3NpuSweepSpec(core_mode=None)]
 
 
 def build_encoder_decoder_specs(config: pytest.Config) -> list[EncoderDecoderNpuSweepSpec]:
@@ -334,6 +374,41 @@ def build_base_npu_params(
         base_kwargs["embedding_weight"] = embedding_weight
 
     return BaseNpuParams(base=base_kwargs)
+
+
+def build_eagle3_npu_params(
+    config: pytest.Config,
+    base_embedding_path: str | None,
+    draft_embedding_path: str | None,
+    *,
+    core_mode_override: str | None = None,
+) -> Eagle3NpuParams:
+    """Build backend kwargs for EAGLE-3 models."""
+    provided_prefixes = collect_provided_prefixes(config, None)
+    warn_unused_prefixes(provided_prefixes, {"base", "draft", "fc"})
+
+    shared_kwargs, _ = collect_npu_kwargs(config, "", core_mode_override=core_mode_override)
+
+    model_kwargs: dict[str, Any] = {}
+    for prefix in ("base", "draft", "fc"):
+        merged_kwargs = {
+            f"{prefix}_mxq_path": shared_kwargs.get("mxq_path"),
+            f"{prefix}_dev_no": shared_kwargs.get("dev_no"),
+            f"{prefix}_core_mode": shared_kwargs.get("core_mode"),
+            f"{prefix}_target_cores": shared_kwargs.get("target_cores"),
+            f"{prefix}_target_clusters": shared_kwargs.get("target_clusters"),
+        }
+        merged_kwargs = {key: value for key, value in merged_kwargs.items() if value is not None}
+        prefix_kwargs, _ = collect_npu_kwargs(config, prefix)
+        merged_kwargs.update(prefix_kwargs)
+        model_kwargs.update(merged_kwargs)
+
+    if base_embedding_path:
+        model_kwargs["base_embedding_weight"] = base_embedding_path
+    if draft_embedding_path:
+        model_kwargs["draft_embedding_weight"] = draft_embedding_path
+
+    return Eagle3NpuParams(model=model_kwargs)
 
 
 def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) -> None:

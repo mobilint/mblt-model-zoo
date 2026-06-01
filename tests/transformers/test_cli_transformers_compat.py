@@ -118,6 +118,78 @@ def test_register_mobilint_models_respects_trust_remote_code(trust_remote_code: 
     assert calls == [("mobilint/demo-model", "dev", trust_remote_code)]
 
 
+def test_register_mobilint_models_imports_hyphenated_model_types_using_package_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate hyphenated Mobilint model types into importable package names."""
+    calls: list[str] = []
+
+    class _FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(model_name_or_path_or_address: str, revision: str | None, trust_remote_code: bool):
+            return type(
+                "_Config",
+                (),
+                {
+                    "model_type": "mobilint-qwen2-eagle3",
+                    "architectures": ["MobilintQwen2Eagle3ForCausalLM"],
+                },
+            )()
+
+    fake_transformers = type(
+        "_Transformers",
+        (),
+        {
+            "AutoConfig": _FakeAutoConfig,
+            "models": type(
+                "_Models",
+                (),
+                {
+                    "auto": type(
+                        "_Auto",
+                        (),
+                        {
+                            "modeling_auto": type(
+                                "_ModelingAuto",
+                                (),
+                                {
+                                    "MODEL_FOR_CAUSAL_LM_MAPPING_NAMES": {},
+                                    "MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES": {},
+                                },
+                            )(),
+                        },
+                    )(),
+                },
+            )(),
+        },
+    )()
+    fake_module = ModuleType("mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3")
+    fake_module.MobilintQwen2Eagle3ForCausalLM = object()
+
+    def _fake_import_module(module_name: str) -> ModuleType:
+        calls.append(module_name)
+        return fake_module
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
+
+    args = type(
+        "_Args",
+        (),
+        {
+            "model_name_or_path_or_address": "mobilint/EAGLE3-JPharmatron-7B",
+            "model_revision": None,
+            "trust_remote_code": True,
+        },
+    )()
+
+    chat_cli.register_mobilint_models(args, fake_transformers)
+
+    assert calls == [
+        "mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3",
+    ]
+    assert getattr(fake_transformers, "MobilintQwen2Eagle3ForCausalLM") is fake_module.MobilintQwen2Eagle3ForCausalLM
+
+
 def test_install_transformers_serve_registration_hook_wraps_loader_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
