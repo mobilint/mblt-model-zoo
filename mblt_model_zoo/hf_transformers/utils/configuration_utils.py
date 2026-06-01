@@ -424,3 +424,221 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
             vision_config=vision_config.to_dict(),
             **kwargs,
         )
+
+
+class MobilintEagle3ConfigMixin(PretrainedConfig):
+    """Config mixin for EAGLE-3 models with base/draft/fc backends."""
+
+    sub_configs = {"draft_config": MobilintConfigMixin}
+    _EAGLE3_BACKEND_FIELDS = (
+        "mxq_path",
+        "dev_no",
+        "max_batch_size",
+        "core_mode",
+        "target_cores",
+        "target_clusters",
+        "revision",
+        "commit_hash",
+    )
+    _EAGLE3_RUNTIME_FIELDS = (
+        ("eagle3_tree_depth", 5, int),
+        ("eagle3_tree_top_k", 8, int),
+        ("eagle3_npu_chunk_size", 192, int),
+    )
+
+    @classmethod
+    def _get_draft_config_class(cls) -> type[PretrainedConfig]:
+        return MobilintConfigMixin
+
+    def _init_or_coerce_draft_config(self, draft_config: Any | None) -> None:
+        draft_config_cls = self._get_draft_config_class()
+
+        if draft_config is None:
+            coerced_draft_config = draft_config_cls()
+        elif isinstance(draft_config, dict):
+            coerced_draft_config = draft_config_cls(**draft_config)
+        elif isinstance(draft_config, draft_config_cls):
+            coerced_draft_config = draft_config
+        else:
+            raise TypeError(
+                f"draft_config must be None, dict, or {draft_config_cls.__name__}; got {type(draft_config).__name__}"
+            )
+
+        self.draft_config = coerced_draft_config
+        self.draft_config.name_or_path = self.name_or_path
+
+    def _ensure_eagle3_npu_backends(self, kwargs: dict[str, Any]) -> None:
+        def _resolve_backend_kwargs(prefix: str) -> dict[str, Any]:
+            backend_kwargs: dict[str, Any] = {}
+            for field_name in self._EAGLE3_BACKEND_FIELDS:
+                prefixed_key = f"{prefix}{field_name}"
+                if prefixed_key in kwargs:
+                    backend_kwargs[prefixed_key] = kwargs[prefixed_key]
+                    continue
+
+                if field_name in kwargs:
+                    backend_kwargs[prefixed_key] = kwargs[field_name]
+            return backend_kwargs
+
+        if not hasattr(self, "base_npu_backend"):
+            self.base_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("base_"), prefix="base_")
+        if not hasattr(self, "draft_npu_backend"):
+            self.draft_npu_backend = MobilintNPUBackend.from_dict(
+                _resolve_backend_kwargs("draft_"),
+                prefix="draft_",
+            )
+        if not hasattr(self, "fc_npu_backend"):
+            self.fc_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("fc_"), prefix="fc_")
+
+    def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
+        for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:
+            if hasattr(self, field_name):
+                continue
+            value = kwargs.pop(field_name, default_value)
+            self.__dict__[field_name] = self._coerce_positive_runtime_int(
+                field_name,
+                value,
+                default_value=default_value,
+            )
+
+    @staticmethod
+    def _coerce_positive_runtime_int(field_name: str, value: Any, *, default_value: int) -> int:
+        """Coerce runtime integer fields and reject invalid ranges."""
+        candidate = default_value if value is None else value
+        try:
+            coerced = int(candidate)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be an integer, got {candidate!r}") from exc
+        if coerced <= 0:
+            raise ValueError(f"{field_name} must be > 0, got {coerced}")
+        return coerced
+
+    def __init__(self, **kwargs):
+        draft_config = kwargs.pop("draft_config", None)
+        self._ensure_eagle3_npu_backends(kwargs)
+        self._ensure_eagle3_runtime_fields(kwargs)
+        super().__init__(**kwargs)
+        self._init_or_coerce_draft_config(draft_config)
+
+    def __post_init__(self, **kwargs: Any) -> None:
+        draft_config = kwargs.pop("draft_config", getattr(self, "draft_config", None))
+        self._ensure_eagle3_npu_backends(kwargs)
+        self._ensure_eagle3_runtime_fields(kwargs)
+        super().__post_init__(**kwargs)
+        self._init_or_coerce_draft_config(draft_config)
+
+    @PretrainedConfig.name_or_path.setter
+    def name_or_path(self, value: str):
+        PretrainedConfig.name_or_path.fset(self, value)
+        draft_config = getattr(self, "draft_config", None)
+        if draft_config is not None:
+            draft_config.name_or_path = value
+
+    @property
+    def base_core_mode(self) -> str:
+        return self.base_npu_backend.core_mode
+
+    @base_core_mode.setter
+    def base_core_mode(self, value: str) -> None:
+        self.base_npu_backend.core_mode = value
+
+    @property
+    def draft_core_mode(self) -> str:
+        return self.draft_npu_backend.core_mode
+
+    @draft_core_mode.setter
+    def draft_core_mode(self, value: str) -> None:
+        self.draft_npu_backend.core_mode = value
+
+    @property
+    def fc_core_mode(self) -> str:
+        return self.fc_npu_backend.core_mode
+
+    @fc_core_mode.setter
+    def fc_core_mode(self, value: str) -> None:
+        self.fc_npu_backend.core_mode = value
+
+    @property
+    def base_target_cores(self) -> list[str]:
+        return self.base_npu_backend.target_cores
+
+    @base_target_cores.setter
+    def base_target_cores(self, values: list[str]) -> None:
+        self.base_npu_backend.target_cores = values
+
+    @property
+    def draft_target_cores(self) -> list[str]:
+        return self.draft_npu_backend.target_cores
+
+    @draft_target_cores.setter
+    def draft_target_cores(self, values: list[str]) -> None:
+        self.draft_npu_backend.target_cores = values
+
+    @property
+    def fc_target_cores(self) -> list[str]:
+        return self.fc_npu_backend.target_cores
+
+    @fc_target_cores.setter
+    def fc_target_cores(self, values: list[str]) -> None:
+        self.fc_npu_backend.target_cores = values
+
+    @property
+    def base_target_clusters(self) -> list[int]:
+        return self.base_npu_backend.target_clusters
+
+    @base_target_clusters.setter
+    def base_target_clusters(self, values: list[int]) -> None:
+        self.base_npu_backend.target_clusters = values
+
+    @property
+    def draft_target_clusters(self) -> list[int]:
+        return self.draft_npu_backend.target_clusters
+
+    @draft_target_clusters.setter
+    def draft_target_clusters(self, values: list[int]) -> None:
+        self.draft_npu_backend.target_clusters = values
+
+    @property
+    def fc_target_clusters(self) -> list[int]:
+        return self.fc_npu_backend.target_clusters
+
+    @fc_target_clusters.setter
+    def fc_target_clusters(self, values: list[int]) -> None:
+        self.fc_npu_backend.target_clusters = values
+
+    @property
+    def base_mxq_path(self) -> str:
+        return self.base_npu_backend.mxq_path
+
+    @base_mxq_path.setter
+    def base_mxq_path(self, value: str) -> None:
+        self.base_npu_backend.mxq_path = value
+
+    @property
+    def draft_mxq_path(self) -> str:
+        return self.draft_npu_backend.mxq_path
+
+    @draft_mxq_path.setter
+    def draft_mxq_path(self, value: str) -> None:
+        self.draft_npu_backend.mxq_path = value
+
+    @property
+    def fc_mxq_path(self) -> str:
+        return self.fc_npu_backend.mxq_path
+
+    @fc_mxq_path.setter
+    def fc_mxq_path(self, value: str) -> None:
+        self.fc_npu_backend.mxq_path = value
+
+    def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
+        _ = d.pop("base_npu_backend", None)
+        _ = d.pop("draft_npu_backend", None)
+        _ = d.pop("fc_npu_backend", None)
+        super()._remove_keys_not_serialized(d)
+
+    def to_dict(self):
+        output = super().to_dict()
+        output.update(self.base_npu_backend.to_dict(prefix="base_"))
+        output.update(self.draft_npu_backend.to_dict(prefix="draft_"))
+        output.update(self.fc_npu_backend.to_dict(prefix="fc_"))
+        return output

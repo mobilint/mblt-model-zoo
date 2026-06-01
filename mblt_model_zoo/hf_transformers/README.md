@@ -288,6 +288,37 @@ To make it easier to test custom compiled models, we support overriding the inpu
   If omitted or set to `None`, the runtime reads `npu_prefill_chunk_size` from the model's `config.json`
   using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
 
+### EAGLE-3 generate compatibility policy
+
+For Mobilint EAGLE-3 models, the draft backend is intentionally lightweight and
+uses a single-block draft architecture (for example, a draft distilled from the
+original model or a Llama-family 1-block draft), rather than the full base-model stack.
+
+`MobilintEagle3GenerationMixin.generate(...)` follows an explicit compatibility policy for unsupported Hugging Face
+generation options.
+
+|Category|Arguments|Behavior|
+|---|---|---|
+|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `prefill_chunk_size`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
+|Hard error (`NotImplementedError`)|`num_beams != 1`, `assistant_model`, `use_cache=False`, custom `logits_processor`, `negative_prompt_ids`, `negative_prompt_attention_mask`|The call fails immediately to prevent ambiguous runtime behavior.|
+
+Examples:
+
+```python
+# Warning-only path (continues)
+outputs = model.generate(
+    input_ids,
+    attention_mask=mask,
+    min_new_tokens=1,
+)
+
+# Hard-error path (fails fast)
+outputs = model.generate(
+    input_ids,
+    num_beams=4,
+)
+```
+
 ### Original Keyword Parameters from `transformers`
 
 The parameters below follow the standard `transformers` semantics. For Mobilint quantized `*.mxq` models, they only affect the non-NPU parts of the model (typically CPU-side layers such as embeddings). NPU execution always runs on Mobilint NPUs.

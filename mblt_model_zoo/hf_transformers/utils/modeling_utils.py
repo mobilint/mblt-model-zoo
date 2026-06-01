@@ -19,23 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
-    npu_backend_prefix: Literal["", "encoder_", "decoder_"] = ""
+    npu_backend_prefix: Literal["", "encoder_", "decoder_", "base_", "draft_", "fc_"] = ""
     _DEFAULT_PREFILL_CHUNK_SIZE = 128
-    
+
     def __init__(self, config: Union[MobilintConfigMixin, MobilintEncoderDecoderConfigMixin], *args, **kwargs):
         no_launch = kwargs.pop("no_launch", False)
-        
+
         super().__init__(config, *args, **kwargs)
-        
+
         if TYPE_CHECKING:
             self.config = config
-        
+
         assert self.config.name_or_path is not None, "config.name_or_path is None!"
 
         # Used for benchmark
         self.npu_time = None
         self.reset_npu_timing()
-        
+
         self.npu_backend: MobilintNPUBackend = self.config.__getattribute__(self.npu_backend_prefix + "npu_backend")
         self.npu_backend.name_or_path = self.config.name_or_path
         revision = getattr(self.config, "revision", None)
@@ -47,7 +47,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         self.npu_backend.create()
         if not no_launch:
             self.launch()
-    
+
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
         embedding_weight_path = kwargs.pop("embedding_weight", None)
@@ -73,9 +73,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             raise FileNotFoundError(f"Custom embedding path not found: {path}")
 
         print(f"[Mobilint] Loading custom embeddings from: {path}")
-        
+
         custom_data = torch.load(path, map_location="cpu")
-        
+
         # Handle dict (state_dict) vs Tensor
         if isinstance(custom_data, dict):
             # Try to find common keys for weights
@@ -90,7 +90,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             raise ValueError(f"Unsupported data format in {path}. Expected dict or Tensor.")
 
         input_embeddings: nn.Embedding = cast(nn.Embedding, model.get_input_embeddings())
-        
+
         original_vocab_size = input_embeddings.weight.shape[0]
         new_vocab_size = new_weight.shape[0]
         embed_dim = input_embeddings.weight.shape[1]
@@ -105,18 +105,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         with torch.no_grad():
             input_embeddings.weight.data = new_weight.to(
-                device=input_embeddings.weight.device,
-                dtype=input_embeddings.weight.dtype
+                device=input_embeddings.weight.device, dtype=input_embeddings.weight.dtype
             )
-        
+
         print("[Mobilint] Custom embeddings successfully injected.")
-    
+
     def launch(self):
         self.npu_backend.launch()
-    
+
     def dispose(self):
         self.npu_backend.dispose()
-    
+
     def get_mxq_model(self):
         return self.npu_backend.mxq_model
 
@@ -151,12 +150,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         input: torch.Tensor,
     ):
         input_numpy = input.type(torch.float32).cpu().numpy()
-        
+
         result = self.npu_backend.mxq_model.infer([input_numpy])
         assert result is not None, "mxq infer result is None!"
 
         output = torch.tensor(result[0], dtype=input.dtype, device=input.device)
-        
+
         return output
 
     def llm_forward(
@@ -170,7 +169,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     ):
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
-        
+
         if attention_mask is not None:
             self._validate_batch_cache(past_key_values, attention_mask.shape[0])
             return self._llm_forward_batch(
@@ -190,14 +189,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         mxq_model = self.npu_backend.mxq_model
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
-        timing_phase: Literal["prefill", "decode"] = (
-            "prefill" if inputs_embeds_numpy.shape[2] > 1 or initial_cache_size == 0 else "decode"
-        )
-        
+        timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
+
         for i in range(num_of_chunks):
             start_index = i * resolved_prefill_chunk_size
             end_index = min(start_index + resolved_prefill_chunk_size, inputs_embeds_numpy.shape[2])
-            cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
+            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
 
             if count_npu_time:
                 t0 = time.perf_counter()
@@ -234,7 +231,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             dtype=torch.long,
             device=inputs_embeds.device,
         )
-    
+
     def _llm_forward_batch(
         self,
         inputs_embeds: torch.Tensor,
@@ -365,7 +362,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     num_of_chunks,
                     input_batch_same,
                 )
-            
+
             if count_npu_time:
                 t0 = time.perf_counter()
                 result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
@@ -373,7 +370,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 elapsed = time.perf_counter() - t0
                 self.npu_time += elapsed
                 phase: Literal["prefill", "decode"] = (
-                    "prefill" if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks) else "decode"
+                    "prefill"
+                    if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks)
+                    else "decode"
                 )
                 self._record_npu_timing(phase, elapsed)
             else:
@@ -512,8 +511,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
 
         mxq_model = self.npu_backend.mxq_model
-        
-        cache_size = (0 if past_key_values is None else past_key_values.get_seq_length())
+
+        cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
 
         result = mxq_model.infer([hidden_states_numpy, encoder_hidden_states_numpy], None, cache_size)
         assert result is not None, "mxq infer result is None!"
@@ -523,5 +522,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             past_key_values.update_cache_position(cache_position)
 
         logits = torch.tensor(logits_ndarray, dtype=hidden_states.dtype, device=hidden_states.device)
-        
+
         return logits
+
+
+class MobilintEagle3ModelMixin(MobilintModelMixin):
+    """Base Mobilint model mixin for EAGLE-3 child backends.
+
+    EAGLE-3 models are composed from base, draft, and optional projection MXQ
+    child models. This mixin exists as the shared extension point for those
+    child backends so future LLM architectures can reuse the same EAGLE-3
+    runtime contracts without inheriting from a Qwen2-specific class.
+    """
