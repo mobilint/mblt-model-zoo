@@ -269,9 +269,9 @@ class YOLOPostBase(PostBase):
             list[torch.Tensor]: List of tensors on the correct device.
         """
         if isinstance(x, np.ndarray):
-            tensors = [torch.from_numpy(x)]
+            tensors = [torch.from_numpy(x).to(self.device)]
         elif isinstance(x, torch.Tensor):
-            tensors = [x]
+            tensors = [x.to(self.device)]
         else:
             assert isinstance(x, list), f"Got unexpected type for x={type(x)}."
             if all(isinstance(xi, np.ndarray) for xi in x):

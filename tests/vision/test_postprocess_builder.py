@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, cast
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -177,6 +178,38 @@ def test_yolo_postprocess_runtime_kwargs_override_nc_default() -> None:
     )
 
     assert postprocessor.nc == 3
+
+
+@pytest.mark.parametrize(
+    "singleton_output",
+    [torch.zeros((84, 8400), dtype=torch.float32), np.zeros((84, 8400), dtype=np.float32)],
+)
+def test_yolo_postprocess_moves_singleton_outputs_to_device_before_dim_check(
+    singleton_output: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Move single raw outputs onto the configured device like list inputs already do."""
+
+    config_path = MODEL_CONFIG_DIR / "YOLO11m.yaml"
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+
+    postprocessor = cast(
+        YOLOPostBase,
+        build_postprocess(config["DEFAULT"]["pre_cfg"], config["DEFAULT"]["post_cfg"]),
+    )
+    postprocessor.to("meta")
+
+    def capture_check_dim(x: list[torch.Tensor]) -> list[torch.Tensor]:
+        return x
+
+    monkeypatch.setattr(postprocessor, "check_dim", capture_check_dim)
+
+    checked_inputs = postprocessor.check_input(singleton_output)
+
+    assert len(checked_inputs) == 1
+    assert checked_inputs[0].device == postprocessor.device
+    assert tuple(checked_inputs[0].shape) == (84, 8400)
 
 
 def test_engine_passes_postprocess_kwargs_to_builder(monkeypatch: pytest.MonkeyPatch) -> None:

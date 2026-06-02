@@ -86,7 +86,8 @@ version = { attr = "mblt_model_zoo.__version__" }
 [tool.setuptools.package-data]
 "mblt_model_zoo" = [
     "MeloTTS/text/cmudict.rep",
-    "MeloTTS/text/cmudict_cache.pickle"
+    "MeloTTS/text/cmudict_cache.pickle",
+    "vision/models/*.yaml",
 ]
 
 [dependency-groups]
