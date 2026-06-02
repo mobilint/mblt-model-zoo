@@ -29,6 +29,38 @@ class YOLOAnchorPost(YOLOPostBase):
         self.anchor_grid: torch.Tensor
         self.make_anchor_grid()
 
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return the export-style output tensor for anchor-based YOLO models."""
+        if len(x) == 1:
+            converted = self.conversion(x)
+            if isinstance(converted, torch.Tensor):
+                return converted.squeeze(1)
+            det_out, proto_out = converted
+            return [det_out.squeeze(1), proto_out]
+
+        rearranged = self.rearrange(x)
+        if isinstance(rearranged, tuple):
+            det_out, proto_out = rearranged
+            return [self.decode_batch(det_out), proto_out.permute(0, 3, 1, 2)]
+        return self.decode_batch(rearranged)
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every anchor without filtering and preserve batch shape."""
+        batch_size = x.shape[0]
+        grid = self.grid.unsqueeze(0).expand(batch_size, -1, -1)
+        anchor_grid = self.anchor_grid.unsqueeze(0).expand(batch_size, -1, -1)
+        stride = self.stride_as_tensor().unsqueeze(0).expand(batch_size, -1, -1)
+
+        decoded = x.clone()
+        decoded[..., :2] = decoded[..., :2].sigmoid().mul(2.0).add(grid).add(-0.5).mul(stride)
+        decoded[..., 2:4] = decoded[..., 2:4].sigmoid().mul(2.0).pow(2.0).mul(anchor_grid)
+        conf = decoded[..., 4:5].sigmoid()
+        decoded[..., 4:5] = conf
+        decoded[..., 5 : 5 + self.nc] = decoded[..., 5 : 5 + self.nc].sigmoid()
+        if self.task == "instance_segmentation" and self.n_extra > 0:
+            decoded[..., 5 + self.nc :] = decoded[..., 5 + self.nc :] * conf
+        return decoded
+
     def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Rearranges raw model output tensors into a concatenated decode input.
 
@@ -70,7 +102,7 @@ class YOLOAnchorPost(YOLOPostBase):
             x (torch.Tensor): Concatenated output tensor from `rearrange`.
 
         Returns:
-            list[torch.Tensor]: Decoded detections for each image in the batch.
+            list[torch.Tensor]: Per-image decoded detections after confidence filtering.
         """
         return [self.process_box_cls(box_cls) for box_cls in x]
 
@@ -122,8 +154,38 @@ class YOLOAnchorPost(YOLOPostBase):
 
         return [process_conversion(xi) for xi in x_list]
 
+    def _nms_single(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+        """Apply anchor-based NMS to a single decoded image tensor."""
+        mi = 5 + self.nc  # mask index
+        if xi.numel() == 0:
+            return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
+
+        scores = xi[:, 5:mi] * xi[:, 4:5]
+        match_index = (scores > self.conf_thres).nonzero(as_tuple=False)
+        if match_index.numel() == 0:
+            return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=xi.device)
+
+        i = match_index[:, 0]
+        j = match_index[:, 1]
+        rows = xi[i]
+        boxes_xywh = rows[:, :4]
+        out = torch.empty((rows.shape[0], 6 + self.n_extra), dtype=rows.dtype, device=rows.device)
+        out[:, 0] = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
+        out[:, 1] = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
+        out[:, 2] = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
+        out[:, 3] = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
+        out[:, 4] = scores[i, j]
+        out[:, 5] = j.to(rows.dtype)
+        if self.n_extra > 0:
+            out[:, 6:] = rows[:, mi:]
+        out = out[out[:, 4].argsort(descending=True)[:max_nms]]
+        c = out[:, 5:6] * max_wh
+        boxes, score = out[:, :4] + c, out[:, 4]
+        i_idx = non_max_suppression(boxes, score, self.iou_thres, max_det)
+        return out[i_idx]
+
     def nms(
-        self, x: list[torch.Tensor], max_det: int = 300, max_nms: int = 30000, max_wh: int = 7680
+        self, x: torch.Tensor | list[torch.Tensor], max_det: int = 300, max_nms: int = 30000, max_wh: int = 7680
     ) -> list[torch.Tensor]:
         """
         Perform Non-Maximum Suppression (NMS) on the decoded detections.
@@ -137,37 +199,9 @@ class YOLOAnchorPost(YOLOPostBase):
         Returns:
             list[torch.Tensor]: Post-NMS detections for each image.
         """
-        mi = 5 + self.nc  # mask index
-        output = []
-        for xi in x:
-            if xi.numel() == 0:
-                output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device))
-                continue
-            xi[..., 5:] *= xi[..., 4:5]  # conf = obj_conf * cls_conf
-            match_index = (xi[..., 5:mi] > self.conf_thres).nonzero(as_tuple=False)
-            if match_index.numel() == 0:
-                output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32))
-                continue
-            i = match_index[:, 0]
-            j = match_index[:, 1]
-            rows = xi[i]
-            boxes_xywh = rows[:, :4]
-            xi = torch.empty((rows.shape[0], 6 + self.n_extra), dtype=rows.dtype, device=rows.device)
-            xi[:, 0] = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
-            xi[:, 1] = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
-            xi[:, 2] = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
-            xi[:, 3] = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
-            xi[:, 4] = rows[torch.arange(rows.shape[0], device=rows.device), j + 5]
-            xi[:, 5] = j.to(rows.dtype)
-            if self.n_extra > 0:
-                xi[:, 6:] = rows[:, mi:]
-            xi = xi[xi[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence
-            # NMS
-            c = xi[:, 5:6] * max_wh
-            boxes, scores = xi[:, :4] + c, xi[:, 4]
-            i_idx = non_max_suppression(boxes, scores, self.iou_thres, max_det)
-            output.append(xi[i_idx])
-        return output
+        if isinstance(x, list):
+            return [self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh) for xi in x]
+        return [self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh) for xi in x]
 
     def make_anchor_grid(self) -> None:
         """
@@ -215,7 +249,7 @@ class YOLOAnchorPost(YOLOPostBase):
 class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
     """Postprocessing for YOLO segmentation models with anchors."""
 
-    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[Any, torch.Tensor | None]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
         Args:

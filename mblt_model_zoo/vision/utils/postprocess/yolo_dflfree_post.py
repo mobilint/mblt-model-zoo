@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import torch
 
@@ -10,6 +10,8 @@ from .common import YOLOPosePostMixin, YOLOSegPostMixin, dist2bbox, dual_topk
 
 class YOLODFLFreePost(YOLOPostBase):
     """Postprocessing for YOLO DFL-free models."""
+
+    max_det = 300
 
     def __init__(self, pre_cfg: dict, post_cfg: dict, **kwargs: object) -> None:
         """Initialize the DFL-free YOLO postprocessor.
@@ -21,19 +23,77 @@ class YOLODFLFreePost(YOLOPostBase):
         """
         super().__init__(pre_cfg, post_cfg, **kwargs)
 
-    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return the export-style output tensor for DFL-free YOLO models."""
+        if len(x) == 2:
+            converted = cast(torch.Tensor, self.conversion(x))
+            return self._stack_topk_outputs(self.filter_conversion(converted))
+        if len(x) == 4:
+            converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
+            return [self._stack_topk_outputs(self.filter_conversion(converted)), self._proto_to_nchw(proto_outs)]
+        if len(x) == 3:
+            converted = cast(torch.Tensor, self.conversion(x))
+            return self._stack_topk_outputs(self.filter_conversion(converted))
+
+        rearranged = self.rearrange(x)
+        if isinstance(rearranged, tuple):
+            det_out, proto_outs = rearranged
+            return [self.decode_batch(det_out), self._proto_to_nchw(proto_outs)]
+        return self.decode_batch(rearranged)
+
+    def _proto_to_nchw(self, proto: torch.Tensor) -> torch.Tensor:
+        """Convert prototype tensors to ``(B, C, H, W)`` if needed."""
+        if proto.ndim == 4 and proto.shape[1] == self.n_extra:
+            return proto
+        if proto.ndim == 4 and proto.shape[-1] == self.n_extra:
+            return proto.permute(0, 3, 1, 2)
+        raise ValueError(f"Unsupported proto tensor shape {tuple(proto.shape)} for non-e2e output.")
+
+    def _stack_topk_outputs(self, outputs: list[torch.Tensor]) -> torch.Tensor:
+        """Pad or trim per-image detections to a fixed batch tensor."""
+        output_dim = 6 + self.n_extra
+        padded_outputs = []
+        for output in outputs:
+            output = output[: self.max_det]
+            if output.shape[0] < self.max_det:
+                pad = torch.zeros(
+                    (self.max_det - output.shape[0], output_dim),
+                    dtype=output.dtype,
+                    device=output.device,
+                )
+                output = torch.cat([output, pad], dim=0)
+            padded_outputs.append(output)
+        return torch.stack(padded_outputs, dim=0)
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every anchor, then apply batched top-k selection for export-style output."""
+        box, scores, extra = torch.split(x, [4, self.nc, self.n_extra], dim=1)
+        anchors = self.anchors_as_tensor().unsqueeze(0)
+        stride = self.stride_as_tensor().unsqueeze(0)
+        dbox = dist2bbox(box, anchors, xywh=False, dim=1) * stride
+        decoded = torch.cat([dbox, scores.sigmoid(), extra], dim=1).transpose(1, 2)
+        return self._stack_topk_outputs(
+            [
+                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                for image in decoded
+            ]
+        )
+
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[Any, torch.Tensor | None]:
         """Preprocesses inputs for DFL-free models.
 
         Args:
             x (list[torch.Tensor]): Raw model outputs.
 
         Returns:
-            tuple: (processed_detections, None).
+            tuple: (processed detections, None).
         """
         if len(x) == 2:
             converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
         rearranged = self.rearrange(x)
+        if not isinstance(rearranged, torch.Tensor):
+            raise TypeError("rearrange should return a tensor for DFL-free detection postprocessing.")
         return self.decode(rearranged), None
 
     def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
@@ -89,7 +149,7 @@ class YOLODFLFreePost(YOLOPostBase):
             x (torch.Tensor): Concatenated output tensor from `rearrange`.
 
         Returns:
-            list[torch.Tensor]: Decoded detections for each image in the batch.
+            list[torch.Tensor]: Per-image decoded detections after filtering and top-k selection.
         """
         return [self.process_box_cls(box_cls) for box_cls in x]
 
@@ -139,7 +199,7 @@ class YOLODFLFreePost(YOLOPostBase):
 
     def nms(
         self,
-        x: list[torch.Tensor],
+        x: torch.Tensor | list[torch.Tensor],
         _max_det: int = 300,
         _max_nms: int = 30000,
         _max_wh: int = 7680,
@@ -153,9 +213,11 @@ class YOLODFLFreePost(YOLOPostBase):
             _max_wh (int, optional): Maximum box width/height. Defaults to 7680.
 
         Returns:
-            list[torch.Tensor]: The input detections unchanged.
+            list[torch.Tensor]: Per-image detections with padded zero rows removed.
         """
-        return x
+        if isinstance(x, list):
+            return x
+        return [xi[xi[:, 4] > 0] for xi in x]
 
 
 class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
@@ -334,3 +396,21 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(1, self.n_extra, -1)  # (1, 51, *)
         pre_topk = torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).squeeze(0).transpose(0, 1)  # (*, 56)
         return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every anchor, then apply batched top-k selection for export-style pose output."""
+        box, scores, keypoints = torch.split(x, [4, self.nc, self.n_extra], dim=1)
+        anchors = self.anchors_as_tensor().unsqueeze(0)
+        stride = self.stride_as_tensor().unsqueeze(0)
+        dbox = dist2bbox(box, anchors, xywh=False, dim=1) * stride
+        keypoints = keypoints.view(x.shape[0], 17, 3, -1)
+        key_coord, key_conf = torch.split(keypoints, [2, 1], dim=2)
+        key_coord = (key_coord + anchors.unsqueeze(1)) * stride.unsqueeze(1)
+        keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(x.shape[0], self.n_extra, -1)
+        decoded = torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).transpose(1, 2)
+        return self._stack_topk_outputs(
+            [
+                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                for image in decoded
+            ]
+        )

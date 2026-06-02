@@ -4,7 +4,7 @@ YOLO NMS-free postprocessing.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import torch
 
@@ -15,7 +15,47 @@ from .yolo_anchorless_post import YOLOAnchorlessPost
 class YOLONMSFreePost(YOLOAnchorlessPost):
     """Postprocessing for YOLO NMS-free models."""
 
-    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+    max_det = 300
+
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor:
+        """Return the export-style output tensor for NMS-free YOLO models."""
+        if len(x) == 2:
+            converted = cast(torch.Tensor, self.conversion(x))
+            return self._stack_topk_outputs(self.filter_conversion(converted))
+
+        rearranged = cast(torch.Tensor, self.rearrange(x))
+        return self.decode_batch(rearranged)
+
+    def _stack_topk_outputs(self, outputs: list[torch.Tensor]) -> torch.Tensor:
+        """Pad or trim per-image detections to a fixed batch tensor."""
+        padded_outputs = []
+        for output in outputs:
+            output = output[: self.max_det]
+            if output.shape[0] < self.max_det:
+                pad = torch.zeros(
+                    (self.max_det - output.shape[0], 6),
+                    dtype=output.dtype,
+                    device=output.device,
+                )
+                output = torch.cat([output, pad], dim=0)
+            padded_outputs.append(output)
+        return torch.stack(padded_outputs, dim=0)
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every anchor, then apply batched top-k selection for export-style output."""
+        box, scores = torch.split(x, [self.reg_max * 4, self.nc], dim=1)
+        anchors = self.anchors_as_tensor().unsqueeze(0)
+        stride = self.stride_as_tensor().unsqueeze(0)
+        dbox = dist2bbox(self.dfl(box), anchors, xywh=False, dim=1) * stride
+        decoded = torch.cat([dbox, scores.sigmoid()], dim=1).transpose(1, 2)
+        return self._stack_topk_outputs(
+            [
+                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                for image in decoded
+            ]
+        )
+
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[Any, torch.Tensor | None]:
         """Preprocesses inputs for NMS-free models.
 
         Args:
@@ -84,7 +124,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
     def nms(
         self,
-        x: list[torch.Tensor],
+        x: torch.Tensor | list[torch.Tensor],
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
@@ -98,6 +138,8 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
             max_wh (int, optional): Maximum box width/height. Defaults to 7680.
 
         Returns:
-            list[torch.Tensor]: The input detections unchanged.
+            list[torch.Tensor]: Per-image detections with padded zero rows removed.
         """
-        return x
+        if isinstance(x, list):
+            return x
+        return [xi[xi[:, 4] > 0] for xi in x]

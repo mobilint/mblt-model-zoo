@@ -161,12 +161,10 @@ class YOLOPostBase(PostBase):
         self.set_threshold(conf_thres, iou_thres)
         checked_input = self.check_input(x)
 
-        predictions, proto_outs = self._pre_process(checked_input)
-
         if not self.e2e:
-            if proto_outs is not None:
-                return self.masking(predictions, proto_outs)
-            return predictions
+            return self.non_e2e(checked_input)
+
+        predictions, proto_outs = self._pre_process(checked_input)
 
         nms_output = self.nms(predictions)
 
@@ -174,10 +172,23 @@ class YOLOPostBase(PostBase):
             return self.masking(nms_output, proto_outs)
         return nms_output
 
+    def non_e2e(self, x: list[torch.Tensor]) -> Any:
+        """Return the export-style postprocess output when end-to-end mode is disabled.
+
+        Args:
+            x: Checked raw model outputs.
+
+        Returns:
+            Export-style tensors whose batch dimensions remain intact.
+        """
+        if len(x) == 1:
+            return self.conversion(x)
+        return self.rearrange(x)
+
     def _pre_process(
         self,
         x: list[torch.Tensor],
-    ) -> tuple[list[torch.Tensor], torch.Tensor | list[torch.Tensor] | None]:
+    ) -> tuple[Any, torch.Tensor | list[torch.Tensor] | None]:
         """Protected method to preprocess inputs into (predictions, prototypes).
 
         Args:
@@ -301,14 +312,14 @@ class YOLOPostBase(PostBase):
         """
 
     @abstractmethod
-    def decode(self, x: Any) -> list[torch.Tensor]:
-        """Decodes rearranged outputs into per-image detection tensors.
+    def decode(self, x: Any) -> Any:
+        """Decodes rearranged outputs into a family-specific batched representation.
 
         Args:
             x: Rearranged output tensors.
 
         Returns:
-            Decoded detections for each image in the batch.
+            Decoded detections in the canonical representation for that YOLO family.
         """
 
     def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
@@ -336,7 +347,7 @@ class YOLOPostBase(PostBase):
         """
 
     @abstractmethod
-    def nms(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+    def nms(self, x: Any) -> list[torch.Tensor]:
         """Performs non-maximum suppression on decoded detections.
 
         Args:
