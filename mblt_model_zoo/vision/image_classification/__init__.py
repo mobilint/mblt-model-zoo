@@ -97,6 +97,7 @@ __all__: list[str] = [
     "ResNeXt50_32x4d",
     "ResNeXt101_32x8d",
     "ResNeXt101_64x4d",
+    "ShuffleNet_V2_X0_5",
     "ShuffleNet_V2_X1_0",
     "ShuffleNet_V2_X1_5",
     "ShuffleNet_V2_X2_0",
@@ -249,6 +250,7 @@ ResNet152 = create_model_class("ResNet152", __name__)
 ResNeXt50_32x4d = create_model_class("ResNeXt50_32x4d", __name__)
 ResNeXt101_32x8d = create_model_class("ResNeXt101_32x8d", __name__)
 ResNeXt101_64x4d = create_model_class("ResNeXt101_64x4d", __name__)
+ShuffleNet_V2_X0_5 = create_model_class("ShuffleNet_V2_X0_5", __name__)
 ShuffleNet_V2_X1_0 = create_model_class("ShuffleNet_V2_X1_0", __name__)
 ShuffleNet_V2_X1_5 = create_model_class("ShuffleNet_V2_X1_5", __name__)
 ShuffleNet_V2_X2_0 = create_model_class("ShuffleNet_V2_X2_0", __name__)
