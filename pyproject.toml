@@ -27,6 +27,7 @@ dependencies = [
     "requests>=2.32.0",
     "tqdm",
     "mblt-tracker>=0.2.5",
+    "PyYAML",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
