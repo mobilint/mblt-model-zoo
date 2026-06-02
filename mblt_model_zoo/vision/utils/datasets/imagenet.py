@@ -2,6 +2,8 @@
 ImageNet dataset constants and utilities.
 """
 
+from __future__ import annotations
+
 
 def get_imagenet_label(idx: int) -> str:
     """Get the descriptive label for an ImageNet class index.

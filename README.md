@@ -33,79 +33,136 @@ cd mblt-model-zoo
 pip install -e .
 ```
 
+Release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Quick Start Guide
 
-### Initializing Quantized Model Class
+### Initializing a Vision Model
 
-**mblt-model-zoo** provides a quantized model with associated pre- and post-processing tools. The following code snippet shows how to use the pre-trained model for inference.
+Vision models are loaded through `MBLT_Engine`. This is the same loading style used in
+[`tests/vision`](tests/vision) and [`benchmark/vision`](benchmark/vision).
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+# Load a built-in model config.
+# If mxq_path is empty, the MXQ file is downloaded from Hugging Face Hub and cached automatically.
+model = MBLT_Engine(
+    model_cls="resnet50",
+    model_type="DEFAULT",
+    mxq_path="",
+    core_mode="global8",
+)
+
+# Load a different recipe defined in the model YAML.
+model = MBLT_Engine(
+    model_cls="resnet50",
+    model_type="IMAGENET1K_V1",
+    mxq_path="",
+    core_mode="global8",
+)
+
+# Load from a local MXQ file instead of downloading from the Hub.
+model = MBLT_Engine(
+    model_cls="resnet50",
+    model_type="DEFAULT",
+    mxq_path="path/to/resnet50.mxq",
+    core_mode="global8",
+)
+```
+
+`MBLT_Engine` accepts these main arguments:
+
+- `model_cls`: Model name or YAML config path.
+- `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
+- `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
+- `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
+
+Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
+
+### Running Inference
+
+You can pass an image path, PIL image, numpy array, or torch tensor to the preprocess pipeline.
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(
+    model_cls="resnet50",
+    model_type="DEFAULT",
+    mxq_path="",
+    core_mode="global8",
+)
+
+image_path = "path/to/image.jpg"
+
+try:
+    input_img = model.preprocess(image_path)
+    output = model(input_img)
+    result = model.postprocess(output)
+
+    result.plot(
+        source_path=image_path,
+        save_path="path/to/save/result.jpg",
+        topk=5,
+    )
+finally:
+    model.dispose()
+```
+
+For object detection models such as YOLO, postprocessing thresholds are initialized from the model
+YAML. You can either use those defaults directly:
+
+```python
+result = model.postprocess(output)
+```
+
+or override them once on the model before calling `postprocess()`:
+
+```python
+model.set_postprocess_thresholds(conf_thres=0.25)
+result = model.postprocess(output)
+```
+
+Available vision models are documented in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
+
+### Vision API Migration for 2.0.0
+
+Starting in `2.0.0`, `mblt_model_zoo.vision` no longer re-exports every legacy vision model class
+at the package top level. Imports such as:
 
 ```python
 from mblt_model_zoo.vision import ResNet50
-
-# Load the pre-trained model. 
-# Automatically download the model if not found in the local cache.
-resnet50 = ResNet50() 
-
-# Load the model trained with a different recipe
-# Currently, the default is "DEFAULT", or "IMAGENET1K_V1".
-resnet50 = ResNet50(model_type = "IMAGENET1K_V2")
-
-# Download the model to local directory and load it
-resnet50 = ResNet50(local_path = "path/to/local/") # the file will be downloaded to "path/to/local/model.mxq"
-
-# Load the model from a local path or download as filename and file path you want
-resnet50 = ResNet50(local_path = "path/to/local/model.mxq")
-
-# Set inference mode for better performance
-# ARIES supports "single", "multi", "global4", and "global8" inference mode. Default is "global8"
-resnet50 = ResNet50(infer_mode = "global8")
-
-# (Beta) If you are holding a model compiled for REGULUS, enable inference on the REGULUS device.
-resnet50 = ResNet50(product = "regulus")
-
-# In summary, the model can be loaded with the following arguments. 
-# You may customize those arguments to work with Mobilint's NPU.
-resnet50 = ResNet50(
-    local_path = None,
-    model_type = "DEFAULT",
-    infer_mode = "global8",
-    product = "aries",
-)
-
+from mblt_model_zoo.vision import YOLO11m
 ```
 
-### Working with Quantized Model
+are no longer supported.
 
-With the image given as a path, PIL image, numpy array, or torch tensor, you can perform inference with the quantized model. The following code snippet shows how to use the quantized model for inference:
+Use one of these migration paths instead:
 
 ```python
-image_path = "path/to/image.jpg"
+from mblt_model_zoo.vision import MBLT_Engine
 
-input_img = resnet50.preprocess(image_path) # Preprocess the input image
-output = resnet50(input_img) # Perform inference with the quantized model
-result = resnet50.postprocess(output) # Postprocess the output
-
-result.plot(
-    source_path=image_path,
-    save_path="path/to/save/result.jpg",
-)
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
 ```
-
-### Listing Available Models
-
-**mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., image classification, object detection, etc.):
 
 ```python
-from mblt_model_zoo.vision import list_models
-from pprint import pprint
-
-available_models = list_models()
-pprint(available_models)
+from mblt_model_zoo.vision.image_classification import ResNet50
+from mblt_model_zoo.vision.object_detection import YOLO11m
 ```
+
+The task subpackage imports remain available as compatibility wrappers around `MBLT_Engine`. You
+can also inspect supported tasks and model names programmatically with `mblt_model_zoo.vision.list_tasks()`
+and `mblt_model_zoo.vision.list_models()`.
+
+For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` so
+existing call sites do not fail immediately, but it is ignored by the YAML-backed model registry.
+If you previously relied on `product` to choose a non-default artifact, migrate that selection to
+explicit `model_cls`, `model_type`, or `mxq_path` values.
 
 ## Model List
 
-We provide the models that are quantized with our advanced quantization techniques. A list of available vision models is [here](mblt_model_zoo/vision/README.md).
+We provide models quantized with our advanced quantization techniques. You can check whether a model is available in our [configuration directory](mblt_model_zoo/vision/models/).
 
 ## Optional Extras
 
@@ -119,6 +176,7 @@ Currently, these optional functions are only available on environment equipped w
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 
 For the `transformers` extra, the repository also includes:
+
 - functional test instructions in [tests/transformers/TEST.md](tests/transformers/TEST.md)
 - benchmark script usage in [benchmark/transformers/README.md](benchmark/transformers/README.md)
 

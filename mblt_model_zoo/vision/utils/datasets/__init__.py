@@ -2,6 +2,8 @@
 Datasets utilities and loaders.
 """
 
+from __future__ import annotations
+
 from .coco import (
     get_coco_class_num,
     get_coco_det_palette,
@@ -19,14 +21,16 @@ from .dataloader import (
     get_imagenet_loader,
     get_widerface_loader,
 )
+from .dotav1 import get_dotav1_class_num, get_dotav1_label
 from .imagenet import get_imagenet_label
 from .organizer import (
     organize_coco,
+    organize_dotav1,
     organize_imagenet,
     organize_widerface,
 )
 
-__all__ = [
+__all__: list[str] = [
     "get_coco_class_num",
     "get_coco_det_palette",
     "get_coco_inv",
@@ -34,6 +38,8 @@ __all__ = [
     "get_coco_label",
     "get_coco_limb_palette",
     "get_coco_pose_skeleton",
+    "get_dotav1_class_num",
+    "get_dotav1_label",
     "CustomCocodata",
     "CustomImageFolder",
     "CustomWiderface",
@@ -42,6 +48,7 @@ __all__ = [
     "get_widerface_loader",
     "get_imagenet_label",
     "organize_coco",
+    "organize_dotav1",
     "organize_imagenet",
     "organize_widerface",
 ]

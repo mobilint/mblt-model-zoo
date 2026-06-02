@@ -8,37 +8,27 @@ It initializes the model and evaluates its performance.
 import argparse
 import os
 
-import mblt_model_zoo
+from mblt_model_zoo.vision import MBLT_Engine
 from mblt_model_zoo.vision.utils.evaluation import eval_coco
-
-TOTAL_MODELS = mblt_model_zoo.vision.list_models()
-MODEL_LIST = TOTAL_MODELS["object_detection"] + TOTAL_MODELS["instance_segmentation"] + TOTAL_MODELS["pose_estimation"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # --- Model Configuration ---
+    parser.add_argument("--model-cls", type=str, default="YOLOv5m", help="model type you want to test")
     parser.add_argument(
-        "--model-name",
+        "--mxq-path",
         type=str,
-        default="YOLOv5m",
-        choices=MODEL_LIST,
-        help="Model name",
-    )
-    parser.add_argument(
-        "--local-path",
-        type=str,
-        default=None,
+        default="",
         help="Path to the YOLOv5m model file (.mxq)",
     )
-    parser.add_argument("--model-type", type=str, default="DEFAULT", help="Model type")
+    parser.add_argument("--model-type", type=str, default="DEFAULT", help="model type")
     parser.add_argument(
-        "--infer-mode",
+        "--core-mode",
         type=str,
         default="global8",
         choices=["single", "multi", "global4", "global8"],
-        help="Inference mode",
+        help="Inference core mode",
     )
-    parser.add_argument("--product", type=str, default="aries", help="Product")
     # --- Benchmark Configuration ---
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size")
     parser.add_argument(
@@ -61,9 +51,13 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_cls = getattr(mblt_model_zoo.vision, args.model_name)
-    # --- Model Initialization ---
-    model = model_cls(args.local_path, args.model_type, args.infer_mode, args.product)
+    # Load model with the specified mxq_path
+    model = MBLT_Engine(
+        model_cls=args.model_cls,
+        mxq_path=args.mxq_path,
+        model_type=args.model_type,
+        core_mode=args.core_mode,
+    )
 
     # --- Benchmark Execution ---
     acc = eval_coco(model, args.data_path, args.batch_size, args.conf_thres, args.iou_thres)

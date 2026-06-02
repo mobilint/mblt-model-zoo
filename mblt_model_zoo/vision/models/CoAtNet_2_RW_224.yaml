@@ -1,0 +1,21 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/CoAtNet_2_RW_224
+    filename: coatnet_2_rw_224.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 235
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: tf
+  post_cfg:
+    task: image_classification

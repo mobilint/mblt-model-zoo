@@ -2,6 +2,8 @@
 Channel order preprocessing.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 
@@ -12,7 +14,7 @@ from .base import PreOps
 class SetOrder(PreOps):
     """Sets the channel order of the image to either HWC or CHW format."""
 
-    def __init__(self, shape: str = "HWC"):
+    def __init__(self, shape: str = "HWC") -> None:
         """Initializes the SetOrder operation.
 
         Args:
@@ -39,10 +41,12 @@ class SetOrder(PreOps):
             cdim = 2
         else:
             raise ValueError(f"Only assume HWC or CHW with 3 channels, but got shape {x.shape}")
-        is_tensor = isinstance(x, torch.Tensor)
-        permute_fn = torch.permute if is_tensor else np.transpose
         if cdim == 0 and self.shape.lower() == "hwc":
-            return permute_fn(x, (1, 2, 0))
+            if isinstance(x, torch.Tensor):
+                return torch.permute(x, (1, 2, 0))
+            return np.transpose(x, (1, 2, 0))
         elif cdim == 2 and self.shape.lower() == "chw":
-            return permute_fn(x, (2, 0, 1))
+            if isinstance(x, torch.Tensor):
+                return torch.permute(x, (2, 0, 1))
+            return np.transpose(x, (2, 0, 1))
         return x

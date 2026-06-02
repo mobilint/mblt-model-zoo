@@ -2,6 +2,8 @@
 COCO dataset constants and utilities.
 """
 
+from __future__ import annotations
+
 CLASS_INV_MAP = (
     1,
     2,
@@ -339,7 +341,7 @@ def get_coco_inv(idx: int) -> int:
     return CLASS_INV_MAP[idx]
 
 
-def get_coco_det_palette(idx: int) -> tuple:
+def get_coco_det_palette(idx: int) -> tuple[int, int, int]:
     """
     Get a distinct color for a COCO detection class.
 
@@ -347,51 +349,51 @@ def get_coco_det_palette(idx: int) -> tuple:
         idx (int): Class index.
 
     Returns:
-        tuple: (R, G, B) color tuple.
+        tuple[int, int, int]: (R, G, B) color tuple.
     """
     return DET_PALETTE[idx]
 
 
-def get_coco_pose_palette(idx: int) -> list:
+def get_coco_pose_palette(idx: int) -> list[int]:
     """Get the COCO pose palette by index.
 
     Args:
         idx (int): The index of the COCO pose palette.
 
     Returns:
-        list: The COCO pose palette as an [R, G, B] list.
+        list[int]: The COCO pose palette as an [R, G, B] list.
     """
     return POSE_PALETTE[idx]
 
 
-def get_coco_pose_skeleton() -> list:
+def get_coco_pose_skeleton() -> list[list[int]]:
     """Get the COCO pose skeleton.
 
     Returns:
-        list: The COCO pose skeleton.
+        list[list[int]]: The COCO pose skeleton.
     """
     return POSE_SKELETON
 
 
-def get_coco_limb_palette(idx: int) -> list:
+def get_coco_limb_palette(idx: int) -> list[int]:
     """Get the COCO limb palette by index.
 
     Args:
         idx (int): The index of the COCO limb palette.
 
     Returns:
-        list: The COCO limb palette as an [R, G, B] list.
+        list[int]: The COCO limb palette as an [R, G, B] list.
     """
     return LIMB_PALETTE[idx]
 
 
-def get_coco_keypoint_palette(idx: int) -> list:
+def get_coco_keypoint_palette(idx: int) -> list[int]:
     """Get the COCO keypoint palette by index.
 
     Args:
         idx (int): The index of the COCO keypoint palette.
 
     Returns:
-        list: The COCO keypoint palette as an [R, G, B] list.
+        list[int]: The COCO keypoint palette as an [R, G, B] list.
     """
     return KEYPOINT_PALETTE[idx]

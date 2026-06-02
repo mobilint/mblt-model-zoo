@@ -1,10 +1,10 @@
-"""
-API functions for listing tasks and models.
-"""
+"""Public helpers for discovering available vision tasks and models."""
+
+from __future__ import annotations
 
 import importlib
 import inspect
-from typing import List, Union
+from typing import Iterable
 
 from .wrapper import MBLT_Engine
 
@@ -13,47 +13,47 @@ TASKS = [
     "object_detection",
     "instance_segmentation",
     "pose_estimation",
+    "face_detection",
 ]
 
 
-def list_tasks() -> List[str]:
-    """Lists the available vision tasks.
+def list_tasks() -> list[str]:
+    """Lists the available vision tasks."""
 
-    Returns:
-            A list of task names.
-    """
-    return TASKS
+    return TASKS.copy()
 
 
-def list_models(
-    tasks: Union[str, List[str]] = None,
-):
-    """Lists the available models for the specified tasks.
+def list_models(tasks: str | Iterable[str] | None = None) -> dict[str, list[str]]:
+    """Lists available models for the selected vision tasks.
 
     Args:
-            tasks: The task(s) to list models for. Defaults to all TASKS.
+        tasks: Task name or names to inspect. When omitted, all tasks are used.
 
     Returns:
-            A dictionary where keys are task names and values are lists of model names.
+        A mapping of task name to exported model class names.
+
+    Raises:
+        ValueError: If an unknown task name is provided.
     """
 
     if tasks is None:
-        tasks = TASKS
+        task_list = TASKS
     elif isinstance(tasks, str):
-        tasks = [tasks]
-    assert set(tasks).issubset(TASKS), f"mblt model zoo supports tasks in {TASKS}"
+        task_list = [tasks]
+    else:
+        task_list = list(tasks)
 
-    available_models = {}
-    for task in tasks:
-        available_models[task] = []
-        try:
-            module = importlib.import_module(f".{task}", package=__name__.replace("._api", ""))
-        except ImportError as e:
-            print(f"Failed to import module for task '{task}': {e}")
-            continue
+    invalid_tasks = sorted(set(task_list) - set(TASKS))
+    if invalid_tasks:
+        raise ValueError(f"mblt_model_zoo.vision supports tasks in {TASKS}, got {invalid_tasks}.")
 
-        for name, obj in inspect.getmembers(module):
-            if inspect.isclass(obj) and issubclass(obj, MBLT_Engine) and obj is not MBLT_Engine:
-                available_models[task].append(name)
+    available_models: dict[str, list[str]] = {}
+    for task in task_list:
+        module = importlib.import_module(f".{task}", package=__name__.replace("._api", ""))
+        available_models[task] = sorted(
+            name
+            for name, obj in inspect.getmembers(module, inspect.isclass)
+            if issubclass(obj, MBLT_Engine) and obj is not MBLT_Engine and not getattr(obj, "_yaml_missing", False)
+        )
 
     return available_models

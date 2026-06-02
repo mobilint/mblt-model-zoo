@@ -2,7 +2,7 @@
 Center crop preprocessing.
 """
 
-from typing import List, Union
+from __future__ import annotations
 
 import cv2
 import numpy as np
@@ -18,11 +18,11 @@ class CenterCrop(PreOps):
     Center crop the image to a specified size.
     """
 
-    def __init__(self, size: Union[int, List[int]]):
+    def __init__(self, size: int | list[int]) -> None:
         """Initializes the CenterCrop operation.
 
         Args:
-            size (Union[int, List[int]]): Target size [h, w]. If int, size is [size, size].
+            size (int | list[int]): Target size [h, w]. If int, size is [size, size].
         """
         super().__init__()
         if isinstance(size, list):
@@ -31,25 +31,27 @@ class CenterCrop(PreOps):
         elif isinstance(size, int):
             self.size = [size, size]
 
-    def __call__(self, x: Union[TensorLike, Image.Image]) -> np.ndarray:
+    def __call__(self, x: TensorLike | Image.Image) -> np.ndarray:
         """Applies center crop to the image.
 
         Args:
-            x (Union[np.ndarray, torch.Tensor, Image.Image]): Input image.
+            x (np.ndarray | torch.Tensor | Image.Image): Input image.
 
         Returns:
             np.ndarray: Center-cropped image in HWC format.
         """
         if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
+            image = x.cpu().numpy()
         elif isinstance(x, Image.Image):
-            x = np.array(x)
-        H, W = x.shape[:2]
+            image = np.array(x)
+        else:
+            image = x
+        H, W = image.shape[:2]
         if (self.size[0] == H) and (self.size[1] == W):
-            return x
+            return image
         elif (self.size[1] > W) or (self.size[0] > H):
-            x = cv2.copyMakeBorder(
-                x,
+            image = cv2.copyMakeBorder(
+                image,
                 (self.size[0] - H) // 2 if self.size[0] > H else 0,
                 (self.size[0] - H + 1) // 2 if self.size[0] > H else 0,
                 (self.size[1] - W) // 2 if self.size[1] > W else 0,
@@ -57,12 +59,12 @@ class CenterCrop(PreOps):
                 cv2.BORDER_CONSTANT,
                 value=0,
             )
-            H, W = x.shape[:2]
+            H, W = image.shape[:2]
         crop_top = round((H - self.size[0]) / 2.0)
         crop_left = round((W - self.size[1]) / 2.0)
-        x = x[
+        image = image[
             crop_top : crop_top + self.size[0],
             crop_left : crop_left + self.size[1],
             :,
         ]
-        return x.astype(np.uint8)
+        return image.astype(np.uint8)

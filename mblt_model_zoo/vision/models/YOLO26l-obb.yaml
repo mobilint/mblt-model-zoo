@@ -1,0 +1,27 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO26l-obb
+    filename: yolo26l-obb.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 1024
+      - 1024
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: obb
+    nl: 3
+    n_extra: 1
+    dflfree: true
+    conf_thres: 0.001
+    iou_thres: 0.7
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

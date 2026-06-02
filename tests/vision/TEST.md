@@ -24,5 +24,5 @@ pytest tests/vision
 Target a specific test file to focus on one model family:
 
 ```bash
-pytest tests/vision/test_resnet50.py
+pytest tests/vision/test_image_classification.py
 ```

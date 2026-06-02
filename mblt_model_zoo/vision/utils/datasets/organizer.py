@@ -2,15 +2,150 @@
 Utilities for organizing datasets.
 """
 
+from __future__ import annotations
+
+import concurrent.futures
 import os
 import shutil
 import xml.etree.ElementTree as ET
 from tempfile import TemporaryDirectory
+from urllib.parse import urlparse
 
+import requests
 from tqdm import tqdm
 
+DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 
-def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
+
+def _is_url(path_or_url: str) -> bool:
+    """Returns whether the given string looks like an HTTP(S) URL."""
+    parsed = urlparse(path_or_url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _download_url(url: str, local_path: str) -> str:
+    """Downloads a URL to a local file with progress and resume support.
+
+    Args:
+        url: HTTP(S) URL to download.
+        local_path: Destination file path.
+
+    Returns:
+        The local destination path.
+    """
+    existing_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
+    headers: dict[str, str] = {}
+    mode = "wb"
+    if existing_size > 0:
+        headers["Range"] = f"bytes={existing_size}-"
+        mode = "ab"
+
+    with requests.get(url, stream=True, timeout=(10, 300), headers=headers) as response:
+        response.raise_for_status()
+
+        if response.status_code == 200 and existing_size > 0:
+            existing_size = 0
+            mode = "wb"
+
+        total_size = response.headers.get("Content-Length")
+        total_bytes = existing_size + int(total_size) if total_size is not None else None
+
+        desc = f"Downloading {os.path.basename(local_path)}"
+        with tqdm(
+            total=total_bytes,
+            initial=existing_size,
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+            desc=desc,
+        ) as pbar:
+            with open(local_path, mode) as file_obj:
+                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    file_obj.write(chunk)
+                    pbar.update(len(chunk))
+
+    return local_path
+
+
+def _download_if_url(path_or_url: str, download_dir: str) -> str:
+    """Downloads a remote dataset archive when needed.
+
+    Args:
+        path_or_url: Local path or HTTP(S) URL pointing to a dataset archive.
+        download_dir: Directory to store downloaded archives.
+
+    Returns:
+        A local filesystem path to the archive or directory.
+
+    Raises:
+        ValueError: If the URL path does not contain a filename.
+    """
+    if not _is_url(path_or_url):
+        return path_or_url
+
+    parsed = urlparse(path_or_url)
+    filename = os.path.basename(parsed.path)
+    if not filename:
+        raise ValueError(f"Unable to determine a filename from URL: {path_or_url}")
+
+    local_path = os.path.join(download_dir, filename)
+    print(f"Downloading dataset archive from {path_or_url} to {local_path}...")
+    _download_url(path_or_url, local_path)
+    print("Download completed")
+    return local_path
+
+
+def _resolve_source(path_or_url: str, download_dir: str) -> str:
+    """Resolves a local path for a dataset source."""
+
+    return _download_if_url(path_or_url, download_dir)
+
+
+def _resolve_sources(path_or_urls: list[str], download_dir: str) -> list[str]:
+    """Resolves multiple dataset sources, downloading URL inputs in parallel."""
+
+    local_paths: list[str | None] = [None] * len(path_or_urls)
+    futures: dict[concurrent.futures.Future[str], int] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(path_or_urls))) as executor:
+        for idx, path_or_url in enumerate(path_or_urls):
+            if _is_url(path_or_url):
+                futures[executor.submit(_resolve_source, path_or_url, download_dir)] = idx
+            else:
+                local_paths[idx] = path_or_url
+
+        for future in concurrent.futures.as_completed(futures):
+            local_paths[futures[future]] = future.result()
+
+    return [path for path in local_paths if path is not None]
+
+
+def _get_object_name(obj: ET.Element, xml_file: str) -> str:
+    """Extracts a non-empty object name from an ImageNet annotation node.
+
+    Args:
+        obj: XML ``object`` element from an annotation file.
+        xml_file: Source XML filename used for error context.
+
+    Returns:
+        The validated object name.
+
+    Raises:
+        ValueError: If the object name node is missing or empty.
+    """
+    name_element = obj.find("name")
+    if name_element is None or name_element.text is None:
+        raise ValueError(f"XML file {xml_file} has an object without a valid name")
+
+    object_name = name_element.text.strip()
+    if not object_name:
+        raise ValueError(f"XML file {xml_file} has an object with an empty name")
+
+    return object_name
+
+
+def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
     """Constructs the ImageNet dataset by organizing images into category folders.
 
     Args:
@@ -39,7 +174,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
             raise ValueError(f"XML file {xml_file} has no object, but expected at least 1")
 
         # check whether the object names in the XML files are the same
-        object_names = [obj.find("name").text for obj in root.findall("object")]
+        object_names = [_get_object_name(obj, xml_file) for obj in root.findall("object")]
         if len(set(object_names)) != 1:
             raise ValueError(
                 f"Object names in XML file {xml_file} are not the same. "
@@ -54,7 +189,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str):
         xml_path = os.path.join(xml_dir + "/val", xml_file)
         xml_tree = ET.parse(xml_path)
         root = xml_tree.getroot()
-        object_name = root.findall("object")[0].find("name").text
+        object_name = _get_object_name(root.findall("object")[0], xml_file)
         image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
         assert os.path.exists(image_path), f"Image file not found: {image_path}"
 
@@ -81,31 +216,34 @@ def organize_imagenet(
     image_dir: str,
     xml_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
-):
+) -> None:
     """Organizes the ImageNet dataset, unpacking archives if necessary.
 
     Args:
-        image_dir (str): Path to the image directory or archive (.tar).
-        xml_dir (str): Path to the XML directory or archive (.tgz).
+        image_dir (str): Path or URL to the image directory or archive (.tar).
+        xml_dir (str): Path or URL to the XML directory or archive (.tgz).
         output_dir (str, optional): Directory to store the organized dataset.
             Defaults to ~/.mblt_model_zoo/datasets/imagenet.
     """
-    if image_dir.endswith(".tar") and xml_dir.endswith(".tgz"):
-        with TemporaryDirectory() as temp_dir:
+    with TemporaryDirectory() as temp_dir:
+        local_image_dir, local_xml_dir = _resolve_sources([image_dir, xml_dir], temp_dir)
+
+        if local_image_dir.endswith(".tar") and local_xml_dir.endswith(".tgz"):
             print("Unpacking image and XML files to temporary directory...")
-            shutil.unpack_archive(image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
-            shutil.unpack_archive(xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
+            shutil.unpack_archive(local_image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
+            shutil.unpack_archive(local_xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
             print("Unpacking completed")
             construct_imagenet(
                 os.path.join(temp_dir, "ILSVRC2012_img_val"),
                 os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"),
                 output_dir,
             )
-    else:
-        construct_imagenet(image_dir, xml_dir, output_dir)
+            return
+
+        construct_imagenet(local_image_dir, local_xml_dir, output_dir)
 
 
-def construct_coco(image_dir: str, annotation_dir: str, output_dir: str):
+def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None:
     """Constructs the COCO dataset by copying images and annotations to a target directory.
 
     Args:
@@ -132,32 +270,34 @@ def organize_coco(
     image_dir: str,
     annotation_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
-):
+) -> None:
     """Organizes the COCO dataset, unpacking archives if necessary.
 
     Args:
-        image_dir (str): Path to the image zip file or directory.
-        annotation_dir (str): Path to the annotation zip file or directory.
+        image_dir (str): Path or URL to the image zip file or directory.
+        annotation_dir (str): Path or URL to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
             Defaults to ~/.mblt_model_zoo/datasets/coco.
     """
-    if image_dir.endswith(".zip") and annotation_dir.endswith(".zip"):
-        with TemporaryDirectory() as temp_dir:
+    with TemporaryDirectory() as temp_dir:
+        local_image_dir, local_annotation_dir = _resolve_sources([image_dir, annotation_dir], temp_dir)
+
+        if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(image_dir, temp_dir)
-            shutil.unpack_archive(annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
+            shutil.unpack_archive(local_image_dir, temp_dir)
+            shutil.unpack_archive(local_annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
             print("Unpacking completed")
             construct_coco(
                 os.path.join(temp_dir, "val2017"),
                 os.path.join(temp_dir, "annotations_trainval2017"),
                 output_dir,
             )
+            return
 
-    else:
-        construct_coco(image_dir, annotation_dir, output_dir)
+        construct_coco(local_image_dir, local_annotation_dir, output_dir)
 
 
-def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str):
+def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) -> None:
     """Constructs the WiderFace dataset by copying images and annotations to a target directory.
 
     Args:
@@ -182,25 +322,112 @@ def organize_widerface(
     image_dir: str,
     annotation_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
-):
+) -> None:
     """Organizes the WiderFace dataset, unpacking archives if necessary.
 
     Args:
-        image_dir (str): Path to the image zip file or directory.
-        annotation_dir (str): Path to the annotation zip file or directory.
+        image_dir (str): Path or URL to the image zip file or directory.
+        annotation_dir (str): Path or URL to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
             Defaults to ~/.mblt_model_zoo/datasets/widerface.
     """
-    if image_dir.endswith(".zip") and annotation_dir.endswith(".zip"):
-        with TemporaryDirectory() as temp_dir:
+    with TemporaryDirectory() as temp_dir:
+        local_image_dir, local_annotation_dir = _resolve_sources([image_dir, annotation_dir], temp_dir)
+
+        if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(image_dir, temp_dir)
-            shutil.unpack_archive(annotation_dir, temp_dir)
+            shutil.unpack_archive(local_image_dir, temp_dir)
+            shutil.unpack_archive(local_annotation_dir, temp_dir)
             print("Unpacking completed")
             construct_widerface(
                 os.path.join(temp_dir, "WIDER_val"),
                 os.path.join(temp_dir, "wider_face_split"),
                 output_dir,
             )
-    else:
-        construct_widerface(image_dir, annotation_dir, output_dir)
+            return
+
+        construct_widerface(local_image_dir, local_annotation_dir, output_dir)
+
+
+def _resolve_dotav1_root(dataset_dir: str) -> str:
+    """Resolves a DOTAv1 dataset root from a directory path.
+
+    Args:
+        dataset_dir: Directory containing the DOTAv1 dataset or its parent.
+
+    Returns:
+        Path to the DOTAv1 dataset root.
+    """
+    dotav1_dir = os.path.join(dataset_dir, "DOTAv1")
+    if os.path.isdir(dotav1_dir):
+        return dotav1_dir
+    return dataset_dir
+
+
+def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
+    """Constructs a validation-only DOTAv1 dataset.
+
+    Args:
+        dataset_dir: Directory containing a DOTAv1 dataset or its parent.
+        output_dir: Directory where the organized validation dataset will be stored.
+
+    Raises:
+        ValueError: If no validation files or directories are found.
+    """
+    dataset_root = _resolve_dotav1_root(dataset_dir)
+    print(f"Constructing DOTAv1 validation dataset from {dataset_root} to {output_dir}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    copied_count = 0
+    for root, dirs, files in os.walk(dataset_root):
+        for dir_name in list(dirs):
+            if "val" not in dir_name:
+                continue
+
+            src_dir = os.path.join(root, dir_name)
+            relative_dir = os.path.relpath(src_dir, dataset_root)
+            dst_dir = os.path.join(output_dir, relative_dir)
+            if os.path.abspath(src_dir) != os.path.abspath(dst_dir):
+                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+            copied_count += 1
+            dirs.remove(dir_name)
+
+        for file_name in files:
+            if "val" not in file_name:
+                continue
+
+            src_file = os.path.join(root, file_name)
+            relative_file = os.path.relpath(src_file, dataset_root)
+            dst_file = os.path.join(output_dir, relative_file)
+            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+            if os.path.abspath(src_file) != os.path.abspath(dst_file):
+                shutil.copy2(src_file, dst_file)
+            copied_count += 1
+
+    if copied_count == 0:
+        raise ValueError(f"No DOTAv1 validation files or directories found in {dataset_root}")
+
+    print("Constructing DOTAv1 validation dataset completed")
+
+
+def organize_dotav1(
+    dataset_path: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1"),
+) -> None:
+    """Organizes a validation-only DOTAv1 dataset.
+
+    Args:
+        dataset_path: Path or URL to the DOTAv1 zip file or extracted dataset directory.
+        output_dir: Directory to store the organized dataset.
+    """
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+
+        if local_dataset_path.endswith(".zip"):
+            print("Unpacking DOTAv1 files to temporary directory...")
+            shutil.unpack_archive(local_dataset_path, temp_dir)
+            print("Unpacking completed")
+            construct_dotav1(temp_dir, output_dir)
+            return
+
+        construct_dotav1(local_dataset_path, output_dir)

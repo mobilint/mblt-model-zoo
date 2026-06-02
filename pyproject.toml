@@ -24,8 +24,10 @@ dependencies = [
     "faster-coco-eval",
     "huggingface-hub",
     "scipy",
+    "requests>=2.32.0",
     "tqdm",
     "mblt-tracker>=0.2.5",
+    "PyYAML",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -85,7 +87,8 @@ version = { attr = "mblt_model_zoo.__version__" }
 [tool.setuptools.package-data]
 "mblt_model_zoo" = [
     "MeloTTS/text/cmudict.rep",
-    "MeloTTS/text/cmudict_cache.pickle"
+    "MeloTTS/text/cmudict_cache.pickle",
+    "vision/models/*.yaml",
 ]
 
 [dependency-groups]

@@ -1,7 +1,7 @@
 """
 Script to organize the COCO dataset.
 
-This script takes the raw image and annotation zip files for the COCO dataset
+This script takes local archives or downloadable sources for the COCO dataset
 and organizes them into a structure suitable for the model zoo.
 """
 
@@ -10,14 +10,22 @@ import os
 
 from mblt_model_zoo.vision.utils.datasets import organize_coco
 
+DEFAULT_COCO_IMAGE_SOURCE = "http://images.cocodataset.org/zips/val2017.zip"
+DEFAULT_COCO_ANNOTATION_SOURCE = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize COCO dataset")
-    parser.add_argument("--image-dir", type=str, required=True, help="Path to the image zip file")
+    parser.add_argument(
+        "--image-dir",
+        type=str,
+        default=DEFAULT_COCO_IMAGE_SOURCE,
+        help="Local path or download URL for the image zip file",
+    )
     parser.add_argument(
         "--ann-dir",
         type=str,
-        required=True,
-        help="Path to the annotation zip file",
+        default=DEFAULT_COCO_ANNOTATION_SOURCE,
+        help="Local path or download URL for the annotation zip file",
     )
     parser.add_argument(
         "--output-dir",

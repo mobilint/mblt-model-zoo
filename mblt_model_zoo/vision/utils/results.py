@@ -2,8 +2,9 @@
 Results processing and plotting.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Union
 
 import cv2
 import numpy as np
@@ -39,28 +40,36 @@ class Results:
         self,
         pre_cfg: dict,
         post_cfg: dict,
-        output: Union[TensorLike, ListTensorLike],
+        output: TensorLike | ListTensorLike,
         **kwargs,
-    ):
+    ) -> None:
         """
         Initializes the Results object.
         Args:
             pre_cfg (dict): Preprocessing configuration.
             post_cfg (dict): Postprocessing configuration.
-            output (Union[TensorLike, ListTensorLike]): Raw model output.
+            output (TensorLike | ListTensorLike): Raw model output.
             **kwargs: Additional arguments.
         """
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
         self.task = post_cfg["task"]
-        self.set_output(output)
         self.conf_thres = kwargs.get("conf_thres", 0.25)
+        self.acc: torch.Tensor | np.ndarray | None = None
+        self.box_cls: torch.Tensor | np.ndarray | None = None
+        self.mask: torch.Tensor | np.ndarray | None = None
+        self.output: TensorLike | ListTensorLike | None = None
+        self.labels: torch.Tensor | None = None
+        self.scores: torch.Tensor | None = None
+        self.boxes: torch.Tensor | None = None
+        self.kpts: torch.Tensor | None = None
+        self.set_output(output)
 
-    def _read_image(self, source_path: Union[str, np.ndarray, Image.Image]):
+    def _read_image(self, source_path: str | np.ndarray | Image.Image) -> np.ndarray:
         """
         Internal method to read an image from various input types and convert to BGR format.
         Args:
-            source_path (Union[str, np.ndarray, Image.Image]): Path to image or image object.
+            source_path (str | np.ndarray | Image.Image): Path to image or image object.
         Returns:
             np.ndarray: Image in BGR format (cv2 style).
         """
@@ -77,13 +86,15 @@ class Results:
                 f"File {source_path} does not exist or is not a file."
             )
             source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
+        if source_img is None:
+            raise ValueError(f"Failed to read image from {type(source_path)}.")
         return source_img
 
-    def set_output(self, output: Union[TensorLike, ListTensorLike]):
+    def set_output(self, output: TensorLike | ListTensorLike) -> None:
         """
         Sets variables from the raw model output based on the task.
         Args:
-            output (Union[TensorLike, ListTensorLike]): Raw model output.
+            output (TensorLike | ListTensorLike): Raw model output.
         Raises:
             NotImplementedError: If the task is not supported.
         """
@@ -91,10 +102,16 @@ class Results:
         self.box_cls = None
         self.mask = None
         if self.task.lower() == "image_classification":
+            if isinstance(output, list):
+                raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
             self.acc = output
         elif self.task.lower() == "object_detection" or self.task.lower() == "pose_estimation":
+            if not isinstance(output, list):
+                raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0]
         elif self.task.lower() == "instance_segmentation":
+            if not isinstance(output, list) or not isinstance(output[0], list):
+                raise TypeError(f"Expected nested list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0][0]
             self.mask = output[0][1]
         else:
@@ -103,22 +120,21 @@ class Results:
 
     def plot(
         self,
-        source_path: Union[str, np.ndarray, Image.Image],
-        save_path: str = None,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
         **kwargs,
-    ):
+    ) -> np.ndarray | None:
         """
         Plots the results on the source image.
         Plots the inference results on the source image.
         Args:
-            source_path (Union[str, np.ndarray, Image.Image]): Path or image object.
+            source_path (str | np.ndarray | Image.Image): Path or image object.
             save_path (str, optional): Path to save the plotted image. Defaults to None.
             **kwargs: Additional arguments.
-            source_path (Union[str, np.ndarray, Image.Image]): The image to plot on.
+            source_path (str | np.ndarray | Image.Image): The image to plot on.
             save_path (str, optional): If provided, the result image will be saved to this path.
             **kwargs: Additional task-specific plotting options (e.g., topk for classification).
         Returns:
-            np.ndarray: The image with plotted results.
             np.ndarray: The image with results visualized (in BGR format).
         Raises:
             NotImplementedError: If the task is not supported.
@@ -139,17 +155,17 @@ class Results:
 
     def _plot_image_classification(
         self,
-        source_path: Union[str, np.ndarray, Image.Image] = None,
-        save_path: str = None,
-        topk=5,
+        source_path: str | np.ndarray | Image.Image | None = None,
+        save_path: str | None = None,
+        topk: int = 5,
         **kwargs,
-    ):
+    ) -> np.ndarray | None:
         assert self.acc is not None, "No accuracy output found."
         if isinstance(self.acc, np.ndarray):
             self.acc = torch.tensor(self.acc)
         topk_probs, topk_indices = torch.topk(self.acc, topk)
-        topk_probs = topk_probs.squeeze().numpy()
-        topk_indices = topk_indices.squeeze().numpy()
+        topk_probs = np.atleast_1d(topk_probs.squeeze().numpy())
+        topk_indices = np.atleast_1d(topk_indices.squeeze().numpy())
         # load labels
         labels = [get_imagenet_label(i) for i in topk_indices]
         comments = []
@@ -157,7 +173,7 @@ class Results:
             comments.append(f"{labels[i]}: {topk_probs[i] * 100:.2f}%")
             print(f"Label: {labels[i]}, Probability: {topk_probs[i] * 100:.2f}%")
         if source_path is not None and save_path is not None:
-            comments = "\n".join(comments)
+            comments_str = "\n".join(comments)
             img = self._read_image(source_path)
             avg_color = img.mean(axis=(0, 1))
             txt_color = (
@@ -165,7 +181,7 @@ class Results:
                 int(255 - avg_color[1]),
                 int(255 - avg_color[2]),
             )
-            for i, line in enumerate(comments.splitlines()):
+            for i, line in enumerate(comments_str.splitlines()):
                 (_, h), _ = cv2.getTextSize(
                     text=line,
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX,
@@ -183,41 +199,42 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
                 cv2.imwrite(save_path, img)
-                cv2.destroyAllWindows()
             return img
         else:
             return None
 
     def _plot_object_detection(
         self,
-        source_path: Union[str, np.ndarray, Image.Image],
-        save_path: str = None,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
         **kwargs,
-    ):
-        assert self.box_cls.shape[1] == 6 + self.post_cfg.get("n_extra", 0), (
-            f"Got unexpected shape for object detection box_cls={self.box_cls.shape}."
+    ) -> np.ndarray:
+        box_cls = self._box_cls_tensor()
+        assert box_cls.shape[1] == 6 + self.post_cfg.get("n_extra", 0), (
+            f"Got unexpected shape for object detection box_cls={box_cls.shape}."
         )
         img = self._read_image(source_path)
-        self.labels = self.box_cls[:, 5].to(torch.int64)
-        self.scores = self.box_cls[:, 4]
+        self.labels = box_cls[:, 5].to(torch.int64)
+        self.scores = box_cls[:, 4]
         self.boxes = scale_boxes(
             self.pre_cfg["LetterBox"]["img_size"],
-            self.box_cls[:, :4],
+            box_cls[:, :4],
             img.shape[:2],
         )
         contours = {i: [] for i in list(range(get_coco_class_num()))}
         for box, score, label in zip(self.boxes, self.scores, self.labels):
+            label_idx = int(label.item())
             img = cv2.putText(
                 img,
-                f"{get_coco_label(label)} {int(100 * score)}%",
+                f"{get_coco_label(label_idx)} {int(100 * score)}%",
                 (int(box[0]), int(box[1]) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                get_coco_det_palette(label),
+                get_coco_det_palette(label_idx),
                 1,
                 cv2.LINE_AA,
             )
-            contours[label.item()].append(
+            contours[label_idx].append(
                 np.array(
                     [
                         [int(box[0]), int(box[1])],
@@ -238,18 +255,21 @@ class Results:
                 )
         if save_path is not None:
             cv2.imwrite(save_path, img)
-            cv2.destroyAllWindows()
         return img
 
     def _plot_instance_segmentation(
         self,
-        source_path: Union[str, np.ndarray, Image.Image],
-        save_path=None,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
         **kwargs,
-    ):
+    ) -> np.ndarray:
         img = self._plot_object_detection(source_path, None, **kwargs)
+        assert self.mask is not None, "No mask output found."
+        assert self.boxes is not None, "No boxes output found."
+        assert self.labels is not None, "No labels output found."
+        mask = self._mask_tensor()
         masks = (
-            crop_mask(scale_masks(self.mask, img.shape[:2]), self.boxes)
+            crop_mask(scale_masks(mask, img.shape[:2]), self.boxes)
             .gt_(0.0)
             .permute(1, 2, 0)
             .to(torch.float32)
@@ -258,31 +278,35 @@ class Results:
         )
         overlay = np.zeros((masks.shape[0], masks.shape[1], 3))
         for i, label in enumerate(self.labels):
+            label_idx = int(label.item())
             overlay = np.maximum(
                 overlay,
-                masks[:, :, i][:, :, np.newaxis] * np.array(get_coco_det_palette(label)).reshape(1, 1, 3),
+                masks[:, :, i][:, :, np.newaxis] * np.array(get_coco_det_palette(label_idx)).reshape(1, 1, 3),
             )
         total_mask = overlay.max(axis=2, keepdims=True)
         inv_mask = 1 - ALPHA * total_mask / 255
         img = (img * inv_mask + overlay * ALPHA).astype(np.uint8)
         if save_path is not None:
             cv2.imwrite(save_path, img)
-            cv2.destroyAllWindows()
         return img
 
     def _plot_pose_estimation(
         self,
-        source_path: Union[str, np.ndarray, Image.Image],
-        save_path=None,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
         **kwargs,
-    ):
+    ) -> np.ndarray:
         img = self._plot_object_detection(source_path, None, **kwargs)
+        box_cls = self._box_cls_tensor()
         self.kpts = scale_coords(
             self.pre_cfg["LetterBox"]["img_size"],
-            self.box_cls[:, 6:].reshape(-1, 17, 3),
+            box_cls[:, 6:].reshape(-1, 17, 3),
             img.shape[:2],
         )
-        for kpt in self.kpts:
+        kpts = self.kpts
+        if kpts is None:
+            raise ValueError("No keypoints output found.")
+        for kpt in kpts:
             for i, (x, y, v) in enumerate(kpt):
                 color_k = get_coco_keypoint_palette(i)
                 # if v < self.conf_thres:
@@ -312,5 +336,20 @@ class Results:
                 )
         if save_path is not None:
             cv2.imwrite(save_path, img)
-            cv2.destroyAllWindows()
         return img
+
+    def _box_cls_tensor(self) -> torch.Tensor:
+        """Returns detection output as a torch tensor."""
+        if self.box_cls is None:
+            raise ValueError("No box_cls output found.")
+        if isinstance(self.box_cls, np.ndarray):
+            return torch.from_numpy(self.box_cls)
+        return self.box_cls
+
+    def _mask_tensor(self) -> torch.Tensor:
+        """Returns segmentation mask output as a torch tensor."""
+        if self.mask is None:
+            raise ValueError("No mask output found.")
+        if isinstance(self.mask, np.ndarray):
+            return torch.from_numpy(self.mask)
+        return self.mask

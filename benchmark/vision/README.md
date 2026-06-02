@@ -6,8 +6,12 @@ You can run the benchmark as the following steps:
 2. Prepare the model for benchmark.
 3. Run the benchmark and evaluate the performance.
 
-> ⚠️ **Warning:** Mobilint does not provide the vision benchmark dataset or direct download link due to the terms of use of the dataset.
-Mobilint model zoo provides utilities on dataset organization, model preparation, and benchmark evaluation, therefore you can easily reproduce the [published benchmark results](../../../mblt_model_zoo/vision/README.md).
+> ⚠️ **Warning:** Mobilint does not host the vision benchmark datasets.
+> The organizer scripts use the datasets' official downloadable sources by default and can also
+> work with local archives that you downloaded yourself.
+> Mobilint model zoo provides utilities on dataset organization, model preparation, and benchmark
+> evaluation, therefore you can easily reproduce the
+> [published benchmark results](../../../mblt_model_zoo/vision/README.md).
 
 Furthermore, you can simply run the benchmark with the model you compiled with custom quantization recipe.
 
@@ -15,21 +19,26 @@ Furthermore, you can simply run the benchmark with the model you compiled with c
 
 ### Download the ImageNet Dataset
 
-To download the ImageNet dataset, visit the [ImageNet website](https://image-net.org/) and download the dataset with the following steps:
-
-0. Login with your account. If you don't have an account, you can register a new account. (Using `.edu` email is highly recommended)
-1. Click on the "Download" button on the menu bar.
-2. Go to "ImageNet Large-scale Visual Recognition Challenge (ILSVRC)" section, and click 2012 button.
-3. Download the following files:
-    - ILSVRC2012_img_val.tar: Displayes as "Validation images (all tasks)" with MD5 checksum `29b22e2961454d5413ddabcf34fc5622`.
-    - ILSVRC2012_bbox_val_v3.tgz: Displayes as "Validation bounding box annotations (all tasks)" with MD5 checksum `f4cd18b5ea29fe6bbea62ec9c20d80f0`.
+The organizer uses ImageNet's official validation image and annotation archives by default. If you
+already downloaded those files yourself, you can point the script to the local archive paths
+instead.
 
 ### Organize the ImageNet Dataset
 
 You can organize the ImageNet dataset with the following command:
 
 ```bash
-python organize_imagenet.py --image_dir {path_to_ILSVRC2012_img_val.tar} --xml_dir {path_to_ILSVRC2012_bbox_val_v3.tgz} --output_dir ~/.mblt_model_zoo/datasets/imagenet
+python benchmark/vision/organize_imagenet.py \
+  --output-dir ~/.mblt_model_zoo/datasets/imagenet
+```
+
+If you want to use local archives instead of the built-in download sources:
+
+```bash
+python benchmark/vision/organize_imagenet.py \
+  --image-dir {path_to_ILSVRC2012_img_val.tar} \
+  --xml-dir {path_to_ILSVRC2012_bbox_val_v3.tgz} \
+  --output-dir ~/.mblt_model_zoo/datasets/imagenet
 ```
 
 This will organize the dataset into the following structure:
@@ -53,39 +62,53 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the ImageNet Benchmark
 
-You can run the ImageNetbenchmark with the following command:
+You can run the ImageNet benchmark with the following command:
 
 ```bash
-python benchmark_imagenet.py --local-path {path to local mxq(optional)}\
---model-type {model type(optional)}\
---infer-mode {single, multi, global4, global8(optional). Default is global8}\
---product {aries, regulus(optional). Default is aries}\
---batch-size {batch size(optional). Default is 1}\
---data-path {path to the ImageNet data(optional). Default is ~/.mblt_model_zoo/datasets/imagenet}
+python benchmark/vision/benchmark_imagenet.py \
+  --model-cls {model class(optional). Default is resnet50} \
+  --mxq-path {path to local mxq(optional)} \
+  --model-type {model type(optional). Default is DEFAULT} \
+  --core-mode {single, multi, global4, global8(optional). Default is global8} \
+  --batch-size {batch size(optional). Default is 1} \
+  --data-path {path to the ImageNet data(optional). Default is ~/.mblt_model_zoo/datasets/imagenet}
 ```
 
 Example:
 
 ```bash
-python benchmark_imagenet.py --local-path ./resnet50_IMAGENET1K_V1.mxq --model-type IMAGENET1K_V1 --infer-mode multi --product aries --batch-size 8 --data-path ~/.mblt_model_zoo/datasets/imagenet
+python benchmark/vision/benchmark_imagenet.py \
+  --model-cls resnet50 \
+  --mxq-path ./resnet50_IMAGENET1K_V1.mxq \
+  --model-type IMAGENET1K_V1 \
+  --core-mode multi \
+  --batch-size 8 \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet
 ```
 
 ## Benchmark with COCO Dataset
 
 ### Download the COCO Dataset
 
-To download the COCO dataset, visit the [COCO website](https://cocodataset.org/) and download the dataset with the following steps:
-
-1. Click on the "Dataset" button on the menu bar, and click "Download" button.
-2. On the "Images" column, click "2017 Val images" button to download `val2017.zip` file.
-3. On the "Annotations" column, click "2017 Train/Val annotations" button to download `annotations_trainval2017.zip` file.
+The organizer uses COCO's official validation image and annotation archives by default. If you
+already downloaded those files yourself, you can pass the local archive paths instead.
 
 ### Organize the COCO Dataset
 
 You can organize the COCO dataset with the following command:
 
 ```bash
-python organize_coco.py --image_dir {path_to_val2017.zip} --annotation_dir {path_to_annotations_trainval2017.zip} --output_dir ~/.mblt_model_zoo/datasets/coco
+python benchmark/vision/organize_coco.py \
+  --output-dir ~/.mblt_model_zoo/datasets/coco
+```
+
+To use local archives:
+
+```bash
+python benchmark/vision/organize_coco.py \
+  --image-dir {path_to_val2017.zip} \
+  --ann-dir {path_to_annotations_trainval2017.zip} \
+  --output-dir ~/.mblt_model_zoo/datasets/coco
 ```
 
 This will organize the dataset into the following structure:
@@ -112,37 +135,52 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 You can run the COCO benchmark with the following command:
 
 ```bash
-python benchmark_coco.py --local-path {path to local mxq(optional)}\
---model-type {model type(optional)}\
---infer-mode {single, multi, global4, global8(optional). Default is global8}\
---product {aries, regulus(optional). Default is aries}\
---batch-size {batch size(optional). Default is 1}\
---data-path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco}
---conf-thres {confidence threshold for object detection(optional). Default is 0.001}\
---iou-thres {IOU threshold for object detection(optional). Default is 0.7}
+python benchmark/vision/benchmark_coco.py \
+  --model-cls {model class(optional). Default is YOLOv5m} \
+  --mxq-path {path to local mxq(optional)} \
+  --model-type {model type(optional). Default is DEFAULT} \
+  --core-mode {single, multi, global4, global8(optional). Default is global8} \
+  --batch-size {batch size(optional). Default is 1} \
+  --data-path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco} \
+  --conf-thres {confidence threshold for object detection(optional). Default is 0.001} \
+  --iou-thres {IOU threshold for object detection(optional). Default is 0.7}
 ```
 
 Example:
 
 ```bash
-python benchmark_coco.py --infer-mode single --product aries --batch-size 8 --data-path ~/.mblt_model_zoo/datasets/coco --conf-thres 0.001 --iou-thres 0.7
+python benchmark/vision/benchmark_coco.py \
+  --model-cls YOLOv5m \
+  --core-mode single \
+  --batch-size 8 \
+  --data-path ~/.mblt_model_zoo/datasets/coco \
+  --conf-thres 0.001 \
+  --iou-thres 0.7
 ```
 
 ## Benchmark with WiderFace Dataset
 
 ### Download the WiderFace Dataset
 
-To download the WiderFace dataset, visit the [WiderFace's Hugging Face page](https://huggingface.co/datasets/CUHK-CSE/wider_face) and download the dataset with the following steps:
-
-1. Go to the "Files and versions" section, and click "data" folder.
-2. Download "WIDER_val.zip" file and "wider_face_split.zip" file.
+The organizer uses the official WiderFace validation image and split archives by default. If you
+already downloaded those files yourself, you can pass the local archive paths instead.
 
 ### Organize the WiderFace Dataset
 
 You can organize the WiderFace dataset with the following command:
 
 ```bash
-python organize_widerface.py --image_dir {path_to_WIDER_val.zip} --annotation_dir {path_to_wider_face_split.zip} --output_dir ~/.mblt_model_zoo/datasets/widerface
+python benchmark/vision/organize_widerface.py \
+  --output-dir ~/.mblt_model_zoo/datasets/widerface
+```
+
+To use local archives:
+
+```bash
+python benchmark/vision/organize_widerface.py \
+  --image-dir {path_to_WIDER_val.zip} \
+  --annotation-dir {path_to_wider_face_split.zip} \
+  --output-dir ~/.mblt_model_zoo/datasets/widerface
 ```
 
 This will organize the dataset into the following structure:
@@ -171,12 +209,60 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 Pending
 
+## Benchmark with DOTAv1 Dataset
+
+### Download the DOTAv1 Dataset
+
+The organizer uses the official DOTAv1 archive by default. If you already downloaded the archive
+or extracted it locally, you can pass that local path instead.
+
+### Organize the DOTAv1 Dataset
+
+You can organize the DOTAv1 validation dataset with the following command:
+
+```bash
+python benchmark/vision/organize_dotav1.py \
+  --output-dir ~/.mblt_model_zoo/datasets/dotav1
+```
+
+To use a local archive or extracted dataset directory:
+
+```bash
+python benchmark/vision/organize_dotav1.py \
+  --dataset-path {path_to_DOTAv1.zip_or_directory} \
+  --output-dir ~/.mblt_model_zoo/datasets/dotav1
+```
+
+This keeps only the validation split and organizes the dataset into the following structure:
+
+```text
+~/.mblt_model_zoo/datasets/dotav1/
+├── images/
+│   └── val/
+│       ├── P0003.png
+│       ├── P0006.png
+│       ├── ...
+├── labels/
+│   ├── val/
+│   │   ├── P0003.txt
+│   │   ├── P0006.txt
+│   │   ├── ...
+│   └── val_original/
+│       ├── P0003.txt
+│       ├── P0006.txt
+│       ├── ...
+```
+
+### Run the DOTAv1 Benchmark
+
+Pending
+
 ## Compare Vision Benchmark Results
 
 You can compare multiple vision benchmark CSV files and generate model-wise charts:
 
 ```bash
-python plot_compare_benchmark_results.py \
+python benchmark/vision/plot_compare_benchmark_results.py \
   ./results/results_a4000.csv \
   ./results/results_a5000.csv \
   ./results/results_mla100.csv
@@ -185,5 +271,8 @@ python plot_compare_benchmark_results.py \
 Output charts are saved under:
 
 ```text
-./results/charts/<input1_input2_...>/
+benchmark/vision/results/charts/<input1_input2_...>/
 ```
+
+You can also pass directories instead of explicit CSV files when each directory contains a single benchmark CSV
+or a `results.csv` file.

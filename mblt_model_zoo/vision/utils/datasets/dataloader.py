@@ -2,8 +2,10 @@
 Custom dataloaders for vision datasets.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Callable
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -12,7 +14,7 @@ from faster_coco_eval import COCO
 from PIL import Image
 
 
-class CustomCocodata:
+class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
     """Custom COCO dataset class for loading images and metadata.
 
     This class provides a simple interface for accessing COCO formatted data
@@ -24,7 +26,7 @@ class CustomCocodata:
         ids (list[int]): Sorted list of image IDs in the dataset.
     """
 
-    def __init__(self, root: str, annFile: str):
+    def __init__(self, root: str, annFile: str) -> None:
         """Initializes the CustomCocodata instance.
 
         Args:
@@ -35,7 +37,7 @@ class CustomCocodata:
         self.coco = COCO(annFile)
         self.ids = list(sorted(self.coco.imgs.keys()))
 
-    def _load_image(self, image_id: int):
+    def _load_image(self, image_id: int) -> np.ndarray:
         """Load image by ID"""
         image_path = os.path.join(self.root, self.coco.loadImgs(image_id)[0]["file_name"])
         image = cv2.imread(image_path)  # Load image (BGR format)
@@ -45,7 +47,7 @@ class CustomCocodata:
 
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index: int) -> tuple[np.ndarray, int, int, int]:
         """Get the image and target by index"""
         image_id = self.ids[index]
         image = self._load_image(image_id)
@@ -53,12 +55,12 @@ class CustomCocodata:
         width = self.coco.imgs[image_id]["width"]
         return image, index, height, width
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the total number of images"""
         return len(self.ids)
 
 
-def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Callable):
+def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Callable) -> torch.utils.data.DataLoader:
     """Creates a DataLoader for the COCO dataset.
 
     Args:
@@ -70,9 +72,9 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
         torch.utils.data.DataLoader: A configured DataLoader for the COCO dataset.
     """
 
-    def loader(batch):
+    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
         """Collate function for COCO DataLoader."""
-        batch = filter(lambda x: x is not None, batch)
+        batch = list(filter(lambda x: x is not None, batch))
         images, idx, height, width = zip(*batch)
 
         processed_images = []
@@ -80,19 +82,25 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
             img = preprocess_fn(img)
             processed_images.append(img)
 
-        height = np.array(height)
-        width = np.array(width)
+        height_arr = np.array(height)
+        width_arr = np.array(width)
 
         return (
             np.stack(processed_images, axis=0),
-            np.stack((height, width), axis=1),
+            np.stack((height_arr, width_arr), axis=1),
             idx,
         )
 
-    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
 
 
-class CustomImageFolder:
+class CustomImageFolder(torch.utils.data.Dataset[tuple[Image.Image, int]]):
     """Custom ImageFolder dataset for loading images from class-based directory structures.
 
     Expects data to be organized in the format: root/class_name/image.jpg.
@@ -104,7 +112,7 @@ class CustomImageFolder:
         samples (list[tuple]): List of (image_path, class_index) tuples.
     """
 
-    def __init__(self, root: str):
+    def __init__(self, root: str) -> None:
         """Initializes the CustomImageFolder instance.
 
         Args:
@@ -112,9 +120,10 @@ class CustomImageFolder:
         """
         self.root = root
         self.classes, self.class_to_idx = self.find_classes(root)
+        self.samples: list[tuple[str, int]] = []
         self.make_dataset()
 
-    def make_dataset(self):
+    def make_dataset(self) -> None:
         """Scans the root directory to create a list of samples."""
         instances = []
         for target_class in sorted(self.class_to_idx.keys()):
@@ -130,19 +139,19 @@ class CustomImageFolder:
 
         self.samples = instances
 
-    def loader(self, path):
+    def loader(self, path: str) -> Image.Image:
         """Load image from path using PIL."""
         with open(path, "rb") as f:
             img = Image.open(f)
             return img.convert("RGB")
 
-    def find_classes(self, directory):
+    def find_classes(self, directory: str) -> tuple[list[str], dict[str, int]]:
         """Find classes in the specified directory."""
         classes = sorted([d.name for d in os.scandir(directory) if d.is_dir()])
         class_to_idx = {cls: i for i, cls in enumerate(classes)}
         return classes, class_to_idx
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> tuple[Image.Image, int]:
         """
         Get sample and target at the specified index.
         Args:
@@ -154,7 +163,7 @@ class CustomImageFolder:
         sample = self.loader(path)
         return sample, target
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Return the total number of samples.
         Returns:
@@ -163,7 +172,9 @@ class CustomImageFolder:
         return len(self.samples)
 
 
-def get_imagenet_loader(dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable):
+def get_imagenet_loader(
+    dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable
+) -> torch.utils.data.DataLoader:
     """Creates a DataLoader for the ImageNet dataset.
 
     Args:
@@ -175,9 +186,9 @@ def get_imagenet_loader(dataset: CustomImageFolder, batch_size: int, preprocess_
         torch.utils.data.DataLoader: A configured DataLoader for the ImageNet dataset.
     """
 
-    def loader(batch):
+    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray]:
         """Collate function for ImageNet DataLoader."""
-        batch = filter(lambda x: x is not None, batch)  # remove None
+        batch = list(filter(lambda x: x is not None, batch))  # remove None
         images, labels = zip(*batch)
         processed_images = []
         for img in images:
@@ -189,10 +200,16 @@ def get_imagenet_loader(dataset: CustomImageFolder, batch_size: int, preprocess_
             np.array(labels),
         )  # BHWC, labels
 
-    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
 
 
-class CustomWiderface:
+class CustomWiderface(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
     """Custom dataset class for the WiderFace dataset.
 
     Attributes:
@@ -201,7 +218,7 @@ class CustomWiderface:
         samples (list[tuple]): List of (image_path, class_name, file_name) tuples.
     """
 
-    def __init__(self, root: str):
+    def __init__(self, root: str) -> None:
         """Initializes the CustomWiderface instance.
 
         Args:
@@ -209,9 +226,10 @@ class CustomWiderface:
         """
         self.root = root
         self.classes = self.find_classes(root)
+        self.samples: list[tuple[str, str, str]] = []
         self.make_dataset()
 
-    def make_dataset(self):
+    def make_dataset(self) -> None:
         """Scans the root directory to create a list of samples."""
         instances = []
         for target_class in self.classes:
@@ -226,12 +244,14 @@ class CustomWiderface:
 
         self.samples = instances
 
-    def loader(self, image_path):
+    def loader(self, image_path: str) -> np.ndarray:
         """Load image by image path"""
         image = cv2.imread(image_path)  # Load image (BGR format)
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
 
-    def find_classes(self, directory):
+    def find_classes(self, directory: str) -> list[str]:
         """Find classes in the specified directory."""
         unsorted_classes = [d.name for d in os.scandir(directory) if d.is_dir()]
         class_to_idx = {}
@@ -245,7 +265,7 @@ class CustomWiderface:
 
         return sorted_classes
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index: int) -> tuple[np.ndarray, str, str]:
         """
         Get the image and target by index.
         Args:
@@ -258,7 +278,7 @@ class CustomWiderface:
 
         return image, target_class, fname
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Return the total number of images.
         Returns:
@@ -267,7 +287,9 @@ class CustomWiderface:
         return len(self.samples)
 
 
-def get_widerface_loader(dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable):
+def get_widerface_loader(
+    dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable
+) -> torch.utils.data.DataLoader:
     """Creates a DataLoader for the WiderFace dataset.
 
     Args:
@@ -279,9 +301,11 @@ def get_widerface_loader(dataset: CustomWiderface, batch_size: int, preprocess_f
         torch.utils.data.DataLoader: A configured DataLoader for the WiderFace dataset.
     """
 
-    def loader(batch):
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], tuple[str, ...]]:
         """Collate function for WiderFace DataLoader."""
-        batch = filter(lambda x: x is not None, batch)
+        batch = list(filter(lambda x: x is not None, batch))
         images, target_classes, fnames = zip(*batch)
         processed_images = []
         heights = []
@@ -299,4 +323,10 @@ def get_widerface_loader(dataset: CustomWiderface, batch_size: int, preprocess_f
             fnames,
         )
 
-    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )

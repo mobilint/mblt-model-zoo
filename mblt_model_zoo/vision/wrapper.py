@@ -2,19 +2,46 @@
 Wrapper classes for MBLT model execution.
 """
 
+from __future__ import annotations
+
+import copy
 import os
-from typing import Optional, Union
+from pathlib import Path
+from typing import Any, Literal, Sequence, cast
 
-import numpy as np
-import qbruntime
 import torch
+import yaml
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError
+from qbruntime import Cluster, CoreId
 
-from ..utils.logging import log_model_details
+from ..utils.npu_backend import MobilintNPUBackend
 from .utils.postprocess import build_postprocess
 from .utils.preprocess import build_preprocess
 from .utils.results import Results
-from .utils.types import ModelInfoSet, TensorLike
+from .utils.types import TensorLike
+
+MODEL_CONFIG_DIR = Path(__file__).parent / "models"
+MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
+CoreMode = Literal["single", "multi", "global4", "global8"]
+
+
+def normalize_core_mode(core_mode: str) -> CoreMode:
+    """Narrow a validated core mode string to the ``CoreMode`` literal type.
+
+    Args:
+            core_mode: Core mode string from user input or configuration.
+
+    Returns:
+            The same value narrowed to ``CoreMode``.
+
+    Raises:
+            ValueError: If ``core_mode`` is not one of the supported values.
+    """
+    valid_modes = {"single", "multi", "global4", "global8"}
+    if core_mode not in valid_modes:
+        raise ValueError(f"Invalid core mode '{core_mode}'. Expected one of {sorted(valid_modes)}.")
+    return cast(CoreMode, core_mode)
 
 
 class MBLT_Engine:
@@ -23,7 +50,7 @@ class MBLT_Engine:
     Handles the full pipeline: Preprocessing -> Inference -> Postprocessing.
 
     Attributes:
-            model_cfg: Model configuration.
+            file_cfg: Model configuration.
             pre_cfg: Preprocessing configuration.
             post_cfg: Postprocessing configuration.
             model: The underlying MXQ_Model.
@@ -32,68 +59,152 @@ class MBLT_Engine:
 
     def __init__(
         self,
-        model_cfg: dict,
-        pre_cfg: dict,
-        post_cfg: dict,
-    ):
+        model_cls: str | dict[str, Any],
+        model_type: str = "DEFAULT",
+        mxq_path: str = "",
+        dev_no: int = 0,
+        core_mode: CoreMode = "single",
+        target_cores: Sequence[str | CoreId] | None = None,
+        target_clusters: Sequence[int | Cluster] | None = None,
+        postprocess_kwargs: dict[str, Any] | None = None,
+    ) -> None:
         """Initializes the MBLT_Engine.
 
         Args:
-                model_cfg: Model configuration.
+            model_cls(if dict):
+                file_cfg: Model configuration.
+                    mxq_path: path to mxq file
+                    dev_no: Accelerator No.
+                    core_mode: single, multi, global4, global8
+                    target_cores: single mode
+                    target_clusters: multi, global modes
                 pre_cfg: Preprocessing configuration.
                 post_cfg: Postprocessing configuration.
+            model_cls(not dict): model name or yaml path
+            postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
         """
-        self.model_cfg = model_cfg
-        self.pre_cfg = pre_cfg
-        self.post_cfg = post_cfg
-        self.model = MXQ_Model(**self.model_cfg)
 
-        if self.model.uint8_input:
+        if target_cores is None:
+            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+        if target_clusters is None:
+            target_clusters = [0, 1]
+
+        if isinstance(model_cls, dict):  # direct setting
+            model_config_part = model_cls
+            self.file_cfg = model_config_part["file_cfg"]
+        else:  # setting via yaml file path or model name
+            config_path = model_cls
+            if not os.path.isfile(config_path):
+                config_path = self.model_name_aliasing(config_path)
+                config_path = os.path.join(MODEL_CONFIG_DIR, config_path)
+
+            with open(config_path, "r", encoding="utf-8") as f:
+                full_config = yaml.safe_load(f)
+            if not isinstance(full_config, dict):
+                raise TypeError(f"Model configuration '{config_path}' should define a dictionary.")
+
+            model_config_part = full_config.get(model_type)
+            if model_config_part is None:
+                raise ValueError(f"Model type '{model_type}' not found in configuration.")
+
+            if isinstance(model_config_part, str):  # Resolve alias
+                resolved_config = full_config.get(model_config_part)
+                if resolved_config is None:
+                    raise ValueError(f"Model alias '{model_config_part}' not found in configuration.")
+                model_config_part = resolved_config
+
+            if not isinstance(model_config_part, dict):
+                raise TypeError(f"Resolved model configuration for '{model_type}' is not a dictionary.")
+
+            if "update" in model_config_part:
+                base_config_key = model_config_part.pop("update")
+                base_config = full_config.get(base_config_key)
+                if base_config is None:
+                    raise ValueError(f"Base configuration '{base_config_key}' not found for update.")
+
+                merged_config = copy.deepcopy(base_config)
+                for key, value in model_config_part.items():
+                    if key in merged_config and isinstance(merged_config[key], dict) and isinstance(value, dict):
+                        merged_config[key].update(value)
+                    else:
+                        merged_config[key] = value
+                model_config_part = merged_config
+
+            self.file_cfg = model_config_part["file_cfg"]
+            self.file_cfg["mxq_path"] = mxq_path
+            self.file_cfg["core_mode"] = core_mode
+            self.file_cfg["target_cores"] = target_cores
+            self.file_cfg["target_clusters"] = target_clusters
+            self.file_config_cleansing()
+
+        self.pre_cfg = model_config_part["pre_cfg"]
+        self.post_cfg = model_config_part["post_cfg"]
+        self.postprocess_kwargs = {} if postprocess_kwargs is None else dict(postprocess_kwargs)
+
+        self.model = MobilintNPUBackend(dev_no=dev_no, **self.file_cfg)
+        self.model.create()
+        self.model.launch()
+
+        if self.model.get_dtype() == "DataType.Uint8":
             self.pre_cfg.pop("Normalize", None)
 
         self.preprocessor = build_preprocess(self.pre_cfg)
-        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg)
+        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg, **self.postprocess_kwargs)
         self.device = torch.device("cpu")
 
-    @staticmethod
-    def _get_configs(
-        model_info_set: ModelInfoSet,
-        local_path: Optional[str] = None,
-        model_type: str = "DEFAULT",
-        infer_mode: str = "global8",
-        product: str = "aries",
-    ):
-        """Extracts and prepares configuration dictionaries from a ModelInfoSet.
+    def file_config_cleansing(self) -> None:
+        """Validates and resolves the MXQ model file path in ``self.file_cfg``.
 
-        Args:
-                model_info_set: Set of model configurations.
-                local_path: Path to a local model file. Defaults to None.
-                model_type: Model configuration type. Defaults to "DEFAULT".
-                infer_mode: Inference execution mode. Defaults to "global8".
-                product: Target hardware product. Defaults to "aries".
+        If ``self.file_cfg["mxq_path"]`` is provided and already points to an
+        existing file, the Hub-related keys (``repo_id``, ``filename``,
+        ``revision``) are removed from the config as they are no longer needed.
 
-        Returns:
-                A tuple of (model_cfg, pre_cfg, post_cfg) dictionaries.
+        Otherwise the method downloads the model from HuggingFace Hub using
+        those keys and updates ``self.file_cfg["mxq_path"]`` with the local
+        cache path. Artifacts are resolved from the legacy ``aries/`` layout
+        first, with a fallback to the core-mode-specific ``aries/<core_mode>/``
+        layout.
+
+        Raises:
+            RuntimeError: If the model cannot be downloaded from HuggingFace
+                Hub, wrapping the original exception for full traceback context.
         """
-        assert model_type in model_info_set.__dict__.keys(), (
-            f"model_type {model_type} not found. Available types: {model_info_set.__dict__.keys()}"
-        )
+        mxq_path = self.file_cfg.get("mxq_path", "")
+        if mxq_path and os.path.isfile(mxq_path):
+            self.file_cfg.pop("repo_id", None)
+            self.file_cfg.pop("filename", None)
+            self.file_cfg.pop("revision", None)
+        else:
+            repo_id = self.file_cfg.pop("repo_id")
+            filename = self.file_cfg.pop("filename")
+            revision = self.file_cfg.pop("revision")
+            core_mode = self.file_cfg.get("core_mode")
+            subfolders = ["aries", f"aries/{core_mode}"] if core_mode else ["aries"]
 
-        # Use copy() to avoid modifying the original ModelInfo in-place
-        model_cfg = model_info_set.__dict__[model_type].value.model_cfg.copy()
-        model_cfg["local_path"] = local_path
-        model_cfg["infer_mode"] = infer_mode
-        model_cfg["product"] = product
+            last_error: Exception | None = None
+            for subfolder in subfolders:
+                try:
+                    cached_file = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        subfolder=subfolder,
+                        revision=revision,
+                        local_dir=MOBILINT_CACHE_DIR,
+                    )
+                    self.file_cfg["mxq_path"] = cached_file
+                    return
+                except EntryNotFoundError as e:
+                    last_error = e
 
-        pre_cfg = model_info_set.__dict__[model_type].value.pre_cfg.copy()
-        post_cfg = model_info_set.__dict__[model_type].value.post_cfg.copy()
-
-        return model_cfg, pre_cfg, post_cfg
+            attempted_paths = ", ".join(f"{subfolder}/{filename}" for subfolder in subfolders)
+            raise RuntimeError(
+                f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
+            ) from last_error
 
     def __call__(
         self,
         x: TensorLike,
-    ):
+    ) -> Any:
         """Runs raw model inference on the input.
 
         Note:
@@ -109,9 +220,9 @@ class MBLT_Engine:
 
     def preprocess(
         self,
-        x,
-        **kwargs,
-    ):
+        x: Any,
+        **kwargs: Any,
+    ) -> Any:
         """Runs preprocessing on the input.
 
         Args:
@@ -125,8 +236,8 @@ class MBLT_Engine:
 
     def postprocess(
         self,
-        x,
-        **kwargs,
+        x: Any,
+        **kwargs: Any,
     ) -> Results:
         """Runs postprocessing on the input.
 
@@ -138,12 +249,36 @@ class MBLT_Engine:
                 Postprocessed results.
         """
         pre_result = self.postprocessor(x, **kwargs)
-        return Results(self.pre_cfg, self.post_cfg, pre_result, **kwargs)
+        result_kwargs = dict(kwargs)
+        conf_thres = getattr(self.postprocessor, "conf_thres", None)
+        iou_thres = getattr(self.postprocessor, "iou_thres", None)
+        if "conf_thres" not in result_kwargs and conf_thres is not None:
+            result_kwargs["conf_thres"] = conf_thres
+        if "iou_thres" not in result_kwargs and iou_thres is not None:
+            result_kwargs["iou_thres"] = iou_thres
+        return Results(self.pre_cfg, self.post_cfg, pre_result, **result_kwargs)
+
+    def set_postprocess_thresholds(self, conf_thres: float | None = None, iou_thres: float | None = None) -> None:
+        """Updates configurable postprocess thresholds for the current model.
+
+        Args:
+                conf_thres: Optional confidence threshold override.
+                iou_thres: Optional IoU threshold override.
+
+        Raises:
+                NotImplementedError: If the current postprocessor does not support thresholds.
+        """
+        set_threshold = getattr(self.postprocessor, "set_threshold", None)
+        if set_threshold is None:
+            raise NotImplementedError(
+                f"Threshold overrides are not supported for task `{self.post_cfg.get('task', 'unknown')}`."
+            )
+        set_threshold(conf_thres=conf_thres, iou_thres=iou_thres)
 
     def to(
         self,
-        device: Union[str, torch.device],
-    ):
+        device: str | torch.device,
+    ) -> None:
         """Moves the engine and its components to the specified device.
 
         Args:
@@ -162,18 +297,18 @@ class MBLT_Engine:
         else:
             raise TypeError(f"Got unexpected type for device={type(device)}.")
 
-    def cpu(self):
+    def cpu(self) -> None:
         """Moves the engine to CPU."""
         self.to(device="cpu")
 
-    def gpu(self):
+    def gpu(self) -> None:
         """Moves the engine to GPU (CUDA)."""
         self.to(device="cuda")
 
     def cuda(
         self,
-        device: Union[str, int] = 0,
-    ):
+        device: str | int = 0,
+    ) -> None:
         """Moves the engine to CUDA device.
 
         Args:
@@ -193,145 +328,74 @@ class MBLT_Engine:
             raise RuntimeError("CUDA is not available. Please check your environment.")
         self.to(device=device)
 
-    def launch(self):
+    def launch(self) -> None:
         """Launches the underlying model."""
         self.model.launch()
 
-    def dispose(self):
+    def dispose(self) -> None:
         """Disposes the underlying model."""
         self.model.dispose()
 
+    def model_name_aliasing(self, model_name: str) -> str:
+        """Finds the YAML config filename that matches the given model name.
 
-class MXQ_Model:
-    """Low-level wrapper for managing model execution on the Mobilint MXQ accelerator.
-
-    Handles communication with the qbruntime and resource management.
-
-    Attributes:
-            infer_mode: Inference execution mode.
-            product: Target hardware product.
-            acc: The accelerator object.
-            model: The model object.
-            uint8_input: Whether the model expects uint8 input.
-    """
-
-    def __init__(
-        self,
-        product: str = "aries",
-        infer_mode: str = "global8",
-        repo_id: Union[str, None] = None,
-        filename: Union[str, None] = None,
-        revision: Union[str, None] = None,
-        local_path: Union[str, None] = None,
-    ) -> None:
-        """Initializes the MXQ_Model.
+        Matching is case-insensitive and first preserves separator boundaries
+        so names such as ``regnet_x_16gf`` do not collide with
+        ``regnet_x_1_6gf``. A separator-stripped fallback is used only when it
+        resolves to a single unique configuration, so inputs like ``resnet50``,
+        ``ResNet50``, ``Resnet_50``, and ``resnet-50`` all resolve to
+        ``ResNet50.yaml``.
 
         Args:
-                product: Target hardware product. Defaults to "aries".
-                infer_mode: Inference execution mode. Defaults to "global8".
-                repo_id: Hugging Face repository ID. Defaults to None.
-                filename: Model filename. Defaults to None.
-                revision: Model revision. Defaults to None.
-                local_path: Path to local model file. Defaults to None.
-
-        Raises:
-                ValueError: If inference mode or product is invalid, or model file is missing.
-        """
-        self.infer_mode = infer_mode
-        assert infer_mode in [
-            "single",
-            "multi",
-            "global4",
-            "global8",
-        ], "Inappropriate inference mode"
-
-        self.product = product
-        assert product in ["aries", "regulus"], "Inappropriate product"
-
-        self.acc = qbruntime.Accelerator()
-        # ----------------Core Allocation-------------------------
-        mc = qbruntime.ModelConfig()
-        if self.product == "aries":
-            if self.infer_mode == "single":
-                mc.set_single_core_mode(
-                    core_ids=[
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core0),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core1),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core2),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster0, core=qbruntime.Core.Core3),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core0),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core1),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core2),
-                        qbruntime.CoreId(cluster=qbruntime.Cluster.Cluster1, core=qbruntime.Core.Core3),
-                    ]
-                )
-            elif self.infer_mode == "multi":
-                mc.set_multi_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
-            elif self.infer_mode == "global4":
-                mc.set_global4_core_mode([qbruntime.Cluster.Cluster0, qbruntime.Cluster.Cluster1])
-            elif self.infer_mode == "global8":
-                mc.set_global8_core_mode()
-            else:
-                raise ValueError("Inappropriate inference mode")
-        elif self.product == "regulus":
-            assert self.infer_mode == "single", "Only single core mode is available on REGULUS"
-        else:
-            raise ValueError("Inappropriate product")
-
-        # -----------------Model Preparation-----------------------
-        if local_path is not None:
-            assert os.path.isfile(local_path), "The model should be prepared on local path"
-            cached_file = local_path
-        elif repo_id is not None and filename is not None:
-            try:
-                cached_file = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                    subfolder=f"{self.product}/{self.infer_mode}",
-                    revision=revision,
-                    local_dir=os.path.expanduser("~/.mblt_model_zoo/vision"),
-                )
-            except Exception as e:
-                print(e)
-                raise RuntimeError("Failed to download model from HuggingFace")
-        else:
-            raise ValueError("The model should be prepared on server or local path")
-
-        # ----------------Initialize Model----------------------
-        self.model = qbruntime.Model(cached_file, mc)
-        log_model_details(cached_file)
-        self.model.launch(self.acc)
-
-        input_dtype = str(self.model.get_model_input_data_type())
-        if input_dtype == "DataType.Uint8":
-            self.uint8_input = True
-        elif input_dtype == "DataType.Float32":
-            self.uint8_input = False
-        else:
-            raise ValueError(f"Got unsupported dtype. Got {input_dtype}")
-
-    def __call__(
-        self,
-        x: TensorLike,
-    ):
-        """Runs inference on the input using the accelerator.
-
-        Args:
-                x: Input tensor or array.
+            model_name: The model identifier provided by the caller.
 
         Returns:
-                NPU outputs.
+            The exact YAML filename (basename only) stored in
+            ``MODEL_CONFIG_DIR`` that corresponds to ``model_name``.
+
+        Raises:
+            ValueError: If no YAML file matches, or if the name is ambiguous
+                (i.e., multiple files match after normalization).
         """
-        if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
-        assert isinstance(x, np.ndarray), "Input should be a numpy array"
-        npu_outs = self.model.infer(x)
-        return npu_outs
 
-    def launch(self):
-        """Launch the model on the accelerator."""
-        self.model.launch(self.acc)
+        def _stem(name: str) -> str:
+            """Returns a YAML filename stem when a YAML suffix is present."""
+            return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
 
-    def dispose(self):
-        """Dispose the model and free resources."""
-        self.model.dispose()
+        def _normalize_separators(name: str) -> str:
+            """Normalizes separator style while preserving separator boundaries."""
+            return "_".join(part for part in _stem(name).replace("-", "_").replace(" ", "_").lower().split("_") if part)
+
+        def _normalize_compact(name: str) -> str:
+            """Strips separators and lowercases a model name for fallback matching."""
+            return _stem(name).replace("_", "").replace("-", "").replace(" ", "").lower()
+
+        candidates = [p.name for p in MODEL_CONFIG_DIR.glob("*.yaml")]
+        candidate_stems = {name: name[: -len(".yaml")] for name in candidates}
+
+        normalized_separator_input = _normalize_separators(model_name)
+        separator_matches = [
+            name for name, stem in candidate_stems.items() if _normalize_separators(stem) == normalized_separator_input
+        ]
+        if len(separator_matches) == 1:
+            return separator_matches[0]
+
+        normalized_compact_input = _normalize_compact(model_name)
+        matches = [
+            name for name, stem in candidate_stems.items() if _normalize_compact(stem) == normalized_compact_input
+        ]
+
+        if len(matches) == 1:
+            return matches[0]
+
+        if len(matches) > 1:
+            raise ValueError(
+                f"Model name '{model_name}' is ambiguous. "
+                f"It matches multiple configurations: {sorted(matches)}. "
+                "Please use a more specific name."
+            )
+        raise ValueError(
+            f"No model configuration found for '{model_name}'. "
+            f"Available models are located in '{MODEL_CONFIG_DIR}'. "
+            "Check spelling or use the exact YAML filename."
+        )

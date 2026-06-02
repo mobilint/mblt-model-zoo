@@ -1,8 +1,8 @@
 """
 Script to organize the WiderFace dataset.
 
-This script takes the raw image and annotation zip files for the WiderFace dataset
-and organizes them into a structure suitable for the model zoo.
+This script takes local archives or downloadable sources for the WiderFace
+dataset and organizes them into a structure suitable for the model zoo.
 """
 
 import argparse
@@ -10,14 +10,24 @@ import os
 
 from mblt_model_zoo.vision.utils.datasets import organize_widerface
 
+DEFAULT_WIDERFACE_IMAGE_SOURCE = "https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/WIDER_val.zip"
+DEFAULT_WIDERFACE_ANNOTATION_SOURCE = (
+    "https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/wider_face_split.zip"
+)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize WiderFace dataset")
-    parser.add_argument("--image-dir", type=str, required=True, help="Path to the image zip file")
+    parser.add_argument(
+        "--image-dir",
+        type=str,
+        default=DEFAULT_WIDERFACE_IMAGE_SOURCE,
+        help="Local path or download URL for the image zip file",
+    )
     parser.add_argument(
         "--annotation-dir",
         type=str,
-        required=True,
-        help="Path to the annotation zip file",
+        default=DEFAULT_WIDERFACE_ANNOTATION_SOURCE,
+        help="Local path or download URL for the annotation zip file",
     )
     parser.add_argument(
         "--output-dir",
