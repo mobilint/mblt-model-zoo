@@ -16,7 +16,6 @@ DEFAULT:
       style: cv
   post_cfg:
     task: obb
-    nc: 15
     nl: 3
     n_extra: 1
     dflfree: true

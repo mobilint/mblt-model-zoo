@@ -16,7 +16,6 @@ DEFAULT:
       style: cv
   post_cfg:
     task: pose_estimation
-    nc: 1
     nl: 4
     n_extra: 51
     reg_max: 16

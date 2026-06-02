@@ -51,12 +51,23 @@ class PostBase(ABC):
 class YOLOPostBase(PostBase):
     """Base class for YOLO postprocessing."""
 
-    def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any]) -> None:
+    DEFAULT_NC_BY_TASK: dict[str, int] = {
+        "object_detection": 80,
+        "instance_segmentation": 80,
+        "pose_estimation": 1,
+        "obb": 15,
+    }
+
+    def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs) -> None:
         """Initializes the YOLOPostBase.
 
         Args:
             pre_cfg (dict): Preprocessing configuration.
             post_cfg (dict): Postprocessing configuration.
+            **kwargs: Optional runtime overrides for postprocess behavior.
+
+        Raises:
+            TypeError: If unsupported keyword overrides are provided.
         """
         super().__init__()
         letterbox_cfg = pre_cfg.get("LetterBox")
@@ -70,10 +81,16 @@ class YOLOPostBase(PostBase):
         elif isinstance(img_size, list):
             assert len(img_size) == 2, "img_size should be a list of two integers"
             self.imh, self.imw = img_size
-        nc = post_cfg.get("nc")
+        task = post_cfg.get("task")
+        if task is None:
+            raise ValueError("task should be provided in post_cfg")
+        self.task: str = task
+        task_key = self.task.lower()
+        default_nc = self.DEFAULT_NC_BY_TASK.get(task_key)
+        nc = kwargs.pop("nc", post_cfg.get("nc", default_nc))
         if nc is None:
-            raise ValueError("nc should be provided in post_cfg")
-        self.nc: int = nc
+            raise ValueError(f"nc should be provided in post_cfg or kwargs for task '{self.task}'.")
+        self.nc: int = int(nc)
         self.anchors: list[Any] | torch.Tensor | None = post_cfg.get("anchors", None)  # anchor coordinates
         self.stride: list[int] | torch.Tensor
         self.nl: int
@@ -81,6 +98,11 @@ class YOLOPostBase(PostBase):
         self.conf_thres: float
         self.iou_thres: float
         self.inv_conf_thres: float
+
+        self.e2e = bool(kwargs.pop("e2e", post_cfg.get("e2e", True)))
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected YOLO postprocess kwargs: {unexpected}")
 
         if self.anchors is None:
             nl = post_cfg.get("nl")
@@ -96,10 +118,6 @@ class YOLOPostBase(PostBase):
             self.nl = len(self.anchors)
             self.na = len(self.anchors[0]) // 2
         self.n_extra: int = post_cfg.get("n_extra", 0)
-        task = post_cfg.get("task")
-        if task is None:
-            raise ValueError("task should be provided in post_cfg")
-        self.task: str = task
         self.conf_thres = float(post_cfg.get("conf_thres", 0.25))
         self.iou_thres = float(post_cfg.get("iou_thres", 0.7))
         self.set_threshold()
@@ -144,6 +162,11 @@ class YOLOPostBase(PostBase):
         checked_input = self.check_input(x)
 
         predictions, proto_outs = self._pre_process(checked_input)
+
+        if not self.e2e:
+            if proto_outs is not None:
+                return self.masking(predictions, proto_outs)
+            return predictions
 
         nms_output = self.nms(predictions)
 

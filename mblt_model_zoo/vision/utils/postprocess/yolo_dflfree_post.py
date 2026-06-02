@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
 import torch
 
@@ -11,8 +11,15 @@ from .common import YOLOPosePostMixin, YOLOSegPostMixin, dist2bbox, dual_topk
 class YOLODFLFreePost(YOLOPostBase):
     """Postprocessing for YOLO DFL-free models."""
 
-    def __init__(self, pre_cfg: dict, post_cfg: dict) -> None:
-        super().__init__(pre_cfg, post_cfg)
+    def __init__(self, pre_cfg: dict, post_cfg: dict, **kwargs: object) -> None:
+        """Initialize the DFL-free YOLO postprocessor.
+
+        Args:
+            pre_cfg: Preprocessing configuration.
+            post_cfg: Postprocessing configuration.
+            **kwargs: Optional runtime overrides for postprocess behavior.
+        """
+        super().__init__(pre_cfg, post_cfg, **kwargs)
 
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
         """Preprocesses inputs for DFL-free models.
@@ -43,14 +50,14 @@ class YOLODFLFreePost(YOLOPostBase):
         x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
 
-    def rearrange(self, x: list[torch.Tensor]) -> Any:
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Rearranges raw outputs into a task-specific intermediate representation.
 
         Args:
             x: Raw model output tensors.
 
         Returns:
-            A task-specific intermediate representation used by ``decode``.
+            A concatenated intermediate representation used by ``decode``.
         """
         y_det = []
         y_cls = []
@@ -70,20 +77,21 @@ class YOLODFLFreePost(YOLOPostBase):
         # sort as box, scores
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        y = [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for (yi_det, yi_cls) in zip(y_det, y_cls)]
-        return y
+        return torch.cat(
+            [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for yi_det, yi_cls in zip(y_det, y_cls)],
+            dim=-1,
+        )
 
-    def decode(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+    def decode(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Decodes model outputs into box coordinates and class scores.
 
         Args:
-            x (list[torch.Tensor]): Rearranged output tensors from `rearrange`.
+            x (torch.Tensor): Concatenated output tensor from `rearrange`.
 
         Returns:
             list[torch.Tensor]: Decoded detections for each image in the batch.
         """
-        batch_box_cls = torch.cat(x, dim=-1)  # (b, 84, 8400)
-        return [self.process_box_cls(box_cls) for box_cls in batch_box_cls]
+        return [self.process_box_cls(box_cls) for box_cls in x]
 
     def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
         """Processes detection results for a single image.
@@ -190,14 +198,14 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         converted = torch.cat(outputs + protos, dim=-1).squeeze(1)
         return converted, proto
 
-    def rearrange(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+    def rearrange(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Rearranges segmentation outputs into detections and prototype masks.
 
         Args:
             x: Raw model output tensors.
 
         Returns:
-            A tuple of rearranged detections and prototype masks.
+            A tuple of concatenated detections and prototype masks.
         """
         y_det = []
         y_cls = []
@@ -223,10 +231,13 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
         assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
-        y = [
-            torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
-            for (yi_det, yi_cls, yi_ext) in zip(y_det, y_cls, y_ext)
-        ]
+        y = torch.cat(
+            [
+                torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
+                for yi_det, yi_cls, yi_ext in zip(y_det, y_cls, y_ext)
+            ],
+            dim=-1,
+        )
         return y, proto
 
 
@@ -261,7 +272,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         kpt = kpt.permute(0, 3, 1, 2).flatten(-2)
         return torch.cat([torch.cat(x, dim=-1).squeeze(1), kpt], dim=-1)  # [b, 8400, 56]
 
-    def rearrange(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
         y_det = []
         y_cls = []
         y_kpt = []
@@ -288,10 +299,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
             torch.cat((yi_det, yi_cls), dim=1).flatten(2)
             for (yi_det, yi_cls) in zip(y_det, y_cls)  # (b, 65, 6400), (b, 65, 1600), (b, 65, 400)
         ]
-        y = [
-            torch.cat((yi_tmp, yi_kpt), dim=1) for (yi_tmp, yi_kpt) in zip(y_tmp, y_kpt)
-        ]  # (b, 116, 6400), (b, 116, 1600), (b, 116, 400)
-        return y
+        return torch.cat([torch.cat((yi_tmp, yi_kpt), dim=1) for yi_tmp, yi_kpt in zip(y_tmp, y_kpt)], dim=-1)
 
     def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
         """Processes pose estimation results for a single image.

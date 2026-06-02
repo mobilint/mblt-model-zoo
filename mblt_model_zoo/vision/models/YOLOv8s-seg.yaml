@@ -16,7 +16,6 @@ DEFAULT:
       style: cv
   post_cfg:
     task: instance_segmentation
-    nc: 80
     nl: 3
     n_extra: 32
     reg_max: 16

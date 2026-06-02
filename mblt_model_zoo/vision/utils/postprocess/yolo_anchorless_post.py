@@ -19,23 +19,28 @@ from .common import (
 class YOLOAnchorlessPost(YOLOPostBase):
     """Postprocessing for YOLO models without anchors."""
 
-    def __init__(self, pre_cfg: dict, post_cfg: dict) -> None:
-        super().__init__(pre_cfg, post_cfg)
+    def __init__(self, pre_cfg: dict, post_cfg: dict, **kwargs: object) -> None:
+        """Initialize the anchorless YOLO postprocessor.
+
+        Args:
+            pre_cfg: Preprocessing configuration.
+            post_cfg: Postprocessing configuration.
+            **kwargs: Optional runtime overrides for postprocess behavior.
+        """
+        super().__init__(pre_cfg, post_cfg, **kwargs)
         self.reg_max = post_cfg.get("reg_max", 0)  # DFL channels
         self.no = self.nc + self.reg_max * 4  # number of outputs per anchor (144)
         self.dfl_weight = torch.arange(self.reg_max, dtype=torch.float32, device=self.device).reshape(1, -1, 1, 1)
 
-    def rearrange(
-        self,
-        x: list[torch.Tensor],
-    ) -> list[torch.Tensor] | tuple[list[torch.Tensor], torch.Tensor]:
-        """Rearranges raw model output tensors into a standardized format.
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Rearranges raw model output tensors into a concatenated decode input.
 
         Args:
             x (list[torch.Tensor]): List of raw output tensors from the model detection heads.
 
         Returns:
-            list[torch.Tensor]: Rearranged tensors, sorted by size descending.
+            torch.Tensor | tuple[torch.Tensor, torch.Tensor]: Concatenated tensor in
+                ``(batch, channels, anchors)`` format, optionally paired with prototype masks.
         """
         y_det = []
         y_cls = []
@@ -55,20 +60,21 @@ class YOLOAnchorlessPost(YOLOPostBase):
         # sort as box, scores
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        y = [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for (yi_det, yi_cls) in zip(y_det, y_cls)]
-        return y
+        return torch.cat(
+            [torch.cat((yi_det, yi_cls), dim=1).flatten(2) for yi_det, yi_cls in zip(y_det, y_cls)],
+            dim=-1,
+        )
 
-    def decode(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+    def decode(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Decodes model outputs into box coordinates and class scores.
 
         Args:
-            x (list[torch.Tensor]): Rearranged output tensors from `rearrange`.
+            x (torch.Tensor): Concatenated output tensor from `rearrange`.
 
         Returns:
             list[torch.Tensor]: Decoded detections for each image in the batch.
         """
-        batch_box_cls = torch.cat(x, dim=-1)  # (b, 144, 8400)
-        return [self.process_box_cls(box_cls) for box_cls in batch_box_cls]
+        return [self.process_box_cls(box_cls) for box_cls in x]
 
     def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
         """Processes detection results for a single image.
@@ -152,12 +158,21 @@ class YOLOAnchorlessPost(YOLOPostBase):
             if xi.numel() == 0:
                 output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device))
                 continue
-            box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
-            i, j = (score > self.conf_thres).nonzero(as_tuple=False).T
-            xi = torch.cat([box[i], xi[i, j + 4, None], j[:, None].float(), extra[i]], 1).to(self.device)
-            if xi.numel() == 0:
+            score = xi[:, 4 : 4 + self.nc]
+            extra = xi[:, 4 + self.nc :]
+            match_index = (score > self.conf_thres).nonzero(as_tuple=False)
+            if match_index.numel() == 0:
                 output.append(torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device))
                 continue
+            i = match_index[:, 0]
+            j = match_index[:, 1]
+            xi_out = torch.empty((match_index.shape[0], 6 + self.n_extra), dtype=xi.dtype, device=xi.device)
+            xi_out[:, :4] = xi[i, :4]
+            xi_out[:, 4] = score[i, j]
+            xi_out[:, 5] = j.to(xi.dtype)
+            if self.n_extra > 0:
+                xi_out[:, 6:] = extra[i]
+            xi = xi_out
             xi = xi[torch.argsort(xi[:, 4], descending=True)[:max_nms]]
             # NMS
             c = xi[:, 5:6] * max_wh
@@ -222,13 +237,13 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
             )
         raise ValueError(f"Wrong shape of input: {x[0].shape}, {x[1].shape}")
 
-    def rearrange(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+    def rearrange(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Rearrange model output tensors for segmentation tasks.
         Args:
             x (list[torch.Tensor]): Raw output tensors.
         Returns:
-            tuple: (rearranged_detections, prototype_masks)
+            tuple: (concatenated_detections, prototype_masks)
         """
         y_det: list[torch.Tensor] = []
         y_cls: list[torch.Tensor] = []
@@ -248,24 +263,27 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
         assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
-        y = [
-            torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
-            for (yi_det, yi_cls, yi_ext) in zip(y_det, y_cls, y_ext)
-        ]
+        y = torch.cat(
+            [
+                torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
+                for yi_det, yi_cls, yi_ext in zip(y_det, y_cls, y_ext)
+            ],
+            dim=-1,
+        )
         return y, proto
 
 
 class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
     """Postprocessing for YOLO pose estimation models without anchors."""
 
-    def rearrange(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Rearranges model output tensors for pose estimation tasks.
 
         Args:
             x (list[torch.Tensor]): Raw output tensors.
 
         Returns:
-            list[torch.Tensor]: Rearranged tensors.
+            torch.Tensor: Concatenated tensor for decode.
         """
         y_det = []
         y_cls = []
@@ -293,10 +311,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
             torch.cat((yi_det, yi_cls), dim=1).flatten(2)
             for (yi_det, yi_cls) in zip(y_det, y_cls)  # (b, 65, 6400), (b, 65, 1600), (b, 65, 400)
         ]
-        y = [
-            torch.cat((yi_tmp, yi_kpt), dim=1) for (yi_tmp, yi_kpt) in zip(y_tmp, y_kpt)
-        ]  # (b, 116, 6400), (b, 116, 1600), (b, 116, 400)
-        return y
+        return torch.cat([torch.cat((yi_tmp, yi_kpt), dim=1) for yi_tmp, yi_kpt in zip(y_tmp, y_kpt)], dim=-1)
 
     def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
         """Processes pose estimation results for a single image.

@@ -27,7 +27,7 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         if len(x) == 2:
             converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
-        rearranged = cast(list[torch.Tensor], self.rearrange(x))
+        rearranged = cast(torch.Tensor, self.rearrange(x))
         return self.decode(rearranged), None
 
     def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:

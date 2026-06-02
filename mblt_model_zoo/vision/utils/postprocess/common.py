@@ -183,36 +183,35 @@ def dual_topk(
     Returns:
         torch.Tensor: Filtered detections of shape (*, 6 + n_extra).
     """
-    if n_extra == 0:
-        ic = torch.amax(pre_topk[..., -nc:], dim=-1) > conf_thres
-    else:
-        ic = torch.amax(pre_topk[..., -nc - n_extra : -n_extra], dim=-1) > conf_thres
-    pre_topk = pre_topk[ic]  # (*, 84)
+    score_start = 4
+    score_end = 4 + nc
+    score_view = pre_topk[:, score_start:score_end]
+    ic = score_view.amax(dim=-1) > conf_thres
+    pre_topk = pre_topk[ic]
 
     if pre_topk.shape[0] == 0:
         return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device)
     max_det = min(pre_topk.shape[0], max_det)
-    # first topk
-    box, scores, extra = pre_topk.split([4, nc, n_extra], dim=-1)
-    max_scores = scores.amax(dim=-1)
-    _, index = torch.topk(max_scores, max_det, dim=-1)
-    index = index.unsqueeze(-1)
-    box = torch.gather(box, dim=0, index=index.expand(-1, 4))
-    scores = torch.gather(scores, dim=0, index=index.expand(-1, nc))
-    extra = torch.gather(extra, dim=0, index=index.expand(-1, n_extra))
-    # second topk
-    scores, index = torch.topk(scores.flatten(), max_det)
-    index = index.unsqueeze(-1)
-    scores = scores.unsqueeze(-1)
-    labels = (index % nc).float()
-    index = index // nc
-    box = box.gather(dim=0, index=index.expand(-1, 4))
-    extra = extra.gather(dim=0, index=index.expand(-1, n_extra))
-    box_cls = torch.cat([box, scores, labels, extra], dim=1)  # (max_det, 6 + n_extra)
-    box_cls = box_cls[box_cls[:, 4] > conf_thres]  # final filtering
-    if box_cls.numel() == 0:
+
+    row_index = torch.topk(pre_topk[:, score_start:score_end].amax(dim=-1), max_det, dim=0).indices
+    selected = pre_topk[row_index]
+    top_scores, flat_index = torch.topk(selected[:, score_start:score_end].reshape(-1), max_det)
+    keep = top_scores > conf_thres
+    if not torch.any(keep):
         return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device)
-    return box_cls
+
+    top_scores = top_scores[keep]
+    flat_index = flat_index[keep]
+    box_index = flat_index // nc
+    labels = (flat_index % nc).to(selected.dtype).unsqueeze(-1)
+
+    output = torch.empty((top_scores.shape[0], 6 + n_extra), dtype=selected.dtype, device=selected.device)
+    output[:, :4] = selected[box_index, :4]
+    output[:, 4] = top_scores
+    output[:, 5:6] = labels
+    if n_extra > 0:
+        output[:, 6:] = selected[box_index, score_end:]
+    return output
 
 
 # --- Scaling & Clipping Utilities ---

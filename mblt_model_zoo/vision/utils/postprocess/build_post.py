@@ -19,6 +19,7 @@ from .yolo_nmsfree_post import YOLONMSFreePost
 def build_postprocess(
     pre_cfg: dict,
     post_cfg: dict,
+    **kwargs: object,
 ) -> PostBase:
     """Builds a postprocessing object based on the model configuration.
 
@@ -26,6 +27,7 @@ def build_postprocess(
         pre_cfg (dict): Preprocessing configuration from the model info.
         post_cfg (dict): Postprocessing configuration from the model info.
             Must contain "task" and relevant flags for the specific task.
+        **kwargs: Optional runtime overrides passed to the postprocessor.
 
     Returns:
         PostBase: An instance of a postprocessing class tailored for the task.
@@ -41,44 +43,53 @@ def build_postprocess(
             return YOLOAnchorPost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         if post_cfg.get("dflfree", False):  # nms free is only available for detection
             return YOLODFLFreePost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         if post_cfg.get("nmsfree", False):
             return YOLONMSFreePost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         return YOLOAnchorlessPost(
             pre_cfg,
             post_cfg,
+            **kwargs,
         )
     if task_lower == "instance_segmentation":
         if post_cfg.get("anchors", False):
             return YOLOAnchorSegPost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         if post_cfg.get("dflfree", False):
             return YOLODFLFreeSegPost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         return YOLOAnchorlessSegPost(
             pre_cfg,
             post_cfg,
+            **kwargs,
         )
     if task_lower == "pose_estimation":
         if post_cfg.get("dflfree", False):
             return YOLODFLFreePosePost(
                 pre_cfg,
                 post_cfg,
+                **kwargs,
             )
         return YOLOAnchorlessPosePost(
             pre_cfg,
             post_cfg,
+            **kwargs,
         )
     raise NotImplementedError(f"Task {post_cfg['task']} is not implemented yet")

@@ -16,7 +16,6 @@ DEFAULT:
       style: cv
   post_cfg:
     task: object_detection
-    nc: 80
     anchors:
     - - 12
       - 16

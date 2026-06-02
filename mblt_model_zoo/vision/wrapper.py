@@ -66,6 +66,7 @@ class MBLT_Engine:
         core_mode: CoreMode = "single",
         target_cores: Sequence[str | CoreId] | None = None,
         target_clusters: Sequence[int | Cluster] | None = None,
+        postprocess_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Initializes the MBLT_Engine.
 
@@ -80,6 +81,7 @@ class MBLT_Engine:
                 pre_cfg: Preprocessing configuration.
                 post_cfg: Postprocessing configuration.
             model_cls(not dict): model name or yaml path
+            postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
         """
 
         if target_cores is None:
@@ -137,6 +139,7 @@ class MBLT_Engine:
 
         self.pre_cfg = model_config_part["pre_cfg"]
         self.post_cfg = model_config_part["post_cfg"]
+        self.postprocess_kwargs = {} if postprocess_kwargs is None else dict(postprocess_kwargs)
 
         self.model = MobilintNPUBackend(dev_no=dev_no, **self.file_cfg)
         self.model.create()
@@ -146,7 +149,7 @@ class MBLT_Engine:
             self.pre_cfg.pop("Normalize", None)
 
         self.preprocessor = build_preprocess(self.pre_cfg)
-        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg)
+        self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg, **self.postprocess_kwargs)
         self.device = torch.device("cpu")
 
     def file_config_cleansing(self) -> None:

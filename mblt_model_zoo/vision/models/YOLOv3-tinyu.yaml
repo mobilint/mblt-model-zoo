@@ -16,7 +16,6 @@ DEFAULT:
       style: cv
   post_cfg:
     task: object_detection
-    nc: 80
     nl: 2
     reg_max: 16
     conf_thres: 0.001
