@@ -33,6 +33,8 @@ cd mblt-model-zoo
 pip install -e .
 ```
 
+Release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Quick Start Guide
 
 ### Initializing a Vision Model
@@ -123,6 +125,40 @@ result = model.postprocess(output)
 ```
 
 Available vision models are documented in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
+
+### Vision API Migration for 2.0.0
+
+Starting in `2.0.0`, `mblt_model_zoo.vision` no longer re-exports every legacy vision model class
+at the package top level. Imports such as:
+
+```python
+from mblt_model_zoo.vision import ResNet50
+from mblt_model_zoo.vision import YOLO11m
+```
+
+are no longer supported.
+
+Use one of these migration paths instead:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
+```
+
+```python
+from mblt_model_zoo.vision.image_classification import ResNet50
+from mblt_model_zoo.vision.object_detection import YOLO11m
+```
+
+The task subpackage imports remain available as compatibility wrappers around `MBLT_Engine`. You
+can also inspect supported tasks and model names programmatically with `mblt_model_zoo.vision.list_tasks()`
+and `mblt_model_zoo.vision.list_models()`.
+
+For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` so
+existing call sites do not fail immediately, but it is ignored by the YAML-backed model registry.
+If you previously relied on `product` to choose a non-default artifact, migrate that selection to
+explicit `model_cls`, `model_type`, or `mxq_path` values.
 
 ## Model List
 

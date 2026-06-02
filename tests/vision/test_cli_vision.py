@@ -1,10 +1,14 @@
-"""Tests for vision CLI parser registration."""
+"""Tests for vision CLI parser registration and dataset source resolution."""
 
 from __future__ import annotations
+
+from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
 from mblt_model_zoo.cli.main import build_parser
+from mblt_model_zoo.cli.val import _resolve_coco_sources
 
 
 def test_cli_predict_example_parses() -> None:
@@ -62,3 +66,26 @@ def test_cli_vision_commands_parse_thresholds(command: str) -> None:
 
     assert args.conf_thres == 0.5
     assert args.iou_thres == 0.6
+
+
+def test_cli_val_reuses_extracted_coco_annotation_parent(tmp_path: Path) -> None:
+    """Resolve the common extracted COCO annotations layout without nesting twice."""
+
+    workspace = tmp_path
+    data_path = workspace / "datasets" / "coco"
+    data_path.mkdir(parents=True)
+    search_root = data_path.parent
+    (search_root / "val2017").mkdir()
+    annotations_leaf = search_root / "annotations"
+    annotations_leaf.mkdir()
+
+    args = Namespace(
+        image_dir=None,
+        annotation_dir=None,
+        force_organize=False,
+    )
+
+    image_dir, annotation_dir = _resolve_coco_sources(args, str(data_path))
+
+    assert image_dir == str(search_root / "val2017")
+    assert annotation_dir == str(search_root)

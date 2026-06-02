@@ -1,4 +1,10 @@
-"""MBLT vision model exports and discovery helpers."""
+"""MBLT vision task exports and discovery helpers.
+
+In ``2.0.0``, ``mblt_model_zoo.vision`` no longer re-exports every legacy model
+class at the package top level. Use task subpackages such as
+``mblt_model_zoo.vision.image_classification`` for compatibility imports, or
+load models through ``MBLT_Engine`` and ``list_models()``.
+"""
 
 from __future__ import annotations
 

@@ -46,6 +46,25 @@ def _find_existing_source(data_path: str, candidate_names: list[str]) -> str | N
     return None
 
 
+def _normalize_coco_annotation_source(annotation_dir: str | None) -> str | None:
+    """Normalizes a COCO annotation source for the organizer contract.
+
+    The COCO organizer expects either the annotation archive or the extracted
+    parent directory that contains an ``annotations`` subdirectory. When source
+    discovery finds the extracted leaf ``annotations`` directory directly,
+    return its parent so downstream code does not resolve ``annotations``
+    twice.
+    """
+
+    if annotation_dir is None:
+        return None
+
+    candidate = Path(annotation_dir).expanduser()
+    if candidate.is_dir() and candidate.name == "annotations":
+        return str(candidate.parent)
+    return annotation_dir
+
+
 def _resolve_imagenet_sources(args: argparse.Namespace, data_path: str) -> tuple[str, str]:
     """Resolves local or remote sources for ImageNet organization."""
 
@@ -61,12 +80,14 @@ def _resolve_coco_sources(args: argparse.Namespace, data_path: str) -> tuple[str
     """Resolves local or remote sources for COCO organization."""
 
     image_dir = args.image_dir
-    annotation_dir = args.annotation_dir
+    annotation_dir = _normalize_coco_annotation_source(args.annotation_dir)
     if not args.force_organize:
         image_dir = image_dir or _find_existing_source(data_path, ["val2017.zip", "val2017"])
-        annotation_dir = annotation_dir or _find_existing_source(
-            data_path,
-            ["annotations_trainval2017.zip", "annotations_trainval2017", "annotations"],
+        annotation_dir = annotation_dir or _normalize_coco_annotation_source(
+            _find_existing_source(
+                data_path,
+                ["annotations_trainval2017.zip", "annotations_trainval2017", "annotations"],
+            )
         )
     return image_dir or DEFAULT_COCO_IMAGE_SOURCE, annotation_dir or DEFAULT_COCO_ANNOTATION_SOURCE
 

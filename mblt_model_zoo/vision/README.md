@@ -5,6 +5,33 @@ segmentation, and pose estimation pipelines backed by pre-trained NPU model arti
 
 Further usage examples can be found in the [tests](../../tests/vision) directory.
 
+## Migration Notes
+
+Starting in `2.0.0`, `mblt_model_zoo.vision` no longer re-exports every legacy model class at the
+package top level. This means direct imports such as `from mblt_model_zoo.vision import ResNet50`
+or `from mblt_model_zoo.vision import YOLO11m` are no longer supported.
+
+Use one of these supported import styles instead:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
+```
+
+```python
+from mblt_model_zoo.vision.image_classification import ResNet50
+from mblt_model_zoo.vision.object_detection import YOLO11m
+```
+
+The task subpackages keep the legacy class names as compatibility wrappers, while `MBLT_Engine`
+and `list_models()` are the preferred discovery and loading APIs for new code.
+
+For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` for
+backward compatibility, but it is ignored by the YAML-backed registry. If you previously used
+`product` to select non-default artifacts, switch to explicit `model_cls`, `model_type`, or
+`mxq_path` values instead.
+
 ## CLI Usage
 
 The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by

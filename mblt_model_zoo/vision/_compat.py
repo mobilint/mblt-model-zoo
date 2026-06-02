@@ -71,7 +71,8 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             local_path: Optional local MXQ path using the legacy argument name.
             model_type: YAML config variant to load.
             infer_mode: Execution mode forwarded to ``MBLT_Engine``.
-            product: Retained for backward compatibility.
+            product: Retained for backward compatibility but ignored by the
+                YAML-backed registry in `2.0.0`.
             dev_no: Accelerator device number.
             target_cores: Optional core selection for single-core mode.
             target_clusters: Optional cluster selection for multi/global modes.
