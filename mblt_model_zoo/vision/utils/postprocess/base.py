@@ -159,6 +159,11 @@ class YOLOPostBase(PostBase):
             list: List of detections per image.
         """
         self.set_threshold(conf_thres, iou_thres)
+        final_detections, proto_outs = self.extract_final_outputs(x)
+        if final_detections is not None:
+            if proto_outs is not None:
+                return self.masking(final_detections, proto_outs)
+            return final_detections
         checked_input = self.check_input(x)
 
         if not self.e2e:
@@ -226,6 +231,69 @@ class YOLOPostBase(PostBase):
 
         img0_shapes = [img0_shape] if isinstance(img0_shape, tuple) else img0_shape
         return nmsout2eval(nms_out, img1_shape, img0_shapes)
+
+    def extract_final_outputs(
+        self,
+        x: TensorLike | ListTensorLike,
+    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+        """Extract already-decoded ONNX-style detections when present.
+
+        Args:
+            x: Raw postprocess input.
+
+        Returns:
+            A tuple of ``(detections, prototypes)`` when the input already contains
+            final detections, otherwise ``(None, None)``.
+        """
+
+        final_det_dim = 6 + self.n_extra
+
+        if isinstance(x, list):
+            if not x:
+                return None, None
+            first = x[0]
+            if isinstance(first, (np.ndarray, torch.Tensor)) and self._is_final_detection_tensor(first, final_det_dim):
+                detections = self._final_detection_batches(first)
+                proto = None
+                if len(x) > 1 and isinstance(x[1], (np.ndarray, torch.Tensor)):
+                    proto = self._normalize_proto_batch(x[1])
+                return detections, proto
+            return None, None
+
+        if isinstance(x, (np.ndarray, torch.Tensor)) and self._is_final_detection_tensor(x, final_det_dim):
+            return self._final_detection_batches(x), None
+
+        return None, None
+
+    def _is_final_detection_tensor(self, x: np.ndarray | torch.Tensor, final_det_dim: int) -> bool:
+        """Return whether ``x`` already contains final detection rows."""
+
+        return x.ndim == 3 and x.shape[-1] == final_det_dim
+
+    def _final_detection_batches(self, x: np.ndarray | torch.Tensor) -> list[torch.Tensor]:
+        """Convert batched final detections to the internal per-image tensor list."""
+
+        if isinstance(x, np.ndarray):
+            tensor = torch.from_numpy(x).to(self.device)
+        else:
+            tensor = x.to(self.device)
+        return [batch[batch[:, 4] > self.conf_thres] for batch in tensor]
+
+    def _normalize_proto_batch(self, proto_outs: np.ndarray | torch.Tensor) -> torch.Tensor:
+        """Normalize prototype masks to ``(B, H, W, C)`` layout."""
+
+        if isinstance(proto_outs, np.ndarray):
+            proto = torch.from_numpy(proto_outs).to(self.device)
+        else:
+            proto = proto_outs.to(self.device)
+
+        if proto.ndim != 4:
+            raise ValueError(f"Expected 4D prototype tensor, got shape {tuple(proto.shape)}.")
+        if proto.shape[-1] == self.n_extra:
+            return proto
+        if proto.shape[1] == self.n_extra:
+            return proto.permute(0, 2, 3, 1)
+        raise ValueError(f"Unsupported prototype tensor shape {tuple(proto.shape)}.")
 
     def make_anchors(self, offset: float = 0.5) -> None:
         """
@@ -369,7 +437,12 @@ class YOLOPostBase(PostBase):
         """
         masks = []
         for pred, proto in zip(x, proto_outs):
-            proto = proto.permute(2, 0, 1)  # [mask_h, mask_w, mask_dim] -> [mask_dim, mask_h, mask_w]
+            if proto.ndim != 3:
+                raise ValueError(f"Expected 3D prototype tensor, got shape {tuple(proto.shape)}.")
+            if proto.shape[-1] == self.n_extra:
+                proto = proto.permute(2, 0, 1)
+            elif proto.shape[0] != self.n_extra:
+                raise ValueError(f"Unsupported prototype tensor shape {tuple(proto.shape)}.")
             if len(pred) == 0:
                 masks.append(torch.zeros((0, self.imh, self.imw), dtype=torch.float32, device=self.device))
                 continue

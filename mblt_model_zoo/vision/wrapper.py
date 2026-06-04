@@ -8,7 +8,7 @@ import copy
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -27,7 +27,6 @@ from .utils.types import TensorLike
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 SUPPORTED_FRAMEWORKS = {"mxq", "onnx"}
-ONNX_SUPPORTED_TASKS = {"image_classification"}
 __all__ = ["CoreMode", "normalize_core_mode", "MBLT_Engine"]
 
 
@@ -153,8 +152,10 @@ class MBLT_Engine:
         self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])
         self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
         self.postprocess_kwargs = {} if postprocess_kwargs is None else dict(postprocess_kwargs)
-        self._validate_framework_support()
         self.file_config_cleansing()
+        self.model: MobilintNPUBackend | ort.InferenceSession
+        self._mxq_model: MobilintNPUBackend | None = None
+        self._onnx_session: ort.InferenceSession | None = None
 
         if self.framework == "onnx":
             resolved_onnx_path = self.file_cfg.get("onnx_path")
@@ -165,33 +166,22 @@ class MBLT_Engine:
             if not os.path.isfile(resolved_onnx_path):
                 raise FileNotFoundError(f"ONNX file not found at: {resolved_onnx_path}")
 
-            self.model = ort.InferenceSession(resolved_onnx_path, providers=["CPUExecutionProvider"])
-            self.input_name = self.model.get_inputs()[0].name
-            self.output_names = [o.name for o in self.model.get_outputs()]
+            self._onnx_session = ort.InferenceSession(resolved_onnx_path, providers=["CPUExecutionProvider"])
+            self.model = self._onnx_session
+            self.input_name = self._onnx_session.get_inputs()[0].name
+            self.output_names = [o.name for o in self._onnx_session.get_outputs()]
         else:
-            self.model = MobilintNPUBackend(dev_no=dev_no, **self._mxq_backend_kwargs())
-            self.model.create()
-            self.model.launch()
+            self._mxq_model = MobilintNPUBackend(dev_no=dev_no, **self._mxq_backend_kwargs())
+            self.model = self._mxq_model
+            self._mxq_model.create()
+            self._mxq_model.launch()
 
-            if self.model.get_dtype() == "DataType.Uint8":
+            if self._mxq_model.get_dtype() == "DataType.Uint8":
                 self.pre_cfg.pop("Normalize", None)
 
         self.preprocessor = build_preprocess(self.pre_cfg)
         self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg, **self.postprocess_kwargs)
         self.device = torch.device("cpu")
-
-    def _validate_framework_support(self) -> None:
-        """Checks whether the selected framework is supported for the current task."""
-
-        if self.framework != "onnx":
-            return
-
-        task = str(self.post_cfg.get("task", "")).lower()
-        if task not in ONNX_SUPPORTED_TASKS:
-            raise NotImplementedError(
-                f"Framework '{self.framework}' is currently supported only for tasks: "
-                f"{sorted(ONNX_SUPPORTED_TASKS)}. Got task '{task}'."
-            )
 
     def _mxq_backend_kwargs(self) -> dict[str, Any]:
         """Builds the MXQ backend kwargs from the resolved file config."""
@@ -323,7 +313,7 @@ class MBLT_Engine:
         if x_np.dtype == np.float64:
             x_np = x_np.astype(np.float32)
 
-        expected_shape = self.model.get_inputs()[0].shape
+        expected_shape = self._require_onnx_session().get_inputs()[0].shape
         if len(expected_shape) == 4:
             if x_np.ndim == 3:
                 if x_np.shape[0] == 3:
@@ -335,6 +325,28 @@ class MBLT_Engine:
                 x_np = np.transpose(x_np, (0, 3, 1, 2))
 
         return {self.input_name: x_np}
+
+    def _require_onnx_session(self) -> ort.InferenceSession:
+        """Return the active ONNX session."""
+
+        session = getattr(self, "_onnx_session", None)
+        if session is None:
+            fallback = getattr(self, "model", None)
+            if fallback is not None and hasattr(fallback, "get_inputs") and hasattr(fallback, "run"):
+                return cast(ort.InferenceSession, fallback)
+            raise RuntimeError("ONNX session is not initialized.")
+        return session
+
+    def _require_mxq_model(self) -> MobilintNPUBackend:
+        """Return the active MXQ backend."""
+
+        model = getattr(self, "_mxq_model", None)
+        if model is None:
+            fallback = getattr(self, "model", None)
+            if fallback is not None and hasattr(fallback, "create") and hasattr(fallback, "launch"):
+                return cast(MobilintNPUBackend, fallback)
+            raise RuntimeError("MXQ backend is not initialized.")
+        return model
 
     def __call__(
         self,
@@ -352,11 +364,11 @@ class MBLT_Engine:
                 Raw model output.
         """
         if self.framework == "onnx":
-            outputs = self.model.run(self.output_names, self._prepare_onnx_inputs(x))
+            outputs = self._require_onnx_session().run(self.output_names, self._prepare_onnx_inputs(x))
             if len(outputs) == 1:
                 return outputs[0]
             return outputs
-        return self.model(x)
+        return cast(Any, self._require_mxq_model())(x)
 
     def preprocess(
         self,
@@ -471,12 +483,12 @@ class MBLT_Engine:
     def launch(self) -> None:
         """Launches the underlying model."""
         if self.framework == "mxq":
-            self.model.launch()
+            self._require_mxq_model().launch()
 
     def dispose(self) -> None:
         """Disposes the underlying model."""
         if self.framework == "mxq":
-            self.model.dispose()
+            self._require_mxq_model().dispose()
 
     def model_name_aliasing(self, model_name: str) -> str:
         """Finds the YAML config filename that matches the given model name.

@@ -152,7 +152,18 @@ class YOLOAnchorlessPost(YOLOPostBase):
         Returns:
             list[torch.Tensor]: Filtered detections for each image in the batch.
         """
-        x_list = torch.split(x.squeeze(1), 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
+        if x.ndim == 4 and x.shape[1] == 1:
+            x = x.squeeze(1)
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D converted tensor, got shape {tuple(x.shape)}.")
+        expected_dim = 4 + self.nc + self.n_extra
+        if x.shape[-1] == expected_dim:
+            normalized = x
+        elif x.shape[1] == expected_dim:
+            normalized = x.transpose(1, 2)
+        else:
+            raise ValueError(f"Unsupported converted tensor shape {tuple(x.shape)}.")
+        x_list = torch.split(normalized, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
         def process_conversion(x: torch.Tensor) -> torch.Tensor:
             x = x.squeeze(0)  # (8400, 84)

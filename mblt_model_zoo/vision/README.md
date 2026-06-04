@@ -22,6 +22,12 @@ model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", cor
 ```
 
 ```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="alexnet", framework="onnx")
+```
+
+```python
 from mblt_model_zoo.vision.image_classification import ResNet50
 from mblt_model_zoo.vision.object_detection import YOLO11m
 ```
@@ -42,6 +48,15 @@ task from the model configuration.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50
+```
+
+Vision commands default to `--framework mxq`. You can switch any supported vision model to ONNX
+with `--framework onnx`, optionally combined with `--onnx-path` when you want to use a local ONNX
+file instead of the published Hugging Face artifact.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
+mblt-model-zoo predict --source ./street.jpg --model yolo11m --framework onnx
 ```
 
 The command saves the plotted result image under `runs/vision/predict/` by default. Use `--output`
@@ -77,6 +92,17 @@ output = model(input_img)
 result = model.postprocess(output)
 ```
 
+The same API works with ONNX by passing `framework="onnx"`:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="yolo11m", framework="onnx")
+input_img = model.preprocess("./street.jpg")
+output = model(input_img)
+result = model.postprocess(output)
+```
+
 When you want custom thresholds, set them once on the model before postprocessing:
 
 ```python
@@ -90,6 +116,7 @@ Common options are available for all vision commands:
 mblt-model-zoo predict \
   --source ./cat.png \
   --model resnet50 \
+  --framework mxq \
   --model-type DEFAULT \
   --mxq-path /path/to/model.mxq \
   --core-mode global8 \
@@ -109,6 +136,13 @@ The vision CLI also provides a unified validation command:
 
 ```bash
 mblt-model-zoo val --model resnet50
+```
+
+Validation also supports `--framework onnx` and the optional `--onnx-path` override:
+
+```bash
+mblt-model-zoo val --model resnet50 --framework onnx
+mblt-model-zoo val --model yolo11m --framework onnx --data-path /path/to/coco
 ```
 
 The command loads the model, infers its task, and validates it on the associated benchmark dataset:

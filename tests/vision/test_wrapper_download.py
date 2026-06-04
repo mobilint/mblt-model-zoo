@@ -11,6 +11,7 @@ import torch
 from huggingface_hub.errors import EntryNotFoundError
 
 import mblt_model_zoo.vision.wrapper as wrapper
+from mblt_model_zoo.vision.utils.postprocess import build_postprocess
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
@@ -122,7 +123,8 @@ def test_prepare_onnx_inputs_keeps_batched_nchw_layout() -> None:
 
     engine = MBLT_Engine.__new__(MBLT_Engine)
     engine.framework = "onnx"
-    engine.model = _FakeSession()
+    engine._onnx_session = _FakeSession()
+    engine.model = engine._onnx_session
     engine.input_name = "input"
 
     batch = torch.zeros((2, 3, 224, 224), dtype=torch.float32)
@@ -147,7 +149,8 @@ def test_prepare_onnx_inputs_transposes_hwc_images() -> None:
 
     engine = MBLT_Engine.__new__(MBLT_Engine)
     engine.framework = "onnx"
-    engine.model = _FakeSession()
+    engine._onnx_session = _FakeSession()
+    engine.model = engine._onnx_session
     engine.input_name = "input"
 
     image = np.zeros((224, 224, 3), dtype=np.float32)
@@ -155,3 +158,38 @@ def test_prepare_onnx_inputs_transposes_hwc_images() -> None:
     inputs = engine._prepare_onnx_inputs(image)
 
     assert inputs["input"].shape == (1, 3, 224, 224)
+
+
+def test_final_onnx_detections_apply_confidence_threshold() -> None:
+    """Filter confidence on already-decoded ONNX detection outputs."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [640, 640],
+        }
+    }
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "nmsfree": True,
+        "reg_max": 16,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = build_postprocess(pre_cfg, post_cfg)
+    final_output = np.array(
+        [
+            [
+                [10.0, 20.0, 30.0, 40.0, 0.49, 0.0],
+                [11.0, 21.0, 31.0, 41.0, 0.50, 1.0],
+                [12.0, 22.0, 32.0, 42.0, 0.90, 2.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+
+    result = postprocessor(final_output)
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 6)
+    assert torch.all(result[0][:, 4] > 0.5)
