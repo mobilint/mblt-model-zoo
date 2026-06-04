@@ -63,8 +63,13 @@ because they are the most consistently structured.
   explicitly updates the public contract.
 - Keep public constructor arguments such as `local_path`, `model_type`, `infer_mode`, and
   `product` stable when extending existing models.
+- `mblt_model_zoo.vision` supports both task-subpackage imports and legacy top-level compatibility
+  imports such as `from mblt_model_zoo.vision import ResNet50`. For new docs and examples, prefer
+  `MBLT_Engine` or task-subpackage imports unless the change is specifically about backward
+  compatibility.
 - When adding or renaming exported vision models, update the relevant `__init__.py` files so
-  `mblt_model_zoo.vision.list_models()` continues to discover them.
+  `mblt_model_zoo.vision.list_models()` continues to discover them, and keep
+  `mblt_model_zoo.vision.__init__` compatibility exports in sync.
 
 ### Tests and Benchmarks
 
@@ -73,6 +78,9 @@ because they are the most consistently structured.
 - Reuse the documented commands in `tests/vision/TEST.md`, `tests/transformers/TEST.md`,
   `tests/MeloTTS/TEST.md`, and `benchmark/vision/README.md`.
 - Use the shared NPU pytest options from `tests/conftest.py` instead of inventing custom flags.
+- For vision tests that call `MBLT_Engine(**kwargs)`, prefer the typed helper
+  `tests.npu_backend_options.build_vision_engine_kwargs()` so `dev_no`, `core_mode`,
+  `target_cores`, and `target_clusters` stay aligned with the engine signature.
 
 ## Comment Style Guide
 

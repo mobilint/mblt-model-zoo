@@ -18,7 +18,7 @@ import pytest
 
 from mblt_model_zoo.vision import MBLT_Engine
 from mblt_model_zoo.vision.wrapper import normalize_core_mode
-from tests.npu_backend_options import BaseNpuParams
+from tests.npu_backend_options import BaseNpuParams, build_vision_engine_kwargs
 
 TEST_DIR = Path(__file__).parent
 
@@ -33,13 +33,7 @@ def pytest_model(base_npu_params: BaseNpuParams) -> Generator[MBLT_Engine, None,
     Yields:
         The initialized model engine.
     """
-    model_kwargs = {
-        "model_cls": "yolo11m",
-        "mxq_path": "",
-        "model_type": "DEFAULT",
-        "core_mode": "global8",
-    }
-    model_kwargs.update(base_npu_params.base)
+    model_kwargs = build_vision_engine_kwargs(base_npu_params.base, model_cls="yolo11m")
     model = MBLT_Engine(**model_kwargs)
     yield model
     model.dispose()
