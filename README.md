@@ -128,27 +128,25 @@ Available vision models are documented in [mblt_model_zoo/vision/README.md](mblt
 
 ### Vision API Migration for 2.0.0
 
-Starting in `2.0.0`, `mblt_model_zoo.vision` no longer re-exports every legacy vision model class
-at the package top level. Imports such as:
+`mblt_model_zoo.vision` supports both the legacy top-level model imports and the task subpackage
+imports. These imports are valid:
 
 ```python
 from mblt_model_zoo.vision import ResNet50
 from mblt_model_zoo.vision import YOLO11m
 ```
 
-are no longer supported.
+```python
+from mblt_model_zoo.vision.image_classification import ResNet50
+from mblt_model_zoo.vision.object_detection import YOLO11m
+```
 
-Use one of these migration paths instead:
+For new code, `MBLT_Engine` remains the preferred loading API:
 
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
 
 model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
-```
-
-```python
-from mblt_model_zoo.vision.image_classification import ResNet50
-from mblt_model_zoo.vision.object_detection import YOLO11m
 ```
 
 The task subpackage imports remain available as compatibility wrappers around `MBLT_Engine`. You

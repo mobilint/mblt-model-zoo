@@ -7,11 +7,13 @@ Further usage examples can be found in the [tests](../../tests/vision) directory
 
 ## Migration Notes
 
-Starting in `2.0.0`, `mblt_model_zoo.vision` no longer re-exports every legacy model class at the
-package top level. This means direct imports such as `from mblt_model_zoo.vision import ResNet50`
-or `from mblt_model_zoo.vision import YOLO11m` are no longer supported.
+`mblt_model_zoo.vision` supports both the task subpackages and the legacy top-level model imports.
+These import styles are both valid:
 
-Use one of these supported import styles instead:
+```python
+from mblt_model_zoo.vision import ResNet50
+from mblt_model_zoo.vision import YOLO11m
+```
 
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
@@ -24,8 +26,8 @@ from mblt_model_zoo.vision.image_classification import ResNet50
 from mblt_model_zoo.vision.object_detection import YOLO11m
 ```
 
-The task subpackages keep the legacy class names as compatibility wrappers, while `MBLT_Engine`
-and `list_models()` are the preferred discovery and loading APIs for new code.
+The task subpackages remain the clearest import surface, while `MBLT_Engine` and `list_models()`
+are the preferred discovery and loading APIs for new code.
 
 For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` for
 backward compatibility, but it is ignored by the YAML-backed registry. If you previously used

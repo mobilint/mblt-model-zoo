@@ -4,13 +4,27 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import pytest
+
+from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
 ALL_PREFIXES = ("base", "draft", "fc", "encoder", "decoder", "vision", "text")
+
+
+class VisionEngineKwargs(TypedDict, total=False):
+    """Typed kwargs for constructing a vision ``MBLT_Engine`` in tests."""
+
+    model_cls: str
+    model_type: str
+    mxq_path: str
+    dev_no: int
+    core_mode: CoreMode
+    target_cores: list[str]
+    target_clusters: list[int]
 
 
 def parse_target_cores(value: str | None) -> list[str] | None:
@@ -264,9 +278,6 @@ def build_eagle3_specs(config: pytest.Config) -> list[Eagle3NpuSweepSpec]:
     if not should_expand_core_matrix(config, prefixes=("base", "draft", "fc")):
         return [Eagle3NpuSweepSpec(core_mode="global4")]
 
-    base_raw = config.getoption("--base-core-mode")
-    draft_raw = config.getoption("--draft-core-mode")
-    fc_raw = config.getoption("--fc-core-mode")
     shared_raw = config.getoption("--core-mode")
     base_explicit = option_value_was_provided(config, "base", "core_mode")
     draft_explicit = option_value_was_provided(config, "draft", "core_mode")
@@ -374,6 +385,47 @@ def build_base_npu_params(
         base_kwargs["embedding_weight"] = embedding_weight
 
     return BaseNpuParams(base=base_kwargs)
+
+
+def build_vision_engine_kwargs(
+    base_kwargs: dict[str, Any],
+    *,
+    model_cls: str,
+    model_type: str = "DEFAULT",
+    mxq_path: str = "",
+    core_mode: CoreMode = "global8",
+) -> VisionEngineKwargs:
+    """Build typed kwargs for vision tests that construct ``MBLT_Engine``.
+
+    Args:
+        base_kwargs: Shared backend kwargs from the pytest NPU fixtures.
+        model_cls: Model name to load.
+        model_type: Model variant key from the YAML config.
+        mxq_path: Optional explicit MXQ path override.
+        core_mode: Default core mode used when the fixture does not override it.
+
+    Returns:
+        A typed kwargs dictionary suitable for ``MBLT_Engine(**kwargs)``.
+    """
+    model_kwargs: VisionEngineKwargs = {
+        "model_cls": model_cls,
+        "mxq_path": mxq_path,
+        "model_type": model_type,
+        "core_mode": core_mode,
+    }
+
+    if "mxq_path" in base_kwargs:
+        model_kwargs["mxq_path"] = cast(str, base_kwargs["mxq_path"])
+    if "dev_no" in base_kwargs:
+        model_kwargs["dev_no"] = cast(int, base_kwargs["dev_no"])
+    if "core_mode" in base_kwargs:
+        model_kwargs["core_mode"] = normalize_core_mode(cast(str, base_kwargs["core_mode"]))
+    if "target_cores" in base_kwargs:
+        model_kwargs["target_cores"] = cast(list[str], base_kwargs["target_cores"])
+    if "target_clusters" in base_kwargs:
+        model_kwargs["target_clusters"] = cast(list[int], base_kwargs["target_clusters"])
+
+    return model_kwargs
 
 
 def build_eagle3_npu_params(

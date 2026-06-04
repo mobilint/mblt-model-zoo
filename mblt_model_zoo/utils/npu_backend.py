@@ -9,12 +9,13 @@ HuggingFace Hub when a local path is not found.
 import logging
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Accelerator, Cluster, Core, CoreId, Model, ModelConfig
 
+from .core_mode import CoreMode, normalize_core_mode
 from .logging import log_model_details
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class MobilintNPUBackend:
         mxq_path: str = "",
         dev_no: int = 0,
         max_batch_size: int = 1,
-        core_mode: Literal["single", "multi", "global4", "global8"] = "single",
+        core_mode: CoreMode = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
         revision: Optional[str] = None,
@@ -84,7 +85,7 @@ class MobilintNPUBackend:
         self.mxq_path = mxq_path
         self.dev_no = dev_no
         self.max_batch_size = max(1, max_batch_size)
-        self.core_mode = core_mode
+        self.core_mode = normalize_core_mode(core_mode)
 
         # Declared here; set during create()
         self.acc: Optional["Accelerator"] = None
