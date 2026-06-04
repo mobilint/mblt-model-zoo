@@ -69,13 +69,25 @@ model = MBLT_Engine(
     mxq_path="path/to/resnet50.mxq",
     core_mode="global8",
 )
+
+# Run an image classification model with ONNX instead of MXQ.
+# If onnx_path is empty, the matching ONNX file is downloaded from the
+# same Hugging Face repo and cached automatically.
+model = MBLT_Engine(
+    model_cls="alexnet",
+    model_type="IMAGENET1K_V1",
+    framework="onnx",
+    onnx_path="",
+)
 ```
 
 `MBLT_Engine` accepts these main arguments:
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
+- `framework`: Inference backend. Defaults to `mxq`. `onnx` is currently supported for image classification models.
 - `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
+- `onnx_path`: Local ONNX path. Use `""` to download and cache the published ONNX automatically when `framework="onnx"`.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
 Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
@@ -106,6 +118,24 @@ try:
         save_path="path/to/save/result.jpg",
         topk=5,
     )
+finally:
+    model.dispose()
+```
+
+For ONNX image classification, the preprocess and postprocess flow stays the same:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(
+    model_cls="caformer_b36",
+    framework="onnx",
+)
+
+try:
+    input_img = model.preprocess("path/to/image.jpg")
+    output = model(input_img)
+    result = model.postprocess(output)
 finally:
     model.dispose()
 ```
@@ -190,6 +220,14 @@ mblt-model-zoo --help
 
 The CLI provides Mobilint-specific helper commands and delegates selected upstream Hugging Face
 Transformers commands to the installed `transformers` package.
+
+For vision inference, `predict` and `val` default to `--framework mxq`. You can switch image
+classification models to ONNX with `--framework onnx`, optionally combined with `--onnx-path`:
+
+```bash
+mblt-model-zoo predict --source ./image.jpg --model alexnet --framework onnx
+mblt-model-zoo val --model caformer_b36 --framework onnx --data-path /path/to/imagenet
+```
 
 ### TPS Benchmark Helpers
 

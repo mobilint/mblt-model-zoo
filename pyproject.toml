@@ -28,6 +28,8 @@ dependencies = [
     "tqdm",
     "mblt-tracker>=0.2.5",
     "PyYAML",
+    "onnx",
+    "onnxruntime",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

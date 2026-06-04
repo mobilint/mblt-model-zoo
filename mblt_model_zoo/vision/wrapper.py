@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import copy
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
+import onnxruntime as ort
 import torch
 import yaml
 from huggingface_hub import hf_hub_download
@@ -23,8 +26,28 @@ from .utils.results import Results
 from .utils.types import TensorLike
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
-MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
+SUPPORTED_FRAMEWORKS = {"mxq", "onnx"}
+ONNX_SUPPORTED_TASKS = {"image_classification"}
 __all__ = ["CoreMode", "normalize_core_mode", "MBLT_Engine"]
+
+
+def _default_cache_dir() -> str:
+    """Returns a writable cache directory for downloaded vision artifacts."""
+
+    preferred = Path(os.path.expanduser("~/.mblt_model_zoo"))
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        test_file = preferred / ".write_test"
+        test_file.touch(exist_ok=True)
+        test_file.unlink(missing_ok=True)
+        return str(preferred)
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "mblt_model_zoo"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return str(fallback)
+
+
+MOBILINT_CACHE_DIR = _default_cache_dir()
 
 
 class MBLT_Engine:
@@ -45,11 +68,13 @@ class MBLT_Engine:
         model_cls: str | dict[str, Any],
         model_type: str = "DEFAULT",
         mxq_path: str = "",
+        onnx_path: str = "",
         dev_no: int = 0,
         core_mode: CoreMode = "single",
         target_cores: Sequence[str | CoreId] | None = None,
         target_clusters: Sequence[int | Cluster] | None = None,
         postprocess_kwargs: dict[str, Any] | None = None,
+        framework: str = "mxq",
     ) -> None:
         """Initializes the MBLT_Engine.
 
@@ -57,6 +82,7 @@ class MBLT_Engine:
             model_cls(if dict):
                 file_cfg: Model configuration.
                     mxq_path: path to mxq file
+                    onnx_path: path to onnx file
                     dev_no: Accelerator No.
                     core_mode: single, multi, global4, global8
                     target_cores: single mode
@@ -65,6 +91,7 @@ class MBLT_Engine:
                 post_cfg: Postprocessing configuration.
             model_cls(not dict): model name or yaml path
             postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
+            framework: Execution framework, either "mxq" or "onnx".
         """
 
         if target_cores is None:
@@ -72,9 +99,12 @@ class MBLT_Engine:
         if target_clusters is None:
             target_clusters = [0, 1]
 
+        self.framework = framework.lower()
+        if self.framework not in SUPPORTED_FRAMEWORKS:
+            raise ValueError(f"Unsupported framework: {framework}. Must be one of {sorted(SUPPORTED_FRAMEWORKS)}.")
+
         if isinstance(model_cls, dict):  # direct setting
-            model_config_part = model_cls
-            self.file_cfg = model_config_part["file_cfg"]
+            model_config_part = copy.deepcopy(model_cls)
         else:  # setting via yaml file path or model name
             config_path = model_cls
             if not os.path.isfile(config_path):
@@ -113,76 +143,198 @@ class MBLT_Engine:
                         merged_config[key] = value
                 model_config_part = merged_config
 
-            self.file_cfg = model_config_part["file_cfg"]
-            self.file_cfg["mxq_path"] = mxq_path
-            self.file_cfg["core_mode"] = core_mode
-            self.file_cfg["target_cores"] = target_cores
-            self.file_cfg["target_clusters"] = target_clusters
-            self.file_config_cleansing()
+        self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
+        self.file_cfg["mxq_path"] = mxq_path
+        self.file_cfg["onnx_path"] = onnx_path
+        self.file_cfg["core_mode"] = core_mode
+        self.file_cfg["target_cores"] = target_cores
+        self.file_cfg["target_clusters"] = target_clusters
 
-        self.pre_cfg = model_config_part["pre_cfg"]
-        self.post_cfg = model_config_part["post_cfg"]
+        self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])
+        self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
         self.postprocess_kwargs = {} if postprocess_kwargs is None else dict(postprocess_kwargs)
+        self._validate_framework_support()
+        self.file_config_cleansing()
 
-        self.model = MobilintNPUBackend(dev_no=dev_no, **self.file_cfg)
-        self.model.create()
-        self.model.launch()
+        if self.framework == "onnx":
+            resolved_onnx_path = self.file_cfg.get("onnx_path")
+            if not resolved_onnx_path:
+                raise RuntimeError(
+                    f"ONNX path not resolved for model {model_cls}. Make sure the model repository has an ONNX file."
+                )
+            if not os.path.isfile(resolved_onnx_path):
+                raise FileNotFoundError(f"ONNX file not found at: {resolved_onnx_path}")
 
-        if self.model.get_dtype() == "DataType.Uint8":
-            self.pre_cfg.pop("Normalize", None)
+            self.model = ort.InferenceSession(resolved_onnx_path, providers=["CPUExecutionProvider"])
+            self.input_name = self.model.get_inputs()[0].name
+            self.output_names = [o.name for o in self.model.get_outputs()]
+        else:
+            self.model = MobilintNPUBackend(dev_no=dev_no, **self._mxq_backend_kwargs())
+            self.model.create()
+            self.model.launch()
+
+            if self.model.get_dtype() == "DataType.Uint8":
+                self.pre_cfg.pop("Normalize", None)
 
         self.preprocessor = build_preprocess(self.pre_cfg)
         self.postprocessor = build_postprocess(self.pre_cfg, self.post_cfg, **self.postprocess_kwargs)
         self.device = torch.device("cpu")
 
+    def _validate_framework_support(self) -> None:
+        """Checks whether the selected framework is supported for the current task."""
+
+        if self.framework != "onnx":
+            return
+
+        task = str(self.post_cfg.get("task", "")).lower()
+        if task not in ONNX_SUPPORTED_TASKS:
+            raise NotImplementedError(
+                f"Framework '{self.framework}' is currently supported only for tasks: "
+                f"{sorted(ONNX_SUPPORTED_TASKS)}. Got task '{task}'."
+            )
+
+    def _mxq_backend_kwargs(self) -> dict[str, Any]:
+        """Builds the MXQ backend kwargs from the resolved file config."""
+
+        excluded_keys = {"repo_id", "filename", "revision", "onnx_filename", "onnx_path"}
+        return {key: value for key, value in self.file_cfg.items() if key not in excluded_keys}
+
+    def _derive_onnx_filename(self) -> str | None:
+        """Returns the ONNX filename associated with the configured MXQ artifact."""
+
+        onnx_filename = self.file_cfg.get("onnx_filename")
+        if onnx_filename:
+            return onnx_filename
+
+        filename = self.file_cfg.get("filename")
+        if not filename:
+            return None
+
+        derived_name = f"{Path(filename).stem}.onnx"
+        self.file_cfg["onnx_filename"] = derived_name
+        return derived_name
+
+    def _resolve_local_onnx_path(self, mxq_path: str) -> str | None:
+        """Tries to resolve a sibling ONNX file next to a local MXQ artifact."""
+
+        onnx_path = self.file_cfg.get("onnx_path", "")
+        if onnx_path and os.path.isfile(onnx_path):
+            return onnx_path
+
+        onnx_filename = self._derive_onnx_filename()
+        if onnx_filename:
+            sibling_path = Path(mxq_path).with_name(onnx_filename)
+            if sibling_path.is_file():
+                return str(sibling_path)
+
+        if mxq_path.endswith(".mxq"):
+            suffix_swapped = f"{mxq_path[:-4]}.onnx"
+            if os.path.isfile(suffix_swapped):
+                return suffix_swapped
+
+        return None
+
+    def _download_hub_artifact(
+        self,
+        *,
+        repo_id: str,
+        filename: str,
+        revision: str,
+        subfolders: Sequence[str] | None = None,
+    ) -> str:
+        """Downloads a model artifact from Hugging Face Hub and returns its cache path."""
+
+        last_error: Exception | None = None
+        normalized_subfolders = [""] if subfolders is None else list(subfolders)
+        for subfolder in normalized_subfolders:
+            kwargs: dict[str, Any] = {
+                "repo_id": repo_id,
+                "filename": filename,
+                "revision": revision,
+                "local_dir": MOBILINT_CACHE_DIR,
+            }
+            if subfolder:
+                kwargs["subfolder"] = subfolder
+            try:
+                return hf_hub_download(**kwargs)
+            except EntryNotFoundError as exc:
+                last_error = exc
+
+        attempted_paths = ", ".join(
+            f"{subfolder}/{filename}" if subfolder else filename for subfolder in normalized_subfolders
+        )
+        raise RuntimeError(
+            f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
+        ) from last_error
+
     def file_config_cleansing(self) -> None:
-        """Validates and resolves the MXQ model file path in ``self.file_cfg``.
-
-        If ``self.file_cfg["mxq_path"]`` is provided and already points to an
-        existing file, the Hub-related keys (``repo_id``, ``filename``,
-        ``revision``) are removed from the config as they are no longer needed.
-
-        Otherwise the method downloads the model from HuggingFace Hub using
-        those keys and updates ``self.file_cfg["mxq_path"]`` with the local
-        cache path. Artifacts are resolved from the legacy ``aries/`` layout
-        first, with a fallback to the core-mode-specific ``aries/<core_mode>/``
-        layout.
-
-        Raises:
-            RuntimeError: If the model cannot be downloaded from HuggingFace
-                Hub, wrapping the original exception for full traceback context.
-        """
+        """Validates and resolves the MXQ and ONNX model file paths in ``self.file_cfg``."""
+        framework = getattr(self, "framework", "mxq")
         mxq_path = self.file_cfg.get("mxq_path", "")
+        onnx_path = self.file_cfg.get("onnx_path", "")
+        onnx_filename = self._derive_onnx_filename()
+
+        if onnx_path and os.path.isfile(onnx_path):
+            self.file_cfg["onnx_path"] = onnx_path
+            return
+
         if mxq_path and os.path.isfile(mxq_path):
             self.file_cfg.pop("repo_id", None)
             self.file_cfg.pop("filename", None)
             self.file_cfg.pop("revision", None)
-        else:
-            repo_id = self.file_cfg.pop("repo_id")
-            filename = self.file_cfg.pop("filename")
-            revision = self.file_cfg.pop("revision")
+            resolved_local_onnx = self._resolve_local_onnx_path(mxq_path)
+            if resolved_local_onnx is not None:
+                self.file_cfg["onnx_path"] = resolved_local_onnx
+            return
+
+        repo_id = self.file_cfg.pop("repo_id", None)
+        filename = self.file_cfg.pop("filename", None)
+        revision = self.file_cfg.pop("revision", None)
+        if not repo_id or not revision:
+            return
+
+        if filename and framework == "mxq":
             core_mode = self.file_cfg.get("core_mode")
             subfolders = ["aries", f"aries/{core_mode}"] if core_mode else ["aries"]
+            self.file_cfg["mxq_path"] = self._download_hub_artifact(
+                repo_id=repo_id,
+                filename=filename,
+                revision=revision,
+                subfolders=subfolders,
+            )
 
-            last_error: Exception | None = None
-            for subfolder in subfolders:
-                try:
-                    cached_file = hf_hub_download(
-                        repo_id=repo_id,
-                        filename=filename,
-                        subfolder=subfolder,
-                        revision=revision,
-                        local_dir=MOBILINT_CACHE_DIR,
-                    )
-                    self.file_cfg["mxq_path"] = cached_file
-                    return
-                except EntryNotFoundError as e:
-                    last_error = e
+        if onnx_filename and not self.file_cfg.get("onnx_path"):
+            self.file_cfg["onnx_path"] = self._download_hub_artifact(
+                repo_id=repo_id,
+                filename=onnx_filename,
+                revision=revision,
+            )
 
-            attempted_paths = ", ".join(f"{subfolder}/{filename}" for subfolder in subfolders)
-            raise RuntimeError(
-                f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
-            ) from last_error
+    def _prepare_onnx_inputs(self, x: TensorLike) -> dict[str, np.ndarray]:
+        """Normalizes runtime inputs to match the ONNX session contract."""
+
+        if isinstance(x, torch.Tensor):
+            x_np = x.detach().cpu().numpy()
+        elif isinstance(x, np.ndarray):
+            x_np = x
+        else:
+            raise TypeError(f"Got unexpected type for ONNX input x={type(x)}.")
+
+        if x_np.dtype == np.float64:
+            x_np = x_np.astype(np.float32)
+
+        expected_shape = self.model.get_inputs()[0].shape
+        if len(expected_shape) == 4:
+            if x_np.ndim == 3:
+                if x_np.shape[0] == 3:
+                    x_np = np.expand_dims(x_np, axis=0)
+                elif x_np.shape[-1] == 3:
+                    x_np = np.transpose(x_np, (2, 0, 1))
+                    x_np = np.expand_dims(x_np, axis=0)
+            elif x_np.ndim == 4 and x_np.shape[-1] == 3 and x_np.shape[1] != 3:
+                x_np = np.transpose(x_np, (0, 3, 1, 2))
+
+        return {self.input_name: x_np}
 
     def __call__(
         self,
@@ -199,6 +351,11 @@ class MBLT_Engine:
         Returns:
                 Raw model output.
         """
+        if self.framework == "onnx":
+            outputs = self.model.run(self.output_names, self._prepare_onnx_inputs(x))
+            if len(outputs) == 1:
+                return outputs[0]
+            return outputs
         return self.model(x)
 
     def preprocess(
@@ -313,11 +470,13 @@ class MBLT_Engine:
 
     def launch(self) -> None:
         """Launches the underlying model."""
-        self.model.launch()
+        if self.framework == "mxq":
+            self.model.launch()
 
     def dispose(self) -> None:
         """Disposes the underlying model."""
-        self.model.dispose()
+        if self.framework == "mxq":
+            self.model.dispose()
 
     def model_name_aliasing(self, model_name: str) -> str:
         """Finds the YAML config filename that matches the given model name.

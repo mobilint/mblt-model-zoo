@@ -48,7 +48,9 @@ class ClsPost(PostBase):
             x = x.to(self.device)
         else:
             raise TypeError(f"Got unexpected type for x={type(x)}.")
-        if x.ndim == 3:
+        if x.ndim == 2:
+            x = x.unsqueeze(-1).unsqueeze(-1)
+        elif x.ndim == 3:
             x = x.unsqueeze(0)
         assert x.ndim == 4, f"Assume that the result is always in form of NCHW. But the shape is {x.shape}"
         x = x.flatten(1)  # assume that the shape can be made to (b, 1000)
