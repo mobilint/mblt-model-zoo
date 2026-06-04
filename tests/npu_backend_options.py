@@ -8,7 +8,7 @@ from typing import Any, TypedDict, cast
 
 import pytest
 
-from mblt_model_zoo.vision.wrapper import CoreMode, normalize_core_mode
+from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
