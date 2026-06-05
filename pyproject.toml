@@ -28,8 +28,6 @@ dependencies = [
     "tqdm",
     "mblt-tracker>=0.2.5",
     "PyYAML",
-    "onnx",
-    "onnxruntime",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -77,6 +75,14 @@ MeloTTS = [
     "soundfile",
     "gradio",
     "click",
+]
+onnxruntime = [
+    "onnx",
+    "onnxruntime",
+]
+onnxruntime-gpu = [
+    "onnx",
+    "onnxruntime-gpu",
 ]
 
 # Tools setting -----------------------------------------

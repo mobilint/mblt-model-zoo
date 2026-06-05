@@ -5,13 +5,13 @@ Wrapper classes for MBLT model execution.
 from __future__ import annotations
 
 import copy
+import importlib
 import os
 import tempfile
 from pathlib import Path
 from typing import Any, Sequence, cast
 
 import numpy as np
-import onnxruntime as ort
 import torch
 import yaml
 from huggingface_hub import hf_hub_download
@@ -27,6 +27,12 @@ from .utils.types import TensorLike
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 SUPPORTED_FRAMEWORKS = {"mxq", "onnx"}
+ONNXRUNTIME_INSTALL_GUIDE = (
+    "onnxruntime is not installed. To use ONNX inference, install one of the optional extras:\n"
+    "pip install mblt-model-zoo[onnxruntime]\n"
+    "or\n"
+    "pip install mblt-model-zoo[onnxruntime-gpu]"
+)
 __all__ = ["CoreMode", "normalize_core_mode", "MBLT_Engine"]
 
 
@@ -47,6 +53,34 @@ def _default_cache_dir() -> str:
 
 
 MOBILINT_CACHE_DIR = _default_cache_dir()
+
+
+def _load_onnxruntime() -> Any:
+    """Loads ``onnxruntime`` only when ONNX inference is requested.
+
+    Returns:
+        The imported ``onnxruntime`` module.
+
+    Raises:
+        ImportError: If ``onnxruntime`` is unavailable in the current environment.
+    """
+
+    try:
+        module = importlib.import_module("onnxruntime")
+    except ImportError as exc:
+        raise ImportError(ONNXRUNTIME_INSTALL_GUIDE) from exc
+
+    if not hasattr(module, "InferenceSession"):
+        module_path = getattr(module, "__file__", None) or "<namespace package>"
+        raise ImportError(
+            "onnxruntime is installed, but the package is incomplete or broken and does not expose "
+            f"`InferenceSession` (resolved from {module_path}). Reinstall one of the optional extras:\n"
+            "pip install mblt-model-zoo[onnxruntime]\n"
+            "or\n"
+            "pip install mblt-model-zoo[onnxruntime-gpu]"
+        )
+
+    return module
 
 
 class MBLT_Engine:
@@ -153,11 +187,13 @@ class MBLT_Engine:
         self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
         self.postprocess_kwargs = {} if postprocess_kwargs is None else dict(postprocess_kwargs)
         self.file_config_cleansing()
-        self.model: MobilintNPUBackend | ort.InferenceSession
+
+        self.model: Any
         self._mxq_model: MobilintNPUBackend | None = None
-        self._onnx_session: ort.InferenceSession | None = None
+        self._onnx_session: Any = None
 
         if self.framework == "onnx":
+            ort = _load_onnxruntime()
             resolved_onnx_path = self.file_cfg.get("onnx_path")
             if not resolved_onnx_path:
                 raise RuntimeError(
@@ -328,14 +364,14 @@ class MBLT_Engine:
 
         return {self.input_name: x_np}
 
-    def _require_onnx_session(self) -> ort.InferenceSession:
+    def _require_onnx_session(self) -> Any:
         """Return the active ONNX session."""
 
         session = getattr(self, "_onnx_session", None)
         if session is None:
             fallback = getattr(self, "model", None)
             if fallback is not None and hasattr(fallback, "get_inputs") and hasattr(fallback, "run"):
-                return cast(ort.InferenceSession, fallback)
+                return fallback
             raise RuntimeError("ONNX session is not initialized.")
         return session
 

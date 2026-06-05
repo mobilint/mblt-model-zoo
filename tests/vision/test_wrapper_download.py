@@ -196,7 +196,7 @@ def test_prepare_onnx_inputs_keeps_batched_nchw_layout() -> None:
 
     engine = MBLT_Engine.__new__(MBLT_Engine)
     engine.framework = "onnx"
-    fake_session = cast(wrapper.ort.InferenceSession, _FakeSession())
+    fake_session = _FakeSession()
     engine._onnx_session = fake_session
     engine.model = fake_session
     engine.input_name = "input"
@@ -223,7 +223,7 @@ def test_prepare_onnx_inputs_transposes_hwc_images() -> None:
 
     engine = MBLT_Engine.__new__(MBLT_Engine)
     engine.framework = "onnx"
-    fake_session = cast(wrapper.ort.InferenceSession, _FakeSession())
+    fake_session = _FakeSession()
     engine._onnx_session = fake_session
     engine.model = fake_session
     engine.input_name = "input"

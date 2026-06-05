@@ -24,6 +24,7 @@ model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", cor
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
 
+# Install the optional `onnxruntime` or `onnxruntime-gpu` extra first.
 model = MBLT_Engine(model_cls="alexnet", framework="onnx")
 ```
 
@@ -97,6 +98,7 @@ The same API works with ONNX by passing `framework="onnx"`:
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
 
+# Install the optional `onnxruntime` or `onnxruntime-gpu` extra first.
 model = MBLT_Engine(model_cls="yolo11m", framework="onnx")
 input_img = model.preprocess("./street.jpg")
 output = model(input_img)
