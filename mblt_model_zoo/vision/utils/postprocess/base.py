@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from ..types import ListTensorLike, TensorLike
-from .common import nmsout2eval, process_mask_upsample
+from .common import RatioPad, nmsout2eval, process_mask_upsample
 
 
 class PostBase(ABC):
@@ -215,6 +215,7 @@ class YOLOPostBase(PostBase):
         nms_out: Any,
         img1_shape: tuple[int, int],
         img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
     ) -> tuple[Any, ...]:
         """Converts NMS output to evaluation format (labels, boxes, scores).
 
@@ -230,7 +231,14 @@ class YOLOPostBase(PostBase):
         """
 
         img0_shapes = [img0_shape] if isinstance(img0_shape, tuple) else img0_shape
-        return nmsout2eval(nms_out, img1_shape, img0_shapes)
+        ratio_pads: list[RatioPad | None] | None
+        if ratio_pad is None:
+            ratio_pads = None
+        elif isinstance(ratio_pad, list):
+            ratio_pads = list(ratio_pad)
+        else:
+            ratio_pads = [ratio_pad]
+        return nmsout2eval(nms_out, img1_shape, img0_shapes, ratio_pads=ratio_pads)
 
     def extract_final_outputs(
         self,
@@ -252,23 +260,43 @@ class YOLOPostBase(PostBase):
             if not x:
                 return None, None
             first = x[0]
-            if isinstance(first, (np.ndarray, torch.Tensor)) and self._is_final_detection_tensor(first, final_det_dim):
-                detections = self._final_detection_batches(first)
+            normalized_first = self._normalize_final_detection_tensor(first, final_det_dim)
+            if normalized_first is not None:
+                detections = self._final_detection_batches(normalized_first)
                 proto = None
                 if len(x) > 1 and isinstance(x[1], (np.ndarray, torch.Tensor)):
                     proto = self._normalize_proto_batch(x[1])
                 return detections, proto
             return None, None
 
-        if isinstance(x, (np.ndarray, torch.Tensor)) and self._is_final_detection_tensor(x, final_det_dim):
-            return self._final_detection_batches(x), None
+        normalized_x = self._normalize_final_detection_tensor(x, final_det_dim)
+        if normalized_x is not None:
+            return self._final_detection_batches(normalized_x), None
 
         return None, None
 
-    def _is_final_detection_tensor(self, x: np.ndarray | torch.Tensor, final_det_dim: int) -> bool:
-        """Return whether ``x`` already contains final detection rows."""
+    def _normalize_final_detection_tensor(
+        self,
+        x: TensorLike,
+        final_det_dim: int,
+    ) -> np.ndarray | torch.Tensor | None:
+        """Return a batched final-detection tensor when ``x`` already contains decoded rows."""
 
-        return x.ndim == 3 and x.shape[-1] == final_det_dim
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[1] == 1:
+                x = x[:, 0]
+            elif x.shape[0] == 1:
+                x = x[0]
+        if x.ndim == 2 and x.shape[-1] == final_det_dim:
+            x = x[None]
+        if x.ndim == 3 and x.shape[-1] == final_det_dim:
+            return x
+        if x.ndim == 3 and x.shape[1] == final_det_dim:
+            if isinstance(x, np.ndarray):
+                return np.swapaxes(x, 1, 2)
+            return x.transpose(1, 2)
+
+        return None
 
     def _final_detection_batches(self, x: np.ndarray | torch.Tensor) -> list[torch.Tensor]:
         """Convert batched final detections to the internal per-image tensor list."""
@@ -339,13 +367,15 @@ class YOLOPostBase(PostBase):
         if isinstance(x, np.ndarray):
             tensors = [torch.from_numpy(x).to(self.device)]
         elif isinstance(x, torch.Tensor):
-            tensors = [x.to(self.device)]
+            tensor_input = cast(torch.Tensor, x)
+            tensors = [tensor_input.to(self.device)]
         else:
             assert isinstance(x, list), f"Got unexpected type for x={type(x)}."
             if all(isinstance(xi, np.ndarray) for xi in x):
                 tensors = [torch.from_numpy(xi).to(self.device) for xi in x]
             elif all(isinstance(xi, torch.Tensor) for xi in x):
-                tensors = [cast(torch.Tensor, xi).to(self.device) for xi in x]
+                torch_inputs = cast(list[torch.Tensor], x)
+                tensors = [xi.to(self.device) for xi in torch_inputs]
             else:
                 raise TypeError(f"Got unexpected element type for x[0]={type(x[0])}.")
         return self.check_dim(tensors)
@@ -361,7 +391,7 @@ class YOLOPostBase(PostBase):
         for xi in x:
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
-            elif xi.ndim == 4:
+            elif xi.ndim in (4, 5):
                 pass
             else:
                 raise ValueError(f"Got unexpected dim for xi={xi.ndim}.")

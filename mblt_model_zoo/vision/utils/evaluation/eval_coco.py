@@ -26,6 +26,7 @@ def format_coco_results(
     nms_outs: Results,
     input_shape: tuple[int, ...],
     org_shape: tuple[int, ...],
+    ratio_pad: list[Any],
     idx: list[int],
     dataset_ids: list[int],
     postprocess: Any,
@@ -44,7 +45,12 @@ def format_coco_results(
     """
     results = []
     if task == "object_detection":
-        labels_list, boxes_list, scores_list = postprocess.nmsout2eval(nms_outs.output, input_shape, org_shape)
+        labels_list, boxes_list, scores_list = postprocess.nmsout2eval(
+            nms_outs.output,
+            input_shape,
+            org_shape,
+            ratio_pad=ratio_pad,
+        )
         for i, labels, boxes, scores in zip(idx, labels_list, boxes_list, scores_list):
             results.extend(
                 [
@@ -59,7 +65,10 @@ def format_coco_results(
             )
     elif task == "instance_segmentation":
         labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
-            nms_outs.output, input_shape, org_shape
+            nms_outs.output,
+            input_shape,
+            org_shape,
+            ratio_pad=ratio_pad,
         )
         for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
@@ -76,7 +85,10 @@ def format_coco_results(
             )
     elif task == "pose_estimation":
         labels_list, boxes_list, scores_list, extra_list = postprocess.nmsout2eval(
-            nms_outs.output, input_shape, org_shape
+            nms_outs.output,
+            input_shape,
+            org_shape,
+            ratio_pad=ratio_pad,
         )
         for i, labels, boxes, scores, extra in zip(idx, labels_list, boxes_list, scores_list, extra_list):
             results.extend(
@@ -126,11 +138,12 @@ def eval_coco(
         dataset = CustomCocodata(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "person_keypoints_val2017.json"),
+            min_keypoints=0,
         )
     else:
         raise NotImplementedError(f"Task {model.post_cfg['task']} is not supported")
 
-    dataloader = get_coco_loader(dataset, batch_size, model.preprocess)
+    dataloader = get_coco_loader(dataset, batch_size, model.preprocess_with_metadata)
     model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)
 
     results = []
@@ -144,7 +157,7 @@ def eval_coco(
 
     cum_num_data = 0
 
-    for input_npu, org_shape, idx in pbar:
+    for input_npu, org_shape, ratio_pad, idx in pbar:
         cum_num_data += len(idx)
         tic = time()
         out_npu = model(input_npu)
@@ -158,6 +171,7 @@ def eval_coco(
                 nms_outs,
                 input_npu.shape[1:-1],
                 org_shape,
+                ratio_pad,
                 idx,
                 dataset.ids,
                 model.postprocessor,
@@ -168,19 +182,25 @@ def eval_coco(
         pbar.set_postfix_str(f"NPU FPS: {cum_num_data / inference_time:.3f}")
 
     pbar.close()
-    res = evaluate_predictions_on_coco(dataset.coco, results, model.post_cfg["task"])
+    res = evaluate_predictions_on_coco(dataset.coco, results, model.post_cfg["task"], img_ids=dataset.ids)
 
     print("COCO evaluation completed")
     return float(res.stats[0].item())
 
 
-def evaluate_predictions_on_coco(coco_gt: COCO, coco_results: list[dict[str, Any]], task: str) -> COCOeval_faster:
+def evaluate_predictions_on_coco(
+    coco_gt: COCO,
+    coco_results: list[dict[str, Any]],
+    task: str,
+    img_ids: list[int] | None = None,
+) -> COCOeval_faster:
     """Evaluates predictions using the COCO API.
 
     Args:
         coco_gt (COCO): Ground truth COCO object.
         coco_results (list): Predictions in COCO format.
         task (str): Task type ('object_detection', 'instance_segmentation', or 'pose_estimation').
+        img_ids: Optional image IDs to include in evaluation.
 
     Returns:
         COCOeval_faster: The COCO evaluation object containing results.
@@ -204,6 +224,9 @@ def evaluate_predictions_on_coco(coco_gt: COCO, coco_results: list[dict[str, Any
         coco_eval = COCOeval_faster(coco_gt, coco_dt, "keypoints", print_function=logger.info)
     else:
         raise NotImplementedError(f"Task {task} is not supported")
+
+    if img_ids is not None:
+        coco_eval.params.imgIds = img_ids
 
     coco_eval.evaluate()
     coco_eval.accumulate()

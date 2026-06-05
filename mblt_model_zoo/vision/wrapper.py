@@ -266,7 +266,8 @@ class MBLT_Engine:
 
         if onnx_path and os.path.isfile(onnx_path):
             self.file_cfg["onnx_path"] = onnx_path
-            return
+            if framework == "onnx":
+                return
 
         if mxq_path and os.path.isfile(mxq_path):
             self.file_cfg.pop("repo_id", None)
@@ -275,7 +276,8 @@ class MBLT_Engine:
             resolved_local_onnx = self._resolve_local_onnx_path(mxq_path)
             if resolved_local_onnx is not None:
                 self.file_cfg["onnx_path"] = resolved_local_onnx
-            return
+            if framework == "mxq":
+                return
 
         repo_id = self.file_cfg.pop("repo_id", None)
         filename = self.file_cfg.pop("filename", None)
@@ -293,7 +295,7 @@ class MBLT_Engine:
                 subfolders=subfolders,
             )
 
-        if onnx_filename and not self.file_cfg.get("onnx_path"):
+        if onnx_filename and framework == "onnx" and not self.file_cfg.get("onnx_path"):
             self.file_cfg["onnx_path"] = self._download_hub_artifact(
                 repo_id=repo_id,
                 filename=onnx_filename,
@@ -385,6 +387,20 @@ class MBLT_Engine:
                 Preprocessed data.
         """
         return self.preprocessor(x, **kwargs)
+
+    def preprocess_with_metadata(
+        self,
+        x: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Runs preprocessing and returns metadata needed for exact postprocess scaling.
+
+        Args:
+                x: Input data.
+
+        Returns:
+                A tuple of preprocessed data and metadata such as ``ratio_pad``.
+        """
+        return self.preprocessor.with_metadata(x)
 
     def postprocess(
         self,

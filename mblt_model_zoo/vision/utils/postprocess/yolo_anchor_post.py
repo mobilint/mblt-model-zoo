@@ -34,15 +34,30 @@ class YOLOAnchorPost(YOLOPostBase):
         if len(x) == 1:
             converted = self.conversion(x)
             if isinstance(converted, torch.Tensor):
-                return converted.squeeze(1)
+                return self._converted_to_batch_output(converted)
             det_out, proto_out = converted
-            return [det_out.squeeze(1), proto_out]
+            return [self._converted_to_batch_output(det_out), proto_out]
 
         rearranged = self.rearrange(x)
         if isinstance(rearranged, tuple):
             det_out, proto_out = rearranged
             return [self.decode_batch(det_out), proto_out.permute(0, 3, 1, 2)]
         return self.decode_batch(rearranged)
+
+    def _converted_to_batch_output(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize converted outputs to the export-style batched layout."""
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[0] == 1:
+                x = x.squeeze(0)
+            elif x.shape[1] == 1:
+                x = x.squeeze(1)
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D converted tensor, got shape {tuple(x.shape)}.")
+        if x.shape[-1] == self.no:
+            return x
+        if x.shape[1] == self.no:
+            return x.transpose(1, 2)
+        raise ValueError(f"Unsupported converted tensor shape {tuple(x.shape)} for non-e2e output.")
 
     def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
         """Decode every anchor without filtering and preserve batch shape."""
@@ -142,7 +157,7 @@ class YOLOAnchorPost(YOLOPostBase):
         Returns:
             list[torch.Tensor]: Filtered detections for each image in the batch.
         """
-        x_list = torch.split(x.squeeze(1), 1, dim=0)  # [(1, 25200, 85), (1, 25200, 85), ...]
+        x_list = torch.split(self._converted_to_batch_output(x), 1, dim=0)  # [(1, 25200, 85), ...]
 
         def process_conversion(x: torch.Tensor) -> torch.Tensor:
             x = x.squeeze(0)  # (25200, 85)
@@ -258,7 +273,7 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
         Returns:
             tuple: (decoded_detections, prototype_masks).
         """
-        if len(x) == 2:
+        if any(xi.ndim <= 4 and self.no in xi.shape[1:] for xi in x):
             converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
             return self.filter_conversion(converted), proto_outs
         rearranged, proto_outs = self.rearrange(x)
@@ -273,17 +288,17 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
         Returns:
             tuple: (detections, prototypes)
         """
-        if self.no in x[0].shape[1:] and self.n_extra in x[1].shape[1:]:
-            return (
-                x[0],
-                x[1],
-            )
-        if self.n_extra in x[0].shape[1:] and self.no in x[1].shape[1:]:
-            return (
-                x[1],
-                x[0],
-            )
-        raise NotImplementedError(f"Input shape {x[0].shape} not supported.")
+        det_out: torch.Tensor | None = None
+        proto_out: torch.Tensor | None = None
+        for xi in x:
+            if xi.ndim <= 4 and self.no in xi.shape[1:]:
+                det_out = xi
+            elif xi.ndim == 4 and self.n_extra in xi.shape[1:]:
+                proto_out = xi
+        if det_out is None or proto_out is None:
+            shapes = ", ".join(str(tuple(xi.shape)) for xi in x)
+            raise NotImplementedError(f"Input shapes not supported for anchor segmentation: {shapes}.")
+        return det_out, proto_out
 
     def rearrange(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Rearranges model output tensors for segmentation tasks.
