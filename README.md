@@ -225,13 +225,17 @@ Transformers commands to the installed `transformers` package.
 
 The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by
 the Python API. Use `predict` with a source image and a model name; the task is inferred from the
-model configuration.
+model configuration. `classify`, `detect`, `pose`, and `segment` are also accepted as aliases.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
-mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
-mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
+```
+
+Vision commands default to `--framework mxq`. You can switch to ONNX with `--framework onnx`.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
 ```
 
 Prediction results are saved under `runs/vision/predict/` by default. Pass `--output` or
@@ -246,10 +250,12 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
 ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
+Validation also supports `--framework onnx`.
 
 ```bash
 mblt-model-zoo val --model resnet50
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+mblt-model-zoo val --model resnet50 --framework onnx
 ```
 
 Common NPU and artifact options are shared by the vision commands:
