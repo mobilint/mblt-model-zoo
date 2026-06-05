@@ -221,13 +221,53 @@ mblt-model-zoo --help
 The CLI provides Mobilint-specific helper commands and delegates selected upstream Hugging Face
 Transformers commands to the installed `transformers` package.
 
-For vision inference, `predict` and `val` default to `--framework mxq`. You can switch image
-classification models to ONNX with `--framework onnx`, optionally combined with `--onnx-path`:
+### Vision Prediction And Validation
+
+The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by
+the Python API. Use `predict` with a source image and a model name; the task is inferred from the
+model configuration.
 
 ```bash
-mblt-model-zoo predict --source ./image.jpg --model alexnet --framework onnx
-mblt-model-zoo val --model caformer_b36 --framework onnx --data-path /path/to/imagenet
+mblt-model-zoo predict --source ./cat.png --model resnet50
+mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
+mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
+mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
 ```
+
+Prediction results are saved under `runs/vision/predict/` by default. Pass `--output` or
+`--save-path` to choose a specific output file. Classification models accept `--topk`; object
+detection, instance segmentation, and pose estimation models accept `--conf-thres` and
+`--iou-thres`.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
+mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --iou-thres 0.5
+```
+
+Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
+ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
+
+```bash
+mblt-model-zoo val --model resnet50
+mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+```
+
+Common NPU and artifact options are shared by the vision commands:
+
+```bash
+mblt-model-zoo predict \
+  --source ./cat.png \
+  --model resnet50 \
+  --model-type DEFAULT \
+  --mxq-path /path/to/model.mxq \
+  --core-mode global8 \
+  --dev-no 0
+```
+
+Use `--core-mode single`, `multi`, `global4`, or `global8` to select the NPU execution mode. For
+manual placement, pass semicolon-separated values with `--target-cores`, such as `0:0;0:1`, or
+`--target-clusters`, such as `0;1`. Full vision CLI details and supported model names are available
+in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
 
 ### TPS Benchmark Helpers
 
