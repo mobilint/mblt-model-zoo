@@ -27,7 +27,7 @@ class SampleTiming:
     audio_duration_s: float
     generate_time_s: float
     num_generated_tokens: int
-    num_beams: int
+    num_beams: int | None
     reference: str
     hypothesis: str
 
@@ -167,7 +167,7 @@ def summarize_timings(timings: Sequence[SampleTiming]) -> ASRMetricSummary:
 
 def format_metrics_row(
     label: str,
-    num_beams: int,
+    num_beams: int | None,
     summary: ASRMetricSummary,
     device_metric: Mapping[str, float | None],
 ) -> dict[str, Any]:

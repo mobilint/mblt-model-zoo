@@ -1,8 +1,10 @@
 import argparse
 import csv
+import functools
 import io
 import itertools
 import json
+import logging
 import os
 import sys
 import time
@@ -10,6 +12,8 @@ import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+import torch
 
 # ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -459,7 +463,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="decoding task hint for Whisper-like ASR models; ignored for unsupported pipelines",
     )
     parser.add_argument("--num-samples", type=int, default=50, help="number of evaluation samples")
-    parser.add_argument("--num-beams", type=int, default=1, help="single beam value to benchmark")
+    parser.add_argument("--num-beams", type=int, default=None, help="beam value to benchmark; omit to use model default")
     parser.add_argument("--max-new-tokens", type=int, default=444, help="maximum generated token count")
     parser.add_argument("--warmup", type=int, default=2, help="number of warmup samples")
     parser.add_argument("--seed", type=int, default=0, help="dataset shuffle seed")
@@ -548,6 +552,7 @@ def _build_asr_pipeline(
     dtype: str | None,
     trust_remote_code: bool,
     core_mode: str | None,
+    native_generate_kwargs: Mapping[str, Any] | None = None,
 ):
     if target.is_original and _is_qwen3_asr_model(target.model_id):
         try:
@@ -561,14 +566,26 @@ def _build_asr_pipeline(
                 ) from exc
             raise
 
+        _quiet_apscheduler_info_logs()
+
+        resolved_native_generate_kwargs = dict(native_generate_kwargs or {})
         native_kwargs: dict[str, Any] = {
             "trust_remote_code": trust_remote_code,
             "max_inference_batch_size": 1,
-            "max_new_tokens": 512,
+            "max_new_tokens": int(resolved_native_generate_kwargs.get("max_new_tokens", 512)),
         }
+        torch_dtype = _resolve_torch_dtype(dtype)
+        if device_map:
+            native_kwargs["device_map"] = device_map
+        elif _is_cuda_device(device):
+            native_kwargs["device_map"] = device
+        if torch_dtype is not None:
+            native_kwargs["torch_dtype"] = torch_dtype
         if revision:
             native_kwargs["revision"] = revision
-        return qwen_asr.Qwen3ASRModel.from_pretrained(target.model_id, **native_kwargs)
+        pipe = qwen_asr.Qwen3ASRModel.from_pretrained(target.model_id, **native_kwargs)
+        _move_native_qwen3_asr_to_device(pipe, device=device, device_map=device_map)
+        return _configure_native_qwen3_asr_generate(pipe, resolved_native_generate_kwargs)
 
     from transformers import pipeline as hf_pipeline
 
@@ -601,6 +618,102 @@ def _build_asr_pipeline(
             kwargs["torch_dtype"] = dtype
             return hf_pipeline(**kwargs)
     return hf_pipeline(**kwargs)
+
+
+def _configure_native_qwen3_asr_generate(pipe: Any, generate_kwargs: Mapping[str, Any] | None) -> Any:
+    """Attach benchmark generation defaults to upstream native Qwen3-ASR objects.
+
+    The upstream ``Qwen3ASRModel.transcribe()`` helper does not expose ``num_beams`` in its
+    public signature, but internally delegates to ``self.model.generate(...)``. For benchmark
+    runs we wrap that inner ``generate`` method so CLI decoding controls such as ``--num-beams``
+    are applied while preserving explicit kwargs provided by upstream code.
+    """
+    if not generate_kwargs:
+        _ensure_native_qwen3_asr_generation_config(pipe)
+        return pipe
+
+    _ensure_native_qwen3_asr_generation_config(pipe)
+    inner_model = getattr(pipe, "model", None)
+    original_generate = getattr(inner_model, "generate", None)
+    if inner_model is None or not callable(original_generate):
+        return pipe
+
+    overrides = {
+        key: value
+        for key, value in dict(generate_kwargs).items()
+        if key not in {"return_timestamps"} and value is not None
+    }
+    if not overrides:
+        return pipe
+
+    @functools.wraps(original_generate)
+    def _generate_with_overrides(*args: Any, **kwargs: Any) -> Any:
+        merged_kwargs = dict(overrides)
+        merged_kwargs.update(kwargs)
+        return original_generate(*args, **merged_kwargs)
+
+    inner_model.generate = _generate_with_overrides
+    return pipe
+
+
+def _ensure_native_qwen3_asr_generation_config(pipe: Any) -> Any:
+    """Populate native upstream Qwen3-ASR generation config defaults needed by benchmark runs."""
+    inner_model = getattr(pipe, "model", None)
+    if inner_model is None:
+        return pipe
+
+    model_config = getattr(inner_model, "config", None)
+    generation_config = getattr(inner_model, "generation_config", None)
+    if generation_config is None:
+        return pipe
+
+    eos_token_id = getattr(generation_config, "eos_token_id", None)
+    if eos_token_id is None and model_config is not None:
+        eos_token_id = getattr(model_config, "eos_token_id", None)
+
+    pad_token_id = getattr(generation_config, "pad_token_id", None)
+    if pad_token_id is None and model_config is not None:
+        pad_token_id = getattr(model_config, "pad_token_id", None)
+
+    if pad_token_id is None and eos_token_id is not None:
+        generation_config.pad_token_id = eos_token_id
+        if model_config is not None and getattr(model_config, "pad_token_id", None) is None:
+            model_config.pad_token_id = eos_token_id
+
+    return pipe
+
+
+def _resolve_torch_dtype(dtype: str | None) -> torch.dtype | None:
+    """Resolve CLI dtype text into a torch dtype object when possible."""
+    if dtype is None:
+        return None
+    text = str(dtype).strip()
+    if not text:
+        return None
+    normalized = text.removeprefix("torch.")
+    resolved = getattr(torch, normalized, None)
+    return resolved if isinstance(resolved, torch.dtype) else None
+
+
+def _move_native_qwen3_asr_to_device(pipe: Any, *, device: str | None, device_map: str | None) -> Any:
+    """Ensure native upstream Qwen3-ASR model is placed on the requested device."""
+    if device_map:
+        return pipe
+    if not device:
+        return pipe
+    inner_model = getattr(pipe, "model", None)
+    move_to = getattr(inner_model, "to", None)
+    if not callable(move_to):
+        return pipe
+    move_to(device)
+    return pipe
+
+
+def _quiet_apscheduler_info_logs() -> None:
+    """Prevent APScheduler INFO job logs from leaking after qwen_asr configures root logging."""
+    aps_logger = logging.getLogger("apscheduler")
+    if aps_logger.level == logging.NOTSET or aps_logger.level < logging.WARNING:
+        aps_logger.setLevel(logging.WARNING)
 
 
 def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -652,13 +765,18 @@ def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
-        "num_beams": int(args.num_beams),
         "max_new_tokens": int(args.max_new_tokens),
         "return_timestamps": False,
     }
-    if int(args.num_beams) > 1:
+    if args.num_beams is not None:
+        kwargs["num_beams"] = int(args.num_beams)
+    if args.num_beams is not None and int(args.num_beams) > 1:
         kwargs["early_stopping"] = True
     return kwargs
+
+
+def _beam_tag(num_beams: int | None) -> str:
+    return "default" if num_beams is None else str(int(num_beams))
 
 
 def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
@@ -697,7 +815,7 @@ def _run_one_sample(pipe: Any, sample: Mapping[str, Any], generate_kwargs: Mappi
             audio_duration_s=float(len(audio_array)) / float(sampling_rate),
             generate_time_s=float(elapsed),
             num_generated_tokens=len(hypothesis_raw.split()),
-            num_beams=int(generate_kwargs.get("num_beams", 1)),
+            num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
             reference=reference,
             hypothesis=hypothesis,
         )
@@ -738,7 +856,7 @@ def _run_one_sample(pipe: Any, sample: Mapping[str, Any], generate_kwargs: Mappi
         audio_duration_s=float(len(audio_array)) / float(sampling_rate),
         generate_time_s=float(elapsed),
         num_generated_tokens=int(token_count),
-        num_beams=int(generate_kwargs.get("num_beams", 1)),
+        num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
         reference=reference,
         hypothesis=hypothesis,
     )
@@ -808,9 +926,10 @@ def _write_target_json(
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
-def _write_combined_outputs(out_dir: Path, num_beams: int) -> None:
+def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
+    beam_tag = _beam_tag(num_beams)
     rows: list[dict[str, Any]] = []
-    for path in sorted(out_dir.glob(f"*_beams{num_beams}.json")):
+    for path in sorted(out_dir.glob(f"*_beams{beam_tag}.json")):
         try:
             with path.open("r", encoding="utf-8") as file:
                 payload = json.load(file)
@@ -823,8 +942,8 @@ def _write_combined_outputs(out_dir: Path, num_beams: int) -> None:
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
         rows.append(format_metrics_row(str(payload.get("model", path.stem)), num_beams, summary, device_metric))
 
-    combined_csv = out_dir / f"combined_beams{num_beams}.csv"
-    combined_md = out_dir / f"combined_beams{num_beams}.md"
+    combined_csv = out_dir / f"combined_beams{beam_tag}.csv"
+    combined_md = out_dir / f"combined_beams{beam_tag}.md"
     if rows:
         headers = list(rows[0].keys())
         with combined_csv.open("w", encoding="utf-8", newline="") as file:
@@ -870,21 +989,22 @@ def _write_combined_outputs(out_dir: Path, num_beams: int) -> None:
 
     _make_rtf_chart(out_dir, num_beams, rows)
     _write_summary_markdown(
-        out_dir / f"summary_beams{num_beams}.md",
-        title=f"Automatic Speech Recognition Benchmark Summary (beams={num_beams})",
+        out_dir / f"summary_beams{beam_tag}.md",
+        title=f"Automatic Speech Recognition Benchmark Summary (beams={beam_tag})",
         host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
         table_markdown_path=combined_md,
         plot_paths=_existing_png_paths(
             out_dir,
-            prefixes=(f"rtf_beams{num_beams}", f"wer_beams{num_beams}", f"cer_beams{num_beams}"),
+            prefixes=(f"rtf_beams{beam_tag}", f"wer_beams{beam_tag}", f"cer_beams{beam_tag}"),
         ),
         plot_tables={},
     )
 
 
-def _make_rtf_chart(out_dir: Path, num_beams: int, rows: Sequence[Mapping[str, Any]]) -> None:
+def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping[str, Any]]) -> None:
     if not rows:
         return
+    beam_tag = _beam_tag(num_beams)
     metrics_by_folder: list[dict[str, Any]] = []
     folder_metrics: dict[str, Any] = {}
     for row in rows:
@@ -892,15 +1012,15 @@ def _make_rtf_chart(out_dir: Path, num_beams: int, rows: Sequence[Mapping[str, A
         folder_metrics[model_name] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
-    labels = [f"beams={num_beams}"]
+    labels = [f"beams={beam_tag}"]
 
     def _selector(key: str):
         return lambda item: None if item.get(key) is None else float(item[key])
 
     for filename, key, title, x_label in (
-        (f"rtf_beams{num_beams}.png", "rtf", "Real-Time Factor", "RTF"),
-        (f"wer_beams{num_beams}.png", "wer", "Word Error Rate", "WER"),
-        (f"cer_beams{num_beams}.png", "cer", "Character Error Rate", "CER"),
+        (f"rtf_beams{beam_tag}.png", "rtf", "Real-Time Factor", "RTF"),
+        (f"wer_beams{beam_tag}.png", "wer", "Word Error Rate", "WER"),
+        (f"cer_beams{beam_tag}.png", "cer", "Character Error Rate", "CER"),
     ):
         try:
             plot_scalar_chart(
@@ -1018,10 +1138,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.all_revisions and not args.mxq_dir and revision is None:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
-        json_path = out_dir / f"{mode_base}_beams{args.num_beams}.json"
+        beam_tag = _beam_tag(args.num_beams)
+        json_path = out_dir / f"{mode_base}_beams{beam_tag}.json"
         print(f"=== {mode_label} ===")
         print(
-            f"Run config: revision={revision or 'main'} num_beams={args.num_beams} core_mode={core_mode or 'default'} "
+            f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
             f"device={args.device} device_backend={target_args.device_backend} samples={len(samples)}"
         )
         pipe = None
@@ -1035,6 +1156,7 @@ def main(argv: list[str] | None = None) -> int:
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
+                    native_generate_kwargs=generate_kwargs,
                 )
             except Exception as exc:
                 if _is_cuda_oom_error(exc):
@@ -1072,7 +1194,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         _release_pipeline(pipe, args.device)
 
-    _write_combined_outputs(out_dir, int(args.num_beams))
+    _write_combined_outputs(out_dir, args.num_beams)
     return 0
 
 

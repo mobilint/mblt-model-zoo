@@ -21,7 +21,7 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.dataset_split == "test"
     assert args.language == "en"
     assert args.num_samples == 50
-    assert args.num_beams == 1
+    assert args.num_beams is None
     assert args.max_new_tokens == 444
     assert args.warmup == 2
     assert args.dry_run is False
@@ -57,6 +57,37 @@ def test_optional_generate_kwargs_only_enable_whisper_hints() -> None:
 
     assert whisper_kwargs == {"task": "transcribe", "language": "en"}
     assert wav2vec_kwargs == {}
+
+
+def test_resolve_generate_kwargs_omits_num_beams_when_unspecified() -> None:
+    """Verify default beam settings defer to the model by omitting num_beams."""
+
+    args = asr_bench._parse_args([])
+
+    assert asr_bench._resolve_generate_kwargs(args) == {
+        "max_new_tokens": 444,
+        "return_timestamps": False,
+    }
+
+
+def test_resolve_generate_kwargs_includes_beam_settings_when_specified() -> None:
+    """Verify explicit beam settings are forwarded into generate kwargs."""
+
+    args = asr_bench._parse_args(["--num-beams", "4"])
+
+    assert asr_bench._resolve_generate_kwargs(args) == {
+        "num_beams": 4,
+        "max_new_tokens": 444,
+        "return_timestamps": False,
+        "early_stopping": True,
+    }
+
+
+def test_beam_tag_uses_default_label_for_unspecified_beams() -> None:
+    """Verify file/report suffixes use a stable label when beams are unspecified."""
+
+    assert asr_bench._beam_tag(None) == "default"
+    assert asr_bench._beam_tag(3) == "3"
 
 
 def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,11 +207,25 @@ def test_qwen3_asr_original_model_prefers_native_qwen_asr_loader(
 
     calls: list[tuple[str, dict[str, object]]] = []
 
+    move_calls: list[str] = []
+
+    class InnerModel:
+        def generate(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return "ok"
+
+        def to(self, device):  # type: ignore[no-untyped-def]
+            move_calls.append(device)
+            return self
+
+    class NativePipe:
+        def __init__(self) -> None:
+            self.model = InnerModel()
+
     class Qwen3ASRModelStub:
         @staticmethod
         def from_pretrained(model_id, **kwargs):  # type: ignore[no-untyped-def]
             calls.append((model_id, kwargs))
-            return object()
+            return NativePipe()
 
     monkeypatch.setitem(
         sys.modules,
@@ -200,11 +245,12 @@ def test_qwen3_asr_original_model_prefers_native_qwen_asr_loader(
     asr_bench._build_asr_pipeline(
         target,
         revision=None,
-        device="cpu",
+        device="cuda:0",
         device_map=None,
-        dtype=None,
+        dtype="float16",
         trust_remote_code=True,
         core_mode=None,
+        native_generate_kwargs={"num_beams": 4, "max_new_tokens": 321, "return_timestamps": False},
     )
 
     assert calls == [
@@ -213,10 +259,13 @@ def test_qwen3_asr_original_model_prefers_native_qwen_asr_loader(
             {
                 "trust_remote_code": True,
                 "max_inference_batch_size": 1,
-                "max_new_tokens": 512,
+                "max_new_tokens": 321,
+                "device_map": "cuda:0",
+                "torch_dtype": asr_bench.torch.float16,
             },
         )
     ]
+    assert move_calls == ["cuda:0"]
 
 
 def test_qwen3_asr_original_model_uses_native_qwen_asr_loader(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,11 +273,25 @@ def test_qwen3_asr_original_model_uses_native_qwen_asr_loader(monkeypatch: pytes
 
     calls: list[tuple[str, dict[str, object]]] = []
 
+    move_calls: list[str] = []
+
+    class InnerModel:
+        def generate(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return "ok"
+
+        def to(self, device):  # type: ignore[no-untyped-def]
+            move_calls.append(device)
+            return self
+
+    class NativePipe:
+        def __init__(self) -> None:
+            self.model = InnerModel()
+
     class Qwen3ASRModelStub:
         @staticmethod
         def from_pretrained(model_id, **kwargs):  # type: ignore[no-untyped-def]
             calls.append((model_id, kwargs))
-            return object()
+            return NativePipe()
 
     monkeypatch.setitem(
         sys.modules,
@@ -249,10 +312,11 @@ def test_qwen3_asr_original_model_uses_native_qwen_asr_loader(monkeypatch: pytes
         target,
         revision="main",
         device="cpu",
-        device_map=None,
+        device_map="auto",
         dtype=None,
         trust_remote_code=True,
         core_mode=None,
+        native_generate_kwargs={"num_beams": 2, "max_new_tokens": 222, "return_timestamps": False},
     )
 
     assert calls == [
@@ -261,11 +325,96 @@ def test_qwen3_asr_original_model_uses_native_qwen_asr_loader(monkeypatch: pytes
             {
                 "trust_remote_code": True,
                 "max_inference_batch_size": 1,
-                "max_new_tokens": 512,
+                "max_new_tokens": 222,
+                "device_map": "auto",
                 "revision": "main",
             },
         )
     ]
+    assert move_calls == []
+
+
+def test_configure_native_qwen3_asr_generate_wraps_inner_generate() -> None:
+    """Verify native Qwen3-ASR wrapper injects benchmark beam settings into inner generate."""
+
+    captured: list[dict[str, object]] = []
+
+    class InnerModel:
+        def generate(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            captured.append(dict(kwargs))
+            return "ok"
+
+    class NativePipe:
+        def __init__(self) -> None:
+            self.model = InnerModel()
+
+    pipe = NativePipe()
+
+    configured = asr_bench._configure_native_qwen3_asr_generate(
+        pipe,
+        {
+            "num_beams": 5,
+            "max_new_tokens": 444,
+            "early_stopping": True,
+            "return_timestamps": False,
+        },
+    )
+
+    assert configured is pipe
+    result = pipe.model.generate(input_features="dummy", max_new_tokens=111)
+
+    assert result == "ok"
+    assert captured == [
+        {
+            "input_features": "dummy",
+            "num_beams": 5,
+            "max_new_tokens": 111,
+            "early_stopping": True,
+        }
+    ]
+
+
+def test_ensure_native_qwen3_asr_generation_config_sets_pad_from_eos() -> None:
+    """Verify native Qwen3-ASR generation config receives pad_token_id from eos_token_id."""
+
+    generation_config = type("GenerationConfigStub", (), {"pad_token_id": None, "eos_token_id": None})()
+    model_config = type("ModelConfigStub", (), {"pad_token_id": None, "eos_token_id": 151645})()
+    pipe = type(
+        "PipeStub",
+        (),
+        {"model": type("InnerModelStub", (), {"generation_config": generation_config, "config": model_config})()},
+    )()
+
+    configured = asr_bench._ensure_native_qwen3_asr_generation_config(pipe)
+
+    assert configured is pipe
+    assert generation_config.pad_token_id == 151645
+    assert model_config.pad_token_id == 151645
+
+
+def test_quiet_apscheduler_info_logs_raises_logger_level_only_when_needed() -> None:
+    """Verify APScheduler logger is raised to WARNING without touching stricter levels."""
+
+    aps_logger = asr_bench.logging.getLogger("apscheduler")
+    original_level = aps_logger.level
+    try:
+        aps_logger.setLevel(asr_bench.logging.NOTSET)
+        asr_bench._quiet_apscheduler_info_logs()
+        assert aps_logger.level == asr_bench.logging.WARNING
+
+        aps_logger.setLevel(asr_bench.logging.ERROR)
+        asr_bench._quiet_apscheduler_info_logs()
+        assert aps_logger.level == asr_bench.logging.ERROR
+    finally:
+        aps_logger.setLevel(original_level)
+
+
+def test_resolve_torch_dtype_supports_torch_prefix() -> None:
+    """Verify dtype strings are converted into torch dtype objects."""
+
+    assert asr_bench._resolve_torch_dtype("float16") == asr_bench.torch.float16
+    assert asr_bench._resolve_torch_dtype("torch.bfloat16") == asr_bench.torch.bfloat16
+    assert asr_bench._resolve_torch_dtype("not-a-real-dtype") is None
 
 
 def test_ensure_qwen3_asr_backend_registered_registers_seq2seq_mapping(
@@ -440,7 +589,7 @@ def test_run_one_sample_uses_array_input_path() -> None:
         "reference": "test output",
     }
 
-    result = asr_bench._run_one_sample(pipe, sample, {"num_beams": 1})
+    result = asr_bench._run_one_sample(pipe, sample, {})
 
     assert result.hypothesis == "test output"
     assert len(pipe.calls) == 1
@@ -468,9 +617,10 @@ def test_run_one_sample_uses_native_qwen_transcribe_when_available() -> None:
         "reference": "native output",
     }
 
-    result = asr_bench._run_one_sample(NativePipe(), sample, {"num_beams": 1})
+    result = asr_bench._run_one_sample(NativePipe(), sample, {})
 
     assert result.hypothesis == "native output"
+    assert result.num_beams is None
 
 
 def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.MonkeyPatch) -> None:
