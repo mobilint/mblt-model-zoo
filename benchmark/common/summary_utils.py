@@ -348,12 +348,12 @@ def existing_png_paths(results_dir: Path | str, *, prefixes: Sequence[str] | Non
     out_dir = Path(results_dir)
     paths = sorted(
         out_dir.glob("*.png"),
-        key=lambda path: (_PLOT_NAME_ORDER.get(path.name, len(_PLOT_NAME_ORDER)), path.name),
+        key=lambda path: (_plot_sort_key(path), path.name),
     )
     if prefixes is None:
-        return [path for path in paths if path.name in _PLOT_TITLES_BY_NAME]
+        return [path for path in paths if _plot_title(path) is not None]
     prefix_tuple = tuple(prefixes)
-    return [path for path in paths if path.name.startswith(prefix_tuple) and path.name in _PLOT_TITLES_BY_NAME]
+    return [path for path in paths if path.name.startswith(prefix_tuple)]
 
 
 def _with_collection_metadata(payload: Any) -> dict[str, Any]:
@@ -405,7 +405,7 @@ def _plots_markdown(
     tables = plot_tables or {}
     for path in existing:
         rel = path.relative_to(base_dir) if path.is_relative_to(base_dir) else path
-        title = _PLOT_TITLES_BY_NAME.get(path.name, path.stem.replace("_", " ").title())
+        title = _plot_title(path) or path.stem.replace("_", " ").title()
         lines.append(f"### {title}\n\n")
         lines.append(f"![{title}]({rel.as_posix()})\n\n")
         table = tables.get(path.name)
@@ -415,6 +415,34 @@ def _plots_markdown(
                 lines.append("\n")
             lines.append("\n")
     return lines
+
+
+def _plot_title(path: Path) -> str | None:
+    title = _PLOT_TITLES_BY_NAME.get(path.name)
+    if title is not None:
+        return title
+
+    stem = path.stem
+    if stem.startswith("rtf_beams"):
+        return "Real-Time Factor"
+    if stem.startswith("wer_beams"):
+        return "Word Error Rate"
+    if stem.startswith("cer_beams"):
+        return "Character Error Rate"
+    return None
+
+
+def _plot_sort_key(path: Path) -> int:
+    if path.name in _PLOT_NAME_ORDER:
+        return _PLOT_NAME_ORDER[path.name]
+    stem = path.stem
+    if stem.startswith("rtf_beams"):
+        return len(_PLOT_NAME_ORDER)
+    if stem.startswith("wer_beams"):
+        return len(_PLOT_NAME_ORDER) + 1
+    if stem.startswith("cer_beams"):
+        return len(_PLOT_NAME_ORDER) + 2
+    return len(_PLOT_NAME_ORDER) + 100
 
 
 def _host_info_sections(payload: Any) -> list[tuple[str, list[tuple[str, str]]]]:
