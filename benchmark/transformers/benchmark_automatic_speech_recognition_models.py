@@ -316,6 +316,21 @@ def _asr_pipeline_inputs(sample: Mapping[str, Any]) -> list[tuple[Any, dict[str,
     return [({"raw": audio_array, "sampling_rate": sampling_rate}, {})]
 
 
+def _sample_audio_duration_s(sample: Mapping[str, Any]) -> float:
+    """Return one sample's audio duration in seconds."""
+
+    audio = sample["audio"]
+    audio_array = audio["array"]
+    sampling_rate = int(audio["sampling_rate"])
+    return float(len(audio_array)) / float(sampling_rate)
+
+
+def _should_skip_whisper_long_form_sample(model_id: str, sample: Mapping[str, Any]) -> bool:
+    """Return whether a Whisper sample should be skipped for exceeding the 30s short-form limit."""
+
+    return _is_whisper_like_model(model_id) and _sample_audio_duration_s(sample) > 30.0
+
+
 def _retryable_generate_kwargs(generate_kwargs: Mapping[str, Any]) -> list[dict[str, Any]]:
     current = dict(generate_kwargs)
     attempts = [dict(current)]
@@ -433,9 +448,7 @@ def _iter_asr_targets_from_mxq_dir(mxq_dir: Path, available_model_ids: Sequence[
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models."
-        )
+        description=("Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models.")
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--model-id", dest="model_ids", nargs="*", default=None, help="model id list to benchmark")
@@ -462,8 +475,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="transcribe",
         help="decoding task hint for Whisper-like ASR models; ignored for unsupported pipelines",
     )
-    parser.add_argument("--num-samples", type=int, default=50, help="number of evaluation samples")
-    parser.add_argument("--num-beams", type=int, default=None, help="beam value to benchmark; omit to use model default")
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=None,
+        help="number of evaluation samples; omit to iterate the full dataset split",
+    )
+    parser.add_argument(
+        "--num-beams",
+        type=int,
+        default=None,
+        help="beam value to benchmark; omit to use model default",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=444, help="maximum generated token count")
     parser.add_argument("--warmup", type=int, default=2, help="number of warmup samples")
     parser.add_argument("--seed", type=int, default=0, help="dataset shuffle seed")
@@ -749,9 +772,10 @@ def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
         dataset = dataset.cast_column("audio", Audio(decode=False))
     if hasattr(dataset, "shuffle"):
         dataset = dataset.shuffle(seed=args.seed)
-    sample_count = max(int(args.num_samples), 0)
+    sample_count = None if args.num_samples is None else max(int(args.num_samples), 0)
     samples: list[dict[str, Any]] = []
-    for index, row in enumerate(itertools.islice(dataset, sample_count)):
+    rows_iter = dataset if sample_count is None else itertools.islice(dataset, sample_count)
+    for index, row in enumerate(rows_iter):
         audio_array, sampling_rate = _decode_audio(row["audio"])
         samples.append(
             {
@@ -796,7 +820,11 @@ def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
         return len(text.split())
 
 
-def _run_one_sample(pipe: Any, sample: Mapping[str, Any], generate_kwargs: Mapping[str, Any]) -> SampleTiming:
+def _run_one_sample(
+    pipe: Any,
+    sample: Mapping[str, Any],
+    generate_kwargs: Mapping[str, Any],
+) -> SampleTiming:
     audio = sample["audio"]
     audio_array = audio["array"]
     sampling_rate = int(audio["sampling_rate"])
@@ -868,6 +896,7 @@ def _warmup(pipe: Any, samples: Sequence[Mapping[str, Any]], generate_kwargs: Ma
 
 
 def _measure_target(
+    model_id: str,
     target_args: argparse.Namespace,
     pipe: Any,
     samples: Sequence[Mapping[str, Any]],
@@ -880,6 +909,12 @@ def _measure_target(
         if tracker is not None:
             tracker.start()
         for sample in tqdm(samples, desc="ASR samples", leave=False, unit="sample"):
+            if _should_skip_whisper_long_form_sample(model_id, sample):
+                print(
+                    "Skipping sample (>30s Whisper limit): "
+                    f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
+                )
+                continue
             timings.append(_run_one_sample(pipe, sample, generate_kwargs))
     finally:
         _stop_tracker_safe_common(tracker)
@@ -954,18 +989,20 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
 
         markdown_rows = []
         for row in rows:
-            markdown_rows.append([
-                row.get("model", ""),
-                row.get("num_beams", ""),
-                f"{100.0 * float(row.get('wer', 0.0)):.2f}",
-                f"{100.0 * float(row.get('cer', 0.0)):.2f}",
-                f"{float(row.get('mean_latency_s', 0.0)):.4f}",
-                f"{float(row.get('p95_latency_s', 0.0)):.4f}",
-                f"{float(row.get('throughput_samples_per_s', 0.0)):.4f}",
-                f"{float(row.get('rtf', 0.0)):.4f}",
-                f"{float(row.get('inverse_rtf', 0.0)):.4f}",
-                f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
-            ])
+            markdown_rows.append(
+                [
+                    row.get("model", ""),
+                    row.get("num_beams", ""),
+                    f"{100.0 * float(row.get('wer', 0.0)):.2f}",
+                    f"{100.0 * float(row.get('cer', 0.0)):.2f}",
+                    f"{float(row.get('mean_latency_s', 0.0)):.4f}",
+                    f"{float(row.get('p95_latency_s', 0.0)):.4f}",
+                    f"{float(row.get('throughput_samples_per_s', 0.0)):.4f}",
+                    f"{float(row.get('rtf', 0.0)):.4f}",
+                    f"{float(row.get('inverse_rtf', 0.0)):.4f}",
+                    f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
+                ]
+            )
         combined_md.write_text(
             _markdown_table_common(
                 [
@@ -1167,7 +1204,13 @@ def main(argv: list[str] | None = None) -> int:
                 continue
 
             _warmup(pipe, samples, generate_kwargs, args.warmup)
-            timings, device_metric, device_trace = _measure_target(target_args, pipe, samples, generate_kwargs)
+            timings, device_metric, device_trace = _measure_target(
+                target.model_id,
+                target_args,
+                pipe,
+                samples,
+                generate_kwargs,
+            )
             summary = summarize_timings(timings)
             _write_target_json(
                 json_path,

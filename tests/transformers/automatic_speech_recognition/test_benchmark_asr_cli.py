@@ -20,7 +20,7 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.dataset_config == "clean"
     assert args.dataset_split == "test"
     assert args.language == "en"
-    assert args.num_samples == 50
+    assert args.num_samples is None
     assert args.num_beams is None
     assert args.max_new_tokens == 444
     assert args.warmup == 2
@@ -81,6 +81,64 @@ def test_resolve_generate_kwargs_includes_beam_settings_when_specified() -> None
         "return_timestamps": False,
         "early_stopping": True,
     }
+
+
+def test_should_skip_whisper_long_form_sample_only_for_whisper_over_30s() -> None:
+    """Skip only Whisper samples that exceed the 30 second short-form limit."""
+
+    long_sample = {
+        "id": "sample-1",
+        "audio": {"array": np.zeros(16000 * 31, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    short_sample = {
+        "id": "sample-2",
+        "audio": {"array": np.zeros(16000 * 30, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+
+    assert asr_bench._should_skip_whisper_long_form_sample("openai/whisper-small", long_sample) is True
+    assert asr_bench._should_skip_whisper_long_form_sample("openai/whisper-small", short_sample) is False
+    assert asr_bench._should_skip_whisper_long_form_sample("Qwen/Qwen3-ASR-1.7B", long_sample) is False
+
+
+def test_measure_target_skips_whisper_long_form_samples() -> None:
+    """Skip >30s Whisper samples instead of attempting long-form generation."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.tokenizer = None
+
+        def __call__(self, pipeline_input, **kwargs):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return {"text": "hello world"}
+
+    short_sample = {
+        "id": "sample-1",
+        "audio": {"array": np.zeros(16000 * 5, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    long_sample = {
+        "id": "sample-2",
+        "audio": {"array": np.zeros(16000 * 31, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    pipe = DummyPipe()
+
+    timings, device_metric, device_trace = asr_bench._measure_target(
+        "openai/whisper-small",
+        asr_bench.argparse.Namespace(device_backend="none"),
+        pipe,
+        [short_sample, long_sample],
+        {"max_new_tokens": 444, "return_timestamps": False},
+    )
+
+    assert len(timings) == 1
+    assert timings[0].hypothesis == "hello world"
+    assert pipe.calls == 1
+    assert device_metric == {}
+    assert device_trace == {}
 
 
 def test_beam_tag_uses_default_label_for_unspecified_beams() -> None:
@@ -702,3 +760,59 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
             "streaming": True,
         }
     ]
+
+
+def test_load_librispeech_uses_full_split_when_num_samples_omitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify dataset iteration consumes the full split when --num-samples is omitted."""
+
+    class DummyDataset:
+        def __init__(self, rows):  # type: ignore[no-untyped-def]
+            self.rows = rows
+            self.iterated = 0
+
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+            return self
+
+        def __iter__(self):
+            for row in self.rows:
+                self.iterated += 1
+                yield row
+
+    rows = [
+        {
+            "id": f"sample-{index}",
+            "audio": {"path": f"dummy-{index}.wav", "bytes": None},
+            "text": f"text-{index}",
+        }
+        for index in range(3)
+    ]
+    dataset = DummyDataset(rows)
+
+    def fake_load_dataset(name, config, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return dataset
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    soundfile_stub = type(
+        "SoundfileStub",
+        (),
+        {"read": staticmethod(lambda path, dtype=None: (np.asarray([0.0, 0.0], dtype=np.float32), 16000))},
+    )()
+    datasets_stub = type(
+        "DatasetsStub",
+        (),
+        {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
+    )()
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
+    monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
+
+    args = asr_bench._parse_args([])
+    samples = asr_bench._load_librispeech(args)
+
+    assert len(samples) == 3
+    assert dataset.iterated == 3

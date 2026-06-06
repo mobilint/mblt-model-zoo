@@ -550,6 +550,16 @@ python benchmark/transformers/plot_compare_benchmark_results.py \
   --task image-text-to-text
 ```
 
+### Compare ASR Results
+
+```bash
+python benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/results/MLA100/asr \
+  benchmark/transformers/results/RTX3090/asr \
+  --output-dir benchmark/transformers/results/charts/asr_compare \
+  --task automatic-speech-recognition
+```
+
 If `--output-dir` is omitted, charts are saved under `benchmark/transformers/results/charts/` using
 a directory name derived from the input folder names.
 
