@@ -243,8 +243,8 @@ core-mode sweeps, result table generation, and chart generation.
 `benchmark_automatic_speech_recognition_models.py` evaluates Hugging Face Transformers
 `automatic-speech-recognition` pipeline-compatible models on LibriSpeech and reports both accuracy
 and speed metrics. You can rerun the script with different `--num-beams` values to compare greedy
-decoding and beam search, but beam count follows the same overwrite policy as every other run
-variable.
+decoding and beam search in the same output directory because each per-target JSON file keeps the
+beam setting in its filename.
 
 The LibriSpeech loader uses streaming mode. By default, the benchmark evaluates `50` samples.
 When `--num-samples` is set, the streaming dataset is shuffled with `--seed` and only the requested
@@ -256,9 +256,11 @@ results. Use `--full-split` to evaluate the full requested split.
 - Original/native Qwen3-ASR runs selected via `--original-models` do not use Mobilint
   `--core-mode`. If you pass `--core-mode` explicitly in that mode, the script prints a notice and
   ignores the value.
-- One `--output-dir` is expected to represent one beam setting. Re-running with the same output
-  directory overwrites prior result files by design, and summary/chart labels do not append a beam
-  tag.
+- Per-target JSON files are written as `<target>_beams<beam>.json`, for example
+  `openai__whisper-small_beamsdefault.json` or `openai__whisper-small_beams5.json`.
+- The same `--output-dir` can store multiple beam-search runs side by side.
+- If a per-target beam JSON already exists, the benchmark stops instead of overwriting it.
+- Use `--skip-existing` to keep existing beam results and continue with the remaining targets.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
@@ -327,17 +329,17 @@ python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --num-beams 1
 ```
 
-Outputs are written under `benchmark/transformers/results/automatic_speech_recognition/` by
-Each run writes per-target JSON files plus these suffix-less aggregate outputs:
+Outputs are written under `benchmark/transformers/results/automatic_speech_recognition/`.
+Each run writes beam-specific per-target JSON files plus these aggregate outputs:
 
 - `combined.csv`
 - `combined.md`
 - `summary.md`
 - optional charts such as `rtf.png`, `wer.png`, and `cer.png`
 
-Reusing the same `--output-dir` overwrites previous aggregate outputs and per-target JSON files,
-including runs that differ only by `--num-beams`. If you want to preserve multiple comparisons,
-write each run to a separate `--output-dir`.
+Aggregate outputs such as `combined.csv`, `combined.md`, `summary.md`, and the charts are rebuilt
+from all ASR JSON files present in the output directory. Reusing the same `--output-dir` is safe
+across different beam settings because the per-target JSON filenames remain distinct.
 
 Validation examples:
 

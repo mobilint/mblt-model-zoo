@@ -375,6 +375,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=2, help="number of warmup samples")
     parser.add_argument("--seed", type=int, default=0, help="dataset shuffle seed")
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="skip target/beam outputs that already exist instead of failing",
+    )
+    parser.add_argument(
         "--output-dir",
         default=str(Path(__file__).resolve().parent / "results" / "automatic_speech_recognition"),
         help="results directory",
@@ -584,6 +589,26 @@ def _sample_preview(
 
 def _beam_tag(num_beams: int | None) -> str:
     return "default" if num_beams is None else str(int(num_beams))
+
+
+def _result_json_path(out_dir: Path, mode_base: str, num_beams: int | None) -> Path:
+    """Return the per-target JSON path for one beam configuration."""
+
+    return out_dir / f"{mode_base}_beams{_beam_tag(num_beams)}.json"
+
+
+def _handle_existing_result(path: Path, *, skip_existing: bool) -> bool:
+    """Return whether the caller should skip because the result already exists."""
+
+    if not path.exists():
+        return False
+    if skip_existing:
+        print(f"Skipping existing result: {path.name}")
+        return True
+    raise SystemExit(
+        f"Result already exists: {path}. Reuse --skip-existing to keep the current file or choose a different "
+        "--output-dir."
+    )
 
 
 def _consume_warmup_samples(
@@ -816,7 +841,7 @@ def _write_target_json(
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
-def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
+def _write_combined_outputs(out_dir: Path) -> None:
     rows: list[dict[str, Any]] = []
     for path in sorted(out_dir.glob("*.json")):
         if path.name == _HOST_PC_INFO_FILENAME:
@@ -833,7 +858,9 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
             continue
         summary = ASRMetricSummary(**asr)
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
-        rows.append(format_metrics_row(str(payload.get("model", path.stem)), num_beams, summary, device_metric))
+        payload_num_beams = payload.get("num_beams")
+        row_num_beams = int(payload_num_beams) if isinstance(payload_num_beams, int) else None
+        rows.append(format_metrics_row(str(payload.get("model", path.stem)), row_num_beams, summary, device_metric))
 
     combined_csv = out_dir / "combined.csv"
     combined_md = out_dir / "combined.md"
@@ -1037,7 +1064,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
         beam_tag = _beam_tag(args.num_beams)
-        json_path = out_dir / f"{mode_base}.json"
+        json_path = _result_json_path(out_dir, mode_base, args.num_beams)
         current_samples = _load_librispeech(args) if args.num_samples is None else (sampled_samples or [])
         print(f"=== {mode_label} ===")
         print(
@@ -1045,6 +1072,8 @@ def main(argv: list[str] | None = None) -> int:
             f"device={args.device} device_backend={target_args.device_backend} "
             f"samples={('full-split' if args.num_samples is None else len(current_samples))}"
         )
+        if _handle_existing_result(json_path, skip_existing=args.skip_existing):
+            continue
         pipe = None
         try:
             try:
@@ -1107,7 +1136,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         _release_pipeline(pipe, args.device)
 
-    _write_combined_outputs(out_dir, args.num_beams)
+    _write_combined_outputs(out_dir)
     return 0
 
 

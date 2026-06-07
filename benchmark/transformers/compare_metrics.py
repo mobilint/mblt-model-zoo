@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from json import JSONDecodeError
@@ -84,9 +83,6 @@ _SHARED_SCALAR_SPECS: tuple[ScalarChartSpec, ...] = (
     ScalarChartSpec("total_energy_j.png", "Total Energy", "Energy (Joules)", "total_energy_j"),
 )
 
-_BEAM_SUFFIX_RE = re.compile(r"_beams(?:\d+|default)$")
-
-
 def _as_float(value: Any) -> float | None:
     """Return a float for numeric values."""
 
@@ -113,8 +109,8 @@ def normalize_model_key(path: Path, loaded_model_id: str) -> str:
 
     stem = path.stem
     if "__" in stem:
-        return _BEAM_SUFFIX_RE.sub("", _strip_group_id(stem))
-    key = _BEAM_SUFFIX_RE.sub("", _strip_group_id(loaded_model_id))
+        return _strip_group_id(stem)
+    key = _strip_group_id(loaded_model_id)
     if "/" in key:
         key = key.split("/", 1)[1]
     return key

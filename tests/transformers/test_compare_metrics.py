@@ -151,20 +151,21 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
     assert (output_dir / "avg_power_w.png").is_file()
 
 
-def test_normalize_model_key_strips_asr_beam_suffix() -> None:
-    assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small"
-    assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small"
-    assert normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault") == "whisper-small"
+def test_normalize_model_key_keeps_asr_beam_suffix() -> None:
+    assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small_beams1"
+    assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small_beams5"
+    assert (
+        normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault")
+        == "whisper-small_beamsdefault"
+    )
 
 
-def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicate_exists(
-    tmp_path: Path, capsys
-) -> None:
-    """Verify compare collection remains deterministic with suffix-less and legacy ASR duplicates."""
+def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) -> None:
+    """Verify compare collection keeps beam-specific ASR results as distinct model keys."""
 
     payload = {
         "benchmark_type": "automatic-speech-recognition",
-        "model": "openai/whisper-small",
+        "model": "openai/whisper-small_beamsdefault",
         "asr": {
             "wer": 0.1,
             "cer": 0.02,
@@ -182,15 +183,15 @@ def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicat
     legacy_payload = dict(payload)
     legacy_payload["model"] = "openai/whisper-small_beams1"
 
-    (tmp_path / "whisper-small.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "whisper-small_beamsdefault.json").write_text(json.dumps(payload), encoding="utf-8")
     (tmp_path / "whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
 
     metrics = collect_metrics(tmp_path, ASRCompareMetric)
     captured = capsys.readouterr()
 
-    assert list(metrics.keys()) == ["whisper-small"]
-    assert metrics["whisper-small"].wer == 0.1
-    assert "duplicate normalized model key 'whisper-small'" in captured.out
+    assert list(metrics.keys()) == ["whisper-small_beams1", "whisper-small_beamsdefault"]
+    assert metrics["whisper-small_beamsdefault"].wer == 0.1
+    assert captured.out == ""
 
 
 def test_plot_compare_benchmark_results_module_help_smoke() -> None:

@@ -251,6 +251,40 @@ def test_beam_tag_uses_default_label_for_unspecified_beams() -> None:
     assert asr_bench._beam_tag(3) == "3"
 
 
+def test_result_json_path_includes_beam_suffix() -> None:
+    """Verify per-target JSON names encode the beam setting."""
+
+    out_dir = Path("results")
+
+    assert asr_bench._result_json_path(out_dir, "openai__whisper-small", None) == Path(
+        "results/openai__whisper-small_beamsdefault.json"
+    )
+    assert asr_bench._result_json_path(out_dir, "openai__whisper-small", 4) == Path(
+        "results/openai__whisper-small_beams4.json"
+    )
+
+
+def test_handle_existing_result_fails_without_skip_existing(tmp_path: Path) -> None:
+    """Verify ASR runs fail fast instead of silently overwriting existing beam outputs."""
+
+    path = tmp_path / "openai__whisper-small_beamsdefault.json"
+    path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="Result already exists"):
+        asr_bench._handle_existing_result(path, skip_existing=False)
+
+
+def test_handle_existing_result_skips_with_skip_existing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify ASR runs can explicitly skip existing beam outputs."""
+
+    path = tmp_path / "openai__whisper-small_beamsdefault.json"
+    path.write_text("{}", encoding="utf-8")
+
+    assert asr_bench._handle_existing_result(path, skip_existing=True) is True
+    captured = capsys.readouterr()
+    assert "Skipping existing result" in captured.out
+
+
 def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify explicit --model-id avoids eager default list resolution."""
 
@@ -798,12 +832,13 @@ def test_run_one_sample_does_not_retry_on_generic_unexpected_error_text() -> Non
     assert pipe.calls == 1
 
 
-def test_write_combined_outputs_uses_suffixless_output_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify ASR combined outputs use suffix-less stable file naming."""
+def test_write_combined_outputs_writes_aggregate_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ASR combined outputs are generated from beam-specific result JSON files."""
 
     payload = {
         "benchmark_type": "automatic-speech-recognition",
         "model": "openai/whisper-small",
+        "num_beams": 5,
         "asr": {
             "num_samples": 1,
             "total_audio_s": 1.0,
@@ -821,18 +856,55 @@ def test_write_combined_outputs_uses_suffixless_output_names(tmp_path: Path, mon
         },
         "device": {},
     }
-    (tmp_path / "whisper-small.json").write_text(
+    (tmp_path / "whisper-small_beams5.json").write_text(
         asr_bench.json.dumps(payload),
         encoding="utf-8",
     )
     (tmp_path / asr_bench._HOST_PC_INFO_FILENAME).write_text("host info\n", encoding="utf-8")
     monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, rows: None)
 
-    asr_bench._write_combined_outputs(tmp_path, None)
+    asr_bench._write_combined_outputs(tmp_path)
 
     assert (tmp_path / "combined.csv").is_file()
     assert (tmp_path / "combined.md").is_file()
     assert (tmp_path / "summary.md").is_file()
+
+
+def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify combined rows read each JSON payload's num_beams value."""
+
+    payload = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "num_beams": 7,
+        "asr": {
+            "num_samples": 1,
+            "total_audio_s": 1.0,
+            "total_generate_s": 0.5,
+            "wer": 0.1,
+            "cer": 0.02,
+            "mean_latency_s": 0.5,
+            "p50_latency_s": 0.5,
+            "p95_latency_s": 0.5,
+            "throughput_samples_per_s": 2.0,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "decode_tokens_per_s": 10.0,
+            "avg_tokens_per_sample": 5.0,
+        },
+        "device": {},
+    }
+    (tmp_path / "whisper-small_beams7.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+    captured_rows: list[dict[str, object]] = []
+
+    def fake_chart(out_dir, rows):  # type: ignore[no-untyped-def]
+        captured_rows.extend(list(rows))
+
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", fake_chart)
+
+    asr_bench._write_combined_outputs(tmp_path)
+
+    assert captured_rows[0]["num_beams"] == 7
 
 
 def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -897,7 +969,7 @@ def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(asr_bench, "summarize_timings", fake_summarize)
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
-    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--language", "ko"]) == 0
     assert captured == {"language": "ko"}
@@ -1380,7 +1452,7 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
     )
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
-    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--full-split"]) == 0
     assert load_calls == [None, None]
@@ -1450,7 +1522,7 @@ def test_main_excludes_warmup_samples_from_measurement(tmp_path: Path, monkeypat
     )
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
-    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"]) == 0
     assert measured_ids == ["measure-1", "measure-2"]
@@ -1475,7 +1547,7 @@ def test_build_run_targets_warns_when_core_mode_is_explicit_for_original_models(
 def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify ASR chart labels no longer embed beam tags."""
+    """Verify ASR chart labels continue to use the output directory name."""
 
     payload = {
         "benchmark_type": "automatic-speech-recognition",
@@ -1498,7 +1570,7 @@ def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
         "device": {},
     }
     captured: dict[str, object] = {}
-    (tmp_path / "whisper-small.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+    (tmp_path / "whisper-small_beamsdefault.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
 
     def fake_plot_scalar_chart(**kwargs):  # type: ignore[no-untyped-def]
         captured.update(kwargs)
