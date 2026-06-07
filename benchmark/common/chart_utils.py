@@ -100,7 +100,9 @@ def plot_grouped_scalar_barh(
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(axis="x", linestyle="--", alpha=0.3)
-    ax.legend(loc="best")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="best")
     plt.tight_layout()
     fig.savefig(output_path, dpi=220)
     plt.close(fig)
