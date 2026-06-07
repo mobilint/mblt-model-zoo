@@ -42,6 +42,10 @@ from benchmark.common.summary_utils import scalar_plot_table as _scalar_plot_tab
 from benchmark.common.summary_utils import token_sweep_plot_table as _token_sweep_plot_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
 from benchmark.common.summary_utils import write_token_combined_markdown as _write_token_combined_markdown
+from benchmark.transformers.benchmark_target_utils import args_for_target_device_backend as _args_for_target_device_backend_shared
+from benchmark.transformers.benchmark_target_utils import iter_revision_targets as _iter_revision_targets_shared
+from benchmark.transformers.benchmark_target_utils import resolve_original_model_ids as _resolve_original_model_ids_shared
+from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -108,8 +112,6 @@ try:
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
-        _resolve_original_model_ids,
-        _revision_exists,
         _should_precheck_cuda,
     )
 except Exception:
@@ -122,8 +124,6 @@ except Exception:
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
-        _resolve_original_model_ids,
-        _revision_exists,
         _should_precheck_cuda,
     )
 
@@ -310,15 +310,25 @@ def _vlm_revision_artifacts_available(
 def _iter_targets(
     model_ids: list[str], revision: str | None, all_revisions: bool
 ) -> list[tuple[str, str | None, str, str]]:
-    out: list[tuple[str, str | None, str, str]] = []
-    if not all_revisions:
-        for m in model_ids:
-            out.append((m, revision, m, _safe_filename(m)))
-        return out
-    for m in model_ids:
-        out.append((m, "W8", f"{m}-W8", f"{_safe_filename(m)}-W8"))
-        out.append((m, "W4V8", f"{m}-W4V8", f"{_safe_filename(m)}-W4V8"))
-    return out
+    return [
+        (model_id, revision_candidates[0], label, base)
+        for model_id, revision_candidates, label, base, _mxq_path in _iter_revision_targets_shared(
+            model_ids,
+            revision=revision,
+            all_revisions=all_revisions,
+            safe_filename=_safe_filename,
+        )
+    ]
+
+
+def _resolve_original_model_ids(model_ids: list[str]) -> list[str]:
+    """Resolve Mobilint model ids to parent/original Hugging Face model ids."""
+    return _resolve_original_model_ids_shared(model_ids)
+
+
+def _revision_exists(model_id: str, revision: str) -> bool | None:
+    """Check whether a Hugging Face model revision exists."""
+    return _revision_exists_shared(model_id, revision)
 
 
 def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -1240,17 +1250,12 @@ def _args_for_target_device_backend(
     mxq_path: str | None = None,
 ) -> argparse.Namespace:
     """Return an args copy with a device backend resolved for one benchmark target."""
-    resolved = copy.copy(args)
-    requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
-    resolved.device_backend = _resolve_default_device_backend_common(
-        device_backend=requested_backend,
-        device_backend_explicit=bool(getattr(args, "_device_backend_explicit", False)),
+    return _args_for_target_device_backend_shared(
+        args,
         model_id=model_id,
         mxq_path=mxq_path,
-        mxq_dir=args.mxq_dir,
-        original_models=args.original_models,
+        resolve_default_device_backend=_resolve_default_device_backend_common,
     )
-    return resolved
 
 
 def main(argv: list[str] | None = None) -> int:

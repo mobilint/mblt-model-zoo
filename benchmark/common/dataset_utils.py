@@ -7,8 +7,9 @@ utilities that do not need dataset loading can still run without them.
 from __future__ import annotations
 
 import io
-import itertools
 import math
+import random
+from collections.abc import Iterable, Iterator
 from typing import Any, Mapping
 
 
@@ -48,7 +49,7 @@ def load_streaming_audio_text_samples(
     num_samples: int | None = None,
     seed: int = 0,
     target_sampling_rate: int = 16000,
-) -> list[dict[str, Any]]:
+) -> Iterable[dict[str, Any]]:
     """Load streaming dataset rows into benchmark-ready audio/text samples.
 
     Args:
@@ -63,7 +64,9 @@ def load_streaming_audio_text_samples(
         target_sampling_rate: Desired output audio sampling rate.
 
     Returns:
-        A list of benchmark sample dictionaries with ``id``, ``audio``, and ``reference`` keys.
+        A streaming iterable of benchmark sample dictionaries with ``id``, ``audio``, and
+        ``reference`` keys. When ``num_samples`` is set, reservoir sampling is used so the
+        loader still scans the dataset as a stream without materializing the full split.
 
     Raises:
         ValueError: If a dataset row does not contain a readable audio payload.
@@ -92,25 +95,35 @@ def load_streaming_audio_text_samples(
             sampling_rate = int(target_sampling_rate)
         return audio_array, sampling_rate
 
+    def _iter_decoded_rows(rows: Iterable[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
+        for index, row in enumerate(rows):
+            audio_array, sampling_rate = _decode_audio(row[audio_column])
+            yield {
+                "id": str(row.get(id_column, index)),
+                "audio": {"array": audio_array, "sampling_rate": sampling_rate},
+                "reference": str(row.get(text_column, "")),
+            }
+
     if dataset_config is None:
         dataset = load_dataset(dataset_name, split=dataset_split, streaming=True)
     else:
         dataset = load_dataset(dataset_name, dataset_config, split=dataset_split, streaming=True)
     if hasattr(dataset, "cast_column"):
         dataset = dataset.cast_column(audio_column, Audio(decode=False))
-    if hasattr(dataset, "shuffle"):
-        dataset = dataset.shuffle(seed=seed)
+    if num_samples is None:
+        return _iter_decoded_rows(dataset)
 
-    sample_count = None if num_samples is None else max(int(num_samples), 0)
-    rows_iter = dataset if sample_count is None else itertools.islice(dataset, sample_count)
-    samples: list[dict[str, Any]] = []
-    for index, row in enumerate(rows_iter):
-        audio_array, sampling_rate = _decode_audio(row[audio_column])
-        samples.append(
-            {
-                "id": str(row.get(id_column, index)),
-                "audio": {"array": audio_array, "sampling_rate": sampling_rate},
-                "reference": str(row.get(text_column, "")),
-            }
-        )
-    return samples
+    sample_count = max(int(num_samples), 0)
+    if sample_count == 0:
+        return []
+
+    rng = random.Random(seed)
+    reservoir: list[dict[str, Any]] = []
+    for seen_count, sample in enumerate(_iter_decoded_rows(dataset), start=1):
+        if len(reservoir) < sample_count:
+            reservoir.append(sample)
+            continue
+        replace_index = rng.randint(1, seen_count)
+        if replace_index <= sample_count:
+            reservoir[replace_index - 1] = sample
+    return reservoir

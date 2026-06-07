@@ -30,6 +30,13 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.dry_run is False
 
 
+def test_asr_benchmark_parser_dataset_config_none_strings_map_to_none() -> None:
+    """Verify dataset-config string sentinels normalize to Python None."""
+
+    assert asr_bench._parse_args(["--dataset-config", "none"]).dataset_config is None
+    assert asr_bench._parse_args(["--dataset-config", "None"]).dataset_config is None
+
+
 def test_asr_benchmark_description_targets_general_asr() -> None:
     """Verify the benchmark help text is not Whisper-only."""
 
@@ -80,11 +87,15 @@ def test_asr_benchmark_module_help_subprocess_smoke() -> None:
     assert "automatic-speech-recognition" in result.stdout
 
 
-def test_asr_benchmark_parser_full_split_conflict_raises() -> None:
-    """Verify --full-split rejects an explicit --num-samples override."""
+def test_asr_benchmark_parser_full_split_yields_to_explicit_num_samples(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify explicit num-samples wins over full-split with an informational message."""
 
-    with pytest.raises(SystemExit, match="--full-split"):
-        asr_bench._parse_args(["--full-split", "--num-samples", "10"])
+    args = asr_bench._parse_args(["--full-split", "--num-samples", "10"])
+
+    captured = capsys.readouterr()
+    assert args.full_split is False
+    assert args.num_samples == 10
+    assert "using --num-samples and ignoring --full-split" in captured.out
 
 
 def test_asr_benchmark_parser_full_split_sets_num_samples_none() -> None:
@@ -212,14 +223,14 @@ def test_warmup_skips_whisper_long_form_samples() -> None:
         "reference": "hello world",
     }
 
-    def fake_run_one_sample(pipe, sample, generate_kwargs):  # type: ignore[no-untyped-def]
+    def fake_run_one_sample(pipe, sample, generate_kwargs, native_language=None):  # type: ignore[no-untyped-def]
         calls.append(str(sample["id"]))
         return None
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(asr_bench, "_run_one_sample", fake_run_one_sample)
     try:
-        asr_bench._warmup(
+        result = asr_bench._warmup(
             "openai/whisper-small",
             object(),
             [long_sample, short_sample, another_short_sample],
@@ -229,6 +240,7 @@ def test_warmup_skips_whisper_long_form_samples() -> None:
     finally:
         monkeypatch.undo()
 
+    assert result is None
     assert calls == ["sample-1", "sample-3"]
 
 
@@ -855,7 +867,7 @@ def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
     monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
     monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
-    monkeypatch.setattr(asr_bench, "_warmup", lambda model_id, pipe, samples, generate_kwargs, n_warmup: None)
+    monkeypatch.setattr(asr_bench, "_warmup", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: (timings, {}, {}))
     monkeypatch.setattr(asr_bench, "summarize_timings", fake_summarize)
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
@@ -907,7 +919,11 @@ def test_run_one_sample_uses_native_qwen_transcribe_when_available() -> None:
             self.text = text
 
     class NativePipe:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
         def transcribe(self, audio=None, language=None):  # type: ignore[no-untyped-def]
+            self.calls.append({"audio": audio, "language": language})
             return [Result("native output")]
 
     sample = {
@@ -916,10 +932,40 @@ def test_run_one_sample_uses_native_qwen_transcribe_when_available() -> None:
         "reference": "native output",
     }
 
-    result = asr_bench._run_one_sample(NativePipe(), sample, {})
+    pipe = NativePipe()
+    result = asr_bench._run_one_sample(pipe, sample, {}, native_language="ko")
 
     assert result.hypothesis == "native output"
     assert result.num_beams is None
+    assert pipe.calls == [{"audio": ([0.0, 0.0, 0.0, 0.0], 16000), "language": "ko"}]
+
+
+def test_run_one_sample_native_qwen_without_language_param_keeps_backward_compatibility() -> None:
+    """Verify native transcribe fallback works when language is not accepted."""
+
+    class Result:
+        def __init__(self, text):  # type: ignore[no-untyped-def]
+            self.text = text
+
+    class NativePipe:
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def transcribe(self, audio=None):  # type: ignore[no-untyped-def]
+            self.calls.append(audio)
+            return [Result("native output")]
+
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "native output",
+    }
+
+    pipe = NativePipe()
+    result = asr_bench._run_one_sample(pipe, sample, {}, native_language="ko")
+
+    assert result.hypothesis == "native output"
+    assert pipe.calls == [([0.0, 0.0, 0.0, 0.0], 16000)]
 
 
 def test_run_one_sample_uses_native_qwen_processor_tokenizer_for_token_count() -> None:
@@ -998,7 +1044,7 @@ def test_resample_audio_changes_rate_with_float32_output() -> None:
 
 
 def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify dataset loading uses streaming and only consumes requested samples."""
+    """Verify fixed-size sampling streams the full iterator without full materialization semantics."""
 
     class DummyDataset:
         def __init__(self, rows):  # type: ignore[no-untyped-def]
@@ -1064,10 +1110,9 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
     samples = asr_bench._load_librispeech(args)
 
     assert len(samples) == 2
-    assert dataset.iterated == 2
+    assert dataset.iterated == 5
     assert dataset.cast_calls and dataset.cast_calls[0][0] == "audio"
     assert getattr(dataset.cast_calls[0][1], "decode", None) is False
-    assert dataset.shuffle_calls == [0]
     assert load_calls == [
         {
             "name": "openslr/librispeech_asr",
@@ -1150,3 +1195,51 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
 
     assert samples == []
     assert captured["num_samples"] is None
+
+
+def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify full-split mode rebuilds the streaming iterable for each target."""
+
+    args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--full-split"])
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    load_calls: list[int | None] = []
+
+    def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
+        load_calls.append(parsed_args.num_samples)
+        return iter([
+            {"id": "sample-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "hello"}
+        ])
+
+    monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
+    monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
+    monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
+    monkeypatch.setattr(
+        asr_bench,
+        "_build_run_targets",
+        lambda parsed_args: [(target, None, target.label, target.base), (target, "single", target.label, target.base)],
+    )
+    monkeypatch.setattr(asr_bench, "_load_librispeech", fake_loader)
+    monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
+    monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
+    monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
+    monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(asr_bench, "_warmup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: ([], {}, {}))
+    monkeypatch.setattr(
+        asr_bench,
+        "summarize_timings",
+        lambda timings, language="en": asr_bench.ASRMetricSummary(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+    monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+
+    assert asr_bench.main(["--output-dir", str(tmp_path), "--full-split"]) == 0
+    assert load_calls == [None, None]

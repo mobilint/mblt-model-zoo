@@ -1,15 +1,18 @@
 import argparse
 import csv
 import functools
+import inspect
+import itertools
 import json
 import logging
 import os
 import sys
 import time
 import traceback
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import torch
 
@@ -36,6 +39,12 @@ from benchmark.common.summary_utils import collect_host_pc_info as _collect_host
 from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
 from benchmark.common.summary_utils import markdown_table as _markdown_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
+from benchmark.transformers.benchmark_target_utils import args_for_target_device_backend as _args_for_target_device_backend_shared
+from benchmark.transformers.benchmark_target_utils import iter_targets_from_mxq_dir as _iter_targets_from_mxq_dir_shared
+from benchmark.transformers.benchmark_target_utils import resolve_model_id_from_mxq_name as _resolve_model_id_from_mxq_name_shared
+from benchmark.transformers.benchmark_target_utils import resolve_original_model_ids as _resolve_original_model_ids_shared
+from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
+from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from benchmark.transformers.asr_metrics import (
     ASRMetricSummary,
     SampleTiming,
@@ -110,108 +119,16 @@ def _print_exception(message: str, exc: BaseException, *, debug_errors: bool) ->
         traceback.print_exception(type(exc), exc, exc.__traceback__)
 
 
-def _normalize_repo_id(value: str) -> str:
-    text = value.strip()
-    if text.startswith("https://huggingface.co/"):
-        text = text[len("https://huggingface.co/") :]
-    return text.strip("/")
-
-
-def _extract_parent_model_id(info: Any) -> str | None:
-    card_data = getattr(info, "cardData", None)
-    if card_data is None:
-        card_data = getattr(info, "card_data", None)
-
-    payload: dict[str, Any] | None = None
-    if isinstance(card_data, dict):
-        payload = card_data
-    elif card_data is not None and hasattr(card_data, "to_dict"):
-        try:
-            payload = card_data.to_dict()
-        except Exception:
-            payload = None
-    elif card_data is not None and hasattr(card_data, "__dict__"):
-        payload = dict(card_data.__dict__)
-
-    if not payload:
-        return None
-
-    def _pick_candidate(raw: Any) -> str | None:
-        if isinstance(raw, str):
-            candidate = _normalize_repo_id(raw)
-            return candidate if "/" in candidate else None
-        if isinstance(raw, dict):
-            for key in ("model_id", "repo_id", "id", "name"):
-                value = raw.get(key)
-                if isinstance(value, str):
-                    candidate = _normalize_repo_id(value)
-                    if "/" in candidate:
-                        return candidate
-            return None
-        if isinstance(raw, list):
-            for item in raw:
-                picked = _pick_candidate(item)
-                if picked:
-                    return picked
-            return None
-        return None
-
-    for key in ("base_model", "base_models", "baseModel", "parent_model"):
-        candidate = _pick_candidate(payload.get(key))
-        if candidate:
-            return candidate
-    return None
-
-
 def _resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
-    try:
-        from huggingface_hub import HfApi
-
-        api = HfApi()
-    except Exception as exc:
-        print(
-            "Failed to initialize Hugging Face Hub API for --original-models. "
-            f"Using original list_models output. Error: {exc}"
-        )
-        return list(model_ids)
-
-    resolved: list[str] = []
-    seen: set[str] = set()
-    for model_id in model_ids:
-        target_id = model_id
-        try:
-            info = api.model_info(model_id)
-            parent_id = _extract_parent_model_id(info)
-            if parent_id:
-                target_id = parent_id
-        except Exception as exc:
-            print(f"Warning: failed to resolve parent model for {model_id}: {exc}")
-
-        if target_id not in seen:
-            resolved.append(target_id)
-            seen.add(target_id)
-    return resolved
+    return _resolve_original_model_ids_shared(model_ids)
 
 
 def _revision_exists(model_id: str, revision: str) -> bool | None:
-    try:
-        from huggingface_hub import HfApi
-
-        api = HfApi()
-        refs = api.list_repo_refs(model_id, repo_type="model")
-        return any(branch.name == revision for branch in getattr(refs, "branches", []))
-    except Exception:
-        return None
+    return _revision_exists_shared(model_id, revision)
 
 
 def _select_revision(model_id: str, candidates: list[str | None]) -> str | None:
-    for candidate in candidates:
-        if not candidate:
-            return candidate
-        exists = _revision_exists(model_id, candidate)
-        if exists is True or exists is None:
-            return candidate
-    return None
+    return _select_revision_shared(model_id, candidates)
 
 
 def _list_default_asr_models() -> list[str]:
@@ -372,20 +289,7 @@ def _extract_hypothesis_text(output: Any) -> str:
 
 
 def _resolve_model_id_from_mxq_name(model_part: str, available_model_ids: Sequence[str]) -> str | None:
-    if model_part in available_model_ids:
-        return model_part
-    model_part_slash = model_part.replace("__", "/")
-    if model_part_slash in available_model_ids:
-        return model_part_slash
-    basename_matches = [model_id for model_id in available_model_ids if model_id.split("/", 1)[-1] == model_part]
-    if len(basename_matches) == 1:
-        return basename_matches[0]
-    basename_matches_slash = [
-        model_id for model_id in available_model_ids if model_id.split("/", 1)[-1] == model_part_slash
-    ]
-    if len(basename_matches_slash) == 1:
-        return basename_matches_slash[0]
-    return None
+    return _resolve_model_id_from_mxq_name_shared(model_part, available_model_ids)
 
 
 def _iter_asr_targets(
@@ -421,41 +325,25 @@ def _iter_asr_targets(
 
 
 def _iter_asr_targets_from_mxq_dir(mxq_dir: Path, available_model_ids: Sequence[str]) -> list[ASRBenchmarkTarget]:
-    targets: list[ASRBenchmarkTarget] = []
-    seen_bases: set[str] = set()
-    for path in sorted(mxq_dir.glob("*.mxq")):
-        stem = path.stem
-        if "-" not in stem:
-            print(f"Skipping mxq (name format mismatch): {path.name}")
-            continue
-        model_part, rev_part = stem.rsplit("-", 1)
-        revision = rev_part.upper()
-        if revision not in ("W8", "W4V8"):
-            print(f"Skipping mxq (unsupported revision suffix): {path.name}")
-            continue
-        resolved_model_id = _resolve_model_id_from_mxq_name(model_part, available_model_ids)
-        if not resolved_model_id:
-            print(f"Skipping mxq (cannot resolve model_id from filename): {path.name}")
-            continue
-        base = f"{_safe_filename(resolved_model_id)}-{revision}"
-        if base in seen_bases:
-            print(f"Skipping mxq (duplicate target key): {path.name}")
-            continue
-        seen_bases.add(base)
-        targets.append(
-            ASRBenchmarkTarget(
-                model_id=resolved_model_id,
-                revision_candidates=[revision],
-                label=f"{resolved_model_id}-{revision}",
-                base=base,
-                mxq_path=str(path.resolve()),
-                is_original=False,
-            )
+    return [
+        ASRBenchmarkTarget(
+            model_id=model_id,
+            revision_candidates=revision_candidates,
+            label=label,
+            base=base,
+            mxq_path=mxq_path,
+            is_original=False,
         )
-    return targets
+        for model_id, revision_candidates, label, base, mxq_path in _iter_targets_from_mxq_dir_shared(
+            mxq_dir=mxq_dir,
+            available_model_ids=available_model_ids,
+            safe_filename=_safe_filename,
+        )
+    ]
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         description=("Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models.")
     )
@@ -531,9 +419,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_device_tracking_args(parser)
     args = parser.parse_args(argv)
-    if args.full_split and args.num_samples != 50:
-        raise SystemExit("--full-split cannot be combined with an explicit --num-samples value.")
-    if args.full_split:
+    num_samples_explicit = _flag_present(raw_argv, "--num-samples")
+    if isinstance(args.dataset_config, str) and args.dataset_config.casefold() == "none":
+        args.dataset_config = None
+    if args.full_split and num_samples_explicit:
+        print("Note: --full-split and --num-samples were both provided; using --num-samples and ignoring --full-split.")
+        args.full_split = False
+    elif args.full_split:
         args.num_samples = None
     return args
 
@@ -575,17 +467,12 @@ def _args_for_target_device_backend(
     model_id: str,
     mxq_path: str | None = None,
 ) -> argparse.Namespace:
-    resolved = argparse.Namespace(**vars(args))
-    requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
-    resolved.device_backend = _resolve_default_device_backend_common(
-        device_backend=requested_backend,
-        device_backend_explicit=bool(getattr(args, "_device_backend_explicit", False)),
+    return _args_for_target_device_backend_shared(
+        args,
         model_id=model_id,
         mxq_path=mxq_path,
-        mxq_dir=args.mxq_dir,
-        original_models=args.original_models,
+        resolve_default_device_backend=_resolve_default_device_backend_common,
     )
-    return resolved
 
 
 def _build_asr_pipeline(
@@ -802,7 +689,7 @@ def _resample_audio(audio_array: Any, source_rate: int, target_rate: int = 16000
     return _resample_audio_common(audio_array, source_rate, target_rate)
 
 
-def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
+def _load_librispeech(args: argparse.Namespace) -> Iterable[dict[str, Any]]:
     """Load LibriSpeech-style ASR samples via the shared streaming dataset utility."""
 
     return load_streaming_audio_text_samples(
@@ -828,6 +715,34 @@ def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     if args.num_beams is not None and int(args.num_beams) > 1:
         kwargs["early_stopping"] = True
     return kwargs
+
+
+def _supports_native_transcribe_language(pipe: Any) -> bool:
+    """Return whether a native ASR transcribe callable accepts ``language``."""
+
+    transcribe = getattr(pipe, "transcribe", None)
+    if not callable(transcribe):
+        return False
+    try:
+        signature = inspect.signature(transcribe)
+    except (TypeError, ValueError):
+        return False
+    return "language" in signature.parameters
+
+
+def _sample_preview(samples: Iterable[Mapping[str, Any]]) -> tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]:
+    """Return the first sample plus a replayable iterable including that first sample."""
+
+    iterator = iter(samples)
+    first = next(iterator, None)
+    if first is None:
+        return None, []
+
+    def _replayed() -> Iterator[Mapping[str, Any]]:
+        yield first
+        yield from iterator
+
+    return first, _replayed()
 
 
 def _beam_tag(num_beams: int | None) -> str:
@@ -881,6 +796,8 @@ def _run_one_sample(
     pipe: Any,
     sample: Mapping[str, Any],
     generate_kwargs: Mapping[str, Any],
+    *,
+    native_language: str | None = None,
 ) -> SampleTiming:
     audio = sample["audio"]
     audio_array = audio["array"]
@@ -888,7 +805,10 @@ def _run_one_sample(
     start = time.perf_counter()
 
     if hasattr(pipe, "transcribe"):
-        results = pipe.transcribe(audio=(audio_array, sampling_rate), language=None)
+        transcribe_kwargs: dict[str, Any] = {"audio": (audio_array, sampling_rate)}
+        if native_language is not None and _supports_native_transcribe_language(pipe):
+            transcribe_kwargs["language"] = native_language
+        results = pipe.transcribe(**transcribe_kwargs)
         if not results:
             raise RuntimeError("Qwen3-ASR native transcribe returned no results.")
         elapsed = time.perf_counter() - start
@@ -948,9 +868,11 @@ def _run_one_sample(
 def _warmup(
     model_id: str,
     pipe: Any,
-    samples: Sequence[Mapping[str, Any]],
+    samples: Iterable[Mapping[str, Any]],
     generate_kwargs: Mapping[str, Any],
     n_warmup: int,
+    *,
+    native_language: str | None = None,
 ) -> None:
     completed = 0
     for sample in samples:
@@ -962,7 +884,7 @@ def _warmup(
                 f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
             )
             continue
-        _run_one_sample(pipe, sample, generate_kwargs)
+        _run_one_sample(pipe, sample, generate_kwargs, native_language=native_language)
         completed += 1
 
 
@@ -970,8 +892,10 @@ def _measure_target(
     model_id: str,
     target_args: argparse.Namespace,
     pipe: Any,
-    samples: Sequence[Mapping[str, Any]],
+    samples: Iterable[Mapping[str, Any]],
     generate_kwargs: Mapping[str, Any],
+    *,
+    native_language: str | None = None,
 ) -> tuple[list[SampleTiming], dict[str, float | None], dict[str, list[dict[str, float]]]]:
     tracker = _build_device_tracker_common(target_args, pipe)
     _print_device_status_common(target_args, tracker)
@@ -986,7 +910,7 @@ def _measure_target(
                     f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
                 )
                 continue
-            timings.append(_run_one_sample(pipe, sample, generate_kwargs))
+            timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
     finally:
         _stop_tracker_safe_common(tracker)
     device_metric = _extract_device_metric_common(tracker) if tracker is not None else {}
@@ -1214,13 +1138,14 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = _resolve_results_dir(args)
     _collect_host_pc_info(out_dir)
     run_targets = _build_run_targets(args)
-    samples = _load_librispeech(args)
+    sampled_samples = None if args.num_samples is None else list(_load_librispeech(args))
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
     if args.dry_run:
         print(f"Resolved {len(run_targets)} target(s).")
-        if samples:
-            first = samples[0]
+        preview_samples = _load_librispeech(args) if args.num_samples is None else (sampled_samples or [])
+        first, _ = _sample_preview(preview_samples)
+        if first is not None:
             print(
                 "First sample: "
                 f"id={first['id']} sr={first['audio']['sampling_rate']} len={len(first['audio']['array'])} "
@@ -1250,10 +1175,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         beam_tag = _beam_tag(args.num_beams)
         json_path = out_dir / f"{mode_base}.json"
+        current_samples = _load_librispeech(args) if args.num_samples is None else (sampled_samples or [])
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
-            f"device={args.device} device_backend={target_args.device_backend} samples={len(samples)}"
+            f"device={args.device} device_backend={target_args.device_backend} "
+            f"samples={('full-split' if args.num_samples is None else len(current_samples))}"
         )
         pipe = None
         try:
@@ -1275,14 +1202,33 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
-
-            _warmup(target.model_id, pipe, samples, generate_kwargs, args.warmup)
+            if args.num_samples is None:
+                warmup_samples, measure_samples = itertools.tee(current_samples)
+                _warmup(
+                    target.model_id,
+                    pipe,
+                    warmup_samples,
+                    generate_kwargs,
+                    args.warmup,
+                    native_language=args.language,
+                )
+            else:
+                _warmup(
+                    target.model_id,
+                    pipe,
+                    current_samples,
+                    generate_kwargs,
+                    args.warmup,
+                    native_language=args.language,
+                )
+                measure_samples = current_samples
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
                 target_args,
                 pipe,
-                samples,
+                measure_samples,
                 generate_kwargs,
+                native_language=args.language,
             )
             summary = summarize_timings(timings, language=args.language)
             _write_target_json(
