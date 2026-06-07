@@ -661,11 +661,14 @@ def _configure_native_qwen3_asr_generate(pipe: Any, generate_kwargs: Mapping[str
     if inner_model is None or not callable(original_generate):
         return pipe
 
+    resolved_pad_token_id = _resolve_native_qwen3_asr_pad_token_id(pipe)
     overrides = {
         key: value
         for key, value in dict(generate_kwargs).items()
         if key not in {"return_timestamps"} and value is not None
     }
+    if resolved_pad_token_id is not None:
+        overrides.setdefault("pad_token_id", resolved_pad_token_id)
     if not overrides:
         return pipe
 
@@ -703,7 +706,39 @@ def _ensure_native_qwen3_asr_generation_config(pipe: Any) -> Any:
         if model_config is not None and getattr(model_config, "pad_token_id", None) is None:
             model_config.pad_token_id = eos_token_id
 
+    resolved_pad_token_id = _resolve_native_qwen3_asr_pad_token_id(pipe)
+    if resolved_pad_token_id is not None:
+        generation_config.pad_token_id = resolved_pad_token_id
+        if model_config is not None:
+            model_config.pad_token_id = resolved_pad_token_id
+
     return pipe
+
+
+def _resolve_native_qwen3_asr_pad_token_id(pipe: Any) -> int | list[int] | None:
+    """Resolve a stable pad token id for native upstream Qwen3-ASR generation.
+
+    Transformers emits a runtime log when ``generate()`` sees ``pad_token_id`` unset and
+    falls back to ``eos_token_id`` automatically. Benchmark runs do not need that fallback log,
+    so we proactively resolve the pad token id from generation/model/tokenizer metadata.
+    """
+    inner_model = getattr(pipe, "model", None)
+    generation_config = getattr(inner_model, "generation_config", None) if inner_model is not None else None
+    model_config = getattr(inner_model, "config", None) if inner_model is not None else None
+    tokenizer = getattr(pipe, "tokenizer", None)
+
+    candidates = [
+        getattr(generation_config, "pad_token_id", None),
+        getattr(model_config, "pad_token_id", None),
+        getattr(tokenizer, "pad_token_id", None),
+        getattr(generation_config, "eos_token_id", None),
+        getattr(model_config, "eos_token_id", None),
+        getattr(tokenizer, "eos_token_id", None),
+    ]
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
+    return None
 
 
 def _resolve_torch_dtype(dtype: str | None) -> torch.dtype | None:
