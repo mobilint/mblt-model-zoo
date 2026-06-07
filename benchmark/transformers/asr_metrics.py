@@ -94,29 +94,36 @@ def normalize_transcript(text: str, *, language: str = "en") -> str:
     return normalized.strip()
 
 
-def compute_wer_cer(references: Sequence[str], hypotheses: Sequence[str]) -> tuple[float, float]:
+def compute_wer_cer(
+    references: Sequence[str],
+    hypotheses: Sequence[str],
+    *,
+    language: str = "en",
+) -> tuple[float, float]:
     """Compute normalized WER and CER.
 
     Args:
         references: Reference transcripts.
         hypotheses: Predicted transcripts.
+        language: Language tag used to select normalization behavior.
 
     Returns:
         Tuple of `(wer, cer)` in 0..1 range.
     """
 
-    normalized_references = [normalize_transcript(text) for text in references]
-    normalized_hypotheses = [normalize_transcript(text) for text in hypotheses]
+    normalized_references = [normalize_transcript(text, language=language) for text in references]
+    normalized_hypotheses = [normalize_transcript(text, language=language) for text in hypotheses]
     word_error_rate = float(wer(normalized_references, normalized_hypotheses))
     char_error_rate = float(cer(normalized_references, normalized_hypotheses))
     return word_error_rate, char_error_rate
 
 
-def summarize_timings(timings: Sequence[SampleTiming]) -> ASRMetricSummary:
+def summarize_timings(timings: Sequence[SampleTiming], *, language: str = "en") -> ASRMetricSummary:
     """Aggregate per-sample timing records into ASR metrics.
 
     Args:
         timings: Measured per-sample timing records.
+        language: Language tag used to select normalization behavior.
 
     Returns:
         Aggregated benchmark summary.
@@ -145,7 +152,7 @@ def summarize_timings(timings: Sequence[SampleTiming]) -> ASRMetricSummary:
     total_tokens = sum(int(item.num_generated_tokens) for item in timings)
     references = [item.reference for item in timings]
     hypotheses = [item.hypothesis for item in timings]
-    word_error_rate, char_error_rate = compute_wer_cer(references, hypotheses)
+    word_error_rate, char_error_rate = compute_wer_cer(references, hypotheses, language=language)
     rtf = _safe_div(total_generate_s, total_audio_s)
 
     return ASRMetricSummary(

@@ -342,6 +342,13 @@ def _retryable_generate_kwargs(generate_kwargs: Mapping[str, Any]) -> list[dict[
     return attempts
 
 
+def _is_retryable_generate_kwargs_error(exc: TypeError | ValueError) -> bool:
+    """Return whether an exception indicates unsupported pipeline generate kwargs."""
+
+    message = str(exc).lower()
+    return "unexpected" in message or "unsupported" in message or "unused" in message
+
+
 def _extract_hypothesis_text(output: Any) -> str:
     if isinstance(output, str):
         return output
@@ -895,11 +902,12 @@ def _run_one_sample(
                 )
                 break
             except TypeError as exc:
-                last_error = exc
-                continue
+                if _is_retryable_generate_kwargs_error(exc):
+                    last_error = exc
+                    continue
+                raise
             except ValueError as exc:
-                message = str(exc).lower()
-                if "unexpected" in message or "unsupported" in message or "unused" in message:
+                if _is_retryable_generate_kwargs_error(exc):
                     last_error = exc
                     continue
                 raise
@@ -1246,7 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
                 samples,
                 generate_kwargs,
             )
-            summary = summarize_timings(timings)
+            summary = summarize_timings(timings, language=args.language)
             _write_target_json(
                 json_path,
                 target=target,

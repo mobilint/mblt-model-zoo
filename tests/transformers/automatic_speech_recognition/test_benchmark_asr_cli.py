@@ -125,10 +125,12 @@ def test_measure_target_skips_whisper_long_form_samples() -> None:
         "reference": "hello world",
     }
     pipe = DummyPipe()
+    args = asr_bench._parse_args([])
+    args.device_backend = "none"
 
     timings, device_metric, device_trace = asr_bench._measure_target(
         "openai/whisper-small",
-        asr_bench.argparse.Namespace(device_backend="none"),
+        args,
         pipe,
         [short_sample, long_sample],
         {"max_new_tokens": 444, "return_timestamps": False},
@@ -623,6 +625,135 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     assert pipe.calls[0]["language"] == "en"
     assert "task" not in pipe.calls[-1]
     assert "language" not in pipe.calls[-1]
+
+
+def test_run_one_sample_does_not_swallow_internal_type_error() -> None:
+    """Verify internal TypeErrors are raised immediately instead of triggering fallback retries."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.tokenizer = None
+
+        def __call__(self, audio_input, sampling_rate=None, generate_kwargs=None):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            raise TypeError("internal decoder bug")
+
+    pipe = DummyPipe()
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "test output",
+    }
+    generate_kwargs = {
+        **asr_bench._resolve_generate_kwargs(asr_bench._parse_args(["--num-beams", "4"])),
+        **asr_bench._optional_generate_kwargs_for_model(asr_bench._parse_args([]), "openai/whisper-small"),
+    }
+
+    with pytest.raises(TypeError, match="internal decoder bug"):
+        asr_bench._run_one_sample(pipe, sample, generate_kwargs)
+
+    assert pipe.calls == 1
+
+
+def test_write_combined_outputs_uses_default_beam_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify default-beam combined outputs use the stable beamsdefault file naming."""
+
+    payload = {
+        "model": "openai/whisper-small",
+        "asr": {
+            "num_samples": 1,
+            "total_audio_s": 1.0,
+            "total_generate_s": 0.5,
+            "wer": 0.1,
+            "cer": 0.02,
+            "mean_latency_s": 0.5,
+            "p50_latency_s": 0.5,
+            "p95_latency_s": 0.5,
+            "throughput_samples_per_s": 2.0,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "decode_tokens_per_s": 10.0,
+            "avg_tokens_per_sample": 5.0,
+        },
+        "device": {},
+    }
+    (tmp_path / "whisper-small_beamsdefault.json").write_text(
+        asr_bench.json.dumps(payload),
+        encoding="utf-8",
+    )
+    (tmp_path / asr_bench._HOST_PC_INFO_FILENAME).write_text("host info\n", encoding="utf-8")
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, num_beams, rows: None)
+
+    asr_bench._write_combined_outputs(tmp_path, None)
+
+    assert (tmp_path / "combined_beamsdefault.csv").is_file()
+    assert (tmp_path / "combined_beamsdefault.md").is_file()
+    assert (tmp_path / "summary_beamsdefault.md").is_file()
+
+
+def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify CLI language is forwarded into summary metric normalization."""
+
+    captured: dict[str, object] = {}
+    args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--language", "ko"])
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    timings = [
+        asr_bench.SampleTiming(
+            sample_id="sample-1",
+            audio_duration_s=1.0,
+            generate_time_s=0.5,
+            num_generated_tokens=3,
+            num_beams=None,
+            reference="hello world",
+            hypothesis="hello, world",
+        )
+    ]
+
+    def fake_summarize(sample_timings, *, language="en"):
+        captured["language"] = language
+        return asr_bench.ASRMetricSummary(
+            num_samples=len(sample_timings),
+            total_audio_s=1.0,
+            total_generate_s=0.5,
+            wer=0.0,
+            cer=0.0,
+            mean_latency_s=0.5,
+            p50_latency_s=0.5,
+            p95_latency_s=0.5,
+            throughput_samples_per_s=2.0,
+            rtf=0.5,
+            inverse_rtf=2.0,
+            decode_tokens_per_s=6.0,
+            avg_tokens_per_sample=3.0,
+        )
+
+    monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
+    monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
+    monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
+    monkeypatch.setattr(asr_bench, "_build_run_targets", lambda parsed_args: [(target, None, target.label, target.base)])
+    monkeypatch.setattr(asr_bench, "_load_librispeech", lambda parsed_args: [dict(timings[0].__dict__)])
+    monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
+    monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
+    monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
+    monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(asr_bench, "_warmup", lambda pipe, samples, generate_kwargs, n_warmup: None)
+    monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: (timings, {}, {}))
+    monkeypatch.setattr(asr_bench, "summarize_timings", fake_summarize)
+    monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+
+    assert asr_bench.main(["--output-dir", str(tmp_path), "--language", "ko"]) == 0
+    assert captured == {"language": "ko"}
 
 
 def test_run_one_sample_uses_array_input_path() -> None:

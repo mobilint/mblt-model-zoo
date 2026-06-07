@@ -150,3 +150,4 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
 def test_normalize_model_key_strips_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small"
     assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small"
+    assert normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault") == "whisper-small"

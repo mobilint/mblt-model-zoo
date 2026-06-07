@@ -25,6 +25,17 @@ def test_compute_wer_cer_known_pair() -> None:
     assert char_error_rate == 0.14285714285714285
 
 
+def test_compute_wer_cer_respects_language_normalization() -> None:
+    """Verify punctuation normalization depends on the requested language."""
+
+    assert compute_wer_cer(["hello world"], ["hello, world"], language="en") == (0.0, 0.0)
+
+    word_error_rate, char_error_rate = compute_wer_cer(["hello world"], ["hello, world"], language="ko")
+
+    assert word_error_rate > 0.0
+    assert char_error_rate > 0.0
+
+
 def test_summarize_timings_aggregation() -> None:
     """Verify timing aggregation computes latency and throughput correctly."""
 
@@ -61,3 +72,27 @@ def test_summarize_timings_aggregation() -> None:
     assert summary.inverse_rtf == 5.0 / 3.0
     assert summary.decode_tokens_per_s == 10.0
     assert summary.avg_tokens_per_sample == 15.0
+
+
+def test_summarize_timings_respects_language_normalization() -> None:
+    """Verify aggregate metrics pass the requested language into transcript normalization."""
+
+    timings = [
+        SampleTiming(
+            sample_id="a",
+            audio_duration_s=1.0,
+            generate_time_s=0.5,
+            num_generated_tokens=2,
+            num_beams=None,
+            reference="hello world",
+            hypothesis="hello, world",
+        )
+    ]
+
+    english_summary = summarize_timings(timings, language="en")
+    korean_summary = summarize_timings(timings, language="ko")
+
+    assert english_summary.wer == 0.0
+    assert english_summary.cer == 0.0
+    assert korean_summary.wer > 0.0
+    assert korean_summary.cer > 0.0

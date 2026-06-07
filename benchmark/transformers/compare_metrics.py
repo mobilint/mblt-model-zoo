@@ -78,7 +78,7 @@ _SHARED_SCALAR_SPECS: tuple[ScalarChartSpec, ...] = (
     ScalarChartSpec("total_energy_j.png", "Total Energy", "Energy (Joules)", "total_energy_j"),
 )
 
-_BEAM_SUFFIX_RE = re.compile(r"_beams\d+$")
+_BEAM_SUFFIX_RE = re.compile(r"_beams(?:\d+|default)$")
 
 
 def _as_float(value: Any) -> float | None:
