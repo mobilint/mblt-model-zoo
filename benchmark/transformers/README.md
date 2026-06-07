@@ -242,12 +242,13 @@ core-mode sweeps, result table generation, and chart generation.
 
 `benchmark_automatic_speech_recognition_models.py` evaluates Hugging Face Transformers
 `automatic-speech-recognition` pipeline-compatible models on LibriSpeech and reports both accuracy
-and speed metrics. Run the script twice with different `--num-beams` values to compare greedy
-decoding and beam search.
+and speed metrics. You can rerun the script with different `--num-beams` values to compare greedy
+decoding and beam search, but beam count follows the same overwrite policy as every other run
+variable.
 
 The LibriSpeech loader uses streaming mode. By default, the benchmark evaluates `50` samples.
-Use `--full-split` to evaluate the full requested split. Streaming avoids eagerly downloading the
-entire split up front, but total benchmark runtime still scales with the full split size.
+When `--num-samples` is set, the streaming dataset is shuffled with `--seed` and only the requested
+number of samples is consumed. Use `--full-split` to evaluate the full requested split.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
@@ -317,12 +318,16 @@ python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
 ```
 
 Outputs are written under `benchmark/transformers/results/automatic_speech_recognition/` by
-default. Each run writes per-target JSON files with the beam count embedded in the filename, plus:
+Each run writes per-target JSON files plus these suffix-less aggregate outputs:
 
-- `combined_beamsN.csv`
-- `combined_beamsN.md`
-- `summary_beamsN.md`
-- optional charts such as `rtf_beamsN.png`, `wer_beamsN.png`, and `cer_beamsN.png`
+- `combined.csv`
+- `combined.md`
+- `summary.md`
+- optional charts such as `rtf.png`, `wer.png`, and `cer.png`
+
+Reusing the same `--output-dir` overwrites previous aggregate outputs and per-target JSON files,
+including runs that differ only by `--num-beams`. If you want to preserve multiple comparisons,
+write each run to a separate `--output-dir`.
 
 Validation examples:
 

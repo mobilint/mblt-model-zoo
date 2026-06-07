@@ -7,8 +7,8 @@ utilities that do not need dataset loading can still run without them.
 from __future__ import annotations
 
 import io
+import itertools
 import math
-import random
 from collections.abc import Iterable, Iterator
 from typing import Any, Mapping
 
@@ -65,8 +65,8 @@ def load_streaming_audio_text_samples(
 
     Returns:
         A streaming iterable of benchmark sample dictionaries with ``id``, ``audio``, and
-        ``reference`` keys. When ``num_samples`` is set, reservoir sampling is used so the
-        loader still scans the dataset as a stream without materializing the full split.
+        ``reference`` keys. When ``num_samples`` is set, the loader shuffles the streaming
+        dataset when supported and then consumes only the requested prefix of decoded rows.
 
     Raises:
         ValueError: If a dataset row does not contain a readable audio payload.
@@ -117,13 +117,6 @@ def load_streaming_audio_text_samples(
     if sample_count == 0:
         return []
 
-    rng = random.Random(seed)
-    reservoir: list[dict[str, Any]] = []
-    for seen_count, sample in enumerate(_iter_decoded_rows(dataset), start=1):
-        if len(reservoir) < sample_count:
-            reservoir.append(sample)
-            continue
-        replace_index = rng.randint(1, seen_count)
-        if replace_index <= sample_count:
-            reservoir[replace_index - 1] = sample
-    return reservoir
+    if hasattr(dataset, "shuffle"):
+        dataset = dataset.shuffle(seed=seed)
+    return list(itertools.islice(_iter_decoded_rows(dataset), sample_count))

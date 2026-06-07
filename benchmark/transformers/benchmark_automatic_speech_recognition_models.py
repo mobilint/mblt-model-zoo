@@ -1,10 +1,8 @@
 import argparse
 import csv
-import functools
-import inspect
 import itertools
 import json
-import logging
+import logging  # noqa: F401
 import os
 import sys
 import time
@@ -14,7 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import torch
+import torch  # noqa: F401
 
 # ruff: noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,12 +37,6 @@ from benchmark.common.summary_utils import collect_host_pc_info as _collect_host
 from benchmark.common.summary_utils import existing_png_paths as _existing_png_paths
 from benchmark.common.summary_utils import markdown_table as _markdown_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
-from benchmark.transformers.benchmark_target_utils import args_for_target_device_backend as _args_for_target_device_backend_shared
-from benchmark.transformers.benchmark_target_utils import iter_targets_from_mxq_dir as _iter_targets_from_mxq_dir_shared
-from benchmark.transformers.benchmark_target_utils import resolve_model_id_from_mxq_name as _resolve_model_id_from_mxq_name_shared
-from benchmark.transformers.benchmark_target_utils import resolve_original_model_ids as _resolve_original_model_ids_shared
-from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
-from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from benchmark.transformers.asr_metrics import (
     ASRMetricSummary,
     SampleTiming,
@@ -52,6 +44,39 @@ from benchmark.transformers.asr_metrics import (
     summarize_timings,
     summary_to_dict,
 )
+from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
+    configure_native_qwen3_asr_generate as _configure_native_qwen3_asr_generate,
+)
+from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
+    ensure_native_qwen3_asr_generation_config as _ensure_native_qwen3_asr_generation_config,
+)
+from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
+    ensure_qwen3_asr_backend_registered as _ensure_qwen3_asr_backend_registered,
+)
+from benchmark.transformers.asr_qwen_utils import is_qwen3_asr_model as _is_qwen3_asr_model
+from benchmark.transformers.asr_qwen_utils import move_native_qwen3_asr_to_device as _move_native_qwen3_asr_to_device
+from benchmark.transformers.asr_qwen_utils import quiet_apscheduler_info_logs as _quiet_apscheduler_info_logs
+from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
+    resolve_native_qwen3_asr_pad_token_id as _resolve_native_qwen3_asr_pad_token_id,
+)
+from benchmark.transformers.asr_qwen_utils import resolve_torch_dtype as _resolve_torch_dtype
+from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
+    supports_native_transcribe_language as _supports_native_transcribe_language,
+)
+from benchmark.transformers.benchmark_target_utils import (
+    args_for_target_device_backend as _args_for_target_device_backend_shared,
+)
+from benchmark.transformers.benchmark_target_utils import (
+    iter_targets_from_mxq_dir as _iter_targets_from_mxq_dir_shared,
+)
+from benchmark.transformers.benchmark_target_utils import (
+    resolve_model_id_from_mxq_name as _resolve_model_id_from_mxq_name_shared,
+)
+from benchmark.transformers.benchmark_target_utils import (
+    resolve_original_model_ids as _resolve_original_model_ids_shared,
+)
+from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
+from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -148,54 +173,6 @@ def _is_excluded_asr_model_id(model_id: str) -> bool:
 
 def _is_whisper_like_model(model_id: str) -> bool:
     return "whisper" in model_id.lower()
-
-
-def _is_qwen3_asr_model(model_id: str) -> bool:
-    normalized = model_id.lower()
-    return "qwen3-asr" in normalized or "qwen3_asr" in normalized
-
-
-def _ensure_qwen3_asr_backend_registered() -> None:
-    """Import upstream Qwen3-ASR Transformers backend so Auto classes recognize it.
-
-    The original upstream checkpoint uses ``model_type='qwen3_asr'``. In some
-    environments, simply calling ``transformers.pipeline(...)`` is not enough to
-    make that architecture discoverable unless the optional ``qwen_asr`` package
-    has already imported and registered its Transformers backend.
-    """
-    try:
-        import qwen_asr.core.transformers_backend  # noqa: F401
-    except ModuleNotFoundError as exc:
-        missing = exc.name or ""
-        if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-            raise ModuleNotFoundError(
-                "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: pip install -U qwen-asr"
-            ) from exc
-        raise
-
-    try:
-        from qwen_asr.core.transformers_backend.configuration_qwen3_asr import Qwen3ASRConfig
-        from qwen_asr.core.transformers_backend.modeling_qwen3_asr import Qwen3ASRForConditionalGeneration
-        from transformers.models.auto.modeling_auto import AutoModelForSpeechSeq2Seq
-
-        Qwen3ASRForConditionalGeneration.main_input_name = "input_features"
-        AutoModelForSpeechSeq2Seq.register(Qwen3ASRConfig, Qwen3ASRForConditionalGeneration, exist_ok=True)
-
-        try:
-            from transformers.pipelines.automatic_speech_recognition import MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES
-
-            MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES.setdefault("qwen3_asr", "Qwen3ASRForConditionalGeneration")
-        except Exception:
-            pass
-    except ModuleNotFoundError as exc:
-        missing = exc.name or ""
-        if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-            raise ModuleNotFoundError(
-                "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: pip install -U qwen-asr"
-            ) from exc
-        raise
 
 
 def _apply_asr_core_mode_model_kwargs(
@@ -552,137 +529,6 @@ def _build_asr_pipeline(
     return hf_pipeline(**kwargs)
 
 
-def _configure_native_qwen3_asr_generate(pipe: Any, generate_kwargs: Mapping[str, Any] | None) -> Any:
-    """Attach benchmark generation defaults to upstream native Qwen3-ASR objects.
-
-    The upstream ``Qwen3ASRModel.transcribe()`` helper does not expose ``num_beams`` in its
-    public signature, but internally delegates to ``self.model.generate(...)``. For benchmark
-    runs we wrap that inner ``generate`` method so CLI decoding controls such as ``--num-beams``
-    are applied while preserving explicit kwargs provided by upstream code.
-    """
-    if not generate_kwargs:
-        _ensure_native_qwen3_asr_generation_config(pipe)
-        return pipe
-
-    _ensure_native_qwen3_asr_generation_config(pipe)
-    inner_model = getattr(pipe, "model", None)
-    original_generate = getattr(inner_model, "generate", None)
-    if inner_model is None or not callable(original_generate):
-        return pipe
-
-    resolved_pad_token_id = _resolve_native_qwen3_asr_pad_token_id(pipe)
-    overrides = {
-        key: value
-        for key, value in dict(generate_kwargs).items()
-        if key not in {"return_timestamps"} and value is not None
-    }
-    if resolved_pad_token_id is not None:
-        overrides.setdefault("pad_token_id", resolved_pad_token_id)
-    if not overrides:
-        return pipe
-
-    @functools.wraps(original_generate)
-    def _generate_with_overrides(*args: Any, **kwargs: Any) -> Any:
-        merged_kwargs = dict(overrides)
-        merged_kwargs.update(kwargs)
-        return original_generate(*args, **merged_kwargs)
-
-    inner_model.generate = _generate_with_overrides
-    return pipe
-
-
-def _ensure_native_qwen3_asr_generation_config(pipe: Any) -> Any:
-    """Populate native upstream Qwen3-ASR generation config defaults needed by benchmark runs."""
-    inner_model = getattr(pipe, "model", None)
-    if inner_model is None:
-        return pipe
-
-    model_config = getattr(inner_model, "config", None)
-    generation_config = getattr(inner_model, "generation_config", None)
-    if generation_config is None:
-        return pipe
-
-    eos_token_id = getattr(generation_config, "eos_token_id", None)
-    if eos_token_id is None and model_config is not None:
-        eos_token_id = getattr(model_config, "eos_token_id", None)
-
-    pad_token_id = getattr(generation_config, "pad_token_id", None)
-    if pad_token_id is None and model_config is not None:
-        pad_token_id = getattr(model_config, "pad_token_id", None)
-
-    if pad_token_id is None and eos_token_id is not None:
-        generation_config.pad_token_id = eos_token_id
-        if model_config is not None and getattr(model_config, "pad_token_id", None) is None:
-            model_config.pad_token_id = eos_token_id
-
-    resolved_pad_token_id = _resolve_native_qwen3_asr_pad_token_id(pipe)
-    if resolved_pad_token_id is not None:
-        generation_config.pad_token_id = resolved_pad_token_id
-        if model_config is not None:
-            model_config.pad_token_id = resolved_pad_token_id
-
-    return pipe
-
-
-def _resolve_native_qwen3_asr_pad_token_id(pipe: Any) -> int | list[int] | None:
-    """Resolve a stable pad token id for native upstream Qwen3-ASR generation.
-
-    Transformers emits a runtime log when ``generate()`` sees ``pad_token_id`` unset and
-    falls back to ``eos_token_id`` automatically. Benchmark runs do not need that fallback log,
-    so we proactively resolve the pad token id from generation/model/tokenizer metadata.
-    """
-    inner_model = getattr(pipe, "model", None)
-    generation_config = getattr(inner_model, "generation_config", None) if inner_model is not None else None
-    model_config = getattr(inner_model, "config", None) if inner_model is not None else None
-    tokenizer = getattr(pipe, "tokenizer", None)
-
-    candidates = [
-        getattr(generation_config, "pad_token_id", None),
-        getattr(model_config, "pad_token_id", None),
-        getattr(tokenizer, "pad_token_id", None),
-        getattr(generation_config, "eos_token_id", None),
-        getattr(model_config, "eos_token_id", None),
-        getattr(tokenizer, "eos_token_id", None),
-    ]
-    for candidate in candidates:
-        if candidate is not None:
-            return candidate
-    return None
-
-
-def _resolve_torch_dtype(dtype: str | None) -> torch.dtype | None:
-    """Resolve CLI dtype text into a torch dtype object when possible."""
-    if dtype is None:
-        return None
-    text = str(dtype).strip()
-    if not text:
-        return None
-    normalized = text.removeprefix("torch.")
-    resolved = getattr(torch, normalized, None)
-    return resolved if isinstance(resolved, torch.dtype) else None
-
-
-def _move_native_qwen3_asr_to_device(pipe: Any, *, device: str | None, device_map: str | None) -> Any:
-    """Ensure native upstream Qwen3-ASR model is placed on the requested device."""
-    if device_map:
-        return pipe
-    if not device:
-        return pipe
-    inner_model = getattr(pipe, "model", None)
-    move_to = getattr(inner_model, "to", None)
-    if not callable(move_to):
-        return pipe
-    move_to(device)
-    return pipe
-
-
-def _quiet_apscheduler_info_logs() -> None:
-    """Prevent APScheduler INFO job logs from leaking after qwen_asr configures root logging."""
-    aps_logger = logging.getLogger("apscheduler")
-    if aps_logger.level == logging.NOTSET or aps_logger.level < logging.WARNING:
-        aps_logger.setLevel(logging.WARNING)
-
-
 def _resample_audio(audio_array: Any, source_rate: int, target_rate: int = 16000) -> Any:
     """Backward-compatible wrapper around shared benchmark audio resampling."""
 
@@ -717,20 +563,9 @@ def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     return kwargs
 
 
-def _supports_native_transcribe_language(pipe: Any) -> bool:
-    """Return whether a native ASR transcribe callable accepts ``language``."""
-
-    transcribe = getattr(pipe, "transcribe", None)
-    if not callable(transcribe):
-        return False
-    try:
-        signature = inspect.signature(transcribe)
-    except (TypeError, ValueError):
-        return False
-    return "language" in signature.parameters
-
-
-def _sample_preview(samples: Iterable[Mapping[str, Any]]) -> tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]:
+def _sample_preview(
+    samples: Iterable[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]:
     """Return the first sample plus a replayable iterable including that first sample."""
 
     iterator = iter(samples)

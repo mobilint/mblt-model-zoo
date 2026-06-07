@@ -1044,7 +1044,7 @@ def test_resample_audio_changes_rate_with_float32_output() -> None:
 
 
 def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify fixed-size sampling streams the full iterator without full materialization semantics."""
+    """Verify fixed-size sampling shuffles and consumes only the requested prefix."""
 
     class DummyDataset:
         def __init__(self, rows):  # type: ignore[no-untyped-def]
@@ -1110,7 +1110,8 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
     samples = asr_bench._load_librispeech(args)
 
     assert len(samples) == 2
-    assert dataset.iterated == 5
+    assert dataset.iterated == 2
+    assert dataset.shuffle_calls == [0]
     assert dataset.cast_calls and dataset.cast_calls[0][0] == "audio"
     assert getattr(dataset.cast_calls[0][1], "decode", None) is False
     assert load_calls == [
@@ -1121,6 +1122,60 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
             "streaming": True,
         }
     ]
+
+
+def test_load_librispeech_zero_samples_returns_empty_without_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify zero-sample requests short-circuit before iterating the streaming dataset."""
+
+    class DummyDataset:
+        def __init__(self) -> None:
+            self.iterated = 0
+            self.shuffle_calls: list[int] = []
+
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+            self.shuffle_calls.append(seed)
+            return self
+
+        def __iter__(self):
+            self.iterated += 1
+            yield {
+                "id": "sample-0",
+                "audio": {"path": "dummy-0.wav", "bytes": None},
+                "text": "text-0",
+            }
+
+    dataset = DummyDataset()
+
+    def fake_load_dataset(name, config, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return dataset
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    soundfile_stub = type(
+        "SoundfileStub",
+        (),
+        {"read": staticmethod(lambda path, dtype=None: (np.asarray([0.0, 0.0], dtype=np.float32), 16000))},
+    )()
+    datasets_stub = type(
+        "DatasetsStub",
+        (),
+        {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
+    )()
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
+    monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
+
+    args = asr_bench._parse_args(["--num-samples", "0"])
+
+    samples = asr_bench._load_librispeech(args)
+
+    assert samples == []
+    assert dataset.iterated == 0
+    assert dataset.shuffle_calls == []
 
 
 def test_load_librispeech_uses_default_sample_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1235,7 +1290,21 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(
         asr_bench,
         "summarize_timings",
-        lambda timings, language="en": asr_bench.ASRMetricSummary(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        lambda timings, language="en": asr_bench.ASRMetricSummary(
+            0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
     )
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
