@@ -1,6 +1,5 @@
 import argparse
 import csv
-import itertools
 import json
 import logging  # noqa: F401
 import os
@@ -242,7 +241,10 @@ def _is_retryable_generate_kwargs_error(exc: TypeError | ValueError) -> bool:
     """Return whether an exception indicates unsupported pipeline generate kwargs."""
 
     message = str(exc).lower()
-    return "unexpected" in message or "unsupported" in message or "unused" in message
+    known_kwargs = ("task", "language", "return_timestamps", "early_stopping", "generate_kwargs")
+    has_known_kwarg = any(keyword in message for keyword in known_kwargs)
+    has_unsupported_shape = any(keyword in message for keyword in ("unexpected keyword", "unsupported", "unused"))
+    return has_known_kwarg and has_unsupported_shape
 
 
 def _extract_hypothesis_text(output: Any) -> str:
@@ -584,6 +586,29 @@ def _beam_tag(num_beams: int | None) -> str:
     return "default" if num_beams is None else str(int(num_beams))
 
 
+def _consume_warmup_samples(
+    model_id: str,
+    pipe: Any,
+    samples: Iterable[Mapping[str, Any]],
+    generate_kwargs: Mapping[str, Any],
+    n_warmup: int,
+    *,
+    native_language: str | None = None,
+) -> Iterator[Mapping[str, Any]]:
+    """Consume warmup samples from one iterator and yield the remaining measurement samples."""
+
+    iterator = iter(samples)
+    _warmup(
+        model_id,
+        pipe,
+        iterator,
+        generate_kwargs,
+        n_warmup,
+        native_language=native_language,
+    )
+    return iterator
+
+
 def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
     if isinstance(output, dict):
         for key in ("token_ids", "tokens", "generated_token_ids"):
@@ -857,7 +882,7 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
     else:
         combined_md.write_text("No ASR results found.\n", encoding="utf-8")
 
-    _make_rtf_chart(out_dir, num_beams, rows)
+    _make_rtf_chart(out_dir, rows)
     _write_summary_markdown(
         out_dir / "summary.md",
         title="Automatic Speech Recognition Benchmark Summary",
@@ -871,7 +896,7 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
     )
 
 
-def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping[str, Any]]) -> None:
+def _make_rtf_chart(out_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     if not rows:
         return
     metrics_by_folder: list[dict[str, Any]] = []
@@ -881,7 +906,7 @@ def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping
         folder_metrics[model_name] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
-    labels = [f"beams={_beam_tag(num_beams)}"]
+    labels = [out_dir.name]
 
     def _selector(key: str, scale: float = 1.0):
         return lambda item: None if item.get(key) is None else scale * float(item[key])
@@ -958,6 +983,8 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
 
     run_targets: list[tuple[ASRBenchmarkTarget, str | None, str, str]] = []
     core_modes = [None] if (args.original_models and not args.mxq_dir) else _iter_core_modes_common(args.core_mode)
+    if args.original_models and not args.mxq_dir and getattr(args, "_core_mode_explicit", False):
+        print("Note: --core-mode is not supported for --original-models ASR native runs and will be ignored.")
     for target in targets:
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
@@ -968,6 +995,7 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     args = _parse_args(argv)
+    args._core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     _resolve_runtime_defaults(args, raw_argv)
     os.environ.setdefault("MPLBACKEND", "Agg")
     out_dir = _resolve_results_dir(args)
@@ -1037,26 +1065,14 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
-            if args.num_samples is None:
-                warmup_samples, measure_samples = itertools.tee(current_samples)
-                _warmup(
-                    target.model_id,
-                    pipe,
-                    warmup_samples,
-                    generate_kwargs,
-                    args.warmup,
-                    native_language=args.language,
-                )
-            else:
-                _warmup(
-                    target.model_id,
-                    pipe,
-                    current_samples,
-                    generate_kwargs,
-                    args.warmup,
-                    native_language=args.language,
-                )
-                measure_samples = current_samples
+            measure_samples = _consume_warmup_samples(
+                target.model_id,
+                pipe,
+                iter(current_samples),
+                generate_kwargs,
+                args.warmup,
+                native_language=args.language,
+            )
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
                 target_args,

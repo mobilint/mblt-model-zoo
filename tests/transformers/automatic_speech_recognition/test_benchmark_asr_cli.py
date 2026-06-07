@@ -773,6 +773,31 @@ def test_run_one_sample_does_not_swallow_internal_type_error() -> None:
     assert pipe.calls == 1
 
 
+def test_run_one_sample_does_not_retry_on_generic_unexpected_error_text() -> None:
+    """Verify retry fallback is limited to known generate-kwargs compatibility failures."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.tokenizer = None
+
+        def __call__(self, audio_input, sampling_rate=None, generate_kwargs=None):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            raise TypeError("unexpected tensor shape inside decoder")
+
+    pipe = DummyPipe()
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "test output",
+    }
+
+    with pytest.raises(TypeError, match="unexpected tensor shape inside decoder"):
+        asr_bench._run_one_sample(pipe, sample, {"task": "transcribe", "language": "en"})
+
+    assert pipe.calls == 1
+
+
 def test_write_combined_outputs_uses_suffixless_output_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify ASR combined outputs use suffix-less stable file naming."""
 
@@ -801,7 +826,7 @@ def test_write_combined_outputs_uses_suffixless_output_names(tmp_path: Path, mon
         encoding="utf-8",
     )
     (tmp_path / asr_bench._HOST_PC_INFO_FILENAME).write_text("host info\n", encoding="utf-8")
-    monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, num_beams, rows: None)
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, rows: None)
 
     asr_bench._write_combined_outputs(tmp_path, None)
 
@@ -1252,6 +1277,53 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
     assert captured["num_samples"] is None
 
 
+def test_load_librispeech_supports_predecoded_array_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify streaming loader accepts already-decoded array/sampling_rate audio payloads."""
+
+    class DummyDataset:
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+            return self
+
+        def __iter__(self):
+            yield {
+                "id": "sample-0",
+                "audio": {
+                    "array": np.asarray([[1.0, 3.0], [5.0, 7.0]], dtype=np.float32),
+                    "sampling_rate": 8000,
+                },
+                "text": "hello",
+            }
+
+    def fake_load_dataset(name, config, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return DummyDataset()
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    datasets_stub = type(
+        "DatasetsStub",
+        (),
+        {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
+    )()
+    soundfile_stub = type("SoundfileStub", (), {"read": staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("soundfile.read should not be used for pre-decoded payloads")
+    ))})()
+    monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
+
+    args = asr_bench._parse_args(["--num-samples", "1"])
+    samples = asr_bench._load_librispeech(args)
+
+    assert len(samples) == 1
+    assert samples[0]["id"] == "sample-0"
+    assert samples[0]["audio"]["sampling_rate"] == 16000
+    assert samples[0]["audio"]["array"].dtype == np.float32
+
+
 def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify full-split mode rebuilds the streaming iterable for each target."""
 
@@ -1312,3 +1384,127 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--full-split"]) == 0
     assert load_calls == [None, None]
+
+
+def test_main_excludes_warmup_samples_from_measurement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify warmup consumes samples and measurement only sees the remaining iterator."""
+
+    args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"])
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    measured_ids: list[str] = []
+
+    samples = [
+        {"id": "warmup", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "a"},
+        {"id": "measure-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "b"},
+        {"id": "measure-2", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "c"},
+    ]
+
+    def fake_warmup(model_id, pipe, sample_iter, generate_kwargs, n_warmup, native_language=None):  # type: ignore[no-untyped-def]
+        for _ in range(n_warmup):
+            next(iter(sample_iter))
+
+    def fake_measure_target(model_id, target_args, pipe, measure_samples, generate_kwargs, native_language=None):  # type: ignore[no-untyped-def]
+        measured_ids.extend(sample["id"] for sample in measure_samples)
+        return [], {}, {}
+
+    monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
+    monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
+    monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
+    monkeypatch.setattr(
+        asr_bench,
+        "_build_run_targets",
+        lambda parsed_args: [(target, None, target.label, target.base)],
+    )
+    monkeypatch.setattr(asr_bench, "_load_librispeech", lambda parsed_args: list(samples))
+    monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
+    monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
+    monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
+    monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(asr_bench, "_warmup", fake_warmup)
+    monkeypatch.setattr(asr_bench, "_measure_target", fake_measure_target)
+    monkeypatch.setattr(
+        asr_bench,
+        "summarize_timings",
+        lambda timings, language="en": asr_bench.ASRMetricSummary(
+            0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
+    )
+    monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir, num_beams: None)
+
+    assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"]) == 0
+    assert measured_ids == ["measure-1", "measure-2"]
+
+
+def test_build_run_targets_warns_when_core_mode_is_explicit_for_original_models(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify native original-model runs explicitly warn that core mode is ignored."""
+
+    monkeypatch.setattr(asr_bench, "_list_default_asr_models", lambda: ["Qwen/Qwen3-ASR-1.7B"])
+    args = asr_bench._parse_args(["--original-models", "--core-mode", "all"])
+    args._core_mode_explicit = True
+
+    targets = asr_bench._build_run_targets(args)
+
+    captured = capsys.readouterr()
+    assert len(targets) == 1
+    assert "core-mode is not supported" in captured.out
+
+
+def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify ASR chart labels no longer embed beam tags."""
+
+    payload = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "asr": {
+            "num_samples": 1,
+            "total_audio_s": 1.0,
+            "total_generate_s": 0.5,
+            "wer": 0.1,
+            "cer": 0.02,
+            "mean_latency_s": 0.5,
+            "p50_latency_s": 0.5,
+            "p95_latency_s": 0.5,
+            "throughput_samples_per_s": 2.0,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "decode_tokens_per_s": 10.0,
+            "avg_tokens_per_sample": 5.0,
+        },
+        "device": {},
+    }
+    captured: dict[str, object] = {}
+    (tmp_path / "whisper-small.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+
+    def fake_plot_scalar_chart(**kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+
+    monkeypatch.setattr(asr_bench, "plot_scalar_chart", fake_plot_scalar_chart)
+
+    asr_bench._make_rtf_chart(tmp_path, [{"model": "openai/whisper-small", "rtf": 0.5, "wer": 0.1, "cer": 0.02}])
+
+    assert captured["folder_labels"] == [tmp_path.name]

@@ -374,6 +374,7 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
     """Collect normalized per-model metrics from one results folder."""
 
     normalized: dict[str, BaseCompareMetric] = {}
+    normalized_sources: dict[str, Path] = {}
     for path in sorted(folder.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as file:
@@ -392,6 +393,14 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
         norm_key = normalize_model_key(path, model_id)
         if norm_key not in normalized:
             normalized[norm_key] = metric
+            normalized_sources[norm_key] = path
+            continue
+
+        original_path = normalized_sources[norm_key]
+        print(
+            "Warning: duplicate normalized model key "
+            f"'{norm_key}' in {path}; keeping {original_path.name} and skipping {path.name}."
+        )
     return normalized
 
 

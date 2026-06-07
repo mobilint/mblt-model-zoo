@@ -248,7 +248,17 @@ variable.
 
 The LibriSpeech loader uses streaming mode. By default, the benchmark evaluates `50` samples.
 When `--num-samples` is set, the streaming dataset is shuffled with `--seed` and only the requested
-number of samples is consumed. Use `--full-split` to evaluate the full requested split.
+number of samples is consumed. Warmup samples are consumed first and are excluded from the measured
+results. Use `--full-split` to evaluate the full requested split.
+
+- The ASR benchmark is a dev-only workflow. Keep optional benchmark dependencies such as `jiwer`
+  in the development environment rather than treating them as package runtime dependencies.
+- Original/native Qwen3-ASR runs selected via `--original-models` do not use Mobilint
+  `--core-mode`. If you pass `--core-mode` explicitly in that mode, the script prints a notice and
+  ignores the value.
+- One `--output-dir` is expected to represent one beam setting. Re-running with the same output
+  directory overwrites prior result files by design, and summary/chart labels do not append a beam
+  tag.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \

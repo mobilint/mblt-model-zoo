@@ -77,14 +77,22 @@ def load_streaming_audio_text_samples(
     from datasets import Audio, load_dataset
 
     def _decode_audio(raw_audio: Mapping[str, Any]) -> tuple[Any, int]:
-        path = raw_audio.get("path")
-        audio_bytes = raw_audio.get("bytes")
-        if isinstance(audio_bytes, (bytes, bytearray)):
-            audio_array, sampling_rate = sf.read(io.BytesIO(audio_bytes), dtype="float32")
-        elif isinstance(path, str) and path:
-            audio_array, sampling_rate = sf.read(path, dtype="float32")
+        decoded_array = raw_audio.get("array")
+        decoded_sampling_rate = raw_audio.get("sampling_rate")
+        if decoded_array is not None and decoded_sampling_rate is not None:
+            audio_array = np.asarray(decoded_array, dtype=np.float32)
+            sampling_rate = int(decoded_sampling_rate)
         else:
-            raise ValueError("Dataset audio row does not contain readable path or bytes payload.")
+            path = raw_audio.get("path")
+            audio_bytes = raw_audio.get("bytes")
+            if isinstance(audio_bytes, (bytes, bytearray)):
+                audio_array, sampling_rate = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+            elif isinstance(path, str) and path:
+                audio_array, sampling_rate = sf.read(path, dtype="float32")
+            else:
+                raise ValueError(
+                    "Dataset audio row does not contain readable decoded array, path, or bytes payload."
+                )
 
         if getattr(audio_array, "ndim", 1) > 1:
             audio_array = np.mean(audio_array, axis=1)

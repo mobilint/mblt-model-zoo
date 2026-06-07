@@ -157,7 +157,9 @@ def test_normalize_model_key_strips_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault") == "whisper-small"
 
 
-def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicate_exists(tmp_path: Path) -> None:
+def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicate_exists(
+    tmp_path: Path, capsys
+) -> None:
     """Verify compare collection remains deterministic with suffix-less and legacy ASR duplicates."""
 
     payload = {
@@ -184,9 +186,11 @@ def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicat
     (tmp_path / "whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
 
     metrics = collect_metrics(tmp_path, ASRCompareMetric)
+    captured = capsys.readouterr()
 
     assert list(metrics.keys()) == ["whisper-small"]
     assert metrics["whisper-small"].wer == 0.1
+    assert "duplicate normalized model key 'whisper-small'" in captured.out
 
 
 def test_plot_compare_benchmark_results_module_help_smoke() -> None:
