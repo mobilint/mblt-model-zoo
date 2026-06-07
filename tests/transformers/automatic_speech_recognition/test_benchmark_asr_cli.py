@@ -22,7 +22,8 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.dataset_config == "clean"
     assert args.dataset_split == "test"
     assert args.language == "en"
-    assert args.num_samples is None
+    assert args.num_samples == 50
+    assert args.full_split is False
     assert args.num_beams is None
     assert args.max_new_tokens == 444
     assert args.warmup == 2
@@ -62,6 +63,37 @@ def test_asr_benchmark_help_subprocess_smoke() -> None:
 
     assert result.returncode == 0
     assert "automatic-speech-recognition" in result.stdout
+
+
+def test_asr_benchmark_module_help_subprocess_smoke() -> None:
+    """Verify module execution help works for ASR benchmark."""
+
+    result = subprocess.run(
+        [sys.executable, "-m", "benchmark.transformers.benchmark_automatic_speech_recognition_models", "--help"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "automatic-speech-recognition" in result.stdout
+
+
+def test_asr_benchmark_parser_full_split_conflict_raises() -> None:
+    """Verify --full-split rejects an explicit --num-samples override."""
+
+    with pytest.raises(SystemExit, match="--full-split"):
+        asr_bench._parse_args(["--full-split", "--num-samples", "10"])
+
+
+def test_asr_benchmark_parser_full_split_sets_num_samples_none() -> None:
+    """Verify --full-split switches dataset loading to full split mode."""
+
+    args = asr_bench._parse_args(["--full-split"])
+
+    assert args.full_split is True
+    assert args.num_samples is None
 
 
 def test_optional_generate_kwargs_only_enable_whisper_hints() -> None:
@@ -160,11 +192,67 @@ def test_measure_target_skips_whisper_long_form_samples() -> None:
     assert device_trace == {}
 
 
+def test_warmup_skips_whisper_long_form_samples() -> None:
+    """Verify warmup also skips >30s Whisper samples and counts completed warmups."""
+
+    calls: list[str] = []
+    short_sample = {
+        "id": "sample-1",
+        "audio": {"array": np.zeros(16000 * 5, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    long_sample = {
+        "id": "sample-2",
+        "audio": {"array": np.zeros(16000 * 31, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    another_short_sample = {
+        "id": "sample-3",
+        "audio": {"array": np.zeros(16000 * 4, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+
+    def fake_run_one_sample(pipe, sample, generate_kwargs):  # type: ignore[no-untyped-def]
+        calls.append(str(sample["id"]))
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(asr_bench, "_run_one_sample", fake_run_one_sample)
+    try:
+        asr_bench._warmup(
+            "openai/whisper-small",
+            object(),
+            [long_sample, short_sample, another_short_sample],
+            {"return_timestamps": False},
+            2,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert calls == ["sample-1", "sample-3"]
+
+
 def test_beam_tag_uses_default_label_for_unspecified_beams() -> None:
     """Verify file/report suffixes use a stable label when beams are unspecified."""
 
     assert asr_bench._beam_tag(None) == "default"
     assert asr_bench._beam_tag(3) == "3"
+
+
+def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify explicit --model-id avoids eager default list resolution."""
+
+    args = asr_bench._parse_args(["--model-id", "openai/whisper-small"])
+
+    def fail_list_default_asr_models():
+        raise AssertionError("_list_default_asr_models should not be called")
+
+    monkeypatch.setattr(asr_bench, "_list_default_asr_models", fail_list_default_asr_models)
+
+    targets = asr_bench._build_run_targets(args)
+
+    assert len(targets) == 1
+    assert targets[0][0].model_id == "openai/whisper-small"
 
 
 def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -673,10 +761,11 @@ def test_run_one_sample_does_not_swallow_internal_type_error() -> None:
     assert pipe.calls == 1
 
 
-def test_write_combined_outputs_uses_default_beam_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify default-beam combined outputs use the stable beamsdefault file naming."""
+def test_write_combined_outputs_uses_suffixless_output_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ASR combined outputs use suffix-less stable file naming."""
 
     payload = {
+        "benchmark_type": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "asr": {
             "num_samples": 1,
@@ -695,7 +784,7 @@ def test_write_combined_outputs_uses_default_beam_suffix(tmp_path: Path, monkeyp
         },
         "device": {},
     }
-    (tmp_path / "whisper-small_beamsdefault.json").write_text(
+    (tmp_path / "whisper-small.json").write_text(
         asr_bench.json.dumps(payload),
         encoding="utf-8",
     )
@@ -704,9 +793,9 @@ def test_write_combined_outputs_uses_default_beam_suffix(tmp_path: Path, monkeyp
 
     asr_bench._write_combined_outputs(tmp_path, None)
 
-    assert (tmp_path / "combined_beamsdefault.csv").is_file()
-    assert (tmp_path / "combined_beamsdefault.md").is_file()
-    assert (tmp_path / "summary_beamsdefault.md").is_file()
+    assert (tmp_path / "combined.csv").is_file()
+    assert (tmp_path / "combined.md").is_file()
+    assert (tmp_path / "summary.md").is_file()
 
 
 def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -766,7 +855,7 @@ def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
     monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
     monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
-    monkeypatch.setattr(asr_bench, "_warmup", lambda pipe, samples, generate_kwargs, n_warmup: None)
+    monkeypatch.setattr(asr_bench, "_warmup", lambda model_id, pipe, samples, generate_kwargs, n_warmup: None)
     monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: (timings, {}, {}))
     monkeypatch.setattr(asr_bench, "summarize_timings", fake_summarize)
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
@@ -989,8 +1078,8 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
     ]
 
 
-def test_load_librispeech_uses_full_split_when_num_samples_omitted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify dataset iteration consumes the full split when --num-samples is omitted."""
+def test_load_librispeech_uses_default_sample_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify default parser settings keep the ASR loader on the 50-sample subset path."""
 
     class DummyDataset:
         def __init__(self, rows):  # type: ignore[no-untyped-def]
@@ -1043,3 +1132,21 @@ def test_load_librispeech_uses_full_split_when_num_samples_omitted(monkeypatch: 
 
     assert len(samples) == 3
     assert dataset.iterated == 3
+
+
+def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify --full-split forwards num_samples=None into the streaming loader."""
+
+    captured: dict[str, object] = {}
+
+    def fake_loader(**kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(asr_bench, "load_streaming_audio_text_samples", fake_loader)
+
+    args = asr_bench._parse_args(["--full-split"])
+    samples = asr_bench._load_librispeech(args)
+
+    assert samples == []
+    assert captured["num_samples"] is None

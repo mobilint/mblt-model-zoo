@@ -18,7 +18,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from chart_utils import plot_scalar_chart
+try:
+    from benchmark.transformers.chart_utils import plot_scalar_chart
+except ModuleNotFoundError:
+    from chart_utils import plot_scalar_chart
 from tqdm import tqdm
 
 from benchmark.common.dataset_utils import load_streaming_audio_text_samples
@@ -484,11 +487,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--num-samples",
         type=int,
-        default=None,
+        default=50,
         help=(
-            "number of evaluation samples; omit to evaluate the full dataset split "
+            "number of evaluation samples; defaults to 50. Use --full-split to evaluate the full dataset split "
             "(streaming avoids eager full download, but runtime still scales with the full split)"
         ),
+    )
+    parser.add_argument(
+        "--full-split",
+        action="store_true",
+        help="evaluate the full dataset split instead of the default --num-samples subset",
     )
     parser.add_argument(
         "--num-beams",
@@ -522,7 +530,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="core mode passed to model_kwargs; all expands to single/global4/global8",
     )
     _add_device_tracking_args(parser)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.full_split and args.num_samples != 50:
+        raise SystemExit("--full-split cannot be combined with an explicit --num-samples value.")
+    if args.full_split:
+        args.num_samples = None
+    return args
 
 
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
@@ -932,9 +945,25 @@ def _run_one_sample(
     )
 
 
-def _warmup(pipe: Any, samples: Sequence[Mapping[str, Any]], generate_kwargs: Mapping[str, Any], n_warmup: int) -> None:
-    for sample in samples[: min(int(n_warmup), len(samples))]:
+def _warmup(
+    model_id: str,
+    pipe: Any,
+    samples: Sequence[Mapping[str, Any]],
+    generate_kwargs: Mapping[str, Any],
+    n_warmup: int,
+) -> None:
+    completed = 0
+    for sample in samples:
+        if completed >= int(n_warmup):
+            break
+        if _should_skip_whisper_long_form_sample(model_id, sample):
+            print(
+                "Skipping warmup sample (>30s Whisper limit): "
+                f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
+            )
+            continue
         _run_one_sample(pipe, sample, generate_kwargs)
+        completed += 1
 
 
 def _measure_target(
@@ -1004,13 +1033,16 @@ def _write_target_json(
 
 
 def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
-    beam_tag = _beam_tag(num_beams)
     rows: list[dict[str, Any]] = []
-    for path in sorted(out_dir.glob(f"*_beams{beam_tag}.json")):
+    for path in sorted(out_dir.glob("*.json")):
+        if path.name == _HOST_PC_INFO_FILENAME:
+            continue
         try:
             with path.open("r", encoding="utf-8") as file:
                 payload = json.load(file)
         except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("benchmark_type") != "automatic-speech-recognition":
             continue
         asr = payload.get("asr")
         if not isinstance(asr, dict):
@@ -1019,8 +1051,8 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
         rows.append(format_metrics_row(str(payload.get("model", path.stem)), num_beams, summary, device_metric))
 
-    combined_csv = out_dir / f"combined_beams{beam_tag}.csv"
-    combined_md = out_dir / f"combined_beams{beam_tag}.md"
+    combined_csv = out_dir / "combined.csv"
+    combined_md = out_dir / "combined.md"
     if rows:
         headers = list(rows[0].keys())
         with combined_csv.open("w", encoding="utf-8", newline="") as file:
@@ -1068,13 +1100,13 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
 
     _make_rtf_chart(out_dir, num_beams, rows)
     _write_summary_markdown(
-        out_dir / f"summary_beams{beam_tag}.md",
-        title=f"Automatic Speech Recognition Benchmark Summary (beams={beam_tag})",
+        out_dir / "summary.md",
+        title="Automatic Speech Recognition Benchmark Summary",
         host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
         table_markdown_path=combined_md,
         plot_paths=_existing_png_paths(
             out_dir,
-            prefixes=(f"rtf_beams{beam_tag}", f"wer_beams{beam_tag}", f"cer_beams{beam_tag}"),
+            prefixes=("rtf", "wer", "cer"),
         ),
         plot_tables={},
     )
@@ -1083,7 +1115,6 @@ def _write_combined_outputs(out_dir: Path, num_beams: int | None) -> None:
 def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping[str, Any]]) -> None:
     if not rows:
         return
-    beam_tag = _beam_tag(num_beams)
     metrics_by_folder: list[dict[str, Any]] = []
     folder_metrics: dict[str, Any] = {}
     for row in rows:
@@ -1091,15 +1122,15 @@ def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping
         folder_metrics[model_name] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
-    labels = [f"beams={beam_tag}"]
+    labels = [f"beams={_beam_tag(num_beams)}"]
 
     def _selector(key: str, scale: float = 1.0):
         return lambda item: None if item.get(key) is None else scale * float(item[key])
 
     for filename, key, title, x_label, scale in (
-        (f"rtf_beams{beam_tag}.png", "rtf", "Real-Time Factor", "RTF", 1.0),
-        (f"wer_beams{beam_tag}.png", "wer", "Word Error Rate", "WER (%)", 100.0),
-        (f"cer_beams{beam_tag}.png", "cer", "Character Error Rate", "CER (%)", 100.0),
+        ("rtf.png", "rtf", "Real-Time Factor", "RTF", 1.0),
+        ("wer.png", "wer", "Word Error Rate", "WER (%)", 100.0),
+        ("cer.png", "cer", "Character Error Rate", "CER (%)", 100.0),
     ):
         try:
             plot_scalar_chart(
@@ -1122,9 +1153,9 @@ def _resolve_results_dir(args: argparse.Namespace) -> Path:
 
 
 def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarget, str | None, str, str]]:
-    available_model_ids = _list_default_asr_models()
     targets: list[ASRBenchmarkTarget]
     if args.mxq_dir:
+        available_model_ids = _list_default_asr_models()
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
@@ -1137,7 +1168,7 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(item) for item in args.model_ids] if args.model_ids else available_model_ids
+        model_ids = [str(item) for item in args.model_ids] if args.model_ids else _list_default_asr_models()
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)
@@ -1218,7 +1249,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
         beam_tag = _beam_tag(args.num_beams)
-        json_path = out_dir / f"{mode_base}_beams{beam_tag}.json"
+        json_path = out_dir / f"{mode_base}.json"
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
@@ -1245,7 +1276,7 @@ def main(argv: list[str] | None = None) -> int:
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
 
-            _warmup(pipe, samples, generate_kwargs, args.warmup)
+            _warmup(target.model_id, pipe, samples, generate_kwargs, args.warmup)
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
                 target_args,

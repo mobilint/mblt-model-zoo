@@ -1281,11 +1281,13 @@ def _run_sweep(args: argparse.Namespace) -> int:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
     _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
 
-    available = list_models(tasks="text-generation")
-    available_model_ids = available.get("text-generation", [])
-    if not available_model_ids:
-        print("No text-generation models found.")
-        return 0
+    available_model_ids: list[str] | None = None
+    if args.mxq_dir or not args.model:
+        available = list_models(tasks="text-generation")
+        available_model_ids = available.get("text-generation", [])
+        if not available_model_ids:
+            print("No text-generation models found.")
+            return 0
 
     _collect_host_pc_info(results_dir)
 
@@ -1306,7 +1308,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
-        model_ids = [str(args.model)] if args.model else available_model_ids
+        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)

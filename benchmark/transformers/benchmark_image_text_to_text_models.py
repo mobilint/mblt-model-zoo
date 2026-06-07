@@ -1409,10 +1409,12 @@ def _collect_vlm_run_targets(
         Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
     )
     results_dir.mkdir(parents=True, exist_ok=True)
-    available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
-    if not available_model_ids:
-        print("No image-text-to-text models found.")
-        return results_dir, False, []
+    available_model_ids: list[str] | None = None
+    if args.mxq_dir or not args.model:
+        available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
+        if not available_model_ids:
+            print("No image-text-to-text models found.")
+            return results_dir, False, []
     raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1420,11 +1422,11 @@ def _collect_vlm_run_targets(
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
         for model_id, rev_candidates, label, base, target_mxq_path in _iter_targets_from_mxq_dir(
             mxq_dir=mxq_dir,
-            available_model_ids=available_model_ids,
+            available_model_ids=available_model_ids or [],
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        model_ids = [str(args.model)] if args.model else available_model_ids
+        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):

@@ -157,6 +157,38 @@ def test_normalize_model_key_strips_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault") == "whisper-small"
 
 
+def test_collect_metrics_prefers_suffixless_asr_result_when_legacy_beam_duplicate_exists(tmp_path: Path) -> None:
+    """Verify compare collection remains deterministic with suffix-less and legacy ASR duplicates."""
+
+    payload = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "asr": {
+            "wer": 0.1,
+            "cer": 0.02,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "mean_latency_s": 1.2,
+            "p50_latency_s": 1.0,
+            "p95_latency_s": 1.9,
+            "throughput_samples_per_s": 3.0,
+            "decode_tokens_per_s": 77.0,
+            "avg_tokens_per_sample": 10.0,
+        },
+        "device": {"avg_power_w": 8.0},
+    }
+    legacy_payload = dict(payload)
+    legacy_payload["model"] = "openai/whisper-small_beams1"
+
+    (tmp_path / "whisper-small.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+    metrics = collect_metrics(tmp_path, ASRCompareMetric)
+
+    assert list(metrics.keys()) == ["whisper-small"]
+    assert metrics["whisper-small"].wer == 0.1
+
+
 def test_plot_compare_benchmark_results_module_help_smoke() -> None:
     """Verify package/module execution path works for compare help output."""
 

@@ -35,6 +35,9 @@ _NPU_ARRAY_KEY_RE = re.compile(r"(?:^|\.)npus\[(\d+)\]\.(.+)$")
 
 
 _PLOT_TITLES_BY_NAME = {
+    "rtf.png": "Real-Time Factor",
+    "wer.png": "Word Error Rate",
+    "cer.png": "Character Error Rate",
     "prefill_tps.png": "Prefill Tokens Per Second",
     "measure_prefill_tps.png": "Prefill Tokens Per Second",
     "llm_prefill_tps.png": "Prefill Tokens Per Second",
