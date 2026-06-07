@@ -1,11 +1,8 @@
 import argparse
 import csv
 import functools
-import io
-import itertools
 import json
 import logging
-import math
 import os
 import sys
 import time
@@ -24,6 +21,8 @@ if str(_REPO_ROOT) not in sys.path:
 from chart_utils import plot_scalar_chart
 from tqdm import tqdm
 
+from benchmark.common.dataset_utils import load_streaming_audio_text_samples
+from benchmark.common.dataset_utils import resample_audio as _resample_audio_common
 from benchmark.common.io_utils import safe_filename as _safe_filename_common
 from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
 from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
@@ -486,7 +485,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--num-samples",
         type=int,
         default=None,
-        help="number of evaluation samples; omit to iterate the full dataset split",
+        help=(
+            "number of evaluation samples; omit to evaluate the full dataset split "
+            "(streaming avoids eager full download, but runtime still scales with the full split)"
+        ),
     )
     parser.add_argument(
         "--num-beams",
@@ -782,72 +784,25 @@ def _quiet_apscheduler_info_logs() -> None:
 
 
 def _resample_audio(audio_array: Any, source_rate: int, target_rate: int = 16000) -> Any:
-    """Resample audio with a polyphase filter for ASR-friendly fidelity.
+    """Backward-compatible wrapper around shared benchmark audio resampling."""
 
-    Args:
-        audio_array: Mono float audio samples.
-        source_rate: Original sampling rate.
-        target_rate: Desired sampling rate.
-
-    Returns:
-        Resampled mono audio array.
-    """
-
-    import numpy as np
-    from scipy.signal import resample_poly
-
-    if int(source_rate) == int(target_rate):
-        return np.asarray(audio_array, dtype=np.float32)
-
-    divisor = math.gcd(int(source_rate), int(target_rate))
-    up = int(target_rate) // divisor
-    down = int(source_rate) // divisor
-    resampled = resample_poly(np.asarray(audio_array, dtype=np.float32), up, down)
-    return np.asarray(resampled, dtype=np.float32)
+    return _resample_audio_common(audio_array, source_rate, target_rate)
 
 
 def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
-    import numpy as np
-    import soundfile as sf
-    from datasets import Audio, load_dataset
+    """Load LibriSpeech-style ASR samples via the shared streaming dataset utility."""
 
-    def _decode_audio(raw_audio: Mapping[str, Any]) -> tuple[Any, int]:
-        path = raw_audio.get("path")
-        audio_bytes = raw_audio.get("bytes")
-        if isinstance(audio_bytes, (bytes, bytearray)):
-            audio_array, sampling_rate = sf.read(io.BytesIO(audio_bytes), dtype="float32")
-        elif isinstance(path, str) and path:
-            audio_array, sampling_rate = sf.read(path, dtype="float32")
-        else:
-            raise ValueError("Dataset audio row does not contain readable path or bytes payload.")
-
-        if getattr(audio_array, "ndim", 1) > 1:
-            audio_array = np.mean(audio_array, axis=1)
-
-        sampling_rate = int(sampling_rate)
-        if sampling_rate != 16000:
-            audio_array = _resample_audio(audio_array, sampling_rate, 16000)
-            sampling_rate = 16000
-        return audio_array, sampling_rate
-
-    dataset = load_dataset(args.dataset, args.dataset_config, split=args.dataset_split, streaming=True)
-    if hasattr(dataset, "cast_column"):
-        dataset = dataset.cast_column("audio", Audio(decode=False))
-    if hasattr(dataset, "shuffle"):
-        dataset = dataset.shuffle(seed=args.seed)
-    sample_count = None if args.num_samples is None else max(int(args.num_samples), 0)
-    samples: list[dict[str, Any]] = []
-    rows_iter = dataset if sample_count is None else itertools.islice(dataset, sample_count)
-    for index, row in enumerate(rows_iter):
-        audio_array, sampling_rate = _decode_audio(row["audio"])
-        samples.append(
-            {
-                "id": str(row.get("id", index)),
-                "audio": {"array": audio_array, "sampling_rate": sampling_rate},
-                "reference": str(row.get("text", "")),
-            }
-        )
-    return samples
+    return load_streaming_audio_text_samples(
+        dataset_name=args.dataset,
+        dataset_config=args.dataset_config,
+        dataset_split=args.dataset_split,
+        audio_column="audio",
+        text_column="text",
+        id_column="id",
+        num_samples=args.num_samples,
+        seed=args.seed,
+        target_sampling_rate=16000,
+    )
 
 
 def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
@@ -872,15 +827,41 @@ def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
             value = output.get(key)
             if isinstance(value, list):
                 return len(value)
-    tokenizer = getattr(pipe, "tokenizer", None)
-    if tokenizer is None:
-        return len(text.split())
-    try:
-        encoded = tokenizer(text, add_special_tokens=False)
-        input_ids = encoded.get("input_ids", [])
-        return len(input_ids) if isinstance(input_ids, list) else len(text.split())
-    except Exception:
-        return len(text.split())
+
+    def _extract_input_ids_length(encoded: Any) -> int | None:
+        if isinstance(encoded, Mapping):
+            input_ids = encoded.get("input_ids")
+        else:
+            input_ids = getattr(encoded, "input_ids", None)
+        if input_ids is None:
+            return None
+        try:
+            return len(input_ids)
+        except TypeError:
+            return None
+
+    processor = getattr(pipe, "processor", None)
+    candidates = [
+        getattr(pipe, "tokenizer", None),
+        getattr(processor, "tokenizer", None) if processor is not None else None,
+        processor,
+    ]
+    for tokenizer in candidates:
+        if not callable(tokenizer):
+            continue
+        try:
+            encoded = tokenizer(text, add_special_tokens=False)
+        except TypeError:
+            try:
+                encoded = tokenizer(text)
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                continue
+        except (AttributeError, ValueError, RuntimeError):
+            continue
+        input_ids_length = _extract_input_ids_length(encoded)
+        if input_ids_length is not None:
+            return input_ids_length
+    return len(text.split())
 
 
 def _run_one_sample(
@@ -899,11 +880,12 @@ def _run_one_sample(
             raise RuntimeError("Qwen3-ASR native transcribe returned no results.")
         elapsed = time.perf_counter() - start
         hypothesis_raw = str(results[0].text)
+        token_count = _extract_generated_token_count(pipe, results[0], hypothesis_raw)
         return SampleTiming(
             sample_id=str(sample["id"]),
             audio_duration_s=float(len(audio_array)) / float(sampling_rate),
             generate_time_s=float(elapsed),
-            num_generated_tokens=len(hypothesis_raw.split()),
+            num_generated_tokens=int(token_count),
             num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
             reference=str(sample["reference"]),
             hypothesis=hypothesis_raw,

@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any, ClassVar, Mapping, Sequence
 
 try:
-    from benchmark.transformers.chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
+    from benchmark.transformers.chart_utils import (
+        default_charts_dir,
+        folder_labels,
+        plot_scalar_chart,
+        plot_token_chart,
+    )
 except ModuleNotFoundError:
     from chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
 

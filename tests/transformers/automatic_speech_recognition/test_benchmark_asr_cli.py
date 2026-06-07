@@ -1,5 +1,5 @@
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -756,7 +756,11 @@ def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
     monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
     monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
-    monkeypatch.setattr(asr_bench, "_build_run_targets", lambda parsed_args: [(target, None, target.label, target.base)])
+    monkeypatch.setattr(
+        asr_bench,
+        "_build_run_targets",
+        lambda parsed_args: [(target, None, target.label, target.base)],
+    )
     monkeypatch.setattr(asr_bench, "_load_librispeech", lambda parsed_args: [dict(timings[0].__dict__)])
     monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
     monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
@@ -827,6 +831,40 @@ def test_run_one_sample_uses_native_qwen_transcribe_when_available() -> None:
 
     assert result.hypothesis == "native output"
     assert result.num_beams is None
+
+
+def test_run_one_sample_uses_native_qwen_processor_tokenizer_for_token_count() -> None:
+    """Verify native qwen_asr token counts prefer processor.tokenizer when available."""
+
+    class Result:
+        def __init__(self, text):  # type: ignore[no-untyped-def]
+            self.text = text
+
+    class Tokenizer:
+        def __call__(self, text, add_special_tokens=False):  # type: ignore[no-untyped-def]
+            return {"input_ids": [1, 2, 3, 4]}
+
+    class Processor:
+        def __init__(self) -> None:
+            self.tokenizer = Tokenizer()
+
+    class NativePipe:
+        def __init__(self) -> None:
+            self.processor = Processor()
+
+        def transcribe(self, audio=None, language=None):  # type: ignore[no-untyped-def]
+            return [Result("native output text")]
+
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "native output text",
+    }
+
+    result = asr_bench._run_one_sample(NativePipe(), sample, {})
+
+    assert result.hypothesis == "native output text"
+    assert result.num_generated_tokens == 4
 
 
 def test_run_one_sample_preserves_raw_text_for_language_specific_summary() -> None:

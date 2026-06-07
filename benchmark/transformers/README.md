@@ -245,8 +245,11 @@ core-mode sweeps, result table generation, and chart generation.
 and speed metrics. Run the script twice with different `--num-beams` values to compare greedy
 decoding and beam search.
 
-The LibriSpeech loader uses streaming mode and consumes only the requested `--num-samples`, so the
-benchmark does not eagerly download the entire evaluation split before running.
+The LibriSpeech loader uses streaming mode. When `--num-samples` is set, the benchmark consumes
+only that many rows. When `--num-samples` is omitted, the benchmark evaluates the full requested
+split. Streaming avoids eagerly downloading the entire split up front, but total benchmark runtime
+still scales with the full split size. For smoke tests, large datasets, or custom datasets, prefer
+setting `--num-samples` explicitly.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
