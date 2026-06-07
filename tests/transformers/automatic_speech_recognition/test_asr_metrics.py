@@ -1,3 +1,7 @@
+import builtins
+
+import pytest
+
 from benchmark.transformers.asr_metrics import SampleTiming, compute_wer_cer, normalize_transcript, summarize_timings
 
 
@@ -34,6 +38,22 @@ def test_compute_wer_cer_respects_language_normalization() -> None:
 
     assert word_error_rate > 0.0
     assert char_error_rate > 0.0
+
+
+def test_compute_wer_cer_missing_jiwer_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify lazy jiwer import raises an actionable dependency message."""
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
+        if name == "jiwer":
+            raise ModuleNotFoundError("No module named 'jiwer'", name="jiwer")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(ModuleNotFoundError, match="uv sync --group dev"):
+        compute_wer_cer(["hello world"], ["hello world"])
 
 
 def test_summarize_timings_aggregation() -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from benchmark.transformers.compare_metrics import (
@@ -94,6 +96,8 @@ def test_asr_compare_metric_from_payload() -> None:
     assert metric is not None
     assert metric.wer == 0.1
     assert metric.cer == 0.02
+    assert metric.wer_pct == 10.0
+    assert metric.cer_pct == 2.0
     assert metric.rtf == 0.5
     assert metric.decode_tokens_per_s == 77.0
     assert metric.avg_power_w == 8.0
@@ -151,3 +155,19 @@ def test_normalize_model_key_strips_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small"
     assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small"
     assert normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault") == "whisper-small"
+
+
+def test_plot_compare_benchmark_results_module_help_smoke() -> None:
+    """Verify package/module execution path works for compare help output."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "benchmark.transformers.plot_compare_benchmark_results", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Compare N benchmark result folders" in result.stdout

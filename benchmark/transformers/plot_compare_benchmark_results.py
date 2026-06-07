@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 try:
-    from compare_metrics import (
+    from benchmark.transformers.compare_metrics import (
         TASK_REGISTRY,
         collect_metrics,
         common_model_ids,
@@ -11,7 +11,7 @@ try:
         render_charts,
     )
 except ModuleNotFoundError:
-    from .compare_metrics import (
+    from compare_metrics import (
         TASK_REGISTRY,
         collect_metrics,
         common_model_ids,

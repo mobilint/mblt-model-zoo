@@ -13,6 +13,12 @@ Install the Transformers integration and development tools:
 pip install -e ".[transformers]" --group dev
 ```
 
+- ASR benchmark accuracy metrics additionally require `jiwer`.
+- `jiwer` is intentionally treated as a benchmark/dev dependency, not a package runtime dependency.
+- The ASR helper imports `jiwer` lazily, so commands such as `--help` and unrelated utilities can run
+  without loading it first.
+- In a `uv` workflow, prefer `uv sync --group dev` when the ASR metric dependency is missing.
+
 Model loading may require Hugging Face Hub access, local `.mxq` files, the Mobilint NPU runtime, or
 GPU drivers depending on the benchmark target. The validation commands in this document avoid model
 inference and model downloads.
@@ -324,6 +330,9 @@ ruff check benchmark/transformers/benchmark_automatic_speech_recognition_models.
 pytest tests/transformers/automatic_speech_recognition/test_asr_metrics.py tests/transformers/automatic_speech_recognition/test_benchmark_asr_cli.py
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py --help
 ```
+
+The help command above is safe for CI smoke validation because it does not require model downloads or
+eager `jiwer` import.
 
 ### Benchmark Text-Generation Models
 

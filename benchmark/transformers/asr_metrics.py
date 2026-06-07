@@ -10,13 +10,33 @@ from __future__ import annotations
 import math
 import re
 import string
+import types
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
-from jiwer import cer, wer
-
 _WHITESPACE_RE = re.compile(r"\s+")
 _PUNCT_TRANSLATION = str.maketrans("", "", string.punctuation)
+
+
+def _load_jiwer() -> types.ModuleType:
+    """Load the optional ``jiwer`` dependency lazily.
+
+    Returns:
+        Imported ``jiwer`` module.
+
+    Raises:
+        ModuleNotFoundError: If ``jiwer`` is unavailable.
+    """
+
+    try:
+        import jiwer
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "ASR accuracy metrics require the optional benchmark dependency 'jiwer'. "
+            "Install dev dependencies with 'uv sync --group dev' or install jiwer directly with "
+            "'pip install jiwer'."
+        ) from exc
+    return jiwer
 
 
 @dataclass
@@ -111,10 +131,11 @@ def compute_wer_cer(
         Tuple of `(wer, cer)` in 0..1 range.
     """
 
+    jiwer = _load_jiwer()
     normalized_references = [normalize_transcript(text, language=language) for text in references]
     normalized_hypotheses = [normalize_transcript(text, language=language) for text in hypotheses]
-    word_error_rate = float(wer(normalized_references, normalized_hypotheses))
-    char_error_rate = float(cer(normalized_references, normalized_hypotheses))
+    word_error_rate = float(jiwer.wer(normalized_references, normalized_hypotheses))
+    char_error_rate = float(jiwer.cer(normalized_references, normalized_hypotheses))
     return word_error_rate, char_error_rate
 
 

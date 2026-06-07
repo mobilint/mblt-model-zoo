@@ -4,13 +4,14 @@ import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, ClassVar, Mapping, Sequence
 
 try:
-    from chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
+    from benchmark.transformers.chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
 except ModuleNotFoundError:
-    from .chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
+    from chart_utils import default_charts_dir, folder_labels, plot_scalar_chart, plot_token_chart
 
 
 @dataclass(frozen=True)
@@ -289,10 +290,22 @@ class ASRCompareMetric(BaseCompareMetric):
     decode_tokens_per_s: float | None = None
     avg_tokens_per_sample: float | None = None
 
+    @property
+    def wer_pct(self) -> float | None:
+        """Return WER in percentage units for chart display."""
+
+        return None if self.wer is None else 100.0 * self.wer
+
+    @property
+    def cer_pct(self) -> float | None:
+        """Return CER in percentage units for chart display."""
+
+        return None if self.cer is None else 100.0 * self.cer
+
     TASK: ClassVar[str] = "automatic-speech-recognition"
     SCALAR_SPECS: ClassVar[Sequence[ScalarChartSpec]] = (
-        ScalarChartSpec("wer.png", "Word Error Rate", "WER", "wer"),
-        ScalarChartSpec("cer.png", "Character Error Rate", "CER", "cer"),
+        ScalarChartSpec("wer.png", "Word Error Rate", "WER (%)", "wer_pct"),
+        ScalarChartSpec("cer.png", "Character Error Rate", "CER (%)", "cer_pct"),
         ScalarChartSpec("rtf.png", "Real-Time Factor", "RTF", "rtf"),
         ScalarChartSpec("inverse_rtf.png", "Inverse Real-Time Factor", "x realtime", "inverse_rtf"),
         ScalarChartSpec("p95_latency_s.png", "P95 Latency", "Seconds", "p95_latency_s"),
@@ -360,7 +373,7 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
         try:
             with path.open("r", encoding="utf-8") as file:
                 payload = json.load(file)
-        except Exception as exc:
+        except (OSError, JSONDecodeError) as exc:
             print(f"Warning: failed to parse {path}: {exc}")
             continue
         if not isinstance(payload, Mapping):

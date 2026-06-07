@@ -5,6 +5,7 @@ import io
 import itertools
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -37,7 +38,6 @@ from benchmark.transformers.asr_metrics import (
     ASRMetricSummary,
     SampleTiming,
     format_metrics_row,
-    normalize_transcript,
     summarize_timings,
     summary_to_dict,
 )
@@ -781,6 +781,31 @@ def _quiet_apscheduler_info_logs() -> None:
         aps_logger.setLevel(logging.WARNING)
 
 
+def _resample_audio(audio_array: Any, source_rate: int, target_rate: int = 16000) -> Any:
+    """Resample audio with a polyphase filter for ASR-friendly fidelity.
+
+    Args:
+        audio_array: Mono float audio samples.
+        source_rate: Original sampling rate.
+        target_rate: Desired sampling rate.
+
+    Returns:
+        Resampled mono audio array.
+    """
+
+    import numpy as np
+    from scipy.signal import resample_poly
+
+    if int(source_rate) == int(target_rate):
+        return np.asarray(audio_array, dtype=np.float32)
+
+    divisor = math.gcd(int(source_rate), int(target_rate))
+    up = int(target_rate) // divisor
+    down = int(source_rate) // divisor
+    resampled = resample_poly(np.asarray(audio_array, dtype=np.float32), up, down)
+    return np.asarray(resampled, dtype=np.float32)
+
+
 def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
     import numpy as np
     import soundfile as sf
@@ -801,11 +826,7 @@ def _load_librispeech(args: argparse.Namespace) -> list[dict[str, Any]]:
 
         sampling_rate = int(sampling_rate)
         if sampling_rate != 16000:
-            duration_s = float(len(audio_array)) / float(sampling_rate)
-            target_length = max(int(round(duration_s * 16000.0)), 1)
-            source_positions = np.linspace(0.0, duration_s, num=len(audio_array), endpoint=False)
-            target_positions = np.linspace(0.0, duration_s, num=target_length, endpoint=False)
-            audio_array = np.interp(target_positions, source_positions, audio_array).astype("float32")
+            audio_array = _resample_audio(audio_array, sampling_rate, 16000)
             sampling_rate = 16000
         return audio_array, sampling_rate
 
@@ -878,16 +899,14 @@ def _run_one_sample(
             raise RuntimeError("Qwen3-ASR native transcribe returned no results.")
         elapsed = time.perf_counter() - start
         hypothesis_raw = str(results[0].text)
-        reference = normalize_transcript(str(sample["reference"]))
-        hypothesis = normalize_transcript(hypothesis_raw)
         return SampleTiming(
             sample_id=str(sample["id"]),
             audio_duration_s=float(len(audio_array)) / float(sampling_rate),
             generate_time_s=float(elapsed),
             num_generated_tokens=len(hypothesis_raw.split()),
             num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
-            reference=reference,
-            hypothesis=hypothesis,
+            reference=str(sample["reference"]),
+            hypothesis=hypothesis_raw,
         )
 
     output = None
@@ -919,8 +938,6 @@ def _run_one_sample(
         raise RuntimeError("ASR pipeline produced no output.")
     elapsed = time.perf_counter() - start
     hypothesis_raw = _extract_hypothesis_text(output)
-    reference = normalize_transcript(str(sample["reference"]))
-    hypothesis = normalize_transcript(hypothesis_raw)
     token_count = _extract_generated_token_count(pipe, output, hypothesis_raw)
     return SampleTiming(
         sample_id=str(sample["id"]),
@@ -928,8 +945,8 @@ def _run_one_sample(
         generate_time_s=float(elapsed),
         num_generated_tokens=int(token_count),
         num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
-        reference=reference,
-        hypothesis=hypothesis,
+        reference=str(sample["reference"]),
+        hypothesis=hypothesis_raw,
     )
 
 
@@ -1094,20 +1111,20 @@ def _make_rtf_chart(out_dir: Path, num_beams: int | None, rows: Sequence[Mapping
     models = sorted(folder_metrics.keys())
     labels = [f"beams={beam_tag}"]
 
-    def _selector(key: str):
-        return lambda item: None if item.get(key) is None else float(item[key])
+    def _selector(key: str, scale: float = 1.0):
+        return lambda item: None if item.get(key) is None else scale * float(item[key])
 
-    for filename, key, title, x_label in (
-        (f"rtf_beams{beam_tag}.png", "rtf", "Real-Time Factor", "RTF"),
-        (f"wer_beams{beam_tag}.png", "wer", "Word Error Rate", "WER"),
-        (f"cer_beams{beam_tag}.png", "cer", "Character Error Rate", "CER"),
+    for filename, key, title, x_label, scale in (
+        (f"rtf_beams{beam_tag}.png", "rtf", "Real-Time Factor", "RTF", 1.0),
+        (f"wer_beams{beam_tag}.png", "wer", "Word Error Rate", "WER (%)", 100.0),
+        (f"cer_beams{beam_tag}.png", "cer", "Character Error Rate", "CER (%)", 100.0),
     ):
         try:
             plot_scalar_chart(
                 models=models,
                 folder_labels=labels,
                 metrics_by_folder=metrics_by_folder,
-                scalar_selector=_selector(key),
+                scalar_selector=_selector(key, scale),
                 title=title,
                 x_label=x_label,
                 output_path=out_dir / filename,

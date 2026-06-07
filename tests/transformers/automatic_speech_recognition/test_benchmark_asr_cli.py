@@ -1,9 +1,11 @@
 import sys
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[3] / "benchmark" / "transformers"
 if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(_TRANSFORMERS_BENCHMARK_DIR))
@@ -45,6 +47,21 @@ def test_asr_benchmark_help_parses() -> None:
         assert exc.code == 0
     else:
         raise AssertionError("Expected --help to exit")
+
+
+def test_asr_benchmark_help_subprocess_smoke() -> None:
+    """Verify the README help command works as a subprocess smoke test."""
+
+    result = subprocess.run(
+        [sys.executable, "benchmark/transformers/benchmark_automatic_speech_recognition_models.py", "--help"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "automatic-speech-recognition" in result.stdout
 
 
 def test_optional_generate_kwargs_only_enable_whisper_hints() -> None:
@@ -810,6 +827,47 @@ def test_run_one_sample_uses_native_qwen_transcribe_when_available() -> None:
 
     assert result.hypothesis == "native output"
     assert result.num_beams is None
+
+
+def test_run_one_sample_preserves_raw_text_for_language_specific_summary() -> None:
+    """Verify raw transcripts survive sample execution so summary language policy stays effective."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.tokenizer = None
+
+        def __call__(self, audio_input, sampling_rate=None, generate_kwargs=None):  # type: ignore[no-untyped-def]
+            return {"text": "hello, world"}
+
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+
+    timing = asr_bench._run_one_sample(DummyPipe(), sample, {})
+
+    assert timing.reference == "hello world"
+    assert timing.hypothesis == "hello, world"
+
+    english_summary = asr_bench.summarize_timings([timing], language="en")
+    korean_summary = asr_bench.summarize_timings([timing], language="ko")
+
+    assert english_summary.wer == 0.0
+    assert english_summary.cer == 0.0
+    assert korean_summary.wer > 0.0
+    assert korean_summary.cer > 0.0
+
+
+def test_resample_audio_changes_rate_with_float32_output() -> None:
+    """Verify ASR resampling uses the dedicated helper and preserves float32 output."""
+
+    audio = np.asarray([0.0, 1.0, -1.0, 0.5], dtype=np.float32)
+
+    resampled = asr_bench._resample_audio(audio, 8000, 16000)
+
+    assert resampled.dtype == np.float32
+    assert len(resampled) > len(audio)
 
 
 def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.MonkeyPatch) -> None:
