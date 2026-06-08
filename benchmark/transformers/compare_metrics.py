@@ -380,6 +380,17 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
             continue
         if not isinstance(payload, Mapping):
             continue
+        benchmark_type = payload.get("benchmark_type")
+        if benchmark_type is not None:
+            if not isinstance(benchmark_type, str):
+                print(f"Warning: skipping {path.name} because benchmark_type is not a string.")
+                continue
+            if benchmark_type != metric_cls.TASK:
+                print(
+                    f"Warning: skipping {path.name} because benchmark_type '{benchmark_type}' "
+                    f"does not match requested task '{metric_cls.TASK}'."
+                )
+                continue
         model_id = payload.get("model")
         if not isinstance(model_id, str) or not model_id:
             continue

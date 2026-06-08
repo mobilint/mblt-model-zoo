@@ -1,5 +1,6 @@
 import argparse
 import csv
+import dataclasses
 import json
 import logging  # noqa: F401
 import os
@@ -843,6 +844,7 @@ def _write_target_json(
 
 def _write_combined_outputs(out_dir: Path) -> None:
     rows: list[dict[str, Any]] = []
+    summary_field_names = {field.name for field in dataclasses.fields(ASRMetricSummary)}
     for path in sorted(out_dir.glob("*.json")):
         if path.name == _HOST_PC_INFO_FILENAME:
             continue
@@ -856,7 +858,15 @@ def _write_combined_outputs(out_dir: Path) -> None:
         asr = payload.get("asr")
         if not isinstance(asr, dict):
             continue
-        summary = ASRMetricSummary(**asr)
+        try:
+            summary_payload = {name: asr[name] for name in summary_field_names}
+            summary = ASRMetricSummary(**summary_payload)
+        except KeyError as exc:
+            print(f"Warning: skipping {path.name} because ASR summary is missing field: {exc.args[0]}")
+            continue
+        except TypeError as exc:
+            print(f"Warning: skipping {path.name} because ASR summary is invalid: {exc}")
+            continue
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
         payload_num_beams = payload.get("num_beams")
         row_num_beams = int(payload_num_beams) if isinstance(payload_num_beams, int) else None

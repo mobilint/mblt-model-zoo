@@ -12,6 +12,14 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Callable
 
+from huggingface_hub.errors import (
+    EntryNotFoundError,
+    HfHubHTTPError,
+    LocalEntryNotFoundError,
+    RepositoryNotFoundError,
+    RevisionNotFoundError,
+)
+
 
 def normalize_repo_id(value: str) -> str:
     """Normalize a Hugging Face repository identifier or URL.
@@ -47,7 +55,7 @@ def extract_parent_model_id(info: Any) -> str | None:
     elif card_data is not None and hasattr(card_data, "to_dict"):
         try:
             payload = card_data.to_dict()
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             payload = None
     elif card_data is not None and hasattr(card_data, "__dict__"):
         payload = dict(card_data.__dict__)
@@ -95,7 +103,7 @@ def resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
         from huggingface_hub import HfApi
 
         api = HfApi()
-    except Exception as exc:
+    except (ImportError, OSError) as exc:
         print(
             "Failed to initialize Hugging Face Hub API for --original-models. "
             f"Using original list_models output. Error: {exc}"
@@ -111,7 +119,15 @@ def resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
             parent_id = extract_parent_model_id(info)
             if parent_id:
                 target_id = parent_id
-        except Exception as exc:
+        except (
+            EntryNotFoundError,
+            HfHubHTTPError,
+            LocalEntryNotFoundError,
+            OSError,
+            RepositoryNotFoundError,
+            RevisionNotFoundError,
+            ValueError,
+        ) as exc:
             print(f"Warning: failed to resolve parent model for {model_id}: {exc}")
 
         if target_id not in seen:
@@ -137,7 +153,15 @@ def revision_exists(model_id: str, revision: str) -> bool | None:
         api = HfApi()
         refs = api.list_repo_refs(model_id, repo_type="model")
         return any(branch.name == revision for branch in getattr(refs, "branches", []))
-    except Exception:
+    except (
+        EntryNotFoundError,
+        HfHubHTTPError,
+        LocalEntryNotFoundError,
+        OSError,
+        RepositoryNotFoundError,
+        RevisionNotFoundError,
+        ValueError,
+    ):
         return None
 
 
