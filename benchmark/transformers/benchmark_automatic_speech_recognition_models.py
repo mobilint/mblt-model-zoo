@@ -23,6 +23,7 @@ except ModuleNotFoundError:
     from chart_utils import plot_scalar_chart
 from tqdm import tqdm
 
+from benchmark.common.argparse_utils import parse_positive_int as _parse_positive_int
 from benchmark.common.dataset_utils import load_streaming_audio_text_samples
 from benchmark.common.dataset_utils import resample_audio as _resample_audio_common
 from benchmark.common.io_utils import safe_filename as _safe_filename_common
@@ -356,11 +357,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--num-beams",
-        type=int,
+        type=_parse_positive_int,
         default=None,
         help="beam value to benchmark; omit to use model default",
     )
-    parser.add_argument("--max-new-tokens", type=int, default=444, help="maximum generated token count")
+    parser.add_argument("--max-new-tokens", type=_parse_positive_int, default=444, help="maximum generated token count")
     parser.add_argument(
         "--warmup",
         type=int,
@@ -641,6 +642,7 @@ def _limit_measurement_samples(
 def _build_no_samples_payload(
     *,
     target: ASRBenchmarkTarget,
+    label: str,
     args: argparse.Namespace,
     revision: str | None,
     core_mode: str | None,
@@ -651,9 +653,9 @@ def _build_no_samples_payload(
     return {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "automatic-speech-recognition",
-        "model": target.label,
+        "model": label,
         "model_id": target.model_id,
-        "label": target.label,
+        "label": label,
         "revision": revision,
         "num_beams": args.num_beams,
         "dataset": {
@@ -764,6 +766,7 @@ def _write_target_json(
     out_path: Path,
     *,
     target: ASRBenchmarkTarget,
+    label: str,
     args: argparse.Namespace,
     revision: str | None,
     core_mode: str | None,
@@ -775,9 +778,9 @@ def _write_target_json(
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "automatic-speech-recognition",
-        "model": target.label,
+        "model": label,
         "model_id": target.model_id,
-        "label": target.label,
+        "label": label,
         "revision": revision,
         "num_beams": args.num_beams,
         "dataset": {
@@ -896,7 +899,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         print(f"Resolved {len(run_targets)} target(s).")
-        preview_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
+        preview_samples = (
+            _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
+        )
         first, _ = _sample_preview(preview_samples)
         if first is not None:
             print(
@@ -933,7 +938,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         if _handle_existing_result(json_path, skip_existing=args.skip_existing):
             continue
-        current_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
+        current_samples = (
+            _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
+        )
         pipe = None
         try:
             try:
@@ -978,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
                     json_path,
                     _build_no_samples_payload(
                         target=target,
+                        label=mode_label,
                         args=args,
                         revision=revision,
                         core_mode=core_mode,
@@ -990,6 +998,7 @@ def main(argv: list[str] | None = None) -> int:
             _write_target_json(
                 json_path,
                 target=target,
+                label=mode_label,
                 args=args,
                 revision=revision,
                 core_mode=core_mode,
