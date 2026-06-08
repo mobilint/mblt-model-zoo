@@ -568,6 +568,14 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             return stopping_criteria
         return StoppingCriteriaList(stopping_criteria)
 
+    def _get_eagle3_input_device(self) -> torch.device:
+        """Return the device used by EAGLE-3 token embeddings."""
+        input_embeddings = self.get_input_embeddings()
+        weight = getattr(input_embeddings, "weight", None)
+        if isinstance(weight, torch.Tensor):
+            return weight.device
+        return next(input_embeddings.parameters()).device
+
     def _prepare_eagle3_generate_context(
         self,
         *,
@@ -604,7 +612,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             top_p=0.0 if resolved_top_p is None else resolved_top_p,
             top_k=resolved_top_k,
         )
-        generated = input_ids.clone()
+        generated = input_ids.to(device=self._get_eagle3_input_device()).clone()
         resolved_eos_token_id = eos_token_id if eos_token_id is not None else generation_config.eos_token_id
         stopping_criteria_list = self._build_stopping_criteria_list(stopping_criteria)
         return (

@@ -13,6 +13,12 @@ Install the Transformers integration and development tools:
 pip install -e ".[transformers]" --group dev
 ```
 
+- ASR benchmark accuracy metrics additionally require `jiwer`.
+- `jiwer` is intentionally treated as a benchmark/dev dependency, not a package runtime dependency.
+- The ASR helper imports `jiwer` lazily, so commands such as `--help` and unrelated utilities can run
+  without loading it first.
+- In a `uv` workflow, prefer `uv sync --group dev` when the ASR metric dependency is missing.
+
 Model loading may require Hugging Face Hub access, local `.mxq` files, the Mobilint NPU runtime, or
 GPU drivers depending on the benchmark target. The validation commands in this document avoid model
 inference and model downloads.
@@ -231,6 +237,130 @@ VLM outputs include `vision_encode_ms`, `vision_fps`, `llm_prefill_tps`, `llm_de
 
 The scripts under `benchmark/transformers/` are intended for multi-model runs, revision sweeps,
 core-mode sweeps, result table generation, and chart generation.
+
+### Benchmark Automatic Speech Recognition Models
+
+`benchmark_automatic_speech_recognition_models.py` evaluates Hugging Face Transformers
+`automatic-speech-recognition` pipeline-compatible models on LibriSpeech and reports both accuracy
+and speed metrics. You can rerun the script with different `--num-beams` values to compare greedy
+decoding and beam search in the same output directory because each per-target JSON file keeps the
+beam setting in its filename.
+
+The LibriSpeech loader uses streaming mode. By default, the benchmark measures `50` samples.
+When `--num-samples` is set, the streaming dataset is shuffled with `--seed`. In bounded runs,
+`--num-samples` means the number of **measured** samples, while `--warmup` is an additional prefix
+consumed before measurement. In other words, the loader fetches enough candidates to cover
+`warmup + measured` samples, and warmup samples are excluded from the reported metrics. Use
+`--full-split` to evaluate the full requested split.
+
+- The ASR benchmark is a dev-only workflow. Keep optional benchmark dependencies such as `jiwer`
+  in the development environment rather than treating them as package runtime dependencies.
+- Original/native Qwen3-ASR runs selected via `--original-models` do not use Mobilint
+  `--core-mode`. If you pass `--core-mode` explicitly in that mode, the script prints a notice and
+  ignores the value.
+- Per-target JSON files are written as `<target>_beams<beam>.json`, for example
+  `openai__whisper-small_beamsdefault.json` or `openai__whisper-small_beams5.json`.
+- The same `--output-dir` can store multiple beam-search runs side by side.
+- If a per-target beam JSON already exists, the benchmark stops instead of overwriting it.
+- Use `--skip-existing` to keep existing beam results and continue with the remaining targets.
+
+```bash
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
+  --model-id mobilint/whisper-small \
+  --revision W8 \
+  --num-samples 5 \
+  --num-beams 1 \
+  --device cpu \
+  --core-mode global8
+```
+
+For original Hugging Face models, omit Mobilint quantized revisions such as `W8`:
+
+```bash
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
+  --model-id openai/whisper-small \
+  --num-samples 5 \
+  --num-beams 5 \
+  --device cpu
+```
+
+For Whisper-like models, `--language` and `--task` are passed as decoding hints. For other ASR
+pipelines, the script automatically retries without those hints when they are unsupported.
+
+Transcript normalization is intentionally benchmark-policy driven:
+
+- English (`--language en`): casefold, ASCII punctuation removal, and whitespace collapsing.
+- Other languages: casefold and whitespace collapsing only; punctuation is preserved.
+
+This keeps the metric policy explicit without introducing a dataset- or model-specific text
+normalizer such as Whisper's English normalizer into every ASR benchmark path.
+
+Representative ASR metrics:
+
+- `wer`, `cer`: Accuracy metrics computed from the benchmark normalization policy above.
+- `mean_latency_s`, `p50_latency_s`, `p95_latency_s`: Per-sample generation latency.
+- `throughput_samples_per_s`: Processed audio samples per second.
+- `rtf`, `inverse_rtf`: Real-Time Factor and its inverse speed metric.
+- `decode_tokens_per_s`: Decoder-side generated token throughput.
+- Device metrics from `mblt-tracker` when enabled.
+
+Original Hugging Face parent models can be benchmarked with `--original-models`:
+
+```bash
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
+  --original-models \
+  --model-id mobilint/whisper-small mobilint/whisper-medium \
+  --device cuda:0 \
+  --dtype float16 \
+  --device-backend gpu \
+  --num-samples 5
+```
+
+You can also benchmark non-Whisper ASR models as long as they follow the Transformers ASR pipeline
+contract:
+
+```bash
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
+  --model-id facebook/wav2vec2-base-960h \
+  --num-samples 5 \
+  --num-beams 1 \
+  --device cuda:0 \
+  --dtype float16 \
+  --device-backend gpu
+```
+
+Local MXQ files can be discovered from a directory in the same style as the other benchmark
+scripts:
+
+```bash
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
+  --mxq-dir ./local_mxq \
+  --num-samples 5 \
+  --num-beams 1
+```
+
+Outputs are written under `benchmark/transformers/results/automatic_speech_recognition/`.
+Each run writes beam-specific per-target JSON files plus these aggregate outputs:
+
+- `combined.csv`
+- `combined.md`
+- `summary.md`
+- optional charts such as `rtf.png`, `wer.png`, and `cer.png`
+
+Aggregate outputs such as `combined.csv`, `combined.md`, `summary.md`, and the charts are rebuilt
+from all ASR JSON files present in the output directory. Reusing the same `--output-dir` is safe
+across different beam settings because the per-target JSON filenames remain distinct.
+
+Validation examples:
+
+```bash
+ruff check benchmark/transformers/benchmark_automatic_speech_recognition_models.py benchmark/transformers/asr_metrics.py tests/transformers/automatic_speech_recognition
+pytest tests/transformers/automatic_speech_recognition/test_asr_metrics.py tests/transformers/automatic_speech_recognition/test_benchmark_asr_cli.py
+python benchmark/transformers/benchmark_automatic_speech_recognition_models.py --help
+```
+
+The help command above is safe for CI smoke validation because it does not require model downloads or
+eager `jiwer` import.
 
 ### Benchmark Text-Generation Models
 
@@ -455,6 +585,16 @@ python benchmark/transformers/plot_compare_benchmark_results.py \
   benchmark/transformers/results/RTX3090/image_text_to_text \
   --output-dir benchmark/transformers/results/charts/vlm_compare \
   --task image-text-to-text
+```
+
+### Compare ASR Results
+
+```bash
+python benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/results/MLA100/asr \
+  benchmark/transformers/results/RTX3090/asr \
+  --output-dir benchmark/transformers/results/charts/asr_compare \
+  --task automatic-speech-recognition
 ```
 
 If `--output-dir` is omitted, charts are saved under `benchmark/transformers/results/charts/` using

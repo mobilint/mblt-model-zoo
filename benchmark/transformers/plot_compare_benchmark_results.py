@@ -1,196 +1,24 @@
 import argparse
-import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-from chart_utils import (
-    ModelMetrics,
-    common_models,
-    default_charts_dir,
-    folder_labels,
-    load_model_metrics,
-    plot_scalar_chart,
-    plot_token_chart,
-)
-
-
-def _strip_group_id(model_id: str) -> str:
-    # Compare by model id only (ignore leading group_id__ prefix).
-    return model_id.split("__", 1)[1] if "__" in model_id else model_id
-
-
-def _normalize_model_key(path: Path, loaded_model_id: str) -> str:
-    # Prefer file name normalization so compare behavior is stable even if JSON "model" differs.
-    stem = path.stem
-    if "__" in stem:
-        return _strip_group_id(stem)
-    key = _strip_group_id(loaded_model_id)
-    if "/" in key:
-        key = key.split("/", 1)[1]
-    return key
-
-
-def _collect_compare_metrics(folder: Path) -> dict[str, ModelMetrics]:
-    normalized: dict[str, ModelMetrics] = {}
-    for path in sorted(folder.glob("*.json")):
-        try:
-            loaded = load_model_metrics(path)
-        except Exception as e:
-            print(f"Warning: failed to parse {path}: {e}")
-            continue
-        if loaded is None:
-            continue
-        model_id, metric = loaded
-        norm_key = _normalize_model_key(path, model_id)
-        if norm_key not in normalized:
-            normalized[norm_key] = metric
-    return normalized
-
-
-@dataclass
-class VLMCompareMetrics:
-    llm_prefill_tps: Optional[float]
-    llm_decode_tps: Optional[float]
-    llm_ttft_ms: Optional[float]
-    llm_decode_duration_ms: Optional[float]
-    llm_total_ms: Optional[float]
-    vision_encode_ms: Optional[float]
-    vision_fps: Optional[float]
-    vision_img_per_j: Optional[float]
-    vision_j_per_img: Optional[float]
-    llm_prefill_tok_per_j: Optional[float]
-    llm_decode_tok_per_j: Optional[float]
-    llm_prefill_j_per_tok: Optional[float]
-    llm_decode_j_per_tok: Optional[float]
-    avg_power_w: Optional[float]
-    total_energy_j: Optional[float]
-    avg_utilization_pct: Optional[float]
-    p99_utilization_pct: Optional[float]
-    avg_temperature_c: Optional[float]
-    p99_temperature_c: Optional[float]
-    avg_memory_used_mb: Optional[float]
-    p99_memory_used_mb: Optional[float]
-    avg_memory_used_pct: Optional[float]
-    p99_memory_used_pct: Optional[float]
-
-
-def _as_float(v) -> Optional[float]:
-    return float(v) if isinstance(v, (int, float)) else None
-
-
-def _load_vlm_model_metrics(path: Path) -> Optional[tuple[str, VLMCompareMetrics]]:
-    with path.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    if not isinstance(payload, dict):
-        return None
-    model_id = payload.get("model")
-    if not isinstance(model_id, str) or not model_id:
-        return None
-    benchmark = payload.get("benchmark", {})
-    if not isinstance(benchmark, dict):
-        return None
-    llm_summary = benchmark.get("llm_results", {}).get("summary", {})
-    vision_summary = benchmark.get("vision_summary", {})
-    device = payload.get("device", {})
-    if not isinstance(llm_summary, dict):
-        llm_summary = {}
-    if not isinstance(vision_summary, dict):
-        vision_summary = {}
-    if not isinstance(device, dict):
-        device = {}
-    return model_id, VLMCompareMetrics(
-        llm_prefill_tps=_as_float(
-            llm_summary.get("llm_prefill_tps", {}).get("mean")
-            if isinstance(llm_summary.get("llm_prefill_tps"), dict)
-            else None
-        ),
-        llm_decode_tps=_as_float(
-            llm_summary.get("llm_decode_tps", {}).get("mean")
-            if isinstance(llm_summary.get("llm_decode_tps"), dict)
-            else None
-        ),
-        llm_ttft_ms=_as_float(
-            llm_summary.get("llm_ttft_ms", {}).get("mean") if isinstance(llm_summary.get("llm_ttft_ms"), dict) else None
-        ),
-        llm_decode_duration_ms=_as_float(
-            llm_summary.get("llm_decode_duration_ms", {}).get("mean")
-            if isinstance(llm_summary.get("llm_decode_duration_ms"), dict)
-            else None
-        ),
-        llm_total_ms=_as_float(
-            llm_summary.get("llm_total_ms", {}).get("mean")
-            if isinstance(llm_summary.get("llm_total_ms"), dict)
-            else None
-        ),
-        vision_encode_ms=_as_float(
-            vision_summary.get("vision_encode_ms", {}).get("mean")
-            if isinstance(vision_summary.get("vision_encode_ms"), dict)
-            else None
-        ),
-        vision_fps=_as_float(
-            vision_summary.get("vision_fps", {}).get("mean")
-            if isinstance(vision_summary.get("vision_fps"), dict)
-            else None
-        ),
-        vision_img_per_j=_as_float(
-            vision_summary.get("vision_img_per_j", {}).get("mean")
-            if isinstance(vision_summary.get("vision_img_per_j"), dict)
-            else None
-        ),
-        vision_j_per_img=_as_float(
-            vision_summary.get("vision_j_per_img", {}).get("mean")
-            if isinstance(vision_summary.get("vision_j_per_img"), dict)
-            else None
-        ),
-        llm_prefill_tok_per_j=_as_float(
-            llm_summary.get("prefill_tok_per_j", {}).get("mean")
-            if isinstance(llm_summary.get("prefill_tok_per_j"), dict)
-            else None
-        ),
-        llm_decode_tok_per_j=_as_float(
-            llm_summary.get("decode_tok_per_j", {}).get("mean")
-            if isinstance(llm_summary.get("decode_tok_per_j"), dict)
-            else None
-        ),
-        llm_prefill_j_per_tok=_as_float(
-            llm_summary.get("prefill_j_per_tok", {}).get("mean")
-            if isinstance(llm_summary.get("prefill_j_per_tok"), dict)
-            else None
-        ),
-        llm_decode_j_per_tok=_as_float(
-            llm_summary.get("decode_j_per_tok", {}).get("mean")
-            if isinstance(llm_summary.get("decode_j_per_tok"), dict)
-            else None
-        ),
-        avg_power_w=_as_float(device.get("avg_power_w")),
-        total_energy_j=_as_float(device.get("total_energy_j")),
-        avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
-        p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
-        avg_temperature_c=_as_float(device.get("avg_temperature_c")),
-        p99_temperature_c=_as_float(device.get("p99_temperature_c")),
-        avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
-        p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
-        avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
-        p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+try:
+    from benchmark.transformers.compare_metrics import (
+        TASK_REGISTRY,
+        collect_metrics,
+        common_model_ids,
+        default_charts_dir,
+        folder_labels,
+        render_charts,
     )
-
-
-def _collect_compare_vlm_metrics(folder: Path) -> dict[str, VLMCompareMetrics]:
-    normalized: dict[str, VLMCompareMetrics] = {}
-    for path in sorted(folder.glob("*.json")):
-        try:
-            loaded = _load_vlm_model_metrics(path)
-        except Exception as e:
-            print(f"Warning: failed to parse {path}: {e}")
-            continue
-        if loaded is None:
-            continue
-        model_id, metric = loaded
-        norm_key = _normalize_model_key(path, model_id)
-        if norm_key not in normalized:
-            normalized[norm_key] = metric
-    return normalized
+except ModuleNotFoundError:
+    from compare_metrics import (
+        TASK_REGISTRY,
+        collect_metrics,
+        common_model_ids,
+        default_charts_dir,
+        folder_labels,
+        render_charts,
+    )
 
 
 def main() -> int:
@@ -209,7 +37,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--task",
-        choices=["text-generation", "image-text-to-text"],
+        choices=sorted(TASK_REGISTRY.keys()),
         default="text-generation",
         help="which benchmark payload to compare (default: text-generation)",
     )
@@ -229,12 +57,10 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.task == "text-generation":
-        metrics_by_folder = [_collect_compare_metrics(folder) for folder in folders]
-    else:
-        metrics_by_folder = [_collect_compare_vlm_metrics(folder) for folder in folders]
+    metric_cls = TASK_REGISTRY[args.task]
+    metrics_by_folder = [collect_metrics(folder, metric_cls) for folder in folders]
     labels = folder_labels(folders)
-    models = common_models(metrics_by_folder)
+    models = common_model_ids(metrics_by_folder)
     for label, folder, metrics in zip(labels, folders, metrics_by_folder):
         print(f"Folder {label}: {folder} -> {len(metrics)} models")
     print(f"Common models across all folders: {len(models)}")
@@ -246,98 +72,13 @@ def main() -> int:
             print(f"[debug] {label} normalized keys (up to 10): {sample}")
         raise SystemExit("No common model_id found across all input folders.")
 
-    if args.task == "text-generation":
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.prefill_tps,
-            title="Prefill Tokens Per Second",
-            x_label="Tokens Per Second",
-            output_path=output_dir / "prefill_tps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.prefill_tokens_per_j,
-            title="Prefill Tokens Per Joule",
-            x_label="Tokens Per Joule",
-            output_path=output_dir / "prefill_tokens_per_j.png",
-        )
-        plot_token_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            token_selector=lambda m: m.decode_tps,
-            title="Decode Tokens Per Second",
-            x_label="Tokens Per Second",
-            output_path=output_dir / "decode_tps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.decode_tokens_per_j,
-            title="Decode Tokens Per Joule",
-            x_label="Tokens Per Joule",
-            output_path=output_dir / "decode_tokens_per_j.png",
-        )
-    else:
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_prefill_tps,
-            title="Prefill Tokens Per Second",
-            x_label="Tokens Per Second",
-            output_path=output_dir / "llm_prefill_tps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_prefill_tok_per_j,
-            title="Prefill Tokens Per Joule",
-            x_label="Tokens Per Joule",
-            output_path=output_dir / "llm_prefill_tokens_per_j.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_decode_tps,
-            title="Decode Tokens Per Second",
-            x_label="Tokens Per Second",
-            output_path=output_dir / "llm_decode_tps.png",
-        )
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=lambda m: m.llm_decode_tok_per_j,
-            title="Decode Tokens Per Joule",
-            x_label="Tokens Per Joule",
-            output_path=output_dir / "llm_decode_tokens_per_j.png",
-        )
-
-    shared_scalar_specs = [
-        ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
-        ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
-        ("avg_utilization_pct.png", "Utilization", "Utilization (Percent)", lambda m: m.avg_utilization_pct),
-        ("avg_memory_used_mb.png", "Memory Used Megabytes", "Memory Used (Megabytes)", lambda m: m.avg_memory_used_mb),
-        ("total_energy_j.png", "Total Energy", "Energy (Joules)", lambda m: m.total_energy_j),
-    ]
-    for filename, title, x_label, selector in shared_scalar_specs:
-        plot_scalar_chart(
-            models=models,
-            folder_labels=labels,
-            metrics_by_folder=metrics_by_folder,
-            scalar_selector=selector,
-            title=title,
-            x_label=x_label,
-            output_path=output_dir / filename,
-        )
+    render_charts(
+        metric_cls=metric_cls,
+        models=models,
+        labels=labels,
+        metrics_by_folder=metrics_by_folder,
+        output_dir=output_dir,
+    )
 
     print(f"Saved charts to: {output_dir}")
     return 0

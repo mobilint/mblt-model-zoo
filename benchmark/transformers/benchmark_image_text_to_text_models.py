@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 import sys
@@ -42,6 +41,14 @@ from benchmark.common.summary_utils import scalar_plot_table as _scalar_plot_tab
 from benchmark.common.summary_utils import token_sweep_plot_table as _token_sweep_plot_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
 from benchmark.common.summary_utils import write_token_combined_markdown as _write_token_combined_markdown
+from benchmark.transformers.benchmark_target_utils import (
+    args_for_target_device_backend as _args_for_target_device_backend_shared,
+)
+from benchmark.transformers.benchmark_target_utils import iter_revision_targets as _iter_revision_targets_shared
+from benchmark.transformers.benchmark_target_utils import (
+    resolve_original_model_ids as _resolve_original_model_ids_shared,
+)
+from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
@@ -108,11 +115,9 @@ try:
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
-        _resolve_original_model_ids,
-        _revision_exists,
         _should_precheck_cuda,
     )
-except Exception:
+except ImportError:
     from .benchmark_text_generation_models import (
         _add_batch_selection_args,
         _cuda_memory_info,
@@ -122,8 +127,6 @@ except Exception:
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
-        _resolve_original_model_ids,
-        _revision_exists,
         _should_precheck_cuda,
     )
 
@@ -310,15 +313,25 @@ def _vlm_revision_artifacts_available(
 def _iter_targets(
     model_ids: list[str], revision: str | None, all_revisions: bool
 ) -> list[tuple[str, str | None, str, str]]:
-    out: list[tuple[str, str | None, str, str]] = []
-    if not all_revisions:
-        for m in model_ids:
-            out.append((m, revision, m, _safe_filename(m)))
-        return out
-    for m in model_ids:
-        out.append((m, "W8", f"{m}-W8", f"{_safe_filename(m)}-W8"))
-        out.append((m, "W4V8", f"{m}-W4V8", f"{_safe_filename(m)}-W4V8"))
-    return out
+    return [
+        (model_id, revision_candidates[0], label, base)
+        for model_id, revision_candidates, label, base, _mxq_path in _iter_revision_targets_shared(
+            model_ids,
+            revision=revision,
+            all_revisions=all_revisions,
+            safe_filename=_safe_filename,
+        )
+    ]
+
+
+def _resolve_original_model_ids(model_ids: list[str]) -> list[str]:
+    """Resolve Mobilint model ids to parent/original Hugging Face model ids."""
+    return _resolve_original_model_ids_shared(model_ids)
+
+
+def _revision_exists(model_id: str, revision: str) -> bool | None:
+    """Check whether a Hugging Face model revision exists."""
+    return _revision_exists_shared(model_id, revision)
 
 
 def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -1240,17 +1253,12 @@ def _args_for_target_device_backend(
     mxq_path: str | None = None,
 ) -> argparse.Namespace:
     """Return an args copy with a device backend resolved for one benchmark target."""
-    resolved = copy.copy(args)
-    requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
-    resolved.device_backend = _resolve_default_device_backend_common(
-        device_backend=requested_backend,
-        device_backend_explicit=bool(getattr(args, "_device_backend_explicit", False)),
+    return _args_for_target_device_backend_shared(
+        args,
         model_id=model_id,
         mxq_path=mxq_path,
-        mxq_dir=args.mxq_dir,
-        original_models=args.original_models,
+        resolve_default_device_backend=_resolve_default_device_backend_common,
     )
-    return resolved
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1409,10 +1417,12 @@ def _collect_vlm_run_targets(
         Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
     )
     results_dir.mkdir(parents=True, exist_ok=True)
-    available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
-    if not available_model_ids:
-        print("No image-text-to-text models found.")
-        return results_dir, False, []
+    available_model_ids: list[str] | None = None
+    if args.mxq_dir or not args.model:
+        available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
+        if not available_model_ids:
+            print("No image-text-to-text models found.")
+            return results_dir, False, []
     raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1420,11 +1430,11 @@ def _collect_vlm_run_targets(
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
         for model_id, rev_candidates, label, base, target_mxq_path in _iter_targets_from_mxq_dir(
             mxq_dir=mxq_dir,
-            available_model_ids=available_model_ids,
+            available_model_ids=available_model_ids or [],
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        model_ids = [str(args.model)] if args.model else available_model_ids
+        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):

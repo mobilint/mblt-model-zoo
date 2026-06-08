@@ -13,10 +13,12 @@ from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_mod
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
     """Attach minimal base/draft/fc modules required by EAGLE-3 helpers."""
+    input_embeddings = torch.nn.Embedding(16, 1)
+    base = SimpleNamespace(get_input_embeddings=lambda: input_embeddings)
     draft = SimpleNamespace(max_draft_tokens=None)
     eagle3_model = SimpleNamespace(
         _modules={
-            "base_model": SimpleNamespace(),
+            "base_model": base,
             "draft_model": draft,
             "fc_projector": SimpleNamespace(),
         },
