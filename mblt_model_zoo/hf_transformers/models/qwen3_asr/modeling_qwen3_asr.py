@@ -203,14 +203,22 @@ class MobilintQwen3ASRTextModel(
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
         logits_list: list[torch.Tensor] = []
+        logits_by_target_tokens: dict[tuple[int, ...], torch.Tensor] = {}
         self.npu_time = 0.0 if count_npu_time else None
         input_ids = input_ids.view(batch_size, -1)
 
         for beam_index in range(batch_size):
             previous_tokens = past_key_values.get_beam_tokens(beam_index)
             target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
+            target_key = tuple(target_tokens)
             prefix_length = past_key_values.get_common_prefix_length(target_tokens)
             previous_length = len(previous_tokens)
+            if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
+                logits_list.append(logits_by_target_tokens[target_key])
+                past_key_values.commit_beam_tokens(beam_index, target_tokens)
+                continue
+            if prefix_length == len(target_tokens):
+                prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
             local_start_index = max(0, prefix_length - previous_length)
             timing_phase = "prefill" if prefix_length == 0 else "decode"
             row_logits_ndarray: np.ndarray | None = None
@@ -266,7 +274,9 @@ class MobilintQwen3ASRTextModel(
                 row_logits = row_logits.squeeze(singleton_dims[0])
             if row_logits.ndim == 2:
                 row_logits = row_logits.unsqueeze(0)
+            row_logits = row_logits[:, -int(input_ids.shape[1]) :, :]
             logits_list.append(row_logits)
+            logits_by_target_tokens[target_key] = row_logits
 
         return torch.cat(logits_list, dim=0)
 
@@ -283,8 +293,8 @@ class MobilintQwen3ASRTextModel(
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
-        if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You must specify input_ids, inputs_embeds, or both.")
 
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
@@ -375,16 +385,81 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
     @wraps(Qwen3ASRThinkerForConditionalGeneration.forward)
     def forward(
         self,
-        *args: object,
+        input_ids=None,
+        input_features=None,
+        attention_mask=None,
+        feature_attention_mask=None,
+        audio_feature_lengths=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        rope_deltas=None,
+        labels=None,
+        use_cache=None,
+        cache_position=None,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs,
     ) -> Union[tuple, Qwen3ASRThinkerCausalLMOutputWithPast]:
-        kwargs["count_npu_time"] = count_npu_time
-        outputs = super().forward(*args, **kwargs)
-        logits = getattr(outputs, "logits", None)
+        if inputs_embeds is None:
+            inputs_embeds = self.get_input_embeddings()(input_ids)
+
+        if input_features is not None:
+            audio_features = self.get_audio_features(
+                input_features,
+                feature_attention_mask=feature_attention_mask,
+                audio_feature_lengths=audio_feature_lengths,
+            )
+            audio_features = audio_features.to(inputs_embeds.device, inputs_embeds.dtype)
+            audio_mask = self.get_placeholder_mask(input_ids, inputs_embeds=inputs_embeds)
+            inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_features)
+
+        if feature_attention_mask is not None:
+            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
+        else:
+            audio_feature_lengths = None
+
+        if attention_mask is not None and position_ids is None:
+            if cache_position is None or (cache_position is not None and cache_position[0] == 0) or self.rope_deltas is None:
+                delta0 = (1 - attention_mask).sum(dim=-1).unsqueeze(1)
+                position_ids, rope_deltas = self.get_rope_index(attention_mask)
+                rope_deltas = rope_deltas - delta0
+                self.rope_deltas = rope_deltas
+            else:
+                batch_size, seq_length = input_ids.shape
+                delta = cache_position[0] + self.rope_deltas if cache_position is not None else 0
+                position_ids = torch.arange(seq_length, device=input_ids.device)
+                position_ids = position_ids.view(1, -1).expand(batch_size, -1)
+                position_ids = position_ids.add(delta)
+                position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+        hidden_states = outputs[0]
+        logits = self.lm_head(hidden_states)
         if isinstance(logits, torch.Tensor) and logits.ndim == 4 and int(logits.shape[1]) == 1:
-            outputs.logits = logits.squeeze(1)
-        return outputs
+            logits = logits.squeeze(1)
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.get_text_config().vocab_size)
+
+        return Qwen3ASRThinkerCausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            past_key_values=outputs.past_key_values,
+            rope_deltas=self.rope_deltas,
+        )
 
 
 class MobilintQwen3ASRForConditionalGeneration(
