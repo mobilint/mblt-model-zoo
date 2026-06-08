@@ -259,14 +259,24 @@ class YOLOPostBase(PostBase):
         if isinstance(x, list):
             if not x:
                 return None, None
-            first = x[0]
-            normalized_first = self._normalize_final_detection_tensor(first, final_det_dim)
-            if normalized_first is not None:
-                detections = self._final_detection_batches(normalized_first)
-                proto = None
-                if len(x) > 1 and isinstance(x[1], (np.ndarray, torch.Tensor)):
-                    proto = self._normalize_proto_batch(x[1])
-                return detections, proto
+
+            normalized_detections: np.ndarray | torch.Tensor | None = None
+            normalized_proto: torch.Tensor | None = None
+            for output in x:
+                if not isinstance(output, (np.ndarray, torch.Tensor)):
+                    continue
+                if normalized_detections is None:
+                    normalized_detections = self._normalize_final_detection_tensor(output, final_det_dim)
+                    if normalized_detections is not None:
+                        continue
+                if normalized_proto is None:
+                    try:
+                        normalized_proto = self._normalize_proto_batch(output)
+                    except ValueError:
+                        continue
+
+            if normalized_detections is not None:
+                return self._final_detection_batches(normalized_detections), normalized_proto
             return None, None
 
         normalized_x = self._normalize_final_detection_tensor(x, final_det_dim)

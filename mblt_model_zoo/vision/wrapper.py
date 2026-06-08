@@ -372,13 +372,65 @@ class MBLT_Engine:
         expected_shape = self._require_onnx_session().get_inputs()[0].shape
         if len(expected_shape) == 4:
             if x_np.ndim == 3:
-                if x_np.shape[0] == 3:
+                first_channel_count = x_np.shape[0]
+                last_channel_count = x_np.shape[-1]
+            elif x_np.ndim == 4:
+                first_channel_count = x_np.shape[1]
+                last_channel_count = x_np.shape[-1]
+            else:
+                first_channel_count = None
+                last_channel_count = None
+
+            expected_second_dim = expected_shape[1]
+            expected_last_dim = expected_shape[-1]
+            second_matches_channels = isinstance(expected_second_dim, int) and (
+                expected_second_dim == first_channel_count or expected_second_dim == last_channel_count
+            )
+            last_matches_channels = isinstance(expected_last_dim, int) and (
+                expected_last_dim == first_channel_count or expected_last_dim == last_channel_count
+            )
+
+            expected_layout = None
+            expected_channels = None
+            if second_matches_channels and not last_matches_channels:
+                expected_layout = "nchw"
+                expected_channels = expected_second_dim
+            elif last_matches_channels and not second_matches_channels:
+                expected_layout = "nhwc"
+                expected_channels = expected_last_dim
+            elif isinstance(expected_second_dim, int) and expected_second_dim in {1, 2, 3, 4}:
+                expected_layout = "nchw"
+                expected_channels = expected_second_dim
+            elif isinstance(expected_last_dim, int) and expected_last_dim in {1, 2, 3, 4}:
+                expected_layout = "nhwc"
+                expected_channels = expected_last_dim
+
+            if x_np.ndim == 3:
+                if expected_layout == "nchw" and expected_channels is not None and x_np.shape[0] == expected_channels:
                     x_np = np.expand_dims(x_np, axis=0)
-                elif x_np.shape[-1] == 3:
+                elif (
+                    expected_layout == "nchw" and expected_channels is not None and x_np.shape[-1] == expected_channels
+                ):
                     x_np = np.transpose(x_np, (2, 0, 1))
                     x_np = np.expand_dims(x_np, axis=0)
-            elif x_np.ndim == 4 and x_np.shape[-1] == 3 and x_np.shape[1] != 3:
-                x_np = np.transpose(x_np, (0, 3, 1, 2))
+                elif (
+                    expected_layout == "nhwc" and expected_channels is not None and x_np.shape[-1] == expected_channels
+                ):
+                    x_np = np.expand_dims(x_np, axis=0)
+                elif expected_layout == "nhwc" and expected_channels is not None and x_np.shape[0] == expected_channels:
+                    x_np = np.transpose(x_np, (1, 2, 0))
+                    x_np = np.expand_dims(x_np, axis=0)
+            elif x_np.ndim == 4:
+                if expected_layout == "nchw" and expected_channels is not None:
+                    if x_np.shape[1] == expected_channels:
+                        pass
+                    elif x_np.shape[-1] == expected_channels:
+                        x_np = np.transpose(x_np, (0, 3, 1, 2))
+                elif expected_layout == "nhwc" and expected_channels is not None:
+                    if x_np.shape[-1] == expected_channels:
+                        pass
+                    elif x_np.shape[1] == expected_channels:
+                        x_np = np.transpose(x_np, (0, 2, 3, 1))
 
         return {self.input_name: x_np}
 
