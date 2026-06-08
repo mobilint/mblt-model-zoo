@@ -1,10 +1,23 @@
 import copy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 import qbruntime
 import torch
 from transformers.cache_utils import Cache, CacheLayerMixin
+
+
+@dataclass
+class MobilintWhisperReplayState:
+    """Replay context needed to rebuild Whisper KV cache state after beam reordering."""
+
+    decoder_input_ids: Optional[torch.LongTensor] = None
+    decoder_forward: Optional[Callable[..., Any]] = None
+    encoder_hidden_states: Optional[torch.Tensor] = None
+    device: Optional[torch.device] = None
+    return_dict: bool = True
+    use_cache: bool = True
 
 
 class MobilintLayer(CacheLayerMixin):
@@ -168,10 +181,250 @@ class MobilintCache(Cache):
     def load_cache_memory_from(self, cache_dir: str, index: int = 0):
         self.layers[index].load_cache_memory_from(cache_dir)
 
+    def reset(self) -> None:
+        """Reset all cache entries in this Mobilint cache."""
+        for layer in self.layers:
+            layer.reset()
+
+    def ensure_batch_size(self, batch_size: int) -> None:
+        """Grow logical cache entries so batched generation can track each active row."""
+        batch_size = max(1, int(batch_size))
+        if batch_size <= self.batch_size:
+            return
+        for cache_id in range(self.batch_size, batch_size):
+            self.layers.append(MobilintLayer(self.mxq_model, cache_id))
+        self.batch_size = batch_size
+
     def copy(self):
         copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
         for i in range(self.batch_size):
             copied.layers[i] = self.layers[i].copy()
+        return copied
+
+
+class MobilintWhisperCache(MobilintCache):
+    """Whisper-specific Mobilint cache with application-level beam KV blobs.
+
+    Whisper decoder MXQ owns a single active KV cache in qbruntime memory. Beam
+    search therefore stores each beam's KV payload as a dumped blob in Python and
+    swaps one blob into the active qbruntime cache before each batch-size-1 decoder
+    call.
+    """
+
+    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
+        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        self._replay_state = MobilintWhisperReplayState()
+        self._is_replaying = False
+        self._beam_cache_buffers: list[Optional[List[bytes]]] = [None for _ in range(self.batch_size)]
+        self._beam_seq_lengths: list[int] = [0 for _ in range(self.batch_size)]
+
+    def configure_reorder_replay(
+        self,
+        *,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_forward: Optional[Callable[..., Any]] = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        device: Optional[torch.device] = None,
+        return_dict: bool = True,
+        use_cache: bool = True,
+    ) -> None:
+        """Configure replay state used by ``reorder_cache``.
+
+        Args:
+            decoder_input_ids: Full decoder token history for each active beam row.
+            decoder_forward: Whisper decoder-compatible forward callable.
+            encoder_hidden_states: Encoder outputs required by Whisper cross-attention.
+            device: Device used for replay token and cache-position tensors.
+            return_dict: Whether replay calls should request return-dict outputs.
+            use_cache: Whether replay calls should update this cache.
+
+        Raises:
+            ValueError: If ``decoder_input_ids`` is not rank 2.
+        """
+        if self._is_replaying:
+            return
+        if decoder_input_ids is not None and decoder_input_ids.ndim != 2:
+            raise ValueError(f"decoder_input_ids must be rank 2, got shape {tuple(decoder_input_ids.shape)}")
+
+        if decoder_input_ids is not None and self._should_update_decoder_input_ids(decoder_input_ids):
+            self.ensure_batch_size(int(decoder_input_ids.shape[0]))
+            self._replay_state.decoder_input_ids = decoder_input_ids.detach().clone().to(dtype=torch.long)
+        if decoder_forward is not None:
+            self._replay_state.decoder_forward = decoder_forward
+        if encoder_hidden_states is not None:
+            self._replay_state.encoder_hidden_states = encoder_hidden_states
+        if device is not None:
+            self._replay_state.device = device
+        self._replay_state.return_dict = return_dict
+        self._replay_state.use_cache = use_cache
+
+    def _should_update_decoder_input_ids(self, decoder_input_ids: torch.LongTensor) -> bool:
+        """Return whether a new decoder history should replace the stored history."""
+        current_input_ids = self._replay_state.decoder_input_ids
+        if current_input_ids is None:
+            return True
+        if int(decoder_input_ids.shape[0]) != int(current_input_ids.shape[0]):
+            return True
+        return int(decoder_input_ids.shape[1]) >= int(current_input_ids.shape[1])
+
+    def reset(self) -> None:
+        """Reset active qbruntime cache bookkeeping and clear stored beam blobs."""
+        super().reset()
+        self._beam_cache_buffers = [None for _ in range(self.batch_size)]
+        self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
+
+    def ensure_batch_size(self, batch_size: int) -> None:
+        """Grow logical beam blob storage for beam-expanded Whisper generation."""
+        previous_batch_size = self.batch_size
+        super().ensure_batch_size(batch_size)
+        if self.batch_size <= previous_batch_size:
+            return
+        self._beam_cache_buffers.extend([None for _ in range(self.batch_size - previous_batch_size)])
+        self._beam_seq_lengths.extend([0 for _ in range(self.batch_size - previous_batch_size)])
+
+    def get_seq_length(self, index: int = 0) -> int:
+        """Return the stored sequence length for one logical Whisper beam."""
+        self.ensure_batch_size(index + 1)
+        return self._beam_seq_lengths[index]
+
+    def set_seq_length(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
+        """Set stored sequence lengths for one or more logical Whisper beams."""
+        if isinstance(sequence_lengths, int):
+            self.ensure_batch_size(index + 1)
+            if sequence_lengths < 0:
+                raise ValueError(f"seq_length must be non-negative, got {sequence_lengths}")
+            self._beam_seq_lengths[index] = sequence_lengths
+            self.layers[index].set_seq_length(sequence_lengths)
+            return
+        if sequence_lengths:
+            self.ensure_batch_size(max(sequence_lengths) + 1)
+        for beam_id, seq_len in sequence_lengths.items():
+            if seq_len < 0:
+                raise ValueError(f"seq_length must be non-negative, got {seq_len}")
+            self._beam_seq_lengths[beam_id] = seq_len
+            self.layers[beam_id].set_seq_length(seq_len)
+
+    def update_cache_position(self, cache_position: torch.Tensor, index: int = 0) -> None:
+        """Update one logical beam length after its active qbruntime cache advances."""
+        self.ensure_batch_size(index + 1)
+        self._beam_seq_lengths[index] += int(cache_position.numel())
+        self.layers[index].set_seq_length(self._beam_seq_lengths[index])
+
+    def load_beam_cache(self, beam_index: int) -> int:
+        """Load one stored beam blob into the single active qbruntime KV cache."""
+        self.ensure_batch_size(beam_index + 1)
+        seq_length = self._beam_seq_lengths[beam_index]
+        self.layers[0].reset()
+        self.layers[0].set_seq_length(seq_length)
+        buffer = self._beam_cache_buffers[beam_index]
+        if seq_length > 0 and buffer is not None:
+            self.mxq_model.load_cache_memory(copy.deepcopy(buffer), 0)
+        return seq_length
+
+    def dump_beam_cache(self, beam_index: int) -> None:
+        """Store the single active qbruntime KV cache as one logical beam blob."""
+        self.ensure_batch_size(beam_index + 1)
+        seq_length = self._beam_seq_lengths[beam_index]
+        if seq_length == 0:
+            self._beam_cache_buffers[beam_index] = None
+            return
+        self._beam_cache_buffers[beam_index] = copy.deepcopy(self.mxq_model.dump_cache_memory(0))
+
+    def reorder_cache(self, beam_idx: torch.LongTensor) -> "MobilintWhisperCache":
+        """Reorder application-level Whisper beam KV blobs in HF beam order."""
+        beam_idx = self._validate_replay_ready(beam_idx)
+        decoder_input_ids = self._replay_state.decoder_input_ids
+
+        if torch.equal(beam_idx.cpu(), torch.arange(int(beam_idx.numel()), dtype=torch.long)):
+            return self
+
+        old_buffers = [copy.deepcopy(buffer) if buffer is not None else None for buffer in self._beam_cache_buffers]
+        old_seq_lengths = list(self._beam_seq_lengths)
+        beam_indices = [int(index) for index in beam_idx.cpu().tolist()]
+        self._beam_cache_buffers = [copy.deepcopy(old_buffers[index]) for index in beam_indices]
+        self._beam_seq_lengths = [old_seq_lengths[index] for index in beam_indices]
+        for beam_id, seq_length in enumerate(self._beam_seq_lengths):
+            self.layers[beam_id].set_seq_length(seq_length)
+        if decoder_input_ids is not None:
+            self._replay_state.decoder_input_ids = decoder_input_ids.index_select(
+                0, beam_idx.to(decoder_input_ids.device)
+            ).detach().clone()
+        return self
+
+    def _validate_replay_ready(self, beam_idx: torch.LongTensor) -> torch.LongTensor:
+        """Validate beam indices and replay context before rebuilding cache state."""
+        if not isinstance(beam_idx, torch.Tensor):
+            raise TypeError("beam_idx must be a torch.Tensor")
+        if beam_idx.ndim != 1:
+            raise ValueError(f"beam_idx must be rank 1, got shape {tuple(beam_idx.shape)}")
+
+        beam_idx = beam_idx.to(dtype=torch.long)
+        state = self._replay_state
+        if state.decoder_input_ids is not None and int(state.decoder_input_ids.shape[0]) != int(beam_idx.numel()):
+            raise ValueError(
+                "decoder_input_ids row count must match beam_idx length: "
+                f"{int(state.decoder_input_ids.shape[0])} vs {int(beam_idx.numel())}"
+            )
+        self.ensure_batch_size(int(beam_idx.numel()))
+        if beam_idx.numel() > 0 and (int(beam_idx.min()) < 0 or int(beam_idx.max()) >= int(beam_idx.numel())):
+            raise ValueError(f"beam_idx contains out-of-range values for {int(beam_idx.numel())} beams")
+        return beam_idx
+
+    @staticmethod
+    def _longest_common_prefix_length(decoder_input_ids: torch.LongTensor) -> int:
+        """Return the shared prefix length across all reordered decoder rows."""
+        if decoder_input_ids.ndim != 2:
+            raise ValueError(f"decoder_input_ids must be rank 2, got shape {tuple(decoder_input_ids.shape)}")
+        if int(decoder_input_ids.shape[0]) <= 1:
+            return int(decoder_input_ids.shape[1])
+
+        first_row = decoder_input_ids[0]
+        for position in range(int(decoder_input_ids.shape[1])):
+            if not torch.equal(decoder_input_ids[:, position], first_row[position].expand_as(decoder_input_ids[:, position])):
+                return position
+        return int(decoder_input_ids.shape[1])
+
+    def _replay_tokens(self, input_ids: torch.LongTensor, start_position: int) -> None:
+        """Replay decoder tokens into qbruntime-backed cache memory."""
+        if input_ids.numel() == 0:
+            return
+
+        state = self._replay_state
+        assert state.decoder_forward is not None
+        assert state.encoder_hidden_states is not None
+        device = state.device or input_ids.device
+        replay_input_ids = input_ids.to(device=device, dtype=torch.long)
+        cache_position = torch.arange(
+            start_position,
+            start_position + int(replay_input_ids.shape[1]),
+            device=device,
+            dtype=torch.long,
+        )
+
+        self._is_replaying = True
+        try:
+            state.decoder_forward(
+                input_ids=replay_input_ids,
+                encoder_hidden_states=state.encoder_hidden_states,
+                past_key_values=self,
+                use_cache=state.use_cache,
+                return_dict=state.return_dict,
+                cache_position=cache_position,
+            )
+        finally:
+            self._is_replaying = False
+
+    def copy(self) -> "MobilintWhisperCache":
+        """Return a copy preserving KV state and replay configuration."""
+        copied = MobilintWhisperCache(self.mxq_model, batch_size=self.batch_size)
+        for i in range(self.batch_size):
+            copied.layers[i] = self.layers[i].copy()
+        copied._replay_state = copy.copy(self._replay_state)
+        if self._replay_state.decoder_input_ids is not None:
+            copied._replay_state.decoder_input_ids = self._replay_state.decoder_input_ids.clone()
+        copied._beam_cache_buffers = [copy.deepcopy(buffer) if buffer is not None else None for buffer in self._beam_cache_buffers]
+        copied._beam_seq_lengths = list(self._beam_seq_lengths)
+        copied._is_replaying = False
         return copied
 
 

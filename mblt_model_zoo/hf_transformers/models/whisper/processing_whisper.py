@@ -47,10 +47,14 @@ class MobilintWhisperFeatureExtractor(HFWhisperFeatureExtractor):
         Returns:
             The batch feature output from the parent feature extractor.
         """
+        return_token_timestamps = bool(kwargs.pop("return_token_timestamps", False))
+        if return_token_timestamps:
+            kwargs["return_attention_mask"] = True
+
         processed = super().__call__(*args, **kwargs)
 
         if (
-            kwargs.get("return_token_timestamps")
+            return_token_timestamps
             and "num_frames" not in processed
             and "attention_mask" in processed
         ):
