@@ -280,12 +280,17 @@ def run_one_sample(
     elapsed = time_module.perf_counter() - start
     hypothesis_raw = hypothesis_text_extractor(output)
     token_count = generated_token_count_extractor(pipe, output, hypothesis_raw)
+    effective_num_beams = (
+        int(effective_generate_kwargs["num_beams"])
+        if effective_generate_kwargs is not None and effective_generate_kwargs.get("num_beams") is not None
+        else None
+    )
     return SampleTiming(
         sample_id=str(sample["id"]),
         audio_duration_s=float(len(audio_array)) / float(sampling_rate),
         generate_time_s=float(elapsed),
         num_generated_tokens=int(token_count),
-        num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
+        num_beams=effective_num_beams,
         reference=str(sample["reference"]),
         hypothesis=hypothesis_raw,
         effective_generate_kwargs=effective_generate_kwargs,

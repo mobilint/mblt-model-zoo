@@ -679,6 +679,27 @@ def _write_status_json(out_path: Path, payload: Mapping[str, Any]) -> None:
         json.dump(dict(payload), file, indent=2, ensure_ascii=False)
 
 
+def _reported_num_beams(sample_timings: Sequence[SampleTiming]) -> int | None:
+    """Return the beam setting that was effectively used for measured samples.
+
+    Raises:
+        ValueError: If measured samples used mixed effective beam settings.
+    """
+
+    observed_num_beams: set[int | None] = set()
+    for timing in sample_timings:
+        effective_kwargs = timing.effective_generate_kwargs
+        if effective_kwargs is not None:
+            value = effective_kwargs.get("num_beams")
+            observed_num_beams.add(int(value) if value is not None else None)
+            continue
+        observed_num_beams.add(int(timing.num_beams) if timing.num_beams is not None else None)
+    if len(observed_num_beams) > 1:
+        observed_values = sorted("default" if value is None else str(value) for value in observed_num_beams)
+        raise ValueError(f"Measured samples used mixed effective num_beams values: {observed_values}")
+    return next(iter(observed_num_beams), None)
+
+
 def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
     return _extract_generated_token_count_shared(pipe, output, text)
 
@@ -775,6 +796,7 @@ def _write_target_json(
     device_trace: Mapping[str, list[dict[str, float]]],
     sample_timings: Sequence[SampleTiming],
 ) -> None:
+    reported_num_beams = _reported_num_beams(sample_timings)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "automatic-speech-recognition",
@@ -782,7 +804,7 @@ def _write_target_json(
         "model_id": target.model_id,
         "label": label,
         "revision": revision,
-        "num_beams": args.num_beams,
+        "num_beams": reported_num_beams,
         "dataset": {
             "name": args.dataset,
             "config": args.dataset_config,

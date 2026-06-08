@@ -856,6 +856,7 @@ def test_run_one_sample_retries_with_empty_generate_kwargs() -> None:
 
     assert result.hypothesis == "test output"
     assert result.effective_generate_kwargs == {}
+    assert result.num_beams is None
     assert pipe.calls[-1] == {}
 
 
@@ -1014,6 +1015,129 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
         "language": "en",
     }
     assert payload["effective_generate_kwargs"] == {"num_beams": 4, "max_new_tokens": 444}
+
+
+def test_write_target_json_reports_effective_num_beams_after_fallback(tmp_path: Path) -> None:
+    """Verify dropped beam-search kwargs are not reported as measured beam search."""
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    args = asr_bench._parse_args(["--num-beams", "4"])
+    summary = asr_bench.ASRMetricSummary(
+        num_samples=1,
+        total_audio_s=1.0,
+        total_generate_s=0.5,
+        wer=0.1,
+        cer=0.02,
+        mean_latency_s=0.5,
+        p50_latency_s=0.5,
+        p95_latency_s=0.5,
+        throughput_samples_per_s=2.0,
+        rtf=0.5,
+        inverse_rtf=2.0,
+        decode_tokens_per_s=10.0,
+        avg_tokens_per_sample=5.0,
+    )
+    timing = asr_bench.SampleTiming(
+        sample_id="sample-1",
+        audio_duration_s=1.0,
+        generate_time_s=0.5,
+        num_generated_tokens=5,
+        num_beams=None,
+        reference="hello",
+        hypothesis="hello",
+        effective_generate_kwargs={},
+    )
+    out_path = tmp_path / "openai__whisper-small_beams4.json"
+
+    asr_bench._write_target_json(
+        out_path,
+        target=target,
+        label=target.label,
+        args=args,
+        revision=None,
+        core_mode=None,
+        summary=summary,
+        device_metric={},
+        device_trace={},
+        sample_timings=[timing],
+    )
+
+    payload = asr_bench.json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["num_beams"] is None
+    assert payload["generate_kwargs"]["num_beams"] == 4
+    assert payload["effective_generate_kwargs"] == {}
+
+
+def test_write_target_json_fails_on_mixed_effective_num_beams(tmp_path: Path) -> None:
+    """Verify aggregate JSON is not written when measured beam settings differ."""
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    args = asr_bench._parse_args(["--num-beams", "4"])
+    summary = asr_bench.ASRMetricSummary(
+        num_samples=2,
+        total_audio_s=2.0,
+        total_generate_s=1.0,
+        wer=0.1,
+        cer=0.02,
+        mean_latency_s=0.5,
+        p50_latency_s=0.5,
+        p95_latency_s=0.5,
+        throughput_samples_per_s=2.0,
+        rtf=0.5,
+        inverse_rtf=2.0,
+        decode_tokens_per_s=10.0,
+        avg_tokens_per_sample=5.0,
+    )
+    timings = [
+        asr_bench.SampleTiming(
+            sample_id="sample-1",
+            audio_duration_s=1.0,
+            generate_time_s=0.5,
+            num_generated_tokens=5,
+            num_beams=4,
+            reference="hello",
+            hypothesis="hello",
+            effective_generate_kwargs={"num_beams": 4},
+        ),
+        asr_bench.SampleTiming(
+            sample_id="sample-2",
+            audio_duration_s=1.0,
+            generate_time_s=0.5,
+            num_generated_tokens=5,
+            num_beams=None,
+            reference="world",
+            hypothesis="world",
+            effective_generate_kwargs={},
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="mixed effective num_beams"):
+        asr_bench._write_target_json(
+            tmp_path / "openai__whisper-small_beams4.json",
+            target=target,
+            label=target.label,
+            args=args,
+            revision=None,
+            core_mode=None,
+            summary=summary,
+            device_metric={},
+            device_trace={},
+            sample_timings=timings,
+        )
 
 
 def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
