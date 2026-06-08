@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from benchmark.transformers import benchmark_target_utils
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[3] / "benchmark" / "transformers"
 if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
@@ -1349,6 +1351,44 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
     assert captured["num_samples"] is None
 
 
+def test_load_measurement_candidate_samples_adds_warmup_to_bounded_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify bounded ASR runs load warmup+measurement candidates from the dataset."""
+
+    captured: list[int | None] = []
+
+    def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
+        captured.append(parsed_args.num_samples)
+        return []
+
+    monkeypatch.setattr(asr_bench, "_load_librispeech", fake_loader)
+
+    args = asr_bench._parse_args(["--num-samples", "3", "--warmup", "2"])
+
+    assert asr_bench._load_measurement_candidate_samples(args) == []
+    assert captured == [5]
+
+
+def test_load_measurement_candidate_samples_keeps_full_split_unbounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify full-split ASR runs preserve streaming semantics for candidate loading."""
+
+    captured: list[int | None] = []
+
+    def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
+        captured.append(parsed_args.num_samples)
+        return []
+
+    monkeypatch.setattr(asr_bench, "_load_librispeech", fake_loader)
+
+    args = asr_bench._parse_args(["--full-split"])
+
+    assert asr_bench._load_measurement_candidate_samples(args) == []
+    assert captured == [None]
+
+
 def test_load_librispeech_raises_actionable_error_for_missing_audio_column(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1517,26 +1557,7 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(asr_bench, "_warmup", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: ([], {}, {}))
-    monkeypatch.setattr(
-        asr_bench,
-        "summarize_timings",
-        lambda timings, language="en": asr_bench.ASRMetricSummary(
-            0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-    )
-    monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_write_status_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
     monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
 
@@ -1544,8 +1565,8 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
     assert load_calls == [None, None]
 
 
-def test_main_excludes_warmup_samples_from_measurement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify warmup consumes samples and measurement only sees the remaining iterator."""
+def test_main_measures_requested_num_samples_after_warmup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify bounded ASR runs measure the requested sample count after warmup."""
 
     args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"])
     target = asr_bench.ASRBenchmarkTarget(
@@ -1562,6 +1583,7 @@ def test_main_excludes_warmup_samples_from_measurement(tmp_path: Path, monkeypat
         {"id": "warmup", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "a"},
         {"id": "measure-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "b"},
         {"id": "measure-2", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "c"},
+        {"id": "measure-3", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "d"},
     ]
 
     def fake_warmup(model_id, pipe, sample_iter, generate_kwargs, n_warmup, native_language=None):  # type: ignore[no-untyped-def]
@@ -1580,38 +1602,105 @@ def test_main_excludes_warmup_samples_from_measurement(tmp_path: Path, monkeypat
         "_build_run_targets",
         lambda parsed_args: [(target, None, target.label, target.base)],
     )
-    monkeypatch.setattr(asr_bench, "_load_librispeech", lambda parsed_args: list(samples))
+    monkeypatch.setattr(asr_bench, "_load_measurement_candidate_samples", lambda parsed_args: list(samples))
     monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
     monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
     monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
     monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(asr_bench, "_warmup", fake_warmup)
     monkeypatch.setattr(asr_bench, "_measure_target", fake_measure_target)
-    monkeypatch.setattr(
-        asr_bench,
-        "summarize_timings",
-        lambda timings, language="en": asr_bench.ASRMetricSummary(
-            0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-    )
+    monkeypatch.setattr(asr_bench, "summarize_timings", lambda timings, language="en": None)
     monkeypatch.setattr(asr_bench, "_write_target_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
     monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"]) == 0
-    assert measured_ids == ["measure-1", "measure-2"]
+    assert measured_ids == ["measure-1", "measure-2", "measure-3"]
+
+
+def test_main_writes_no_samples_status_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify empty measured ASR runs write a status payload instead of zero-valued metrics."""
+
+    args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--num-samples", "1"])
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    captured_payloads: list[dict[str, object]] = []
+
+    monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
+    monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
+    monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
+    monkeypatch.setattr(
+        asr_bench,
+        "_build_run_targets",
+        lambda parsed_args: [(target, None, target.label, target.base)],
+    )
+    monkeypatch.setattr(
+        asr_bench,
+        "_load_measurement_candidate_samples",
+        lambda parsed_args: [
+            {
+                "id": "warmup",
+                "audio": {"array": [0.0, 0.0], "sampling_rate": 16000},
+                "reference": "a",
+            }
+        ],
+    )
+    monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
+    monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
+    monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
+    monkeypatch.setattr(asr_bench, "_build_asr_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(asr_bench, "_warmup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(asr_bench, "_measure_target", lambda *args, **kwargs: ([], {}, {}))
+    monkeypatch.setattr(
+        asr_bench,
+        "_write_status_json",
+        lambda out_path, payload: captured_payloads.append(dict(payload)),
+    )
+    monkeypatch.setattr(asr_bench, "_release_pipeline", lambda pipe, device: None)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
+
+    assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "1"]) == 0
+    assert captured_payloads and captured_payloads[0]["status"] == "no_samples"
+    assert "asr" not in captured_payloads[0]
+
+
+def test_write_combined_outputs_skips_status_only_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify status-only ASR payloads do not become zero-valued combined rows."""
+
+    payload = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "status": "no_samples",
+        "reason": "No measured samples remained after warmup/skip filtering.",
+    }
+    (tmp_path / "whisper-small_beamsdefault.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, rows: None)
+    monkeypatch.setattr(asr_bench, "_write_summary_markdown", lambda *args, **kwargs: None)
+
+    asr_bench._write_combined_outputs(tmp_path)
+
+    assert not (tmp_path / "combined.csv").exists()
+    assert (tmp_path / "combined.md").read_text(encoding="utf-8") == "No ASR results found.\n"
+
+
+def test_select_revision_warns_when_revision_check_is_inconclusive(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify ASR revision selection warns when existence checks are inconclusive."""
+
+    monkeypatch.setattr(benchmark_target_utils, "revision_exists", lambda model_id, revision: None)
+
+    selected = asr_bench._select_revision("openai/whisper-small", ["W8"])
+
+    captured = capsys.readouterr()
+    assert selected == "W8"
+    assert "failed to verify revision 'W8'" in captured.out
 
 
 def test_build_run_targets_warns_when_core_mode_is_explicit_for_original_models(

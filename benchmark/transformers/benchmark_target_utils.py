@@ -179,7 +179,10 @@ def select_revision(model_id: str, candidates: list[str | None]) -> str | None:
         if not candidate:
             return candidate
         exists = revision_exists(model_id, candidate)
-        if exists is True or exists is None:
+        if exists is None:
+            print(f"Warning: failed to verify revision '{candidate}' for {model_id}; trying it anyway.")
+            return candidate
+        if exists is True:
             return candidate
     return None
 

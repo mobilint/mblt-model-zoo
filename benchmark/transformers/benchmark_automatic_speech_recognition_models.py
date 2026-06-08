@@ -501,6 +501,24 @@ def _load_librispeech(args: argparse.Namespace) -> Iterable[dict[str, Any]]:
     )
 
 
+def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[dict[str, Any]]:
+    """Load enough bounded ASR samples to cover warmup plus measured samples.
+
+    For bounded runs, ``--num-samples`` is treated as the number of samples that should
+    contribute to measured metrics, while ``--warmup`` remains an additional prefix.
+    Full-split runs keep streaming semantics and are handled separately by callers.
+    """
+
+    if args.num_samples is None:
+        return _load_librispeech(args)
+
+    requested = max(int(args.num_samples), 0)
+    warmup = max(int(args.warmup), 0)
+    bounded_args = argparse.Namespace(**vars(args))
+    bounded_args.num_samples = requested + warmup
+    return _load_librispeech(bounded_args)
+
+
 def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "max_new_tokens": int(args.max_new_tokens),
@@ -575,6 +593,65 @@ def _consume_warmup_samples(
         native_language=native_language,
     )
     return iterator
+
+
+def _limit_measurement_samples(
+    samples: Iterable[Mapping[str, Any]],
+    *,
+    num_samples: int | None,
+) -> Iterable[Mapping[str, Any]]:
+    """Limit post-warmup measurement samples when a bounded target count is requested."""
+
+    if num_samples is None:
+        return samples
+
+    def _limited() -> Iterator[Mapping[str, Any]]:
+        yielded = 0
+        for sample in samples:
+            if yielded >= int(num_samples):
+                break
+            yield sample
+            yielded += 1
+
+    return _limited()
+
+
+def _build_no_samples_payload(
+    *,
+    target: ASRBenchmarkTarget,
+    args: argparse.Namespace,
+    revision: str | None,
+    core_mode: str | None,
+    reason: str,
+) -> dict[str, Any]:
+    """Build a status-only payload for targets that produced no measured ASR samples."""
+
+    return {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": target.label,
+        "model_id": target.model_id,
+        "label": target.label,
+        "revision": revision,
+        "num_beams": args.num_beams,
+        "dataset": {
+            "name": args.dataset,
+            "config": args.dataset_config,
+            "split": args.dataset_split,
+            "language": args.language,
+            "task": args.task,
+        },
+        "mxq_path": target.mxq_path,
+        "core_mode": core_mode,
+        "status": "no_samples",
+        "reason": reason,
+    }
+
+
+def _write_status_json(out_path: Path, payload: Mapping[str, Any]) -> None:
+    """Write a status-only benchmark payload."""
+
+    with out_path.open("w", encoding="utf-8") as file:
+        json.dump(dict(payload), file, indent=2, ensure_ascii=False)
 
 
 def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
@@ -783,7 +860,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = _resolve_results_dir(args)
     _collect_host_pc_info(out_dir)
     run_targets = _build_run_targets(args)
-    sampled_samples = None if args.num_samples is None else list(_load_librispeech(args))
+    sampled_samples = None if args.num_samples is None else list(_load_measurement_candidate_samples(args))
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
     if args.dry_run:
@@ -825,7 +902,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
             f"device={args.device} device_backend={target_args.device_backend} "
-            f"samples={('full-split' if args.num_samples is None else len(current_samples))}"
+            f"samples={('full-split' if args.num_samples is None else int(args.num_samples))}"
         )
         if _handle_existing_result(json_path, skip_existing=args.skip_existing):
             continue
@@ -857,6 +934,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.warmup,
                 native_language=args.language,
             )
+            measure_samples = _limit_measurement_samples(measure_samples, num_samples=args.num_samples)
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
                 target_args,
@@ -865,6 +943,21 @@ def main(argv: list[str] | None = None) -> int:
                 generate_kwargs,
                 native_language=args.language,
             )
+            if not timings:
+                reason = "No measured samples remained after warmup/skip filtering."
+                print(f"Warning: {reason} model={mode_label}")
+                _write_status_json(
+                    json_path,
+                    _build_no_samples_payload(
+                        target=target,
+                        args=args,
+                        revision=revision,
+                        core_mode=core_mode,
+                        reason=reason,
+                    ),
+                )
+                _release_pipeline(pipe, args.device)
+                continue
             summary = summarize_timings(timings, language=args.language)
             _write_target_json(
                 json_path,
