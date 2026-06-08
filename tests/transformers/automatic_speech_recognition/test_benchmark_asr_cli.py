@@ -453,6 +453,19 @@ def test_qwen3_asr_uses_encoder_decoder_core_mode_kwargs(monkeypatch: pytest.Mon
     assert "core_mode" not in model_kwargs
 
 
+def test_whisper_asr_uses_encoder_decoder_core_mode_kwargs() -> None:
+    """Verify Whisper ASR receives encoder/decoder-prefixed core-mode kwargs."""
+
+    model_kwargs = asr_bench._apply_asr_core_mode_model_kwargs({}, "openai/whisper-small", "global4")
+
+    assert model_kwargs.get("encoder_core_mode") == "global4"
+    assert model_kwargs.get("decoder_core_mode") == "global4"
+    assert model_kwargs.get("encoder_target_clusters") == [0]
+    assert model_kwargs.get("decoder_target_clusters") == [0]
+    assert "core_mode" not in model_kwargs
+    assert "target_clusters" not in model_kwargs
+
+
 def test_qwen3_asr_original_model_prefers_native_qwen_asr_loader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -769,7 +782,7 @@ def test_qwen3_asr_original_model_missing_optional_backend_has_actionable_error(
 def test_non_composite_asr_uses_top_level_core_mode_kwargs() -> None:
     """Verify non-composite ASR models keep the existing top-level core-mode kwargs."""
 
-    model_kwargs = asr_bench._apply_asr_core_mode_model_kwargs({}, "openai/whisper-small", "global4")
+    model_kwargs = asr_bench._apply_asr_core_mode_model_kwargs({}, "facebook/wav2vec2-base-960h", "global4")
 
     assert model_kwargs.get("core_mode") == "global4"
     assert model_kwargs.get("target_clusters") == [0]

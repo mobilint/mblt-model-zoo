@@ -195,13 +195,19 @@ def _is_whisper_like_model(model_id: str) -> bool:
     return "whisper" in model_id.lower()
 
 
+def _uses_encoder_decoder_core_mode_kwargs(model_id: str) -> bool:
+    """Return whether an ASR target expects encoder/decoder-prefixed NPU kwargs."""
+
+    return _is_qwen3_asr_model(model_id) or _is_whisper_like_model(model_id)
+
+
 def _apply_asr_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     model_id: str,
     core_mode: str | None,
 ) -> dict[str, Any]:
     """Apply core-mode kwargs for ASR models, expanding composite encoder/decoder configs when needed."""
-    if not _is_qwen3_asr_model(model_id):
+    if not _uses_encoder_decoder_core_mode_kwargs(model_id):
         return _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
 
     expanded: dict[str, Any] = {}
