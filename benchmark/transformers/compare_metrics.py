@@ -104,16 +104,23 @@ def _strip_group_id(model_id: str) -> str:
     return model_id.split("__", 1)[1] if "__" in model_id else model_id
 
 
+def _restore_safe_model_id(value: str) -> str:
+    """Restore slash-separated model ids from benchmark-safe filenames when possible."""
+
+    if "/" in value:
+        return _strip_group_id(value)
+    if "__" in value:
+        return value.replace("__", "/", 1)
+    return value
+
+
 def normalize_model_key(path: Path, loaded_model_id: str) -> str:
     """Normalize a model id for cross-folder comparison."""
 
     stem = path.stem
-    if "__" in stem:
-        return _strip_group_id(stem)
-    key = _strip_group_id(loaded_model_id)
-    if "/" in key:
-        key = key.split("/", 1)[1]
-    return key
+    if "__" in stem or "_beams" in stem:
+        return _restore_safe_model_id(stem)
+    return _restore_safe_model_id(loaded_model_id)
 
 
 @dataclass

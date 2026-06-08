@@ -48,6 +48,7 @@ def load_streaming_audio_text_samples(
     id_column: str = "id",
     num_samples: int | None = None,
     seed: int = 0,
+    shuffle_buffer_size: int = 10_000,
     target_sampling_rate: int = 16000,
 ) -> Iterable[dict[str, Any]]:
     """Load streaming dataset rows into benchmark-ready audio/text samples.
@@ -61,12 +62,14 @@ def load_streaming_audio_text_samples(
         id_column: Column containing sample id.
         num_samples: Maximum number of rows to consume. ``None`` consumes the full split.
         seed: Shuffle seed for streaming datasets that support shuffling.
+        shuffle_buffer_size: Buffer size used for bounded streaming dataset shuffle.
         target_sampling_rate: Desired output audio sampling rate.
 
     Returns:
         A streaming iterable of benchmark sample dictionaries with ``id``, ``audio``, and
         ``reference`` keys. When ``num_samples`` is set, the loader shuffles the streaming
-        dataset when supported and then consumes only the requested prefix of decoded rows.
+        dataset with a shuffle buffer when supported and then consumes only the requested
+        prefix of decoded rows.
 
     Raises:
         ValueError: If a dataset row does not contain a readable audio payload.
@@ -146,5 +149,5 @@ def load_streaming_audio_text_samples(
         return []
 
     if hasattr(dataset, "shuffle"):
-        dataset = dataset.shuffle(seed=seed)
+        dataset = dataset.shuffle(seed=seed, buffer_size=max(int(shuffle_buffer_size), sample_count))
     return list(itertools.islice(_iter_decoded_rows(dataset), sample_count))

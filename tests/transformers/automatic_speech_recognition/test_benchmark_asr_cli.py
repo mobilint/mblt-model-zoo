@@ -1152,7 +1152,7 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
     class DummyDataset:
         def __init__(self, rows):  # type: ignore[no-untyped-def]
             self.rows = rows
-            self.shuffle_calls: list[int] = []
+            self.shuffle_calls: list[tuple[int | None, int | None]] = []
             self.iterated = 0
             self.cast_calls: list[tuple[str, object]] = []
 
@@ -1160,8 +1160,8 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
             self.cast_calls.append((name, feature))
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
-            self.shuffle_calls.append(seed)
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
+            self.shuffle_calls.append((seed, buffer_size))
             return self
 
         def __iter__(self):
@@ -1214,7 +1214,7 @@ def test_load_librispeech_streams_only_requested_samples(monkeypatch: pytest.Mon
 
     assert len(samples) == 2
     assert dataset.iterated == 2
-    assert dataset.shuffle_calls == [0]
+    assert dataset.shuffle_calls == [(0, 10_000)]
     assert dataset.cast_calls and dataset.cast_calls[0][0] == "audio"
     assert getattr(dataset.cast_calls[0][1], "decode", None) is False
     assert load_calls == [
@@ -1233,13 +1233,13 @@ def test_load_librispeech_zero_samples_returns_empty_without_iteration(monkeypat
     class DummyDataset:
         def __init__(self) -> None:
             self.iterated = 0
-            self.shuffle_calls: list[int] = []
+            self.shuffle_calls: list[tuple[int | None, int | None]] = []
 
         def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
-            self.shuffle_calls.append(seed)
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
+            self.shuffle_calls.append((seed, buffer_size))
             return self
 
         def __iter__(self):
@@ -1292,7 +1292,7 @@ def test_load_librispeech_uses_default_sample_limit(monkeypatch: pytest.MonkeyPa
         def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
             return self
 
         def __iter__(self):
@@ -1402,7 +1402,7 @@ def test_load_librispeech_raises_actionable_error_for_missing_audio_column(
         def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
             return self
 
         def __iter__(self):
@@ -1445,7 +1445,7 @@ def test_load_librispeech_raises_actionable_error_for_non_mapping_audio_payload(
         def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
             return self
 
         def __iter__(self):
@@ -1486,7 +1486,7 @@ def test_load_librispeech_supports_predecoded_array_payload(monkeypatch: pytest.
         def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
             return self
 
-        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
             return self
 
         def __iter__(self):

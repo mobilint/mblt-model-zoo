@@ -126,8 +126,8 @@ def test_collect_metrics_and_common_models(tmp_path: Path) -> None:
     (folder_b / "two.json").write_text(json.dumps(payload), encoding="utf-8")
     metrics_a = collect_metrics(folder_a, LLMCompareMetric)
     metrics_b = collect_metrics(folder_b, LLMCompareMetric)
-    assert list(metrics_a.keys()) == ["model-a"]
-    assert common_model_ids([metrics_a, metrics_b]) == ["model-a"]
+    assert list(metrics_a.keys()) == ["repo/model-a"]
+    assert common_model_ids([metrics_a, metrics_b]) == ["repo/model-a"]
 
 
 def test_render_charts_smoke(tmp_path: Path) -> None:
@@ -155,9 +155,14 @@ def test_normalize_model_key_keeps_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small_beams1"
     assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small_beams5"
     assert (
-        normalize_model_key(Path("whisper-small_beamsdefault.json"), "whisper-small_beamsdefault")
-        == "whisper-small_beamsdefault"
+        normalize_model_key(Path("openai__whisper-small_beamsdefault.json"), "openai/whisper-small")
+        == "openai/whisper-small_beamsdefault"
     )
+
+
+def test_normalize_model_key_keeps_owner_name_by_default() -> None:
+    assert normalize_model_key(Path("one.json"), "org-a/model-x") == "org-a/model-x"
+    assert normalize_model_key(Path("org-a__model-x.json"), "org-a/model-x") == "org-a/model-x"
 
 
 def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) -> None:
@@ -183,15 +188,35 @@ def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) ->
     legacy_payload = dict(payload)
     legacy_payload["model"] = "openai/whisper-small_beams1"
 
-    (tmp_path / "whisper-small_beamsdefault.json").write_text(json.dumps(payload), encoding="utf-8")
-    (tmp_path / "whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
+    (tmp_path / "openai__whisper-small_beamsdefault.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "openai__whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
 
     metrics = collect_metrics(tmp_path, ASRCompareMetric)
     captured = capsys.readouterr()
 
-    assert list(metrics.keys()) == ["whisper-small_beams1", "whisper-small_beamsdefault"]
-    assert metrics["whisper-small_beamsdefault"].wer == 0.1
+    assert list(metrics.keys()) == ["openai/whisper-small_beams1", "openai/whisper-small_beamsdefault"]
+    assert metrics["openai/whisper-small_beamsdefault"].wer == 0.1
     assert captured.out == ""
+
+
+def test_collect_metrics_keeps_same_basename_from_different_owners(tmp_path: Path) -> None:
+    """Verify owner/name keys prevent collisions between same-basename models."""
+
+    base_payload = {
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+        "device": {"avg_power_w": 1.0},
+    }
+    payload_a = {**base_payload, "model": "org-a/model-x"}
+    payload_b = {**base_payload, "model": "org-b/model-x"}
+    (tmp_path / "a.json").write_text(json.dumps(payload_a), encoding="utf-8")
+    (tmp_path / "b.json").write_text(json.dumps(payload_b), encoding="utf-8")
+
+    metrics = collect_metrics(tmp_path, LLMCompareMetric)
+
+    assert list(metrics.keys()) == ["org-a/model-x", "org-b/model-x"]
 
 
 def test_plot_compare_benchmark_results_module_help_smoke() -> None:
