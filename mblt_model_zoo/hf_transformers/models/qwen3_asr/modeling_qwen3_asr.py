@@ -236,8 +236,11 @@ class MobilintQwen3ASRTextModel(
             if row_logits_ndarray is None:
                 raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
             row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
-            if row_logits.ndim == 4 and int(row_logits.shape[0]) == 1:
-                row_logits = row_logits.squeeze(0)
+            while row_logits.ndim > 2:
+                singleton_dims = [dim for dim, size in enumerate(row_logits.shape[:-1]) if int(size) == 1]
+                if not singleton_dims:
+                    raise ValueError(f"Unexpected Qwen3-ASR beam logits shape: {tuple(row_logits.shape)}")
+                row_logits = row_logits.squeeze(singleton_dims[0])
             if row_logits.ndim == 2:
                 row_logits = row_logits.unsqueeze(0)
             logits_list.append(row_logits)
@@ -260,12 +263,17 @@ class MobilintQwen3ASRTextModel(
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
-        if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
         assert inputs_embeds is not None
+
+        if int(inputs_embeds.shape[0]) > 1:
+            use_cache = True
+
+        if use_cache and past_key_values is None:
+            past_key_values = self._get_cache("", int(inputs_embeds.shape[0]), 0)
 
         if cache_position is None:
             past_seen_tokens = (
@@ -334,6 +342,10 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.get_mxq_model()
 
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintBeamCache:
+        """Return a beam-snapshot cache for the nested Qwen3-ASR thinker generation loop."""
+        return self.model._get_cache(cache_implementation, batch_size, max_cache_len, *args)
+
     @wraps(Qwen3ASRThinkerForConditionalGeneration.forward)
     def forward(
         self,
@@ -342,7 +354,11 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
         **kwargs: object,
     ) -> Union[tuple, Qwen3ASRThinkerCausalLMOutputWithPast]:
         kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        outputs = super().forward(*args, **kwargs)
+        logits = getattr(outputs, "logits", None)
+        if isinstance(logits, torch.Tensor) and logits.ndim == 4 and int(logits.shape[1]) == 1:
+            outputs.logits = logits.squeeze(1)
+        return outputs
 
 
 class MobilintQwen3ASRForConditionalGeneration(
