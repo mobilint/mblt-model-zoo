@@ -49,7 +49,7 @@ def retryable_generate_kwargs(generate_kwargs: Mapping[str, Any]) -> list[dict[s
 
     current = dict(generate_kwargs)
     attempts = [dict(current)]
-    for key in ("task", "language", "return_timestamps", "early_stopping"):
+    for key in ("task", "language", "return_timestamps", "early_stopping", "max_new_tokens", "num_beams"):
         if key in current:
             current = dict(current)
             current.pop(key, None)
@@ -61,7 +61,15 @@ def is_retryable_generate_kwargs_error(exc: TypeError | ValueError) -> bool:
     """Return whether an exception indicates unsupported pipeline kwargs."""
 
     message = str(exc).lower()
-    known_kwargs = ("task", "language", "return_timestamps", "early_stopping", "generate_kwargs")
+    known_kwargs = (
+        "task",
+        "language",
+        "return_timestamps",
+        "early_stopping",
+        "max_new_tokens",
+        "num_beams",
+        "generate_kwargs",
+    )
     has_known_kwarg = any(keyword in message for keyword in known_kwargs)
     has_unsupported_shape = any(keyword in message for keyword in ("unexpected keyword", "unsupported", "unused"))
     return has_known_kwarg and has_unsupported_shape

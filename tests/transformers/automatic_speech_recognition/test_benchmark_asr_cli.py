@@ -826,6 +826,39 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     assert "language" not in pipe.calls[-1]
 
 
+def test_run_one_sample_retries_with_empty_generate_kwargs() -> None:
+    """Verify fallback can call generic ASR pipelines without generation kwargs."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+            self.tokenizer = None
+
+        def __call__(self, audio_array, sampling_rate=None, generate_kwargs=None):  # type: ignore[no-untyped-def]
+            payload = dict(generate_kwargs or {})
+            self.calls.append(payload)
+            if payload:
+                raise TypeError("generate_kwargs contains unsupported generation key")
+            return {"text": "test output"}
+
+    pipe = DummyPipe()
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "test output",
+    }
+    generate_kwargs = {
+        **asr_bench._resolve_generate_kwargs(asr_bench._parse_args(["--num-beams", "4"])),
+        **asr_bench._optional_generate_kwargs_for_model(asr_bench._parse_args([]), "openai/whisper-small"),
+    }
+
+    result = asr_bench._run_one_sample(pipe, sample, generate_kwargs)
+
+    assert result.hypothesis == "test output"
+    assert result.effective_generate_kwargs == {}
+    assert pipe.calls[-1] == {}
+
+
 def test_run_one_sample_does_not_swallow_internal_type_error() -> None:
     """Verify internal TypeErrors are raised immediately instead of triggering fallback retries."""
 
@@ -960,6 +993,7 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
     asr_bench._write_target_json(
         out_path,
         target=target,
+        label=target.label,
         args=args,
         revision=None,
         core_mode=None,
