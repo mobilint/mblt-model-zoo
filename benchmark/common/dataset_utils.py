@@ -48,6 +48,7 @@ def load_streaming_audio_text_samples(
     id_column: str = "id",
     num_samples: int | None = None,
     seed: int = 0,
+    shuffle_streaming: bool = False,
     shuffle_buffer_size: int = 10_000,
     target_sampling_rate: int = 16000,
 ) -> Iterable[dict[str, Any]]:
@@ -62,6 +63,7 @@ def load_streaming_audio_text_samples(
         id_column: Column containing sample id.
         num_samples: Maximum number of rows to consume. ``None`` consumes the full split.
         seed: Shuffle seed for streaming datasets that support shuffling.
+        shuffle_streaming: Shuffle an unbounded streaming iterable without applying a sample limit.
         shuffle_buffer_size: Buffer size used for bounded streaming dataset shuffle.
         target_sampling_rate: Desired output audio sampling rate.
 
@@ -142,6 +144,8 @@ def load_streaming_audio_text_samples(
     if hasattr(dataset, "cast_column"):
         dataset = dataset.cast_column(audio_column, Audio(decode=False))
     if num_samples is None:
+        if shuffle_streaming and hasattr(dataset, "shuffle"):
+            dataset = dataset.shuffle(seed=seed, buffer_size=int(shuffle_buffer_size))
         return _iter_decoded_rows(dataset)
 
     sample_count = max(int(num_samples), 0)

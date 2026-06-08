@@ -1461,23 +1461,78 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
     assert captured["num_samples"] is None
 
 
-def test_load_measurement_candidate_samples_uses_unbounded_stream_for_bounded_requests(
+def test_load_measurement_candidate_samples_uses_shuffled_unbounded_stream_for_bounded_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify bounded ASR runs can consume replacement candidates after skips."""
+    """Verify bounded ASR runs keep replacement candidates while preserving dataset shuffle."""
 
-    captured: list[int | None] = []
+    captured: list[tuple[int | None, bool]] = []
 
     def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
-        captured.append(parsed_args.num_samples)
+        captured.append((parsed_args.num_samples, parsed_args.shuffle_streaming))
         return []
 
     monkeypatch.setattr(asr_bench, "_load_librispeech", fake_loader)
 
-    args = asr_bench._parse_args(["--num-samples", "3", "--warmup", "2"])
+    args = asr_bench._parse_args(["--num-samples", "3", "--warmup", "2", "--seed", "7"])
 
     assert asr_bench._load_measurement_candidate_samples(args) == []
-    assert captured == [None]
+    assert captured == [(None, True)]
+
+
+def test_load_librispeech_can_shuffle_unbounded_streaming_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify replacement-candidate streams still honor the ASR shuffle seed."""
+
+    class DummyDataset:
+        def __init__(self, rows):  # type: ignore[no-untyped-def]
+            self.rows = rows
+            self.shuffle_calls: list[tuple[int | None, int | None]] = []
+
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None, buffer_size=None):  # type: ignore[no-untyped-def]
+            self.shuffle_calls.append((seed, buffer_size))
+            return self
+
+        def __iter__(self):
+            yield from self.rows
+
+    dataset = DummyDataset(
+        [
+            {
+                "id": "sample-0",
+                "audio": {"path": "dummy-0.wav", "bytes": None},
+                "text": "text-0",
+            }
+        ]
+    )
+
+    def fake_load_dataset(name, config, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return dataset
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    soundfile_stub = type(
+        "SoundfileStub",
+        (),
+        {"read": staticmethod(lambda path, dtype=None: (np.asarray([0.0, 0.0], dtype=np.float32), 16000))},
+    )()
+    datasets_stub = type(
+        "DatasetsStub",
+        (),
+        {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
+    )()
+    monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
+    monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
+
+    args = asr_bench._parse_args(["--num-samples", "2", "--seed", "7"])
+    samples = asr_bench._load_measurement_candidate_samples(args)
+
+    assert next(iter(samples))["id"] == "sample-0"
+    assert dataset.shuffle_calls == [(7, 10_000)]
 
 
 def test_load_measurement_candidate_samples_keeps_full_split_unbounded(
@@ -1734,6 +1789,42 @@ def test_main_measures_requested_num_samples_after_warmup(tmp_path: Path, monkey
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "3", "--warmup", "1"]) == 0
     assert measured_ids == ["measure-1", "measure-2", "measure-3"]
+
+
+def test_main_skip_existing_avoids_dataset_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify --skip-existing skips before constructing ASR dataset samples."""
+
+    args = asr_bench._parse_args(["--output-dir", str(tmp_path), "--num-samples", "3", "--skip-existing"])
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    existing_path = tmp_path / "openai__whisper-small_beamsdefault.json"
+    existing_path.write_text("{}", encoding="utf-8")
+
+    def fail_loader(parsed_args):  # type: ignore[no-untyped-def]
+        raise AssertionError("Dataset should not be loaded for skipped existing ASR results")
+
+    monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
+    monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
+    monkeypatch.setattr(asr_bench, "_collect_host_pc_info", lambda out_dir: None)
+    monkeypatch.setattr(
+        asr_bench,
+        "_build_run_targets",
+        lambda parsed_args: [(target, None, target.label, target.base)],
+    )
+    monkeypatch.setattr(asr_bench, "_load_librispeech", fail_loader)
+    monkeypatch.setattr(asr_bench, "_load_measurement_candidate_samples", fail_loader)
+    monkeypatch.setattr(asr_bench, "_resolve_generate_kwargs", lambda parsed_args: {"return_timestamps": False})
+    monkeypatch.setattr(asr_bench, "_optional_generate_kwargs_for_model", lambda parsed_args, model_id: {})
+    monkeypatch.setattr(asr_bench, "_args_for_target_device_backend", lambda parsed_args, **kwargs: parsed_args)
+    monkeypatch.setattr(asr_bench, "_write_combined_outputs", lambda out_dir: None)
+
+    assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "3", "--skip-existing"]) == 0
 
 
 def test_main_writes_no_samples_status_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

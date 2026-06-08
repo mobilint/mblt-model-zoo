@@ -505,6 +505,7 @@ def _load_librispeech(args: argparse.Namespace) -> Iterable[dict[str, Any]]:
         id_column="id",
         num_samples=args.num_samples,
         seed=args.seed,
+        shuffle_streaming=bool(getattr(args, "shuffle_streaming", False)),
         target_sampling_rate=16000,
     )
 
@@ -515,6 +516,8 @@ def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[di
     For bounded runs, ``--num-samples`` is treated as the number of samples that should
     contribute to measured metrics, while ``--warmup`` remains an additional prefix.
     Full-split runs keep streaming semantics and are handled separately by callers.
+    Bounded runs keep an unbounded candidate stream so skipped samples do not consume
+    the measured quota, but still request dataset shuffle before streaming candidates.
     """
 
     if args.num_samples is None:
@@ -525,6 +528,7 @@ def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[di
         return []
     bounded_args = argparse.Namespace(**vars(args))
     bounded_args.num_samples = None
+    bounded_args.shuffle_streaming = True
     return _load_librispeech(bounded_args)
 
 
@@ -921,7 +925,6 @@ def main(argv: list[str] | None = None) -> int:
             continue
         beam_tag = _beam_tag(args.num_beams)
         json_path = _result_json_path(out_dir, mode_base, args.num_beams)
-        current_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
@@ -930,6 +933,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if _handle_existing_result(json_path, skip_existing=args.skip_existing):
             continue
+        current_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
         pipe = None
         try:
             try:
