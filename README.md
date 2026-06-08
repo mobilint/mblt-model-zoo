@@ -70,7 +70,7 @@ model = MBLT_Engine(
     core_mode="global8",
 )
 
-# Run an image classification model with ONNX instead of MXQ.
+# Run a vision model with ONNX instead of MXQ.
 # If onnx_path is empty, the matching ONNX file is downloaded from the
 # same Hugging Face repo and cached automatically.
 model = MBLT_Engine(
@@ -85,7 +85,7 @@ model = MBLT_Engine(
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
-- `framework`: Inference backend. Defaults to `mxq`. `onnx` is currently supported for image classification models.
+- `framework`: Inference backend. Defaults to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
 - `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
 - `onnx_path`: Local ONNX path. Use `""` to download and cache the published ONNX automatically when `framework="onnx"`.
 - `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
@@ -123,7 +123,7 @@ finally:
     model.dispose()
 ```
 
-For ONNX image classification, the preprocess and postprocess flow stays the same:
+For ONNX vision models, the preprocess and postprocess flow stays the same:
 
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
