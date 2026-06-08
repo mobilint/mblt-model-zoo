@@ -342,14 +342,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=50,
         help=(
-            "number of evaluation samples; defaults to 50. Use --full-split to evaluate the full dataset split "
-            "(streaming avoids eager full download, but runtime still scales with the full split)"
+            "number of measured evaluation samples; defaults to 50. Bounded runs load additional warmup "
+            "samples before measurement. Use --full-split to evaluate the full dataset split (streaming avoids "
+            "eager full download, but runtime still scales with the full split)"
         ),
     )
     parser.add_argument(
         "--full-split",
         action="store_true",
-        help="evaluate the full dataset split instead of the default --num-samples subset",
+        help="evaluate the full dataset split instead of a bounded measured --num-samples run",
     )
     parser.add_argument(
         "--num-beams",
@@ -358,7 +359,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="beam value to benchmark; omit to use model default",
     )
     parser.add_argument("--max-new-tokens", type=int, default=444, help="maximum generated token count")
-    parser.add_argument("--warmup", type=int, default=2, help="number of warmup samples")
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=2,
+        help="number of additional warmup samples consumed before measured samples",
+    )
     parser.add_argument("--seed", type=int, default=0, help="dataset shuffle seed")
     parser.add_argument(
         "--skip-existing",

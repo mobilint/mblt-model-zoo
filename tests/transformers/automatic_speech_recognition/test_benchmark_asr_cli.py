@@ -72,6 +72,8 @@ def test_asr_benchmark_help_subprocess_smoke() -> None:
 
     assert result.returncode == 0
     assert "automatic-speech-recognition" in result.stdout
+    assert "number of measured evaluation samples" in result.stdout
+    assert "additional warmup samples" in result.stdout
 
 
 def test_asr_benchmark_module_help_subprocess_smoke() -> None:
@@ -87,6 +89,8 @@ def test_asr_benchmark_module_help_subprocess_smoke() -> None:
 
     assert result.returncode == 0
     assert "automatic-speech-recognition" in result.stdout
+    assert "number of measured evaluation samples" in result.stdout
+    assert "additional warmup samples" in result.stdout
 
 
 def test_asr_benchmark_parser_full_split_yields_to_explicit_num_samples(capsys: pytest.CaptureFixture[str]) -> None:

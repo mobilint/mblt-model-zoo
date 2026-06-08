@@ -246,10 +246,12 @@ and speed metrics. You can rerun the script with different `--num-beams` values 
 decoding and beam search in the same output directory because each per-target JSON file keeps the
 beam setting in its filename.
 
-The LibriSpeech loader uses streaming mode. By default, the benchmark evaluates `50` samples.
-When `--num-samples` is set, the streaming dataset is shuffled with `--seed` and only the requested
-number of samples is consumed. Warmup samples are consumed first and are excluded from the measured
-results. Use `--full-split` to evaluate the full requested split.
+The LibriSpeech loader uses streaming mode. By default, the benchmark measures `50` samples.
+When `--num-samples` is set, the streaming dataset is shuffled with `--seed`. In bounded runs,
+`--num-samples` means the number of **measured** samples, while `--warmup` is an additional prefix
+consumed before measurement. In other words, the loader fetches enough candidates to cover
+`warmup + measured` samples, and warmup samples are excluded from the reported metrics. Use
+`--full-split` to evaluate the full requested split.
 
 - The ASR benchmark is a dev-only workflow. Keep optional benchmark dependencies such as `jiwer`
   in the development environment rather than treating them as package runtime dependencies.
@@ -285,9 +287,17 @@ python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
 For Whisper-like models, `--language` and `--task` are passed as decoding hints. For other ASR
 pipelines, the script automatically retries without those hints when they are unsupported.
 
+Transcript normalization is intentionally benchmark-policy driven:
+
+- English (`--language en`): casefold, ASCII punctuation removal, and whitespace collapsing.
+- Other languages: casefold and whitespace collapsing only; punctuation is preserved.
+
+This keeps the metric policy explicit without introducing a dataset- or model-specific text
+normalizer such as Whisper's English normalizer into every ASR benchmark path.
+
 Representative ASR metrics:
 
-- `wer`, `cer`: Accuracy metrics computed from normalized transcripts.
+- `wer`, `cer`: Accuracy metrics computed from the benchmark normalization policy above.
 - `mean_latency_s`, `p50_latency_s`, `p95_latency_s`: Per-sample generation latency.
 - `throughput_samples_per_s`: Processed audio samples per second.
 - `rtf`, `inverse_rtf`: Real-Time Factor and its inverse speed metric.
