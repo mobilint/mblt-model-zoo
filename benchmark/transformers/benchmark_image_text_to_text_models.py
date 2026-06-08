@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 import sys
@@ -42,9 +41,13 @@ from benchmark.common.summary_utils import scalar_plot_table as _scalar_plot_tab
 from benchmark.common.summary_utils import token_sweep_plot_table as _token_sweep_plot_table_common
 from benchmark.common.summary_utils import write_summary_markdown as _write_summary_markdown
 from benchmark.common.summary_utils import write_token_combined_markdown as _write_token_combined_markdown
-from benchmark.transformers.benchmark_target_utils import args_for_target_device_backend as _args_for_target_device_backend_shared
+from benchmark.transformers.benchmark_target_utils import (
+    args_for_target_device_backend as _args_for_target_device_backend_shared,
+)
 from benchmark.transformers.benchmark_target_utils import iter_revision_targets as _iter_revision_targets_shared
-from benchmark.transformers.benchmark_target_utils import resolve_original_model_ids as _resolve_original_model_ids_shared
+from benchmark.transformers.benchmark_target_utils import (
+    resolve_original_model_ids as _resolve_original_model_ids_shared,
+)
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -114,7 +117,7 @@ try:
         _read_raw_config,
         _should_precheck_cuda,
     )
-except Exception:
+except ImportError:
     from .benchmark_text_generation_models import (
         _add_batch_selection_args,
         _cuda_memory_info,

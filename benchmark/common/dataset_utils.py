@@ -76,6 +76,25 @@ def load_streaming_audio_text_samples(
     import soundfile as sf
     from datasets import Audio, load_dataset
 
+    def _require_mapping_row(row: Any) -> Mapping[str, Any]:
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Dataset row must be a mapping, got {type(row).__name__}.")
+        return row
+
+    def _require_audio_payload(row: Mapping[str, Any]) -> Mapping[str, Any]:
+        if audio_column not in row:
+            raise ValueError(
+                f"Dataset row is missing required audio column '{audio_column}' for dataset "
+                f"'{dataset_name}' split '{dataset_split}'."
+            )
+        raw_audio = row[audio_column]
+        if not isinstance(raw_audio, Mapping):
+            raise ValueError(
+                f"Dataset audio column '{audio_column}' must contain a mapping payload, got "
+                f"{type(raw_audio).__name__} for dataset '{dataset_name}' split '{dataset_split}'."
+            )
+        return raw_audio
+
     def _decode_audio(raw_audio: Mapping[str, Any]) -> tuple[Any, int]:
         decoded_array = raw_audio.get("array")
         decoded_sampling_rate = raw_audio.get("sampling_rate")
@@ -105,11 +124,12 @@ def load_streaming_audio_text_samples(
 
     def _iter_decoded_rows(rows: Iterable[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
         for index, row in enumerate(rows):
-            audio_array, sampling_rate = _decode_audio(row[audio_column])
+            validated_row = _require_mapping_row(row)
+            audio_array, sampling_rate = _decode_audio(_require_audio_payload(validated_row))
             yield {
-                "id": str(row.get(id_column, index)),
+                "id": str(validated_row.get(id_column, index)),
                 "audio": {"array": audio_array, "sampling_rate": sampling_rate},
-                "reference": str(row.get(text_column, "")),
+                "reference": str(validated_row.get(text_column, "")),
             }
 
     if dataset_config is None:

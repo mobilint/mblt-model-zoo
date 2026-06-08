@@ -1349,6 +1349,92 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
     assert captured["num_samples"] is None
 
 
+def test_load_librispeech_raises_actionable_error_for_missing_audio_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify dataset schema errors include dataset and column context."""
+
+    class DummyDataset:
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+            return self
+
+        def __iter__(self):
+            yield {"id": "sample-0", "text": "hello"}
+
+    def fake_load_dataset(name, config=None, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return DummyDataset()
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        type("DatasetsStub", (), {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)})(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "soundfile",
+        type(
+            "SoundfileStub",
+            (),
+            {"read": staticmethod(lambda *args, **kwargs: (np.asarray([], dtype=np.float32), 16000))},
+        )(),
+    )
+
+    args = asr_bench._parse_args(["--num-samples", "1"])
+
+    with pytest.raises(ValueError, match="audio column 'audio'.*openslr/librispeech_asr.*test"):
+        asr_bench._load_librispeech(args)
+
+
+def test_load_librispeech_raises_actionable_error_for_non_mapping_audio_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify malformed audio payloads raise a contextual ValueError."""
+
+    class DummyDataset:
+        def cast_column(self, name, feature):  # type: ignore[no-untyped-def]
+            return self
+
+        def shuffle(self, seed=None):  # type: ignore[no-untyped-def]
+            return self
+
+        def __iter__(self):
+            yield {"id": "sample-0", "audio": "bad-audio", "text": "hello"}
+
+    def fake_load_dataset(name, config=None, split=None, streaming=None):  # type: ignore[no-untyped-def]
+        return DummyDataset()
+
+    class AudioStub:
+        def __init__(self, *, decode):  # type: ignore[no-untyped-def]
+            self.decode = decode
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        type("DatasetsStub", (), {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)})(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "soundfile",
+        type(
+            "SoundfileStub",
+            (),
+            {"read": staticmethod(lambda *args, **kwargs: (np.asarray([], dtype=np.float32), 16000))},
+        )(),
+    )
+
+    args = asr_bench._parse_args(["--num-samples", "1"])
+
+    with pytest.raises(ValueError, match="audio column 'audio' must contain a mapping payload"):
+        asr_bench._load_librispeech(args)
+
+
 def test_load_librispeech_supports_predecoded_array_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify streaming loader accepts already-decoded array/sampling_rate audio payloads."""
 
@@ -1580,3 +1666,53 @@ def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
     asr_bench._make_rtf_chart(tmp_path, [{"model": "openai/whisper-small", "rtf": 0.5, "wer": 0.1, "cer": 0.02}])
 
     assert captured["folder_labels"] == [tmp_path.name]
+
+
+def test_write_combined_outputs_unions_row_headers_for_device_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify combined CSV tolerates device metric keys that differ by row."""
+
+    base_asr = {
+        "num_samples": 1,
+        "total_audio_s": 1.0,
+        "total_generate_s": 0.5,
+        "wer": 0.1,
+        "cer": 0.02,
+        "mean_latency_s": 0.5,
+        "p50_latency_s": 0.5,
+        "p95_latency_s": 0.5,
+        "throughput_samples_per_s": 2.0,
+        "rtf": 0.5,
+        "inverse_rtf": 2.0,
+        "decode_tokens_per_s": 10.0,
+        "avg_tokens_per_sample": 5.0,
+    }
+    payload_a = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "model-a",
+        "num_beams": None,
+        "asr": dict(base_asr),
+        "device": {"avg_power_w": 1.0},
+    }
+    payload_b = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "model-b",
+        "num_beams": 4,
+        "asr": dict(base_asr, wer=0.2),
+        "device": {"total_energy_j": 3.5},
+    }
+    (tmp_path / "model-a.json").write_text(asr_bench.json.dumps(payload_a), encoding="utf-8")
+    (tmp_path / "model-b.json").write_text(asr_bench.json.dumps(payload_b), encoding="utf-8")
+
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", lambda out_dir, rows: None)
+    monkeypatch.setattr(asr_bench, "_write_summary_markdown", lambda *args, **kwargs: None)
+
+    asr_bench._write_combined_outputs(tmp_path)
+
+    csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
+    assert "avg_power_w" in csv_text
+    assert "total_energy_j" in csv_text
+    assert "model-a" in csv_text
+    assert "model-b" in csv_text

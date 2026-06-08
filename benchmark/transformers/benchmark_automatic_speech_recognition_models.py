@@ -1,6 +1,4 @@
 import argparse
-import csv
-import dataclasses
 import json
 import logging  # noqa: F401
 import os
@@ -44,6 +42,19 @@ from benchmark.transformers.asr_metrics import (
     summarize_timings,
     summary_to_dict,
 )
+from benchmark.transformers.asr_output_utils import make_rtf_chart as _make_rtf_chart_shared
+from benchmark.transformers.asr_output_utils import write_combined_outputs as _write_combined_outputs_shared
+from benchmark.transformers.asr_pipeline_utils import asr_pipeline_inputs as _asr_pipeline_inputs_shared
+from benchmark.transformers.asr_pipeline_utils import build_asr_pipeline as _build_asr_pipeline_shared
+from benchmark.transformers.asr_pipeline_utils import (
+    extract_generated_token_count as _extract_generated_token_count_shared,
+)
+from benchmark.transformers.asr_pipeline_utils import extract_hypothesis_text as _extract_hypothesis_text_shared
+from benchmark.transformers.asr_pipeline_utils import (
+    is_retryable_generate_kwargs_error as _is_retryable_generate_kwargs_error_shared,
+)
+from benchmark.transformers.asr_pipeline_utils import retryable_generate_kwargs as _retryable_generate_kwargs_shared
+from benchmark.transformers.asr_pipeline_utils import run_one_sample as _run_one_sample_shared
 from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
     configure_native_qwen3_asr_generate as _configure_native_qwen3_asr_generate,
 )
@@ -78,7 +89,9 @@ from benchmark.transformers.benchmark_target_utils import (
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_device_tracking_args as _add_device_tracking_args,
 )
@@ -101,14 +114,18 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_time_series as _extract_device_time_series_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import iter_core_modes as _iter_core_modes_common
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import print_device_status as _print_device_status_common
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    print_device_status as _print_device_status_common,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     resolve_default_device as _resolve_default_device_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     resolve_default_device_backend as _resolve_default_device_backend_common,
 )
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import stop_tracker_safe as _stop_tracker_safe_common
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    stop_tracker_safe as _stop_tracker_safe_common,
+)
 
 
 @dataclass(frozen=True)
@@ -206,10 +223,7 @@ def _asr_pipeline_call_kwargs(generate_kwargs: Mapping[str, Any]) -> dict[str, A
 
 
 def _asr_pipeline_inputs(sample: Mapping[str, Any]) -> list[tuple[Any, dict[str, Any]]]:
-    audio = sample["audio"]
-    audio_array = audio["array"]
-    sampling_rate = int(audio["sampling_rate"])
-    return [({"raw": audio_array, "sampling_rate": sampling_rate}, {})]
+    return _asr_pipeline_inputs_shared(sample)
 
 
 def _sample_audio_duration_s(sample: Mapping[str, Any]) -> float:
@@ -228,44 +242,15 @@ def _should_skip_whisper_long_form_sample(model_id: str, sample: Mapping[str, An
 
 
 def _retryable_generate_kwargs(generate_kwargs: Mapping[str, Any]) -> list[dict[str, Any]]:
-    current = dict(generate_kwargs)
-    attempts = [dict(current)]
-    for key in ("task", "language", "return_timestamps", "early_stopping"):
-        if key in current:
-            current = dict(current)
-            current.pop(key, None)
-            attempts.append(dict(current))
-    return attempts
+    return _retryable_generate_kwargs_shared(generate_kwargs)
 
 
 def _is_retryable_generate_kwargs_error(exc: TypeError | ValueError) -> bool:
-    """Return whether an exception indicates unsupported pipeline generate kwargs."""
-
-    message = str(exc).lower()
-    known_kwargs = ("task", "language", "return_timestamps", "early_stopping", "generate_kwargs")
-    has_known_kwarg = any(keyword in message for keyword in known_kwargs)
-    has_unsupported_shape = any(keyword in message for keyword in ("unexpected keyword", "unsupported", "unused"))
-    return has_known_kwarg and has_unsupported_shape
+    return _is_retryable_generate_kwargs_error_shared(exc)
 
 
 def _extract_hypothesis_text(output: Any) -> str:
-    if isinstance(output, str):
-        return output
-    if isinstance(output, dict):
-        text = output.get("text")
-        if isinstance(text, str):
-            return text
-        chunks = output.get("chunks")
-        if isinstance(chunks, list):
-            parts: list[str] = []
-            for chunk in chunks:
-                if isinstance(chunk, dict):
-                    chunk_text = chunk.get("text")
-                    if isinstance(chunk_text, str) and chunk_text.strip():
-                        parts.append(chunk_text.strip())
-            if parts:
-                return " ".join(parts)
-    return str(output)
+    return _extract_hypothesis_text_shared(output)
 
 
 def _resolve_model_id_from_mxq_name(model_part: str, available_model_ids: Sequence[str]) -> str | None:
@@ -471,70 +456,27 @@ def _build_asr_pipeline(
     core_mode: str | None,
     native_generate_kwargs: Mapping[str, Any] | None = None,
 ):
-    if target.is_original and _is_qwen3_asr_model(target.model_id):
-        try:
-            import qwen_asr
-        except ModuleNotFoundError as exc:
-            missing = exc.name or ""
-            if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-                raise ModuleNotFoundError(
-                    "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                    "Install it with: pip install -U qwen-asr"
-                ) from exc
-            raise
-
-        _quiet_apscheduler_info_logs()
-
-        resolved_native_generate_kwargs = dict(native_generate_kwargs or {})
-        native_kwargs: dict[str, Any] = {
-            "trust_remote_code": trust_remote_code,
-            "max_inference_batch_size": 1,
-            "max_new_tokens": int(resolved_native_generate_kwargs.get("max_new_tokens", 512)),
-        }
-        torch_dtype = _resolve_torch_dtype(dtype)
-        if device_map:
-            native_kwargs["device_map"] = device_map
-        elif _is_cuda_device(device):
-            native_kwargs["device_map"] = device
-        if torch_dtype is not None:
-            native_kwargs["torch_dtype"] = torch_dtype
-        if revision:
-            native_kwargs["revision"] = revision
-        pipe = qwen_asr.Qwen3ASRModel.from_pretrained(target.model_id, **native_kwargs)
-        _move_native_qwen3_asr_to_device(pipe, device=device, device_map=device_map)
-        return _configure_native_qwen3_asr_generate(pipe, resolved_native_generate_kwargs)
-
     from transformers import pipeline as hf_pipeline
 
-    if _is_qwen3_asr_model(target.model_id):
-        _ensure_qwen3_asr_backend_registered()
-
-    kwargs: dict[str, Any] = {
-        "task": "automatic-speech-recognition",
-        "model": target.model_id,
-        "trust_remote_code": trust_remote_code,
-    }
-    if revision:
-        kwargs["revision"] = revision
-    if device is not None:
-        kwargs["device"] = device
-    if device_map:
-        kwargs["device_map"] = device_map
-    model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_asr_core_mode_model_kwargs(model_kwargs, target.model_id, core_mode)
-    if target.mxq_path:
-        model_kwargs["mxq_path"] = target.mxq_path
-    if model_kwargs:
-        kwargs["model_kwargs"] = model_kwargs
-    if dtype:
-        kwargs["dtype"] = dtype
-        try:
-            return hf_pipeline(**kwargs)
-        except TypeError:
-            kwargs.pop("dtype", None)
-            kwargs["torch_dtype"] = dtype
-            return hf_pipeline(**kwargs)
-    return hf_pipeline(**kwargs)
+    return _build_asr_pipeline_shared(
+        target,
+        revision=revision,
+        device=device,
+        device_map=device_map,
+        dtype=dtype,
+        trust_remote_code=trust_remote_code,
+        core_mode=core_mode,
+        native_generate_kwargs=native_generate_kwargs,
+        is_cuda_device=_is_cuda_device,
+        resolve_torch_dtype=_resolve_torch_dtype,
+        is_qwen3_asr_model=_is_qwen3_asr_model,
+        quiet_apscheduler_info_logs=_quiet_apscheduler_info_logs,
+        move_native_qwen3_asr_to_device=_move_native_qwen3_asr_to_device,
+        configure_native_qwen3_asr_generate=_configure_native_qwen3_asr_generate,
+        ensure_qwen3_asr_backend_registered=_ensure_qwen3_asr_backend_registered,
+        apply_asr_core_mode_model_kwargs=_apply_asr_core_mode_model_kwargs,
+        hf_pipeline=hf_pipeline,
+    )
 
 
 def _resample_audio(audio_array: Any, source_rate: int, target_rate: int = 16000) -> Any:
@@ -636,46 +578,7 @@ def _consume_warmup_samples(
 
 
 def _extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
-    if isinstance(output, dict):
-        for key in ("token_ids", "tokens", "generated_token_ids"):
-            value = output.get(key)
-            if isinstance(value, list):
-                return len(value)
-
-    def _extract_input_ids_length(encoded: Any) -> int | None:
-        if isinstance(encoded, Mapping):
-            input_ids = encoded.get("input_ids")
-        else:
-            input_ids = getattr(encoded, "input_ids", None)
-        if input_ids is None:
-            return None
-        try:
-            return len(input_ids)
-        except TypeError:
-            return None
-
-    processor = getattr(pipe, "processor", None)
-    candidates = [
-        getattr(pipe, "tokenizer", None),
-        getattr(processor, "tokenizer", None) if processor is not None else None,
-        processor,
-    ]
-    for tokenizer in candidates:
-        if not callable(tokenizer):
-            continue
-        try:
-            encoded = tokenizer(text, add_special_tokens=False)
-        except TypeError:
-            try:
-                encoded = tokenizer(text)
-            except (AttributeError, TypeError, ValueError, RuntimeError):
-                continue
-        except (AttributeError, ValueError, RuntimeError):
-            continue
-        input_ids_length = _extract_input_ids_length(encoded)
-        if input_ids_length is not None:
-            return input_ids_length
-    return len(text.split())
+    return _extract_generated_token_count_shared(pipe, output, text)
 
 
 def _run_one_sample(
@@ -685,69 +588,19 @@ def _run_one_sample(
     *,
     native_language: str | None = None,
 ) -> SampleTiming:
-    audio = sample["audio"]
-    audio_array = audio["array"]
-    sampling_rate = int(audio["sampling_rate"])
-    start = time.perf_counter()
-
-    if hasattr(pipe, "transcribe"):
-        transcribe_kwargs: dict[str, Any] = {"audio": (audio_array, sampling_rate)}
-        if native_language is not None and _supports_native_transcribe_language(pipe):
-            transcribe_kwargs["language"] = native_language
-        results = pipe.transcribe(**transcribe_kwargs)
-        if not results:
-            raise RuntimeError("Qwen3-ASR native transcribe returned no results.")
-        elapsed = time.perf_counter() - start
-        hypothesis_raw = str(results[0].text)
-        token_count = _extract_generated_token_count(pipe, results[0], hypothesis_raw)
-        return SampleTiming(
-            sample_id=str(sample["id"]),
-            audio_duration_s=float(len(audio_array)) / float(sampling_rate),
-            generate_time_s=float(elapsed),
-            num_generated_tokens=int(token_count),
-            num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
-            reference=str(sample["reference"]),
-            hypothesis=hypothesis_raw,
-        )
-
-    output = None
-    last_error: BaseException | None = None
-    for pipeline_input, extra_kwargs in _asr_pipeline_inputs(sample):
-        for attempt_kwargs in _retryable_generate_kwargs(generate_kwargs):
-            try:
-                output = pipe(
-                    pipeline_input,
-                    **extra_kwargs,
-                    **_asr_pipeline_call_kwargs(attempt_kwargs),
-                )
-                break
-            except TypeError as exc:
-                if _is_retryable_generate_kwargs_error(exc):
-                    last_error = exc
-                    continue
-                raise
-            except ValueError as exc:
-                if _is_retryable_generate_kwargs_error(exc):
-                    last_error = exc
-                    continue
-                raise
-        if output is not None:
-            break
-    if output is None:
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("ASR pipeline produced no output.")
-    elapsed = time.perf_counter() - start
-    hypothesis_raw = _extract_hypothesis_text(output)
-    token_count = _extract_generated_token_count(pipe, output, hypothesis_raw)
-    return SampleTiming(
-        sample_id=str(sample["id"]),
-        audio_duration_s=float(len(audio_array)) / float(sampling_rate),
-        generate_time_s=float(elapsed),
-        num_generated_tokens=int(token_count),
-        num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
-        reference=str(sample["reference"]),
-        hypothesis=hypothesis_raw,
+    return _run_one_sample_shared(
+        pipe=pipe,
+        sample=sample,
+        generate_kwargs=generate_kwargs,
+        native_language=native_language,
+        time_module=time,
+        supports_native_transcribe_language=_supports_native_transcribe_language,
+        pipeline_inputs_builder=_asr_pipeline_inputs,
+        pipeline_call_kwargs_builder=_asr_pipeline_call_kwargs,
+        retryable_generate_kwargs_builder=_retryable_generate_kwargs,
+        retryable_error_checker=_is_retryable_generate_kwargs_error,
+        hypothesis_text_extractor=_extract_hypothesis_text,
+        generated_token_count_extractor=_extract_generated_token_count,
     )
 
 
@@ -843,128 +696,20 @@ def _write_target_json(
 
 
 def _write_combined_outputs(out_dir: Path) -> None:
-    rows: list[dict[str, Any]] = []
-    summary_field_names = {field.name for field in dataclasses.fields(ASRMetricSummary)}
-    for path in sorted(out_dir.glob("*.json")):
-        if path.name == _HOST_PC_INFO_FILENAME:
-            continue
-        try:
-            with path.open("r", encoding="utf-8") as file:
-                payload = json.load(file)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if payload.get("benchmark_type") != "automatic-speech-recognition":
-            continue
-        asr = payload.get("asr")
-        if not isinstance(asr, dict):
-            continue
-        try:
-            summary_payload = {name: asr[name] for name in summary_field_names}
-            summary = ASRMetricSummary(**summary_payload)
-        except KeyError as exc:
-            print(f"Warning: skipping {path.name} because ASR summary is missing field: {exc.args[0]}")
-            continue
-        except TypeError as exc:
-            print(f"Warning: skipping {path.name} because ASR summary is invalid: {exc}")
-            continue
-        device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
-        payload_num_beams = payload.get("num_beams")
-        row_num_beams = int(payload_num_beams) if isinstance(payload_num_beams, int) else None
-        rows.append(format_metrics_row(str(payload.get("model", path.stem)), row_num_beams, summary, device_metric))
-
-    combined_csv = out_dir / "combined.csv"
-    combined_md = out_dir / "combined.md"
-    if rows:
-        headers = list(rows[0].keys())
-        with combined_csv.open("w", encoding="utf-8", newline="") as file:
-            writer = csv.DictWriter(file, fieldnames=headers)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({key: ("" if value is None else value) for key, value in row.items()})
-
-        markdown_rows = []
-        for row in rows:
-            markdown_rows.append(
-                [
-                    row.get("model", ""),
-                    row.get("num_beams", ""),
-                    f"{100.0 * float(row.get('wer', 0.0)):.2f}",
-                    f"{100.0 * float(row.get('cer', 0.0)):.2f}",
-                    f"{float(row.get('mean_latency_s', 0.0)):.4f}",
-                    f"{float(row.get('p95_latency_s', 0.0)):.4f}",
-                    f"{float(row.get('throughput_samples_per_s', 0.0)):.4f}",
-                    f"{float(row.get('rtf', 0.0)):.4f}",
-                    f"{float(row.get('inverse_rtf', 0.0)):.4f}",
-                    f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
-                ]
-            )
-        combined_md.write_text(
-            _markdown_table_common(
-                [
-                    "model",
-                    "num_beams",
-                    "WER(%)",
-                    "CER(%)",
-                    "mean_latency_s",
-                    "p95_latency_s",
-                    "samples_per_s",
-                    "RTF",
-                    "inverse_RTF",
-                    "decode_tokens_per_s",
-                ],
-                markdown_rows,
-            ),
-            encoding="utf-8",
-        )
-    else:
-        combined_md.write_text("No ASR results found.\n", encoding="utf-8")
-
-    _make_rtf_chart(out_dir, rows)
-    _write_summary_markdown(
-        out_dir / "summary.md",
-        title="Automatic Speech Recognition Benchmark Summary",
-        host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
-        table_markdown_path=combined_md,
-        plot_paths=_existing_png_paths(
-            out_dir,
-            prefixes=("rtf", "wer", "cer"),
-        ),
-        plot_tables={},
+    _write_combined_outputs_shared(
+        out_dir=out_dir,
+        host_pc_info_filename=_HOST_PC_INFO_FILENAME,
+        asr_metric_summary_cls=ASRMetricSummary,
+        format_metrics_row_func=format_metrics_row,
+        markdown_table_func=_markdown_table_common,
+        existing_png_paths_func=_existing_png_paths,
+        write_summary_markdown_func=_write_summary_markdown,
+        make_rtf_chart_func=_make_rtf_chart,
     )
 
 
 def _make_rtf_chart(out_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
-    if not rows:
-        return
-    metrics_by_folder: list[dict[str, Any]] = []
-    folder_metrics: dict[str, Any] = {}
-    for row in rows:
-        model_name = str(row.get("model", ""))
-        folder_metrics[model_name] = row
-    metrics_by_folder.append(folder_metrics)
-    models = sorted(folder_metrics.keys())
-    labels = [out_dir.name]
-
-    def _selector(key: str, scale: float = 1.0):
-        return lambda item: None if item.get(key) is None else scale * float(item[key])
-
-    for filename, key, title, x_label, scale in (
-        ("rtf.png", "rtf", "Real-Time Factor", "RTF", 1.0),
-        ("wer.png", "wer", "Word Error Rate", "WER (%)", 100.0),
-        ("cer.png", "cer", "Character Error Rate", "CER (%)", 100.0),
-    ):
-        try:
-            plot_scalar_chart(
-                models=models,
-                folder_labels=labels,
-                metrics_by_folder=metrics_by_folder,
-                scalar_selector=_selector(key, scale),
-                title=title,
-                x_label=x_label,
-                output_path=out_dir / filename,
-            )
-        except Exception as exc:
-            print(f"Warning: failed to build {filename}: {exc}")
+    _make_rtf_chart_shared(out_dir=out_dir, rows=rows, plot_scalar_chart_func=plot_scalar_chart)
 
 
 def _resolve_results_dir(args: argparse.Namespace) -> Path:
