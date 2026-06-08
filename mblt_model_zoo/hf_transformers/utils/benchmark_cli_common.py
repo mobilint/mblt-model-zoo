@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any, Optional, Protocol, TypeAlias
 
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
@@ -427,16 +427,16 @@ def _trace_from_method(tracker: DeviceTracker, method_name: str) -> list[DeviceT
         return []
 
 
-def _trace_from_first_available_method(
+def _trace_from_method_with_fallback(
     tracker: DeviceTracker,
-    method_names: Sequence[str],
+    method_name: str,
+    fallback_method_name: str,
 ) -> list[DeviceTracePoint]:
-    """Return the first non-empty trace from the ordered tracker method candidates."""
-    for method_name in method_names:
-        trace = _trace_from_method(tracker, method_name)
-        if trace:
-            return trace
-    return []
+    """Return a trace from a preferred tracker method, falling back for GPU trackers."""
+    trace = _trace_from_method(tracker, method_name)
+    if trace:
+        return trace
+    return _trace_from_method(tracker, fallback_method_name)
 
 
 def _trace_from_attr(tracker: DeviceTracker, attr_name: str) -> list[DeviceTracePoint]:
@@ -446,33 +446,23 @@ def _trace_from_attr(tracker: DeviceTracker, attr_name: str) -> list[DeviceTrace
 def extract_device_time_series(tracker: DeviceTracker) -> DeviceTimeSeriesMap:
     """Extract JSON-safe device metric time-series from mblt-tracker 1.x-compatible trackers."""
     trace_getters: dict[str, Callable[[], list[DeviceTracePoint]]] = {
-        "power_w": lambda: _trace_from_first_available_method(tracker, ("get_total_power_trace", "get_trace")),
-        "utilization_pct": lambda: _trace_from_first_available_method(
+        "power_w": lambda: _trace_from_method_with_fallback(tracker, "get_total_power_trace", "get_trace"),
+        "utilization_pct": lambda: _trace_from_method_with_fallback(
             tracker,
-            ("get_total_utilization_trace", "get_util_trace"),
+            "get_total_utilization_trace",
+            "get_util_trace",
         ),
-        "temperature_c": lambda: _trace_from_first_available_method(
+        "temperature_c": lambda: _trace_from_method_with_fallback(
             tracker,
-            ("get_temperature_trace", "get_temp_trace"),
+            "get_temperature_trace",
+            "get_temp_trace",
         ),
         "memory_used_mb": lambda: _trace_from_attr(tracker, "_mem_used_trace"),
         "memory_used_pct": lambda: _trace_from_attr(tracker, "_mem_used_pct_trace"),
-        "npu_power_w": lambda: _trace_from_first_available_method(
-            tracker,
-            ("get_npu_rail_power_trace", "get_npu_power_trace"),
-        ),
-        "ddr_power_w": lambda: _trace_from_first_available_method(
-            tracker,
-            ("get_ddr_rail_power_trace", "get_ddr_power_trace"),
-        ),
-        "pmic_power_w": lambda: _trace_from_first_available_method(
-            tracker,
-            ("get_pmic_rail_power_trace", "get_pmic_power_trace"),
-        ),
-        "goldfinger_power_w": lambda: _trace_from_first_available_method(
-            tracker,
-            ("get_goldfinger_rail_power_trace", "get_goldfinger_power_trace"),
-        ),
+        "npu_power_w": lambda: _trace_from_method(tracker, "get_npu_rail_power_trace"),
+        "ddr_power_w": lambda: _trace_from_method(tracker, "get_ddr_rail_power_trace"),
+        "pmic_power_w": lambda: _trace_from_method(tracker, "get_pmic_rail_power_trace"),
+        "goldfinger_power_w": lambda: _trace_from_method(tracker, "get_goldfinger_rail_power_trace"),
     }
     return {key: getter() for key, getter in trace_getters.items()}
 

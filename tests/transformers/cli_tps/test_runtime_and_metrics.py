@@ -2028,7 +2028,7 @@ def test_extract_device_metric_normalizes_tracker_023_shape():
     assert all(value is None or isinstance(value, float) for value in metric.values())
 
 
-def test_extract_device_time_series_normalizes_tracker_023_traces():
+def test_extract_device_time_series_preserves_gpu_legacy_total_traces():
     class _FakeTracker:
         _mem_used_trace = [(1.0, 512), ("bad", 768), (2.0, "bad")]
         _mem_used_pct_trace = [(1.0, 25.0)]
@@ -2042,18 +2042,6 @@ def test_extract_device_time_series_normalizes_tracker_023_traces():
         def get_temp_trace(self):
             return [(1.0, 55.0), [2.0, 56.0]]
 
-        def get_npu_power_trace(self):
-            return [(1.0, 8.0)]
-
-        def get_ddr_power_trace(self):
-            return [(1.0, 1.5)]
-
-        def get_pmic_power_trace(self):
-            return [(1.0, 0.5)]
-
-        def get_goldfinger_power_trace(self):
-            return [(1.0, 12.0)]
-
     series = extract_device_time_series(_FakeTracker())
 
     assert series["power_w"] == [
@@ -2062,7 +2050,8 @@ def test_extract_device_time_series_normalizes_tracker_023_traces():
     ]
     assert series["temperature_c"] == [{"timestamp_s": 1.0, "value": 55.0}]
     assert series["memory_used_mb"] == [{"timestamp_s": 1.0, "value": 512.0}]
-    assert series["goldfinger_power_w"] == [{"timestamp_s": 1.0, "value": 12.0}]
+    assert series["npu_power_w"] == []
+    assert series["goldfinger_power_w"] == []
 
 
 def test_parse_npu_rail_metrics_accepts_default_and_all():
@@ -2114,7 +2103,7 @@ def test_build_device_tracker_forwards_npu_rail_metrics(monkeypatch: pytest.Monk
     assert created == {"interval": 1.0, "npu_id": 0, "rail_metrics": "all"}
 
 
-def test_extract_device_time_series_prefers_tracker_100_trace_aliases():
+def test_extract_device_time_series_uses_tracker_100_trace_methods():
     class _FakeTracker:
         def get_total_power_trace(self):
             return [(1.0, 100.0)]
@@ -2138,25 +2127,25 @@ def test_extract_device_time_series_prefers_tracker_100_trace_aliases():
             return [(4.0, 10.0)]
 
         def get_npu_power_trace(self):
-            return [(4.0, 1.0)]
+            raise AssertionError("legacy NPU rail alias must not be used")
 
         def get_ddr_rail_power_trace(self):
             return [(5.0, 2.0)]
 
         def get_ddr_power_trace(self):
-            return [(5.0, 0.2)]
+            raise AssertionError("legacy DDR rail alias must not be used")
 
         def get_pmic_rail_power_trace(self):
             return [(6.0, 3.0)]
 
         def get_pmic_power_trace(self):
-            return [(6.0, 0.3)]
+            raise AssertionError("legacy PMIC rail alias must not be used")
 
         def get_goldfinger_rail_power_trace(self):
             return [(7.0, 4.0)]
 
         def get_goldfinger_power_trace(self):
-            return [(7.0, 0.4)]
+            raise AssertionError("legacy goldfinger rail alias must not be used")
 
     series = extract_device_time_series(_FakeTracker())
 
@@ -2199,6 +2188,20 @@ def test_cli_tps_device_npu_rail_metrics_parsing():
     )
 
     assert args.device_npu_rail_metrics == ["npu", "ddr"]
+
+
+def test_cli_tps_device_npu_rail_metrics_default():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ]
+    )
+
+    assert args.device_npu_rail_metrics == "npu"
 
 
 def test_cli_tps_device_npu_id_rejects_negative_values():

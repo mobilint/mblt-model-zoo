@@ -211,11 +211,27 @@ def test_benchmark_parser_accepts_npu_rail_metrics(module, command) -> None:
     assert args.device_npu_rail_metrics == "all"
 
 
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_parser_defaults_npu_rail_metrics(module, command) -> None:
+    """Verify benchmark subcommand parsers keep the default low-latency NPU rail."""
+    args = module._build_arg_parser().parse_args([command])
+
+    assert args.device_npu_rail_metrics == "npu"
+
+
 def test_asr_benchmark_parser_accepts_npu_rail_metrics() -> None:
     """Verify the ASR benchmark parser exposes the shared NPU rail metric option."""
     args = asr_bench._parse_args(["--device-npu-rail-metrics", "npu,ddr"])
 
     assert args.device_npu_rail_metrics == ["npu", "ddr"]
+
+
+def test_asr_benchmark_parser_defaults_npu_rail_metrics() -> None:
+    """Verify the ASR benchmark parser keeps the default low-latency NPU rail."""
+    args = asr_bench._parse_args([])
+
+    assert args.device_npu_rail_metrics == "npu"
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
