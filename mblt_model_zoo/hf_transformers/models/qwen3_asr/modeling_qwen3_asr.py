@@ -183,13 +183,14 @@ class MobilintQwen3ASRTextModel(
 
     def _beam_llm_forward(
         self,
+        input_ids: torch.LongTensor,
         inputs_embeds: torch.Tensor,
         past_key_values: MobilintBeamCache,
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
     ) -> torch.Tensor:
-        """Run Qwen3-ASR decoder by swapping one active beam cache at a time."""
+        """Run Qwen3-ASR decoder by forwarding only suffixes missing from active cache."""
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected rank-3 inputs_embeds for beam decode, got {tuple(inputs_embeds.shape)}")
 
@@ -200,22 +201,44 @@ class MobilintQwen3ASRTextModel(
 
         past_key_values.ensure_batch_size(batch_size)
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
-        num_of_chunks = math.ceil(sequence_length / resolved_prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
         logits_list: list[torch.Tensor] = []
         self.npu_time = 0.0 if count_npu_time else None
+        input_ids = input_ids.view(batch_size, -1)
 
         for beam_index in range(batch_size):
-            initial_cache_size = past_key_values.load_beam_cache(beam_index)
-            timing_phase = "prefill" if initial_cache_size == 0 else "decode"
+            previous_tokens = past_key_values.get_beam_tokens(beam_index)
+            target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens)
+            previous_length = len(previous_tokens)
+            local_start_index = max(0, prefix_length - previous_length)
+            timing_phase = "prefill" if prefix_length == 0 else "decode"
             row_logits_ndarray: np.ndarray | None = None
-            row_embeds_numpy = inputs_embeds[beam_index : beam_index + 1].type(torch.float32).cpu().numpy()
-            row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
 
-            for chunk_index in range(num_of_chunks):
+            if prefix_length < previous_length:
+                suffix_tokens = torch.tensor(
+                    [target_tokens[prefix_length:]],
+                    dtype=torch.long,
+                    device=inputs_embeds.device,
+                )
+                row_embeds = self.embed_tokens(suffix_tokens)
+            else:
+                row_embeds = inputs_embeds[beam_index : beam_index + 1, local_start_index:, :]
+
+            suffix_length = int(row_embeds.shape[1])
+            if suffix_length <= 0:
+                row_embeds = inputs_embeds[beam_index : beam_index + 1, -1:, :]
+                suffix_length = 1
+                prefix_length = max(0, len(target_tokens) - 1)
+
+            row_embeds_numpy = row_embeds.type(torch.float32).cpu().numpy()
+            row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
+            num_suffix_chunks = math.ceil(suffix_length / resolved_prefill_chunk_size)
+
+            for chunk_index in range(num_suffix_chunks):
                 start_index = chunk_index * resolved_prefill_chunk_size
-                end_index = min(start_index + resolved_prefill_chunk_size, sequence_length)
-                cache_size = past_key_values.get_seq_length(beam_index)
+                end_index = min(start_index + resolved_prefill_chunk_size, suffix_length)
+                cache_size = prefix_length + start_index
                 chunk = row_embeds_numpy[:, :, start_index:end_index, :]
 
                 if count_npu_time:
@@ -230,9 +253,9 @@ class MobilintQwen3ASRTextModel(
 
                 assert result is not None, "mxq infer result is None!"
                 row_logits_ndarray = result[0]
-                past_key_values.update_cache_position(cache_position[start_index:end_index], index=beam_index)
 
-            past_key_values.dump_beam_cache(beam_index)
+            past_key_values.commit_beam_tokens(beam_index, target_tokens)
+            past_key_values.commit_active_tokens(target_tokens)
             if row_logits_ndarray is None:
                 raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
             row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
@@ -289,7 +312,10 @@ class MobilintQwen3ASRTextModel(
             )
 
         if isinstance(past_key_values, MobilintBeamCache):
+            if input_ids is None:
+                raise ValueError("MobilintBeamCache requires input_ids to track Qwen3-ASR beam token histories.")
             logits = self._beam_llm_forward(
+                input_ids=input_ids,
                 inputs_embeds=inputs_embeds,
                 past_key_values=past_key_values,
                 cache_position=cache_position,

@@ -101,47 +101,90 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
 
+    def _embed_token_suffix(
+        self,
+        token_history: list[int],
+        start_index: int,
+        *,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Embed a suffix of a Whisper decoder token history with absolute positions."""
+        suffix_tokens = token_history[start_index:]
+        if not suffix_tokens:
+            raise ValueError("Cannot embed an empty Whisper token suffix.")
+        input_ids = torch.tensor([suffix_tokens], dtype=torch.long, device=device)
+        position_ids = torch.arange(start_index, len(token_history), dtype=torch.long, device=device).unsqueeze(0)
+        inputs_embeds = self.embed_tokens(input_ids)
+        positions = self.embed_positions(input_ids, past_key_values_length=start_index, position_ids=position_ids)
+        return (inputs_embeds + positions.to(inputs_embeds.device)).unsqueeze(1)
+
+    def _normalize_decoder_logits(
+        self,
+        logits: torch.Tensor,
+        *,
+        sequence_length: int,
+    ) -> torch.Tensor:
+        """Normalize raw Whisper decoder logits to ``(batch, 1, seq_len, vocab)``."""
+        if logits.ndim == 2 and int(logits.shape[0]) == sequence_length:
+            return logits.reshape(1, 1, sequence_length, -1)
+        if logits.ndim == 3:
+            return logits.unsqueeze(0)
+        return logits
+
     def decoder_forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         past_key_values: Union[MobilintWhisperCache, None],
         cache_position: torch.Tensor,
+        input_ids: Union[torch.LongTensor, None] = None,
     ) -> torch.Tensor:
-        """Run Whisper decoder MXQ by swapping one active beam cache at a time."""
+        """Run Whisper decoder MXQ by replaying only beam suffixes missing from active cache."""
         batch_size = int(hidden_states.shape[0])
         if past_key_values is None:
             return super().decoder_forward(hidden_states, encoder_hidden_states, past_key_values, cache_position)
 
-        if batch_size <= 1:
-            past_key_values.load_beam_cache(0)
-            logits = super().decoder_forward(hidden_states, encoder_hidden_states, past_key_values, cache_position)
-            past_key_values.dump_beam_cache(0)
-            return logits
+        if input_ids is None:
+            raise ValueError("MobilintWhisperCache requires input_ids to track beam token histories.")
+
+        input_ids = input_ids.view(batch_size, -1)
 
         past_key_values.ensure_batch_size(batch_size)
         if encoder_hidden_states.shape[0] == 1 and batch_size > 1:
             encoder_hidden_states = encoder_hidden_states.expand(batch_size, *encoder_hidden_states.shape[1:])
-        sequence_length = int(hidden_states.shape[2])
 
-        logits_list = []
+        logits_list: list[torch.Tensor] = []
+        logits_by_target_tokens: dict[tuple[int, ...], torch.Tensor] = {}
         mxq_model = self.npu_backend.mxq_model
         for beam_index in range(batch_size):
-            cache_size = past_key_values.load_beam_cache(beam_index)
-            hidden_states_numpy = hidden_states[beam_index : beam_index + 1].type(torch.float32).cpu().numpy()
+            target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
+            target_key = tuple(target_tokens)
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens)
+            if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
+                logits_list.append(logits_by_target_tokens[target_key])
+                past_key_values.commit_beam_tokens(beam_index, target_tokens)
+                continue
+            if prefix_length == len(target_tokens):
+                prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
+            suffix_hidden_states = self._embed_token_suffix(
+                target_tokens,
+                prefix_length,
+                device=hidden_states.device,
+            )
+            suffix_length = int(suffix_hidden_states.shape[2])
+            hidden_states_numpy = suffix_hidden_states.type(torch.float32).cpu().numpy()
             encoder_hidden_states_numpy = (
                 encoder_hidden_states[beam_index : beam_index + 1].type(torch.float32).cpu().numpy()
             )
-            result = mxq_model.infer([hidden_states_numpy, encoder_hidden_states_numpy], None, cache_size)
+            result = mxq_model.infer([hidden_states_numpy, encoder_hidden_states_numpy], None, prefix_length)
             assert result is not None, "mxq infer result is None!"
             logits = torch.tensor(result[0], dtype=hidden_states.dtype, device=hidden_states.device)
-            if logits.ndim == 2 and int(logits.shape[0]) == sequence_length:
-                logits = logits.reshape(1, 1, sequence_length, -1)
-            elif logits.ndim == 3:
-                logits = logits.unsqueeze(0)
-            logits_list.append(logits)
-            past_key_values.update_cache_position(cache_position, index=beam_index)
-            past_key_values.dump_beam_cache(beam_index)
+            logits = self._normalize_decoder_logits(logits, sequence_length=suffix_length)
+            current_logits = logits[:, :, -input_ids.shape[1] :, :]
+            logits_list.append(current_logits)
+            logits_by_target_tokens[target_key] = current_logits
+            past_key_values.commit_beam_tokens(beam_index, target_tokens)
+            past_key_values.commit_active_tokens(target_tokens)
 
         return torch.cat(logits_list, dim=0)
     
@@ -223,7 +266,8 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             hidden_states.unsqueeze(1),
             cast(torch.Tensor, encoder_hidden_states),
             past_key_values,
-            cache_position
+            cache_position,
+            input_ids=input_ids,
         )
 
         next_cache = past_key_values if use_cache else None
