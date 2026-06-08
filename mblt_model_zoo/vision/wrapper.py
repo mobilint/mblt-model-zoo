@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import importlib
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -27,11 +28,11 @@ from .utils.types import TensorLike
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 SUPPORTED_FRAMEWORKS = {"mxq", "onnx"}
+
 ONNXRUNTIME_INSTALL_GUIDE = (
     "onnxruntime is not installed. To use ONNX inference, install one of the optional extras:\n"
     "pip install mblt-model-zoo[onnxruntime]\n"
-    "or\n"
-    "pip install mblt-model-zoo[onnxruntime-gpu]"
+    + ("or\npip install mblt-model-zoo[onnxruntime-gpu]" if sys.platform != "darwin" else "")
 )
 __all__ = ["CoreMode", "normalize_core_mode", "MBLT_Engine"]
 
@@ -72,13 +73,12 @@ def _load_onnxruntime() -> Any:
 
     if not hasattr(module, "InferenceSession"):
         module_path = getattr(module, "__file__", None) or "<namespace package>"
-        raise ImportError(
+        msg = (
             "onnxruntime is installed, but the package is incomplete or broken and does not expose "
-            f"`InferenceSession` (resolved from {module_path}). Reinstall one of the optional extras:\n"
-            "pip install mblt-model-zoo[onnxruntime]\n"
-            "or\n"
-            "pip install mblt-model-zoo[onnxruntime-gpu]"
+            f"`InferenceSession` (resolved from {module_path}). "
+            f"{ONNXRUNTIME_INSTALL_GUIDE.replace('is not installed. To use ONNX inference, install', 'Reinstall')}"
         )
+        raise ImportError(msg)
 
     return module
 
@@ -102,8 +102,8 @@ class MBLT_Engine:
         model_type: str = "DEFAULT",
         mxq_path: str = "",
         onnx_path: str = "",
-        dev_no: int = 0,
-        core_mode: CoreMode = "single",
+        dev_no: int | None = None,
+        core_mode: CoreMode | None = None,
         target_cores: Sequence[str | CoreId] | None = None,
         target_clusters: Sequence[int | Cluster] | None = None,
         postprocess_kwargs: dict[str, Any] | None = None,
@@ -127,6 +127,17 @@ class MBLT_Engine:
             framework: Execution framework, either "mxq" or "onnx".
         """
 
+        _mxq_path_passed = bool(mxq_path)
+        _onnx_path_passed = bool(onnx_path)
+        _dev_no_passed = dev_no is not None
+        _core_mode_passed = core_mode is not None
+        _target_cores_passed = target_cores is not None
+        _target_clusters_passed = target_clusters is not None
+
+        if dev_no is None:
+            dev_no = 0
+        if core_mode is None:
+            core_mode = "single"
         if target_cores is None:
             target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
         if target_clusters is None:
@@ -177,11 +188,18 @@ class MBLT_Engine:
                 model_config_part = merged_config
 
         self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
-        self.file_cfg["mxq_path"] = mxq_path
-        self.file_cfg["onnx_path"] = onnx_path
-        self.file_cfg["core_mode"] = core_mode
-        self.file_cfg["target_cores"] = target_cores
-        self.file_cfg["target_clusters"] = target_clusters
+        if _mxq_path_passed or "mxq_path" not in self.file_cfg:
+            self.file_cfg["mxq_path"] = mxq_path
+        if _onnx_path_passed or "onnx_path" not in self.file_cfg:
+            self.file_cfg["onnx_path"] = onnx_path
+        if _core_mode_passed or "core_mode" not in self.file_cfg:
+            self.file_cfg["core_mode"] = core_mode
+        if _target_cores_passed or "target_cores" not in self.file_cfg:
+            self.file_cfg["target_cores"] = target_cores
+        if _target_clusters_passed or "target_clusters" not in self.file_cfg:
+            self.file_cfg["target_clusters"] = target_clusters
+        if _dev_no_passed or "dev_no" not in self.file_cfg:
+            self.file_cfg["dev_no"] = dev_no
 
         self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])
         self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
@@ -207,7 +225,7 @@ class MBLT_Engine:
             self.input_name = self._onnx_session.get_inputs()[0].name
             self.output_names = [o.name for o in self._onnx_session.get_outputs()]
         else:
-            self._mxq_model = MobilintNPUBackend(dev_no=dev_no, **self._mxq_backend_kwargs())
+            self._mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
             self.model = self._mxq_model
             self._mxq_model.create()
             self._mxq_model.launch()
