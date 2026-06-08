@@ -236,3 +236,53 @@ def test_plot_compare_benchmark_results_module_help_smoke() -> None:
 
     assert result.returncode == 0
     assert "Compare N benchmark result folders" in result.stdout
+
+
+def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) -> None:
+    """Verify compare CLI detects ASR payloads when --task is omitted."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "linux_asr"
+    folder_b = tmp_path / "windows_asr"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    payload = {
+        "benchmark_type": "automatic-speech-recognition",
+        "model": "mobilint/whisper-small",
+        "asr": {
+            "wer": 0.1,
+            "cer": 0.02,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "mean_latency_s": 1.2,
+            "p50_latency_s": 1.0,
+            "p95_latency_s": 1.9,
+            "throughput_samples_per_s": 3.0,
+            "decode_tokens_per_s": 77.0,
+            "avg_tokens_per_sample": 10.0,
+        },
+    }
+    (folder_a / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_b / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.plot_compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Auto-detected task: automatic-speech-recognition" in result.stdout
+    assert "Common models across all folders: 1" in result.stdout
+    assert (output_dir / "wer.png").is_file()

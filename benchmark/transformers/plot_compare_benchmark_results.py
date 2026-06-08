@@ -1,5 +1,8 @@
 import argparse
+import json
+from json import JSONDecodeError
 from pathlib import Path
+from typing import Any, Mapping
 
 try:
     from benchmark.transformers.compare_metrics import (
@@ -21,6 +24,40 @@ except ModuleNotFoundError:
     )
 
 
+def _detect_task_from_folders(folders: list[Path]) -> str:
+    """Detect the benchmark task from result payloads, falling back to text-generation."""
+
+    detected_tasks: set[str] = set()
+    for folder in folders:
+        for path in sorted(folder.glob("*.json")):
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    payload: Any = json.load(file)
+            except (OSError, JSONDecodeError) as exc:
+                print(f"Warning: failed to parse {path}: {exc}")
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            benchmark_type = payload.get("benchmark_type")
+            if benchmark_type is None:
+                continue
+            if not isinstance(benchmark_type, str):
+                print(f"Warning: ignoring {path.name} because benchmark_type is not a string.")
+                continue
+            if benchmark_type not in TASK_REGISTRY:
+                raise SystemExit(f"Unsupported benchmark_type '{benchmark_type}' found in {path}.")
+            detected_tasks.add(benchmark_type)
+
+    if not detected_tasks:
+        return "text-generation"
+    if len(detected_tasks) > 1:
+        tasks = ", ".join(sorted(detected_tasks))
+        raise SystemExit(f"Multiple benchmark_type values found ({tasks}); please pass --task explicitly.")
+    task = next(iter(detected_tasks))
+    print(f"Auto-detected task: {task}")
+    return task
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare N benchmark result folders and generate model-wise bar charts."
@@ -38,8 +75,11 @@ def main() -> int:
     parser.add_argument(
         "--task",
         choices=sorted(TASK_REGISTRY.keys()),
-        default="text-generation",
-        help="which benchmark payload to compare (default: text-generation)",
+        default=None,
+        help=(
+            "which benchmark payload to compare "
+            "(default: auto-detect from benchmark_type, fallback: text-generation)"
+        ),
     )
     args = parser.parse_args()
 
@@ -57,7 +97,8 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metric_cls = TASK_REGISTRY[args.task]
+    task = args.task or _detect_task_from_folders(folders)
+    metric_cls = TASK_REGISTRY[task]
     metrics_by_folder = [collect_metrics(folder, metric_cls) for folder in folders]
     labels = folder_labels(folders)
     models = common_model_ids(metrics_by_folder)
