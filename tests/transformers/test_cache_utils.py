@@ -92,7 +92,7 @@ def test_fake_prefill_rejects_negative_length() -> None:
         cache.fake_prefill(-1)
 
 
-def test_whisper_cache_reorder_works_without_replay_state() -> None:
+def test_whisper_cache_reorder_works_with_application_level_blobs() -> None:
     """Whisper beam reorder should only require application-level KV blobs."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
     cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
@@ -107,95 +107,52 @@ def test_whisper_cache_reorder_works_without_replay_state() -> None:
 def test_whisper_cache_reorder_rejects_invalid_beam_idx_shape() -> None:
     """Whisper beam reorder should only accept rank-1 beam indices."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
-    cache.configure_reorder_replay(
-        decoder_input_ids=torch.tensor([[1, 2], [1, 3]], dtype=torch.long),
-        decoder_forward=lambda **kwargs: None,
-        encoder_hidden_states=torch.ones(2, 1, 4, 3),
-    )
 
     with pytest.raises(ValueError, match="rank 1"):
         cache.reorder_cache(torch.tensor([[0, 1]], dtype=torch.long))
 
 
 def test_whisper_cache_reorder_reorders_application_level_blobs() -> None:
-    """Whisper beam reorder should reorder stored KV blobs without decoder replay."""
+    """Whisper beam reorder should reorder stored KV blobs."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=3)
-    replay_calls = 0
-
-    def fake_decoder_forward(**kwargs) -> None:
-        nonlocal replay_calls
-        replay_calls += 1
-        kwargs["past_key_values"].update_cache_position(kwargs["cache_position"])
-
-    cache.configure_reorder_replay(
-        decoder_input_ids=torch.tensor(
-            [
-                [10, 20, 30, 31],
-                [10, 20, 40, 41],
-                [10, 20, 50, 51],
-            ],
-            dtype=torch.long,
-        ),
-        decoder_forward=fake_decoder_forward,
-        encoder_hidden_states=torch.ones(3, 1, 4, 3),
-        device=torch.device("cpu"),
-    )
     cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
     cache._beam_seq_lengths = [4, 5, 6]
 
     result = cache.reorder_cache(torch.tensor([2, 0, 2], dtype=torch.long))
 
     assert result is cache
-    assert replay_calls == 0
     assert cache._beam_cache_buffers == [[b"beam-2"], [b"beam-0"], [b"beam-2"]]
     assert cache._beam_cache_buffers[0] is not cache._beam_cache_buffers[2]
     assert [cache.get_seq_length(index=i) for i in range(3)] == [6, 4, 6]
-    assert torch.equal(
-        cache._replay_state.decoder_input_ids,
-        torch.tensor([[10, 20, 50, 51], [10, 20, 30, 31], [10, 20, 50, 51]], dtype=torch.long),
-    )
 
 
-def test_whisper_cache_reorder_skips_replay_for_identity_order_only() -> None:
-    """Whisper beam reorder should only skip replay when beam order is identity."""
+def test_whisper_cache_reorder_identity_order_is_noop() -> None:
+    """Whisper beam reorder should no-op for identity beam order."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=1)
-    replay_calls = 0
-
-    def fake_decoder_forward(**kwargs) -> None:
-        nonlocal replay_calls
-        replay_calls += 1
-        kwargs["past_key_values"].update_cache_position(kwargs["cache_position"])
-
-    cache.configure_reorder_replay(
-        decoder_input_ids=torch.tensor([[10, 20], [10, 20], [10, 20]], dtype=torch.long),
-        decoder_forward=fake_decoder_forward,
-        encoder_hidden_states=torch.ones(3, 1, 4, 3),
-    )
     cache.set_seq_length({0: 2, 1: 2, 2: 2})
+    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
 
     result = cache.reorder_cache(torch.tensor([0, 1, 2], dtype=torch.long))
 
     assert result is cache
-    assert replay_calls == 0
     assert cache.batch_size == 3
+    assert cache._beam_cache_buffers == [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
     assert [cache.get_seq_length(index=i) for i in range(3)] == [2, 2, 2]
 
 
-def test_whisper_cache_copy_preserves_replay_configuration_safely() -> None:
-    """Whisper cache copy should clone token history without sharing mutable tensors."""
+def test_whisper_cache_copy_preserves_beam_snapshots_safely() -> None:
+    """Whisper cache copy should clone beam snapshots without sharing mutable buffers."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
-    decoder_input_ids = torch.tensor([[1, 2], [1, 3]], dtype=torch.long)
-    cache.configure_reorder_replay(
-        decoder_input_ids=decoder_input_ids,
-        decoder_forward=lambda **kwargs: None,
-        encoder_hidden_states=torch.ones(2, 1, 4, 3),
-    )
+    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
+    cache._beam_seq_lengths = [2, 3]
 
     copied = cache.copy()
-    decoder_input_ids[0, 0] = 99
+    cache._beam_cache_buffers[0][0] = b"changed"
+    cache._beam_seq_lengths[0] = 99
 
     assert isinstance(copied, MobilintWhisperCache)
-    assert torch.equal(copied._replay_state.decoder_input_ids, torch.tensor([[1, 2], [1, 3]], dtype=torch.long))
+    assert copied._beam_cache_buffers == [[b"beam-0"], [b"beam-1"]]
+    assert copied._beam_seq_lengths == [2, 3]
 
 
 def test_deepstack_cache_returns_real_chunk() -> None:

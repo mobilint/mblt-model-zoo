@@ -212,15 +212,6 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             )
 
         hidden_states = inputs_embeds + positions.to(inputs_embeds.device)
-        if isinstance(past_key_values, MobilintWhisperCache) and input_ids is not None:
-            past_key_values.configure_reorder_replay(
-                decoder_input_ids=input_ids,
-                decoder_forward=self.forward,
-                encoder_hidden_states=cast(torch.Tensor, encoder_hidden_states),
-                device=inputs_embeds.device,
-                return_dict=return_dict,
-                use_cache=use_cache,
-            )
         
         if output_attentions:
             logger.warning("output_attentions is not supported.")
@@ -439,61 +430,13 @@ class MobilintWhisperForConditionalGeneration(
         prefill_chunk_size: Union[int, None] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Prepare Whisper generation inputs and refresh cache replay context."""
-        model_inputs = super().prepare_inputs_for_generation(
+        """Prepare Whisper generation inputs while preserving Mobilint kwargs."""
+        return super().prepare_inputs_for_generation(
             *args,
             count_npu_time=count_npu_time,
             prefill_chunk_size=prefill_chunk_size,
             **kwargs,
         )
-        past_key_values = model_inputs.get("past_key_values", kwargs.get("past_key_values"))
-        if isinstance(past_key_values, MobilintWhisperCache):
-            decoder_input_ids = self._resolve_generation_decoder_input_ids(args, kwargs, model_inputs)
-            encoder_hidden_states = self._resolve_generation_encoder_hidden_states(kwargs, model_inputs)
-            if encoder_hidden_states is not None and encoder_hidden_states.ndim == 3:
-                encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
-            device = decoder_input_ids.device if decoder_input_ids is not None else None
-            past_key_values.configure_reorder_replay(
-                decoder_input_ids=decoder_input_ids,
-                decoder_forward=self.model.decoder.forward,
-                encoder_hidden_states=encoder_hidden_states,
-                device=device,
-                return_dict=bool(model_inputs.get("return_dict", self.config.return_dict)),
-                use_cache=bool(model_inputs.get("use_cache", self.config.use_cache)),
-            )
-        return model_inputs
-
-    @staticmethod
-    def _resolve_generation_decoder_input_ids(
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        model_inputs: dict[str, Any],
-    ) -> Union[torch.LongTensor, None]:
-        """Resolve the most complete decoder token history available during generation."""
-        for key in ("decoder_input_ids", "input_ids"):
-            value = kwargs.get(key)
-            if isinstance(value, torch.Tensor):
-                return cast(torch.LongTensor, value)
-        for key in ("decoder_input_ids", "input_ids"):
-            value = model_inputs.get(key)
-            if isinstance(value, torch.Tensor):
-                return cast(torch.LongTensor, value)
-        if args and isinstance(args[0], torch.Tensor):
-            return cast(torch.LongTensor, args[0])
-        return None
-
-    @staticmethod
-    def _resolve_generation_encoder_hidden_states(
-        kwargs: dict[str, Any],
-        model_inputs: dict[str, Any],
-    ) -> Union[torch.Tensor, None]:
-        """Resolve encoder hidden states from generation kwargs or prepared model inputs."""
-        encoder_outputs = model_inputs.get("encoder_outputs", kwargs.get("encoder_outputs"))
-        if encoder_outputs is None:
-            return None
-        if isinstance(encoder_outputs, BaseModelOutput):
-            return encoder_outputs.last_hidden_state
-        return encoder_outputs[0]
 
     def forward(
         self,
