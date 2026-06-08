@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from mblt_model_zoo.hf_transformers.utils.cache_utils import (
+    MobilintBeamCache,
     MobilintCache,
     MobilintDeepStackCache,
     MobilintEagle3Cache,
@@ -102,6 +103,25 @@ def test_whisper_cache_reorder_works_with_application_level_blobs() -> None:
 
     assert cache._beam_cache_buffers == [[b"beam-1"], [b"beam-0"]]
     assert [cache.get_seq_length(index=i) for i in range(2)] == [3, 2]
+
+
+def test_beam_cache_reorder_works_with_application_level_blobs() -> None:
+    """Generic beam cache should reorder stored KV blobs for beam search."""
+    cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2)
+    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
+    cache._beam_seq_lengths = [2, 3]
+
+    cache.reorder_cache(torch.tensor([1, 0], dtype=torch.long))
+
+    assert cache._beam_cache_buffers == [[b"beam-1"], [b"beam-0"]]
+    assert [cache.get_seq_length(index=i) for i in range(2)] == [3, 2]
+
+
+def test_whisper_cache_is_beam_cache_for_backwards_compatibility() -> None:
+    """Whisper cache should preserve its public name while reusing generic beam cache behavior."""
+    cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=1)
+
+    assert isinstance(cache, MobilintBeamCache)
 
 
 def test_whisper_cache_reorder_rejects_invalid_beam_idx_shape() -> None:

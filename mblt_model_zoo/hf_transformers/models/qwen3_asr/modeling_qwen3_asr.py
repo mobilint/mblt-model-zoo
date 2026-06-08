@@ -1,3 +1,5 @@
+import math
+import time
 from functools import wraps
 from typing import Optional, Union, cast
 
@@ -14,7 +16,7 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintCache
+from ...utils.cache_utils import MobilintBeamCache, MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
 from ._errors import guard_qwen_asr_import
@@ -166,6 +168,82 @@ class MobilintQwen3ASRTextModel(
     def set_input_embeddings(self, value: nn.Module) -> None:
         self.embed_tokens = value
 
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintBeamCache:
+        """Return a beam-snapshot cache for Qwen3-ASR text generation."""
+        del cache_implementation, max_cache_len, args
+        configured_batch_size = max(1, int(batch_size), getattr(self.config, "max_batch_size", 1))
+        if not hasattr(self, "_cache") or not isinstance(self._cache, MobilintBeamCache):
+            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
+            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        else:
+            self._cache.reset()
+
+        return self._cache
+
+    def _beam_llm_forward(
+        self,
+        inputs_embeds: torch.Tensor,
+        past_key_values: MobilintBeamCache,
+        cache_position: torch.Tensor,
+        prefill_chunk_size: Optional[int] = None,
+        count_npu_time: bool = False,
+    ) -> torch.Tensor:
+        """Run Qwen3-ASR decoder by swapping one active beam cache at a time."""
+        if inputs_embeds.ndim != 3:
+            raise ValueError(f"Expected rank-3 inputs_embeds for beam decode, got {tuple(inputs_embeds.shape)}")
+
+        batch_size = int(inputs_embeds.shape[0])
+        sequence_length = int(inputs_embeds.shape[1])
+        if sequence_length <= 0:
+            raise ValueError("Qwen3-ASR beam decode received an empty token sequence.")
+
+        past_key_values.ensure_batch_size(batch_size)
+        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        num_of_chunks = math.ceil(sequence_length / resolved_prefill_chunk_size)
+        mxq_model = self.npu_backend.mxq_model
+        logits_list: list[torch.Tensor] = []
+        self.npu_time = 0.0 if count_npu_time else None
+
+        for beam_index in range(batch_size):
+            initial_cache_size = past_key_values.load_beam_cache(beam_index)
+            timing_phase = "prefill" if initial_cache_size == 0 else "decode"
+            row_logits_ndarray: np.ndarray | None = None
+            row_embeds_numpy = inputs_embeds[beam_index : beam_index + 1].type(torch.float32).cpu().numpy()
+            row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
+
+            for chunk_index in range(num_of_chunks):
+                start_index = chunk_index * resolved_prefill_chunk_size
+                end_index = min(start_index + resolved_prefill_chunk_size, sequence_length)
+                cache_size = past_key_values.get_seq_length(beam_index)
+                chunk = row_embeds_numpy[:, :, start_index:end_index, :]
+
+                if count_npu_time:
+                    t0 = time.perf_counter()
+                    result = mxq_model.infer([chunk], None, cache_size)
+                    elapsed = time.perf_counter() - t0
+                    assert self.npu_time is not None
+                    self.npu_time += elapsed
+                    self._record_npu_timing(timing_phase, elapsed)
+                else:
+                    result = mxq_model.infer([chunk], None, cache_size)
+
+                assert result is not None, "mxq infer result is None!"
+                row_logits_ndarray = result[0]
+                past_key_values.update_cache_position(cache_position[start_index:end_index], index=beam_index)
+
+            past_key_values.dump_beam_cache(beam_index)
+            if row_logits_ndarray is None:
+                raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
+            row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+            if row_logits.ndim == 4 and int(row_logits.shape[0]) == 1:
+                row_logits = row_logits.squeeze(0)
+            if row_logits.ndim == 2:
+                row_logits = row_logits.unsqueeze(0)
+            logits_list.append(row_logits)
+
+        return torch.cat(logits_list, dim=0)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -202,14 +280,23 @@ class MobilintQwen3ASRTextModel(
                 ),
             )
 
-        logits = self.llm_forward(
-            inputs_embeds=inputs_embeds,
-            past_key_values=past_key_values,
-            cache_position=cache_position,
-            prefill_chunk_size=prefill_chunk_size,
-            count_npu_time=count_npu_time,
-            attention_mask=None,
-        )
+        if isinstance(past_key_values, MobilintBeamCache):
+            logits = self._beam_llm_forward(
+                inputs_embeds=inputs_embeds,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
+                prefill_chunk_size=prefill_chunk_size,
+                count_npu_time=count_npu_time,
+            )
+        else:
+            logits = self.llm_forward(
+                inputs_embeds=inputs_embeds,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
+                prefill_chunk_size=prefill_chunk_size,
+                count_npu_time=count_npu_time,
+                attention_mask=None,
+            )
 
         return BaseModelOutputWithPast(
             last_hidden_state=cast(torch.FloatTensor, logits),

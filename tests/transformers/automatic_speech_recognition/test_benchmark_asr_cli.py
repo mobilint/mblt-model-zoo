@@ -826,6 +826,44 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     assert "language" not in pipe.calls[-1]
 
 
+def test_run_one_sample_preserves_qwen3_asr_num_beams() -> None:
+    """Verify Qwen3-ASR benchmark calls keep explicit beam settings effective."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+            self.tokenizer = None
+
+        def __call__(self, audio_input, **kwargs):  # type: ignore[no-untyped-def]
+            del audio_input
+            payload = dict(kwargs.get("generate_kwargs") or {})
+            self.calls.append(payload)
+            return {"text": "qwen output"}
+
+    pipe = DummyPipe()
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": [0.0, 0.0, 0.0, 0.0], "sampling_rate": 16000},
+        "reference": "qwen output",
+    }
+    args = asr_bench._parse_args(["--num-beams", "4"])
+    generate_kwargs = asr_bench._generate_kwargs_for_target(args, "mobilint/Qwen3-ASR-1.7B")
+
+    result = asr_bench._run_one_sample(pipe, sample, generate_kwargs)
+
+    assert pipe.calls == [
+        {
+            "num_beams": 4,
+            "max_new_tokens": 444,
+            "return_timestamps": False,
+            "early_stopping": True,
+        }
+    ]
+    assert result.hypothesis == "qwen output"
+    assert result.num_beams == 4
+    assert result.effective_generate_kwargs == pipe.calls[0]
+
+
 def test_run_one_sample_retries_with_empty_generate_kwargs() -> None:
     """Verify fallback can call generic ASR pipelines without generation kwargs."""
 

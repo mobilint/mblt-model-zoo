@@ -189,13 +189,13 @@ class MobilintCache(Cache):
         return copied
 
 
-class MobilintWhisperCache(MobilintCache):
-    """Whisper-specific Mobilint cache with application-level beam KV blobs.
+class MobilintBeamCache(MobilintCache):
+    """Mobilint cache with application-level beam KV blobs.
 
-    Whisper decoder MXQ owns a single active KV cache in qbruntime memory. Beam
+    Some decoder MXQs own a single active KV cache in qbruntime memory. Beam
     search therefore stores each beam's KV payload as a dumped blob in Python and
-    swaps one blob into the active qbruntime cache before each batch-size-1 decoder
-    call.
+    swaps one blob into the active qbruntime cache before each batch-size-1
+    decoder call.
     """
 
     def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
@@ -219,12 +219,12 @@ class MobilintWhisperCache(MobilintCache):
         self._beam_seq_lengths.extend([0 for _ in range(self.batch_size - previous_batch_size)])
 
     def get_seq_length(self, index: int = 0) -> int:
-        """Return the stored sequence length for one logical Whisper beam."""
+        """Return the stored sequence length for one logical beam."""
         self.ensure_batch_size(index + 1)
         return self._beam_seq_lengths[index]
 
     def set_seq_length(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
-        """Set stored sequence lengths for one or more logical Whisper beams."""
+        """Set stored sequence lengths for one or more logical beams."""
         if isinstance(sequence_lengths, int):
             self.ensure_batch_size(index + 1)
             if sequence_lengths < 0:
@@ -266,8 +266,8 @@ class MobilintWhisperCache(MobilintCache):
             return
         self._beam_cache_buffers[beam_index] = copy.deepcopy(self.mxq_model.dump_cache_memory(0))
 
-    def reorder_cache(self, beam_idx: torch.LongTensor) -> "MobilintWhisperCache":
-        """Reorder application-level Whisper beam KV blobs in HF beam order."""
+    def reorder_cache(self, beam_idx: torch.LongTensor) -> "MobilintBeamCache":
+        """Reorder application-level beam KV blobs in HF beam order."""
         beam_idx = self._validate_beam_indices(beam_idx)
 
         if torch.equal(beam_idx.cpu(), torch.arange(int(beam_idx.numel()), dtype=torch.long)):
@@ -295,9 +295,9 @@ class MobilintWhisperCache(MobilintCache):
             raise ValueError(f"beam_idx contains out-of-range values for {int(beam_idx.numel())} beams")
         return beam_idx
 
-    def copy(self) -> "MobilintWhisperCache":
+    def copy(self) -> "MobilintBeamCache":
         """Return a copy preserving application-level beam KV snapshots."""
-        copied = MobilintWhisperCache(self.mxq_model, batch_size=self.batch_size)
+        copied = self.__class__(self.mxq_model, batch_size=self.batch_size)
         for i in range(self.batch_size):
             copied.layers[i] = self.layers[i].copy()
         copied._beam_cache_buffers = [
@@ -305,6 +305,10 @@ class MobilintWhisperCache(MobilintCache):
         ]
         copied._beam_seq_lengths = list(self._beam_seq_lengths)
         return copied
+
+
+class MobilintWhisperCache(MobilintBeamCache):
+    """Backward-compatible Whisper cache alias for beam snapshot decoding."""
 
 
 class MobilintDeepStackCache(MobilintCache):
