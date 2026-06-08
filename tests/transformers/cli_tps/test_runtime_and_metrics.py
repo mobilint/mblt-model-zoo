@@ -2185,6 +2185,22 @@ def test_cli_tps_device_npu_id_parsing():
     assert args.device_npu_id == [0, 1]
 
 
+def test_cli_tps_device_npu_rail_metrics_parsing():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--device-npu-rail-metrics",
+            "npu,ddr",
+        ]
+    )
+
+    assert args.device_npu_rail_metrics == ["npu", "ddr"]
+
+
 def test_cli_tps_device_npu_id_rejects_negative_values():
     parser = build_parser()
     with pytest.raises(SystemExit) as excinfo:

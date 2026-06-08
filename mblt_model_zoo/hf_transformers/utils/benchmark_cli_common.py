@@ -28,6 +28,7 @@ DeviceMetricValue: TypeAlias = float | None
 DeviceMetricMap: TypeAlias = dict[str, DeviceMetricValue]
 DeviceTracePoint: TypeAlias = dict[str, float]
 DeviceTimeSeriesMap: TypeAlias = dict[str, list[DeviceTracePoint]]
+NpuRailMetrics: TypeAlias = str | list[str]
 RawDeviceMetricMap: TypeAlias = Mapping[str, object]
 
 
@@ -90,8 +91,12 @@ def parse_int_list_optional(spec: str | None) -> list[int] | None:
     return parse_non_negative_int_list_optional(spec, name="device-gpu-id")
 
 
-def parse_npu_rail_metrics(spec: str | None) -> str | list[str]:
-    """Parse NPU rail metrics for mblt-tracker NPU device tracking."""
+def parse_npu_rail_metrics(spec: str | None) -> NpuRailMetrics:
+    """Parse NPU rail metrics for mblt-tracker NPU device tracking.
+
+    Returns ``"npu"`` for the default low-latency rail, ``"all"`` for every supported rail, or a
+    de-duplicated list of rail names when a comma-separated subset is provided.
+    """
     if spec is None:
         return "npu"
     text = str(spec).strip().lower()

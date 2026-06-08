@@ -58,10 +58,11 @@ inference and model downloads.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
   - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
-  - `--device-npu-rail-metrics npu`: Selects NPU rail power metrics collected by `mblt-tracker`.
-    The default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`,
-    and `goldfinger`, or pass a comma-separated subset such as `npu,ddr`. Non-NPU rails can have a
-    lower effective sampling rate because their values depend on the firmware refresh cadence.
+  - `--device-npu-rail-metrics`: Selects NPU rail power metrics collected by `mblt-tracker`. The
+    default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`, and
+    `goldfinger`, or pass a comma-separated subset, for example `--device-npu-rail-metrics npu,ddr`.
+    Non-NPU rails can have a lower effective sampling rate because their values depend on the
+    firmware refresh cadence.
   - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids.
   - `--no-device-metrics`: Disables device metric collection.
   - Console summaries show aggregate scalar metrics such as average and p99 power, utilization,
