@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, overload
+from typing import Any, TypeAlias, overload
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from ..datasets import get_coco_inv
+
+RatioPad: TypeAlias = tuple[tuple[float, float], tuple[float, float]]
 
 
 # --- Box Conversion Utilities ---
@@ -318,8 +320,8 @@ def scale_coords(
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
         pad = (
-            int((img1_shape[1] - img0_shape[1] * gain) / 2),
-            int((img1_shape[0] - img0_shape[0] * gain) / 2),
+            (img1_shape[1] - round(img0_shape[1] * gain)) / 2,
+            (img1_shape[0] - round(img0_shape[0] * gain)) / 2,
         )  # wh padding
     else:
         gain = ratio_pad[0][0]
@@ -356,8 +358,8 @@ def compute_ratio_pad(
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
         pad = (
-            round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1),
-            round((img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1),
+            round((img1_shape[1] - round(img0_shape[1] * gain)) / 2 - 0.1),
+            round((img1_shape[0] - round(img0_shape[0] * gain)) / 2 - 0.1),
         )  # wh padding
     else:
         gain = ratio_pad[0][0]
@@ -496,15 +498,21 @@ def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     Returns:
         torch.Tensor: Cropped masks.
     """
-    _, h, w = masks.shape
-    out = torch.zeros_like(masks)
-    boxes_i = torch.ceil(boxes).to(torch.int64)
-    boxes_i[:, [0, 2]] = boxes_i[:, [0, 2]].clamp_(0, w)
-    boxes_i[:, [1, 3]] = boxes_i[:, [1, 3]].clamp_(0, h)
-    for i, (x1, y1, x2, y2) in enumerate(boxes_i.tolist()):
-        if x2 > x1 and y2 > y1:
-            out[i, y1:y2, x1:x2] = masks[i, y1:y2, x1:x2]
-    return out
+    if boxes.device != masks.device:
+        boxes = boxes.to(masks.device)
+    n, h, w = masks.shape
+    if n < 50 and not masks.is_cuda:
+        for i, (x1, y1, x2, y2) in enumerate(boxes.clamp(min=0).round().int()):
+            masks[i, :y1] = 0
+            masks[i, y2:] = 0
+            masks[i, :, :x1] = 0
+            masks[i, :, x2:] = 0
+        return masks
+
+    x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)
+    rows = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]
+    cols = torch.arange(h, device=masks.device, dtype=x1.dtype)[None, :, None]
+    return masks * ((rows >= x1) * (rows < x2) * (cols >= y1) * (cols < y2))
 
 
 def scale_masks(
@@ -534,7 +542,7 @@ def scale_masks(
         return masks
     if ratio_pad is None:  # calculate from im0_shape
         gain = min(im1_h / im0_h, im1_w / im0_w)  # gain  = old / new
-        pad_w, pad_h = (im1_w - im0_w * gain), (im1_h - im0_h * gain)  # wh padding
+        pad_w, pad_h = (im1_w - round(im0_w * gain)), (im1_h - round(im0_h * gain))  # wh padding
         if padding:
             pad_w /= 2
             pad_h /= 2
@@ -620,6 +628,7 @@ def nmsout2eval(
     nms_outs: list[torch.Tensor] | torch.Tensor,
     img1_shape: tuple[int, int],
     img0_shapes: list[tuple[int, int]],
+    ratio_pads: list[RatioPad | None] | None = None,
 ) -> tuple[list[list[int]], list[list[list[float]]], list[list[float]]]:
     """Converts NMS output to COCO evaluation format.
 
@@ -641,15 +650,20 @@ def nmsout2eval(
     labels_list: list[list[int]] = []
     boxes_list: list[list[list[float]]] = []
     scores_list: list[list[float]] = []
-    for nms_out, img0_shape in zip(nms_outs, img0_shapes):
-        boxes = nms_out[:, :4]
+    actual_ratio_pads: list[RatioPad | None]
+    if ratio_pads is None:
+        actual_ratio_pads = [None] * len(img0_shapes)
+    else:
+        actual_ratio_pads = list(ratio_pads)
+    for nms_out, img0_shape, ratio_pad in zip(nms_outs, img0_shapes, actual_ratio_pads):
+        boxes = nms_out[:, :4].clone()
         scores = nms_out[:, 4]
         labels = nms_out[:, 5]
-        boxes = scale_boxes(img1_shape, boxes, img0_shape)  # scale boxes to original image size
+        boxes = scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=ratio_pad)  # scale boxes to original image size
         boxes[:, 2:] = boxes[:, 2:] - boxes[:, :2]  # xyxy to xywh with corner xy
 
-        boxes_tolist = boxes.tolist()
-        scores_tolist = scores.tolist()
+        boxes_tolist = [[round(float(value), 3) for value in box] for box in boxes.tolist()]
+        scores_tolist = [round(float(score), 5) for score in scores.tolist()]
         labels_tolist = labels.tolist()
         labels_res = [get_coco_inv(int(label)) for label in labels_tolist]
 
@@ -664,6 +678,7 @@ def nmsout2eval_seg(
     nms_outs: Any,
     img1_shape: tuple[int, int],
     img0_shapes: tuple[int, int] | list[tuple[int, int]],
+    ratio_pads: RatioPad | list[RatioPad | None] | None = None,
 ) -> tuple[list[list[int]], list[list[list[float]]], list[list[float]], list[list[dict[str, Any]]]]:
     """Converts segmentation NMS output to COCO evaluation format.
 
@@ -685,6 +700,13 @@ def nmsout2eval_seg(
         actual_img0_shapes = [img0_shapes]
     else:
         actual_img0_shapes = img0_shapes
+    actual_ratio_pads: list[RatioPad | None]
+    if ratio_pads is None:
+        actual_ratio_pads = [None] * len(actual_img0_shapes)
+    elif isinstance(ratio_pads, tuple):
+        actual_ratio_pads = [ratio_pads]
+    else:
+        actual_ratio_pads = list(ratio_pads)
 
     if not isinstance(nms_outs[0], (list, tuple)):
         actual_nms_outs = [nms_outs]
@@ -697,11 +719,16 @@ def nmsout2eval_seg(
         det_results.append(nms_out[0])
         seg_results.append(nms_out[1])
 
-    labels_list, boxes_list, scores_list = nmsout2eval(det_results, img1_shape, actual_img0_shapes)
+    labels_list, boxes_list, scores_list = nmsout2eval(
+        det_results,
+        img1_shape,
+        actual_img0_shapes,
+        ratio_pads=actual_ratio_pads,
+    )
 
     scaled_seg_results = [
-        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]))
-        for seg_result, img0_shape in zip(seg_results, actual_img0_shapes)
+        scale_masks(seg_result.to(torch.float32), (img0_shape[0], img0_shape[1]), ratio_pad=ratio_pad)
+        for seg_result, img0_shape, ratio_pad in zip(seg_results, actual_img0_shapes, actual_ratio_pads)
     ]
 
     def mask_encode(seg_result: torch.Tensor) -> list[dict[str, Any]]:
@@ -726,7 +753,8 @@ def nmsout2eval_pose(
     nms_outs: list[torch.Tensor] | torch.Tensor,
     img1_shape: tuple[int, int],
     img0_shapes: tuple[int, int] | list[tuple[int, int]],
-) -> tuple[list[list[int]], list[list[list[float]]], list[list[float]], list[torch.Tensor]]:
+    ratio_pads: RatioPad | list[RatioPad | None] | None = None,
+) -> tuple[list[list[int]], list[list[list[float]]], list[list[float]], list[list[list[float]]]]:
     """Converts pose estimation NMS output to COCO evaluation format.
 
     Args:
@@ -742,16 +770,28 @@ def nmsout2eval_pose(
             - keypoints (list[list]): The scaled keypoints for each image.
     """
     actual_img0_shapes = [img0_shapes] if isinstance(img0_shapes, tuple) else img0_shapes
+    actual_ratio_pads: list[RatioPad | None]
+    if ratio_pads is None:
+        actual_ratio_pads = [None] * len(actual_img0_shapes)
+    elif isinstance(ratio_pads, tuple):
+        actual_ratio_pads = [ratio_pads]
+    else:
+        actual_ratio_pads = list(ratio_pads)
     if not isinstance(nms_outs, list):
         actual_nms_outs = [nms_outs]
     else:
         actual_nms_outs = nms_outs
-    labels_list, boxes_list, scores_list = nmsout2eval(actual_nms_outs, img1_shape, actual_img0_shapes)
+    labels_list, boxes_list, scores_list = nmsout2eval(
+        actual_nms_outs,
+        img1_shape,
+        actual_img0_shapes,
+        ratio_pads=actual_ratio_pads,
+    )
     extra = [
-        scale_coords(img1_shape, nms_out[:, 6:].reshape(-1, 17, 3), img0_shape).reshape(-1, 51)
-        for nms_out, img0_shape in zip(actual_nms_outs, actual_img0_shapes)
+        scale_coords(img1_shape, nms_out[:, 6:].reshape(-1, 17, 3), img0_shape, ratio_pad=ratio_pad).reshape(-1, 51)
+        for nms_out, img0_shape, ratio_pad in zip(actual_nms_outs, actual_img0_shapes, actual_ratio_pads)
     ]
-    return labels_list, boxes_list, scores_list, extra
+    return labels_list, boxes_list, scores_list, [x.tolist() for x in extra]
 
 
 class YOLOSegPostMixin:
@@ -762,6 +802,7 @@ class YOLOSegPostMixin:
         nms_out: Any,
         img1_shape: tuple[int, int],
         img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
     ) -> tuple[Any, ...]:
         """Converts NMS output to evaluation format for segmentation.
 
@@ -773,7 +814,7 @@ class YOLOSegPostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_seg(nms_out, img1_shape, img0_shape)
+        return nmsout2eval_seg(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
 
 
 class YOLOPosePostMixin:
@@ -784,6 +825,7 @@ class YOLOPosePostMixin:
         nms_out: Any,
         img1_shape: tuple[int, int],
         img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
     ) -> tuple[Any, ...]:
         """Converts NMS output to evaluation format for pose estimation.
 
@@ -795,4 +837,4 @@ class YOLOPosePostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_pose(nms_out, img1_shape, img0_shape)
+        return nmsout2eval_pose(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)

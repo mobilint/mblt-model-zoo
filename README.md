@@ -69,13 +69,26 @@ model = MBLT_Engine(
     mxq_path="path/to/resnet50.mxq",
     core_mode="global8",
 )
+
+# Run a vision model with ONNX instead of MXQ.
+# If onnx_path is empty, the matching ONNX file is downloaded from the
+# same Hugging Face repo and cached automatically.
+model = MBLT_Engine(
+    model_cls="alexnet",
+    model_type="IMAGENET1K_V1",
+    framework="onnx",
+    onnx_path="",
+)
 ```
 
 `MBLT_Engine` accepts these main arguments:
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
+- `framework`: Inference backend. Defaults to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
 - `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
+- `onnx_path`: Local ONNX path. Use `""` to download and cache the published ONNX automatically when `framework="onnx"`.
+- `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
 Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
@@ -106,6 +119,24 @@ try:
         save_path="path/to/save/result.jpg",
         topk=5,
     )
+finally:
+    model.dispose()
+```
+
+For ONNX vision models, the preprocess and postprocess flow stays the same:
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(
+    model_cls="caformer_b36",
+    framework="onnx",
+)
+
+try:
+    input_img = model.preprocess("path/to/image.jpg")
+    output = model(input_img)
+    result = model.postprocess(output)
 finally:
     model.dispose()
 ```
@@ -170,6 +201,8 @@ Currently, these optional functions are only available on environment equipped w
 
 |Name|Use|Details|
 |-------|------|------|
+|onnxruntime|For running vision models with `framework="onnx"` on CPU|Install with `pip install mblt-model-zoo[onnxruntime]`|
+|onnxruntime-gpu|For running vision models with `framework="onnx"` with GPU-enabled ONNX Runtime|Install with `pip install mblt-model-zoo[onnxruntime-gpu]`|
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 
@@ -195,13 +228,17 @@ Transformers commands to the installed `transformers` package.
 
 The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by
 the Python API. Use `predict` with a source image and a model name; the task is inferred from the
-model configuration.
+model configuration. `classify`, `detect`, `pose`, and `segment` are also accepted as aliases.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
-mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
-mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
+```
+
+Vision commands default to `--framework mxq`. You can switch to ONNX with `--framework onnx`.
+
+```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
 ```
 
 Prediction results are saved under `runs/vision/predict/` by default. Pass `--output` or
@@ -216,10 +253,12 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
 ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
+Validation also supports `--framework onnx`.
 
 ```bash
 mblt-model-zoo val --model resnet50
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+mblt-model-zoo val --model resnet50 --framework onnx
 ```
 
 Common NPU and artifact options are shared by the vision commands:

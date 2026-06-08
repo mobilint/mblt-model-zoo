@@ -24,6 +24,7 @@ class LetterBox(PreOps):
         """
         super().__init__()
         self.img_size = img_size
+        self.ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None
 
     def __call__(self, x: TensorLike) -> torch.Tensor:
         """Executes YOLO preprocessing (letterbox resizing).
@@ -50,6 +51,7 @@ class LetterBox(PreOps):
             img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
         top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
         left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        self.ratio_pad = ((r, r), (left, top))
         img = cv2.copyMakeBorder(
             img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
         )  # add border

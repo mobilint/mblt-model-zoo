@@ -64,6 +64,8 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         target_cores: Sequence[str] | None = None,
         target_clusters: Sequence[int] | None = None,
         mxq_path: str | None = None,
+        onnx_path: str | None = None,
+        framework: str = "mxq",
     ) -> None:
         """Initializes a YAML-backed compatibility wrapper.
 
@@ -77,19 +79,25 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             target_cores: Optional core selection for single-core mode.
             target_clusters: Optional cluster selection for multi/global modes.
             mxq_path: Optional explicit MXQ path alias.
+            onnx_path: Optional explicit ONNX path.
+            framework: Execution framework, either ``"mxq"`` or ``"onnx"``.
+                Defaults to ``"mxq"``.
         """
 
         del product
         resolved_mxq_path = mxq_path or local_path or ""
+        resolved_onnx_path = onnx_path or (local_path or "" if framework.lower() == "onnx" else "")
         MBLT_Engine.__init__(
             self,
             model_cls=yaml_name,
             model_type=model_type,
             mxq_path=resolved_mxq_path,
+            onnx_path=resolved_onnx_path,
             dev_no=dev_no,
             core_mode=infer_mode,
             target_cores=list(target_cores) if target_cores is not None else None,
             target_clusters=list(target_clusters) if target_clusters is not None else None,
+            framework=framework,
         )
 
     return __init__

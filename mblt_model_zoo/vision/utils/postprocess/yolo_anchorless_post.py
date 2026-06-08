@@ -152,7 +152,21 @@ class YOLOAnchorlessPost(YOLOPostBase):
         Returns:
             list[torch.Tensor]: Filtered detections for each image in the batch.
         """
-        x_list = torch.split(x.squeeze(1), 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[0] == 1:
+                x = x.squeeze(0)
+            elif x.shape[1] == 1:
+                x = x.squeeze(1)
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D converted tensor, got shape {tuple(x.shape)}.")
+        expected_dim = 4 + self.nc + self.n_extra
+        if x.shape[-1] == expected_dim:
+            normalized = x
+        elif x.shape[1] == expected_dim:
+            normalized = x.transpose(1, 2)
+        else:
+            raise ValueError(f"Unsupported converted tensor shape {tuple(x.shape)}.")
+        x_list = torch.split(normalized, 1, dim=0)  # [(1, 8400, 84), (1, 8400, 84), ...]
 
         def process_conversion(x: torch.Tensor) -> torch.Tensor:
             x = x.squeeze(0)  # (8400, 84)
@@ -175,17 +189,20 @@ class YOLOAnchorlessPost(YOLOPostBase):
         xi_t = xi.transpose(0, 1)
         score = xi_t[:, 4 : 4 + self.nc]
         extra = xi_t[:, 4 + self.nc :]
-        match_index = (score > self.conf_thres).nonzero(as_tuple=False)
-        if match_index.numel() == 0:
+        conf, cls_idx = score.max(dim=1)
+        filt = conf > self.conf_thres
+        if not torch.any(filt):
             return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        i = match_index[:, 0]
-        j = match_index[:, 1]
-        xi_out = torch.empty((match_index.shape[0], 6 + self.n_extra), dtype=xi_t.dtype, device=xi_t.device)
-        xi_out[:, :4] = xi_t[i, :4]
-        xi_out[:, 4] = score[i, j]
-        xi_out[:, 5] = j.to(xi_t.dtype)
+        xi_t = xi_t[filt]
+        conf = conf[filt]
+        cls_idx = cls_idx[filt]
+        extra = extra[filt]
+        xi_out = torch.empty((xi_t.shape[0], 6 + self.n_extra), dtype=xi_t.dtype, device=xi_t.device)
+        xi_out[:, :4] = xi_t[:, :4]
+        xi_out[:, 4] = conf
+        xi_out[:, 5] = cls_idx.to(xi_t.dtype)
         if self.n_extra > 0:
-            xi_out[:, 6:] = extra[i]
+            xi_out[:, 6:] = extra
         xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
         c = xi_out[:, 5:6] * max_wh
         boxes, scores = xi_out[:, :4] + c, xi_out[:, 4]
@@ -197,17 +214,20 @@ class YOLOAnchorlessPost(YOLOPostBase):
         if xi.numel() == 0:
             return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
         box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
-        match_index = (score > self.conf_thres).nonzero(as_tuple=False)
-        if match_index.numel() == 0:
+        conf, cls_idx = score.max(dim=1)
+        filt = conf > self.conf_thres
+        if not torch.any(filt):
             return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        i = match_index[:, 0]
-        j = match_index[:, 1]
-        xi_out = torch.empty((match_index.shape[0], 6 + self.n_extra), dtype=xi.dtype, device=xi.device)
-        xi_out[:, :4] = box[i]
-        xi_out[:, 4] = score[i, j]
-        xi_out[:, 5] = j.to(xi.dtype)
+        box = box[filt]
+        conf = conf[filt]
+        cls_idx = cls_idx[filt]
+        extra = extra[filt]
+        xi_out = torch.empty((box.shape[0], 6 + self.n_extra), dtype=xi.dtype, device=xi.device)
+        xi_out[:, :4] = box
+        xi_out[:, 4] = conf
+        xi_out[:, 5] = cls_idx.to(xi.dtype)
         if self.n_extra > 0:
-            xi_out[:, 6:] = extra[i]
+            xi_out[:, 6:] = extra
         xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
         c = xi_out[:, 5:6] * max_wh
         boxes, scores = xi_out[:, :4] + c, xi_out[:, 4]
@@ -239,10 +259,12 @@ class YOLOAnchorlessPost(YOLOPostBase):
             for xi in x:
                 if xi.ndim != 2:
                     raise ValueError(f"Expected 2D decoded tensor, got shape {tuple(xi.shape)}.")
-                if xi.shape[0] == 4 + self.nc + self.n_extra:
+                if xi.shape[1] == 4 + self.nc + self.n_extra:
+                    output.append(self._nms_single_legacy_rows(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh))
+                elif xi.shape[0] == 4 + self.nc + self.n_extra:
                     output.append(self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh))
                 else:
-                    output.append(self._nms_single_legacy_rows(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh))
+                    raise ValueError(f"Unsupported decoded tensor shape {tuple(xi.shape)}.")
             return output
         return [self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh) for xi in x]
 

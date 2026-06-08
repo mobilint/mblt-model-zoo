@@ -76,6 +76,14 @@ MeloTTS = [
     "gradio",
     "click",
 ]
+onnxruntime = [
+    "onnx",
+    "onnxruntime",
+]
+onnxruntime-gpu = [
+    "onnx; sys_platform != 'darwin'",
+    "onnxruntime-gpu; sys_platform != 'darwin'",
+]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]

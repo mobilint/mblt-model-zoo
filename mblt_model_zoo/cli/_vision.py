@@ -38,7 +38,14 @@ def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source", required=True, help="Path to the source image.")
     parser.add_argument("--model", required=True, help="Vision model name, for example `resnet50` or `yolo11m`.")
     parser.add_argument("--output", "--save-path", dest="output", help="Path to save the plotted result image.")
+    parser.add_argument(
+        "--framework",
+        default="mxq",
+        choices=["mxq", "onnx"],
+        help="Inference framework to use. Defaults to `mxq`.",
+    )
     parser.add_argument("--mxq-path", default="", help="Optional local MXQ model path.")
+    parser.add_argument("--onnx-path", default="", help="Optional local ONNX model path.")
     parser.add_argument("--model-type", default="DEFAULT", help="Model variant from the YAML configuration.")
     parser.add_argument(
         "--core-mode",
@@ -130,7 +137,9 @@ def run_vision_inference(
     model = MBLT_Engine(
         model_cls=args.model,
         model_type=args.model_type,
+        framework=args.framework,
         mxq_path=args.mxq_path,
+        onnx_path=args.onnx_path,
         dev_no=args.dev_no,
         core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,

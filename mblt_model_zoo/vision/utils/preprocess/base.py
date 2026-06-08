@@ -95,6 +95,26 @@ class PreBase:
             x = op(x)
         return x
 
+    def with_metadata(
+        self,
+        x: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Apply preprocessing and return metadata produced by preprocessing operations.
+
+        Args:
+                x: Initial input data.
+
+        Returns:
+                A tuple of the processed data and collected metadata.
+        """
+        metadata: dict[str, Any] = {}
+        for op in self.Ops:
+            x = op(x)
+            ratio_pad = getattr(op, "ratio_pad", None)
+            if ratio_pad is not None:
+                metadata["ratio_pad"] = ratio_pad
+        return x, metadata
+
     def to(
         self,
         device: str | torch.device,

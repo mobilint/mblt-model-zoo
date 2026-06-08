@@ -4,7 +4,8 @@ Preprocessing builder.
 
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections.abc import Mapping
+from typing import Any
 
 from .base import PreBase
 from .center_crop import CenterCrop
@@ -16,7 +17,7 @@ from .resize import Resize
 
 
 def build_preprocess(
-    pre_cfg: OrderedDict,
+    pre_cfg: Mapping[str, Mapping[str, Any]],
 ) -> PreBase:
     """Builds a preprocessing pipeline based on the configuration.
 

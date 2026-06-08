@@ -26,16 +26,25 @@ class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]])
         ids (list[int]): Sorted list of image IDs in the dataset.
     """
 
-    def __init__(self, root: str, annFile: str) -> None:
+    def __init__(self, root: str, annFile: str, min_keypoints: int | None = None) -> None:
         """Initializes the CustomCocodata instance.
 
         Args:
             root (str): Path to the directory containing images.
             annFile (str): Path to the COCO annotation JSON file.
+            min_keypoints: If set, keep only images with at least one
+                annotation whose ``num_keypoints`` is greater than this value.
         """
         self.root = root
         self.coco = COCO(annFile)
-        self.ids = list(sorted(self.coco.imgs.keys()))
+        if min_keypoints is None:
+            self.ids = list(sorted(self.coco.imgs.keys()))
+        else:
+            self.ids = list(
+                sorted(
+                    {ann["image_id"] for ann in self.coco.anns.values() if ann.get("num_keypoints", 0) > min_keypoints}
+                )
+            )
 
     def _load_image(self, image_id: int) -> np.ndarray:
         """Load image by ID"""
@@ -72,15 +81,22 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
         torch.utils.data.DataLoader: A configured DataLoader for the COCO dataset.
     """
 
-    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
+    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray, list[Any], tuple[int, ...]]:
         """Collate function for COCO DataLoader."""
         batch = list(filter(lambda x: x is not None, batch))
         images, idx, height, width = zip(*batch)
 
         processed_images = []
+        ratio_pads = []
         for img in images:
-            img = preprocess_fn(img)
-            processed_images.append(img)
+            processed = preprocess_fn(img)
+            if isinstance(processed, tuple) and len(processed) == 2 and isinstance(processed[1], dict):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
 
         height_arr = np.array(height)
         width_arr = np.array(width)
@@ -88,6 +104,7 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
         return (
             np.stack(processed_images, axis=0),
             np.stack((height_arr, width_arr), axis=1),
+            ratio_pads,
             idx,
         )
 

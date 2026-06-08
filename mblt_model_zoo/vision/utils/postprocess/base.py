@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from ..types import ListTensorLike, TensorLike
-from .common import nmsout2eval, process_mask_upsample
+from .common import RatioPad, nmsout2eval, process_mask_upsample
 
 
 class PostBase(ABC):
@@ -159,6 +159,11 @@ class YOLOPostBase(PostBase):
             list: List of detections per image.
         """
         self.set_threshold(conf_thres, iou_thres)
+        final_detections, proto_outs = self.extract_final_outputs(x)
+        if final_detections is not None:
+            if proto_outs is not None:
+                return self.masking(final_detections, proto_outs)
+            return final_detections
         checked_input = self.check_input(x)
 
         if not self.e2e:
@@ -210,6 +215,7 @@ class YOLOPostBase(PostBase):
         nms_out: Any,
         img1_shape: tuple[int, int],
         img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
     ) -> tuple[Any, ...]:
         """Converts NMS output to evaluation format (labels, boxes, scores).
 
@@ -225,7 +231,107 @@ class YOLOPostBase(PostBase):
         """
 
         img0_shapes = [img0_shape] if isinstance(img0_shape, tuple) else img0_shape
-        return nmsout2eval(nms_out, img1_shape, img0_shapes)
+        ratio_pads: list[RatioPad | None] | None
+        if ratio_pad is None:
+            ratio_pads = None
+        elif isinstance(ratio_pad, list):
+            ratio_pads = list(ratio_pad)
+        else:
+            ratio_pads = [ratio_pad]
+        return nmsout2eval(nms_out, img1_shape, img0_shapes, ratio_pads=ratio_pads)
+
+    def extract_final_outputs(
+        self,
+        x: TensorLike | ListTensorLike,
+    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+        """Extract already-decoded ONNX-style detections when present.
+
+        Args:
+            x: Raw postprocess input.
+
+        Returns:
+            A tuple of ``(detections, prototypes)`` when the input already contains
+            final detections, otherwise ``(None, None)``.
+        """
+
+        final_det_dim = 6 + self.n_extra
+
+        if isinstance(x, list):
+            if not x:
+                return None, None
+
+            normalized_detections: np.ndarray | torch.Tensor | None = None
+            normalized_proto: torch.Tensor | None = None
+            for output in x:
+                if not isinstance(output, (np.ndarray, torch.Tensor)):
+                    continue
+                if normalized_detections is None:
+                    normalized_detections = self._normalize_final_detection_tensor(output, final_det_dim)
+                    if normalized_detections is not None:
+                        continue
+                if normalized_proto is None:
+                    try:
+                        normalized_proto = self._normalize_proto_batch(output)
+                    except ValueError:
+                        continue
+
+            if normalized_detections is not None:
+                return self._final_detection_batches(normalized_detections), normalized_proto
+            return None, None
+
+        normalized_x = self._normalize_final_detection_tensor(x, final_det_dim)
+        if normalized_x is not None:
+            return self._final_detection_batches(normalized_x), None
+
+        return None, None
+
+    def _normalize_final_detection_tensor(
+        self,
+        x: TensorLike,
+        final_det_dim: int,
+    ) -> np.ndarray | torch.Tensor | None:
+        """Return a batched final-detection tensor when ``x`` already contains decoded rows."""
+
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[1] == 1:
+                x = x[:, 0]
+            elif x.shape[0] == 1:
+                x = x[0]
+        if x.ndim == 2 and x.shape[-1] == final_det_dim:
+            x = x[None]
+        if x.ndim == 3 and x.shape[-1] == final_det_dim:
+            return x
+        if x.ndim == 3 and x.shape[1] == final_det_dim:
+            if isinstance(x, np.ndarray):
+                return np.swapaxes(x, 1, 2)
+            return x.transpose(1, 2)
+
+        return None
+
+    def _final_detection_batches(self, x: np.ndarray | torch.Tensor) -> list[torch.Tensor]:
+        """Convert batched final detections to the internal per-image tensor list."""
+
+        if isinstance(x, np.ndarray):
+            tensor = torch.from_numpy(x).to(self.device)
+        else:
+            tensor = x.to(self.device)
+        return [batch[batch[:, 4] > self.conf_thres] for batch in tensor]
+
+    def _normalize_proto_batch(self, proto_outs: np.ndarray | torch.Tensor) -> torch.Tensor:
+        """Normalize prototype masks to ``(B, H, W, C)`` layout."""
+
+        if isinstance(proto_outs, np.ndarray):
+            proto = torch.from_numpy(proto_outs).to(self.device)
+        else:
+            proto = proto_outs.to(self.device)
+
+        if proto.ndim != 4:
+            raise ValueError(f"Expected 4D prototype tensor, got shape {tuple(proto.shape)}.")
+        if proto.shape[-1] == self.n_extra:
+            return proto
+        if proto.shape[1] == self.n_extra:
+            return proto.permute(0, 2, 3, 1)
+        raise ValueError(f"Unsupported prototype tensor shape {tuple(proto.shape)}.")
 
     def make_anchors(self, offset: float = 0.5) -> None:
         """
@@ -271,13 +377,15 @@ class YOLOPostBase(PostBase):
         if isinstance(x, np.ndarray):
             tensors = [torch.from_numpy(x).to(self.device)]
         elif isinstance(x, torch.Tensor):
-            tensors = [x.to(self.device)]
+            tensor_input = cast(torch.Tensor, x)
+            tensors = [tensor_input.to(self.device)]
         else:
             assert isinstance(x, list), f"Got unexpected type for x={type(x)}."
             if all(isinstance(xi, np.ndarray) for xi in x):
                 tensors = [torch.from_numpy(xi).to(self.device) for xi in x]
             elif all(isinstance(xi, torch.Tensor) for xi in x):
-                tensors = [cast(torch.Tensor, xi).to(self.device) for xi in x]
+                torch_inputs = cast(list[torch.Tensor], x)
+                tensors = [xi.to(self.device) for xi in torch_inputs]
             else:
                 raise TypeError(f"Got unexpected element type for x[0]={type(x[0])}.")
         return self.check_dim(tensors)
@@ -293,7 +401,7 @@ class YOLOPostBase(PostBase):
         for xi in x:
             if xi.ndim == 3:
                 xi = xi.unsqueeze(0)
-            elif xi.ndim == 4:
+            elif xi.ndim in (4, 5):
                 pass
             else:
                 raise ValueError(f"Got unexpected dim for xi={xi.ndim}.")
@@ -369,7 +477,12 @@ class YOLOPostBase(PostBase):
         """
         masks = []
         for pred, proto in zip(x, proto_outs):
-            proto = proto.permute(2, 0, 1)  # [mask_h, mask_w, mask_dim] -> [mask_dim, mask_h, mask_w]
+            if proto.ndim != 3:
+                raise ValueError(f"Expected 3D prototype tensor, got shape {tuple(proto.shape)}.")
+            if proto.shape[-1] == self.n_extra:
+                proto = proto.permute(2, 0, 1)
+            elif proto.shape[0] != self.n_extra:
+                raise ValueError(f"Unsupported prototype tensor shape {tuple(proto.shape)}.")
             if len(pred) == 0:
                 masks.append(torch.zeros((0, self.imh, self.imw), dtype=torch.float32, device=self.device))
                 continue
