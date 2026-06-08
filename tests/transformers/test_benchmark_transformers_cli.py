@@ -8,6 +8,7 @@ _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[2] / "benchmark" 
 if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(_TRANSFORMERS_BENCHMARK_DIR))
 
+from benchmark.transformers import benchmark_automatic_speech_recognition_models as asr_bench  # noqa: E402
 from benchmark.transformers import benchmark_image_text_to_text_models as vlm_bench  # noqa: E402
 from benchmark.transformers import benchmark_text_generation_models as text_bench  # noqa: E402
 
@@ -199,6 +200,22 @@ def test_benchmark_batch_flags(module, command) -> None:
     assert parser.parse_args([command, "--non-batch"]).batch_mode == "non_batch"
     with pytest.raises(SystemExit):
         parser.parse_args([command, "--batch", "--non-batch"])
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_parser_accepts_npu_rail_metrics(module, command) -> None:
+    """Verify benchmark subcommand parsers expose the NPU rail metric option."""
+    args = module._build_arg_parser().parse_args([command, "--device-npu-rail-metrics", "all"])
+
+    assert args.device_npu_rail_metrics == "all"
+
+
+def test_asr_benchmark_parser_accepts_npu_rail_metrics() -> None:
+    """Verify the ASR benchmark parser exposes the shared NPU rail metric option."""
+    args = asr_bench._parse_args(["--device-npu-rail-metrics", "npu,ddr"])
+
+    assert args.device_npu_rail_metrics == ["npu", "ddr"]
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])

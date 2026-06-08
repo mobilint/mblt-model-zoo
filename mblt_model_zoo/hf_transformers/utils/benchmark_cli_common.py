@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TypeAlias
 
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
 DEFAULT_DEVICE_BACKEND = "none"
+NPU_RAIL_METRIC_CHOICES = ("npu", "ddr", "pmic", "goldfinger")
 CORE_MODE_CHOICES = ("single", "global4", "global8")
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
 DEVICE_METRIC_KEYS = (
@@ -31,7 +32,11 @@ RawDeviceMetricMap: TypeAlias = Mapping[str, object]
 
 
 class DeviceTracker(Protocol):
-    """Runtime protocol for mblt-tracker objects used by benchmark helpers."""
+    """Runtime protocol for mblt-tracker 1.x-compatible benchmark helpers.
+
+    Optional trace methods are intentionally discovered dynamically because GPU, NPU, fake, and
+    future tracker implementations do not expose identical time-series APIs.
+    """
 
     def start(self) -> None:
         """Start device metric collection."""
@@ -83,6 +88,35 @@ def parse_non_negative_int_list_optional(spec: str | None, *, name: str = "devic
 def parse_int_list_optional(spec: str | None) -> list[int] | None:
     """Parse comma-separated GPU tracker IDs for backward-compatible callers."""
     return parse_non_negative_int_list_optional(spec, name="device-gpu-id")
+
+
+def parse_npu_rail_metrics(spec: str | None) -> str | list[str]:
+    """Parse NPU rail metrics for mblt-tracker NPU device tracking."""
+    if spec is None:
+        return "npu"
+    text = str(spec).strip().lower()
+    if not text:
+        return "npu"
+    if text == "all":
+        return "all"
+
+    rails: list[str] = []
+    valid_rails = set(NPU_RAIL_METRIC_CHOICES)
+    for raw_rail in text.split(","):
+        rail = raw_rail.strip()
+        if not rail:
+            raise argparse.ArgumentTypeError("device-npu-rail-metrics values must not be empty")
+        if rail not in valid_rails:
+            choices = ", ".join((*NPU_RAIL_METRIC_CHOICES, "all"))
+            raise argparse.ArgumentTypeError(f"unknown NPU rail metric '{rail}' (expected one of: {choices})")
+        if rail not in rails:
+            rails.append(rail)
+
+    if not rails:
+        return "npu"
+    if len(rails) == 1:
+        return rails[0]
+    return rails
 
 
 def iter_core_modes(core_mode: str | None) -> list[str | None]:
@@ -223,6 +257,15 @@ def add_device_tracking_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="comma-separated NPU logical card ids for device tracking (e.g., 0,1)",
     )
+    parser.add_argument(
+        "--device-npu-rail-metrics",
+        type=parse_npu_rail_metrics,
+        default="npu",
+        help=(
+            "NPU rail metrics to collect with mblt-tracker: npu, ddr, pmic, goldfinger, all, or a "
+            "comma-separated combination (default: npu)"
+        ),
+    )
 
 
 def add_pipeline_device_args(
@@ -306,8 +349,13 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any) -> DeviceTrack
         from mblt_tracker import NPUDeviceTracker
 
         npu_id = infer_npu_ids(getattr(args, "device_npu_id", None))
+        rail_metrics = getattr(args, "device_npu_rail_metrics", "npu")
         try:
-            return NPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC, npu_id=npu_id)
+            return NPUDeviceTracker(
+                interval=DEVICE_TRACKER_INTERVAL_SEC,
+                npu_id=npu_id,
+                rail_metrics=rail_metrics,
+            )
         except Exception as e:
             print(f"[device] failed to initialize NPU tracker: {e}")
             return None
@@ -374,22 +422,52 @@ def _trace_from_method(tracker: DeviceTracker, method_name: str) -> list[DeviceT
         return []
 
 
+def _trace_from_first_available_method(
+    tracker: DeviceTracker,
+    method_names: Sequence[str],
+) -> list[DeviceTracePoint]:
+    """Return the first non-empty trace from the ordered tracker method candidates."""
+    for method_name in method_names:
+        trace = _trace_from_method(tracker, method_name)
+        if trace:
+            return trace
+    return []
+
+
 def _trace_from_attr(tracker: DeviceTracker, attr_name: str) -> list[DeviceTracePoint]:
     return _normalize_trace(getattr(tracker, attr_name, []))
 
 
 def extract_device_time_series(tracker: DeviceTracker) -> DeviceTimeSeriesMap:
-    """Extract JSON-safe device metric time-series from mblt-tracker 0.2.3."""
+    """Extract JSON-safe device metric time-series from mblt-tracker 1.x-compatible trackers."""
     trace_getters: dict[str, Callable[[], list[DeviceTracePoint]]] = {
-        "power_w": lambda: _trace_from_method(tracker, "get_trace"),
-        "utilization_pct": lambda: _trace_from_method(tracker, "get_util_trace"),
-        "temperature_c": lambda: _trace_from_method(tracker, "get_temp_trace"),
+        "power_w": lambda: _trace_from_first_available_method(tracker, ("get_total_power_trace", "get_trace")),
+        "utilization_pct": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_total_utilization_trace", "get_util_trace"),
+        ),
+        "temperature_c": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_temperature_trace", "get_temp_trace"),
+        ),
         "memory_used_mb": lambda: _trace_from_attr(tracker, "_mem_used_trace"),
         "memory_used_pct": lambda: _trace_from_attr(tracker, "_mem_used_pct_trace"),
-        "npu_power_w": lambda: _trace_from_method(tracker, "get_npu_power_trace"),
-        "ddr_power_w": lambda: _trace_from_method(tracker, "get_ddr_power_trace"),
-        "pmic_power_w": lambda: _trace_from_method(tracker, "get_pmic_power_trace"),
-        "goldfinger_power_w": lambda: _trace_from_method(tracker, "get_goldfinger_power_trace"),
+        "npu_power_w": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_npu_rail_power_trace", "get_npu_power_trace"),
+        ),
+        "ddr_power_w": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_ddr_rail_power_trace", "get_ddr_power_trace"),
+        ),
+        "pmic_power_w": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_pmic_rail_power_trace", "get_pmic_power_trace"),
+        ),
+        "goldfinger_power_w": lambda: _trace_from_first_available_method(
+            tracker,
+            ("get_goldfinger_rail_power_trace", "get_goldfinger_power_trace"),
+        ),
     }
     return {key: getter() for key, getter in trace_getters.items()}
 

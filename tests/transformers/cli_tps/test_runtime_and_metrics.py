@@ -2,8 +2,8 @@ import argparse
 import importlib
 import inspect
 import json
+import sys
 import types
-import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -16,8 +16,10 @@ from mblt_model_zoo.hf_transformers.models.blip.modeling_blip_text import Mobili
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     DEVICE_METRIC_KEYS,
+    build_device_tracker,
     extract_device_metric,
     extract_device_time_series,
+    parse_npu_rail_metrics,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
@@ -2061,6 +2063,110 @@ def test_extract_device_time_series_normalizes_tracker_023_traces():
     assert series["temperature_c"] == [{"timestamp_s": 1.0, "value": 55.0}]
     assert series["memory_used_mb"] == [{"timestamp_s": 1.0, "value": 512.0}]
     assert series["goldfinger_power_w"] == [{"timestamp_s": 1.0, "value": 12.0}]
+
+
+def test_parse_npu_rail_metrics_accepts_default_and_all():
+    assert parse_npu_rail_metrics(None) == "npu"
+    assert parse_npu_rail_metrics("") == "npu"
+    assert parse_npu_rail_metrics(" all ") == "all"
+
+
+def test_parse_npu_rail_metrics_accepts_comma_separated_rails():
+    assert parse_npu_rail_metrics("npu,ddr,NPU") == ["npu", "ddr"]
+
+
+def test_parse_npu_rail_metrics_rejects_unknown_rail():
+    with pytest.raises(argparse.ArgumentTypeError, match="unknown NPU rail metric"):
+        parse_npu_rail_metrics("cpu")
+
+
+def test_build_device_tracker_forwards_npu_rail_metrics(monkeypatch: pytest.MonkeyPatch):
+    created: dict[str, object] = {}
+
+    class _FakeNPUDeviceTracker:
+        def __init__(self, **kwargs) -> None:
+            created.update(kwargs)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {}
+
+    fake_module = types.SimpleNamespace(NPUDeviceTracker=_FakeNPUDeviceTracker)
+    monkeypatch.setitem(sys.modules, "mblt_tracker", fake_module)
+    args = argparse.Namespace(
+        device_metrics=True,
+        device_backend="npu",
+        device_npu_id=[0],
+        device_npu_rail_metrics="all",
+        device="cpu",
+        device_gpu_id=None,
+    )
+    pipeline = SimpleNamespace(model=SimpleNamespace(npu_backend=object()))
+
+    tracker = build_device_tracker(args, pipeline)
+
+    assert isinstance(tracker, _FakeNPUDeviceTracker)
+    assert created == {"interval": 1.0, "npu_id": 0, "rail_metrics": "all"}
+
+
+def test_extract_device_time_series_prefers_tracker_100_trace_aliases():
+    class _FakeTracker:
+        def get_total_power_trace(self):
+            return [(1.0, 100.0)]
+
+        def get_trace(self):
+            return [(1.0, 1.0)]
+
+        def get_total_utilization_trace(self):
+            return [(2.0, 80.0)]
+
+        def get_util_trace(self):
+            return [(2.0, 8.0)]
+
+        def get_temperature_trace(self):
+            return [(3.0, 50.0)]
+
+        def get_temp_trace(self):
+            return [(3.0, 5.0)]
+
+        def get_npu_rail_power_trace(self):
+            return [(4.0, 10.0)]
+
+        def get_npu_power_trace(self):
+            return [(4.0, 1.0)]
+
+        def get_ddr_rail_power_trace(self):
+            return [(5.0, 2.0)]
+
+        def get_ddr_power_trace(self):
+            return [(5.0, 0.2)]
+
+        def get_pmic_rail_power_trace(self):
+            return [(6.0, 3.0)]
+
+        def get_pmic_power_trace(self):
+            return [(6.0, 0.3)]
+
+        def get_goldfinger_rail_power_trace(self):
+            return [(7.0, 4.0)]
+
+        def get_goldfinger_power_trace(self):
+            return [(7.0, 0.4)]
+
+    series = extract_device_time_series(_FakeTracker())
+
+    assert series["power_w"] == [{"timestamp_s": 1.0, "value": 100.0}]
+    assert series["utilization_pct"] == [{"timestamp_s": 2.0, "value": 80.0}]
+    assert series["temperature_c"] == [{"timestamp_s": 3.0, "value": 50.0}]
+    assert series["npu_power_w"] == [{"timestamp_s": 4.0, "value": 10.0}]
+    assert series["ddr_power_w"] == [{"timestamp_s": 5.0, "value": 2.0}]
+    assert series["pmic_power_w"] == [{"timestamp_s": 6.0, "value": 3.0}]
+    assert series["goldfinger_power_w"] == [{"timestamp_s": 7.0, "value": 4.0}]
 
 
 def test_cli_tps_device_npu_id_parsing():

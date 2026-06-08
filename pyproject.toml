@@ -26,7 +26,7 @@ dependencies = [
     "scipy",
     "requests>=2.32.0",
     "tqdm",
-    "mblt-tracker>=0.2.5",
+    "mblt-tracker>=1.0.0",
     "PyYAML",
 ]
 classifiers = [

@@ -58,6 +58,10 @@ inference and model downloads.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
   - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
+  - `--device-npu-rail-metrics npu`: Selects NPU rail power metrics collected by `mblt-tracker`.
+    The default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`,
+    and `goldfinger`, or pass a comma-separated subset such as `npu,ddr`. Non-NPU rails can have a
+    lower effective sampling rate because their values depend on the firmware refresh cadence.
   - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids.
   - `--no-device-metrics`: Disables device metric collection.
   - Console summaries show aggregate scalar metrics such as average and p99 power, utilization,
@@ -701,6 +705,9 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
 - `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`.
 - `--device-npu-id`: NPU tracker target logical card id, such as `0` or `0,1`.
+- `--device-npu-rail-metrics`: NPU rail metric selection for `mblt-tracker` 1.x. Accepted values are
+  `npu`, `ddr`, `pmic`, `goldfinger`, `all`, or a comma-separated subset such as `npu,ddr`. The
+  default is `npu`; `all` enables every supported rail.
 
 ### Result Management
 
