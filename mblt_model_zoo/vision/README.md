@@ -28,6 +28,10 @@ from mblt_model_zoo.vision import MBLT_Engine
 model = MBLT_Engine(model_cls="alexnet", framework="onnx")
 ```
 
+When `framework="onnx"` is selected, the engine prefers available GPU-capable ONNX Runtime
+providers such as `CUDAExecutionProvider` and keeps CPU as a fallback. Pass `onnx_providers` to
+override the provider order explicitly when needed.
+
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
 from mblt_model_zoo.vision.object_detection import YOLO11m

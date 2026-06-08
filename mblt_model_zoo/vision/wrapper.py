@@ -83,6 +83,36 @@ def _load_onnxruntime() -> Any:
     return module
 
 
+def _resolve_onnx_providers(ort_module: Any, requested_providers: Sequence[str] | None = None) -> list[str]:
+    """Selects ONNX Runtime execution providers.
+
+    Args:
+        ort_module: Imported ``onnxruntime`` module or compatible test double.
+        requested_providers: Optional provider order requested by the caller.
+
+    Returns:
+        The provider list passed to ``InferenceSession``.
+    """
+
+    if requested_providers is not None:
+        return list(requested_providers)
+
+    get_available = getattr(ort_module, "get_available_providers", None)
+    if not callable(get_available):
+        return ["CPUExecutionProvider"]
+
+    available_providers = set(get_available())
+    preferred_providers = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "ROCMExecutionProvider",
+        "DmlExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+    resolved_providers = [provider for provider in preferred_providers if provider in available_providers]
+    return resolved_providers or ["CPUExecutionProvider"]
+
+
 class MBLT_Engine:
     """Main engine class for running vision models from the MBLT zoo.
 
@@ -108,6 +138,7 @@ class MBLT_Engine:
         target_clusters: Sequence[int | Cluster] | None = None,
         postprocess_kwargs: dict[str, Any] | None = None,
         framework: str = "mxq",
+        onnx_providers: Sequence[str] | None = None,
     ) -> None:
         """Initializes the MBLT_Engine.
 
@@ -125,6 +156,7 @@ class MBLT_Engine:
             model_cls(not dict): model name or yaml path
             postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
             framework: Execution framework, either "mxq" or "onnx".
+            onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
         _mxq_path_passed = bool(mxq_path)
@@ -220,7 +252,8 @@ class MBLT_Engine:
             if not os.path.isfile(resolved_onnx_path):
                 raise FileNotFoundError(f"ONNX file not found at: {resolved_onnx_path}")
 
-            self._onnx_session = ort.InferenceSession(resolved_onnx_path, providers=["CPUExecutionProvider"])
+            providers = _resolve_onnx_providers(ort, onnx_providers)
+            self._onnx_session = ort.InferenceSession(resolved_onnx_path, providers=providers)
             self.model = self._onnx_session
             self.input_name = self._onnx_session.get_inputs()[0].name
             self.output_names = [o.name for o in self._onnx_session.get_outputs()]
@@ -324,12 +357,16 @@ class MBLT_Engine:
                 return
 
         if mxq_path and os.path.isfile(mxq_path):
-            self.file_cfg.pop("repo_id", None)
-            self.file_cfg.pop("filename", None)
-            self.file_cfg.pop("revision", None)
             resolved_local_onnx = self._resolve_local_onnx_path(mxq_path)
             if resolved_local_onnx is not None:
                 self.file_cfg["onnx_path"] = resolved_local_onnx
+                self.file_cfg.pop("repo_id", None)
+                self.file_cfg.pop("filename", None)
+                self.file_cfg.pop("revision", None)
+            elif framework == "mxq":
+                self.file_cfg.pop("repo_id", None)
+                self.file_cfg.pop("filename", None)
+                self.file_cfg.pop("revision", None)
             if framework == "mxq":
                 return
 

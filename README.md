@@ -88,6 +88,7 @@ model = MBLT_Engine(
 - `framework`: Inference backend. Defaults to `mxq`. `onnx` is currently supported for image classification models.
 - `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
 - `onnx_path`: Local ONNX path. Use `""` to download and cache the published ONNX automatically when `framework="onnx"`.
+- `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
 Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
