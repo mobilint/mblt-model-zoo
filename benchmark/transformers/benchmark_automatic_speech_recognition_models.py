@@ -127,6 +127,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
 )
 
+_ASR_BENCHMARK_SCHEMA_VERSION = 1
+
 
 @dataclass(frozen=True)
 class ASRBenchmarkTarget:
@@ -537,6 +539,15 @@ def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     return kwargs
 
 
+def _generate_kwargs_for_target(args: argparse.Namespace, model_id: str) -> dict[str, Any]:
+    """Return requested generation kwargs for one ASR benchmark target."""
+
+    return {
+        **_resolve_generate_kwargs(args),
+        **_optional_generate_kwargs_for_model(args, model_id),
+    }
+
+
 def _sample_preview(
     samples: Iterable[Mapping[str, Any]],
 ) -> tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]:
@@ -633,6 +644,7 @@ def _build_no_samples_payload(
     """Build a status-only payload for targets that produced no measured ASR samples."""
 
     return {
+        "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "automatic-speech-recognition",
         "model": target.label,
         "model_id": target.model_id,
@@ -753,6 +765,7 @@ def _write_target_json(
     sample_timings: Sequence[SampleTiming],
 ) -> None:
     payload: dict[str, Any] = {
+        "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "automatic-speech-recognition",
         "model": target.label,
         "model_id": target.model_id,
@@ -768,10 +781,15 @@ def _write_target_json(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
+        "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
         "asr": summary_to_dict(summary),
         "device": dict(device_metric),
         "device_trace": dict(device_trace),
     }
+    effective_generate_kwargs = [item.effective_generate_kwargs for item in sample_timings]
+    effective_generate_kwargs = [item for item in effective_generate_kwargs if item is not None]
+    if effective_generate_kwargs:
+        payload["effective_generate_kwargs"] = effective_generate_kwargs[0]
     if args.save_samples:
         payload["samples"] = [asdict(item) for item in sample_timings]
     with out_path.open("w", encoding="utf-8") as file:
@@ -886,10 +904,7 @@ def main(argv: list[str] | None = None) -> int:
         desc="Benchmarking ASR models",
         unit="model-mode",
     ):
-        generate_kwargs = {
-            **base_generate_kwargs,
-            **_optional_generate_kwargs_for_model(args, target.model_id),
-        }
+        generate_kwargs = {**base_generate_kwargs, **_optional_generate_kwargs_for_model(args, target.model_id)}
         target_args = _args_for_target_device_backend(args, model_id=target.model_id, mxq_path=target.mxq_path)
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)

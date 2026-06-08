@@ -274,14 +274,14 @@ python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --core-mode global8
 ```
 
+For original Hugging Face models, omit Mobilint quantized revisions such as `W8`:
+
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --model-id openai/whisper-small \
-  --revision W8 \
   --num-samples 5 \
   --num-beams 5 \
-  --device cpu \
-  --core-mode global8
+  --device cpu
 ```
 
 For Whisper-like models, `--language` and `--task` are passed as decoding hints. For other ASR

@@ -50,6 +50,7 @@ class SampleTiming:
     num_beams: int | None
     reference: str
     hypothesis: str
+    effective_generate_kwargs: dict[str, Any] | None = None
 
 
 @dataclass

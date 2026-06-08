@@ -778,6 +778,12 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     result = asr_bench._run_one_sample(pipe, sample, generate_kwargs)
 
     assert result.hypothesis == "test output"
+    assert result.effective_generate_kwargs == {
+        "num_beams": 4,
+        "max_new_tokens": 444,
+        "return_timestamps": False,
+        "early_stopping": True,
+    }
     assert pipe.calls[0]["task"] == "transcribe"
     assert pipe.calls[0]["language"] == "en"
     assert "task" not in pipe.calls[-1]
@@ -874,6 +880,70 @@ def test_write_combined_outputs_writes_aggregate_files(tmp_path: Path, monkeypat
     assert (tmp_path / "combined.csv").is_file()
     assert (tmp_path / "combined.md").is_file()
     assert (tmp_path / "summary.md").is_file()
+
+
+def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) -> None:
+    """Verify per-target ASR JSON records schema and requested/effective generate kwargs."""
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-small",
+        revision_candidates=[None],
+        label="openai/whisper-small",
+        base="openai__whisper-small",
+        mxq_path=None,
+        is_original=False,
+    )
+    args = asr_bench._parse_args(["--num-beams", "4"])
+    summary = asr_bench.ASRMetricSummary(
+        num_samples=1,
+        total_audio_s=1.0,
+        total_generate_s=0.5,
+        wer=0.1,
+        cer=0.02,
+        mean_latency_s=0.5,
+        p50_latency_s=0.5,
+        p95_latency_s=0.5,
+        throughput_samples_per_s=2.0,
+        rtf=0.5,
+        inverse_rtf=2.0,
+        decode_tokens_per_s=10.0,
+        avg_tokens_per_sample=5.0,
+    )
+    timing = asr_bench.SampleTiming(
+        sample_id="sample-1",
+        audio_duration_s=1.0,
+        generate_time_s=0.5,
+        num_generated_tokens=5,
+        num_beams=4,
+        reference="hello",
+        hypothesis="hello",
+        effective_generate_kwargs={"num_beams": 4, "max_new_tokens": 444},
+    )
+    out_path = tmp_path / "openai__whisper-small_beams4.json"
+
+    asr_bench._write_target_json(
+        out_path,
+        target=target,
+        args=args,
+        revision=None,
+        core_mode=None,
+        summary=summary,
+        device_metric={},
+        device_trace={},
+        sample_timings=[timing],
+    )
+
+    payload = asr_bench.json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == asr_bench._ASR_BENCHMARK_SCHEMA_VERSION
+    assert payload["generate_kwargs"] == {
+        "max_new_tokens": 444,
+        "return_timestamps": False,
+        "num_beams": 4,
+        "early_stopping": True,
+        "task": "transcribe",
+        "language": "en",
+    }
+    assert payload["effective_generate_kwargs"] == {"num_beams": 4, "max_new_tokens": 444}
 
 
 def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1671,11 +1741,12 @@ def test_main_writes_no_samples_status_payload(tmp_path: Path, monkeypatch: pyte
 
     assert asr_bench.main(["--output-dir", str(tmp_path), "--num-samples", "1"]) == 0
     assert captured_payloads and captured_payloads[0]["status"] == "no_samples"
+    assert captured_payloads[0]["schema_version"] == asr_bench._ASR_BENCHMARK_SCHEMA_VERSION
     assert "asr" not in captured_payloads[0]
 
 
 def test_write_combined_outputs_skips_status_only_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify status-only ASR payloads do not become zero-valued combined rows."""
+    """Verify status-only ASR payloads are summarized but do not become metric rows."""
 
     payload = {
         "benchmark_type": "automatic-speech-recognition",
@@ -1690,7 +1761,11 @@ def test_write_combined_outputs_skips_status_only_payloads(tmp_path: Path, monke
     asr_bench._write_combined_outputs(tmp_path)
 
     assert not (tmp_path / "combined.csv").exists()
-    assert (tmp_path / "combined.md").read_text(encoding="utf-8") == "No ASR results found.\n"
+    combined_md = (tmp_path / "combined.md").read_text(encoding="utf-8")
+    assert combined_md.startswith("No ASR results found.\n")
+    assert "ASR status-only targets" in combined_md
+    assert "No measured samples remained" in combined_md
+    assert (tmp_path / "combined_status.md").is_file()
 
 
 def test_select_revision_warns_when_revision_check_is_inconclusive(

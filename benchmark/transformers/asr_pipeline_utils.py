@@ -242,6 +242,7 @@ def run_one_sample(
 
     output = None
     last_error: BaseException | None = None
+    effective_generate_kwargs: dict[str, Any] | None = None
     for pipeline_input, extra_kwargs in pipeline_inputs_builder(sample):
         for attempt_kwargs in retryable_generate_kwargs_builder(generate_kwargs):
             try:
@@ -250,6 +251,7 @@ def run_one_sample(
                     **extra_kwargs,
                     **pipeline_call_kwargs_builder(attempt_kwargs),
                 )
+                effective_generate_kwargs = dict(attempt_kwargs)
                 break
             except TypeError as exc:
                 if retryable_error_checker(exc):
@@ -278,6 +280,7 @@ def run_one_sample(
         num_beams=(int(generate_kwargs["num_beams"]) if generate_kwargs.get("num_beams") is not None else None),
         reference=str(sample["reference"]),
         hypothesis=hypothesis_raw,
+        effective_generate_kwargs=effective_generate_kwargs,
     )
 
 
@@ -299,6 +302,7 @@ def write_combined_outputs(
     import json
 
     rows: list[dict[str, Any]] = []
+    status_rows: list[list[Any]] = []
     summary_field_names = {field.name for field in dataclasses.fields(asr_metric_summary_cls)}
     for path in sorted(out_dir.glob("*.json")):
         if path.name == host_pc_info_filename:
@@ -309,6 +313,16 @@ def write_combined_outputs(
         except (OSError, json.JSONDecodeError):
             continue
         if payload.get("benchmark_type") != "automatic-speech-recognition":
+            continue
+        if payload.get("status"):
+            status_rows.append(
+                [
+                    str(payload.get("model", path.stem)),
+                    payload.get("num_beams", ""),
+                    payload.get("status", ""),
+                    payload.get("reason", ""),
+                ]
+            )
             continue
         asr = payload.get("asr")
         if not isinstance(asr, dict):
@@ -336,6 +350,7 @@ def write_combined_outputs(
 
     combined_csv = out_dir / "combined.csv"
     combined_md = out_dir / "combined.md"
+    status_md = out_dir / "combined_status.md"
     if rows:
         headers: list[str] = []
         seen_headers: set[str] = set()
@@ -386,6 +401,15 @@ def write_combined_outputs(
         )
     else:
         combined_md.write_text("No ASR results found.\n", encoding="utf-8")
+    status_markdown = ""
+    if status_rows:
+        status_markdown = markdown_table_func(["model", "num_beams", "status", "reason"], status_rows)
+        status_md.write_text(status_markdown, encoding="utf-8")
+        with combined_md.open("a", encoding="utf-8") as file:
+            file.write("\n## ASR status-only targets\n\n")
+            file.write(status_markdown)
+    elif status_md.exists():
+        status_md.unlink()
 
     make_rtf_chart_func(out_dir, rows)
     write_summary_markdown_func(
