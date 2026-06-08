@@ -521,9 +521,10 @@ def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[di
         return _load_librispeech(args)
 
     requested = max(int(args.num_samples), 0)
-    warmup = max(int(args.warmup), 0)
+    if requested == 0:
+        return []
     bounded_args = argparse.Namespace(**vars(args))
-    bounded_args.num_samples = requested + warmup
+    bounded_args.num_samples = None
     return _load_librispeech(bounded_args)
 
 
@@ -730,6 +731,7 @@ def _measure_target(
     generate_kwargs: Mapping[str, Any],
     *,
     native_language: str | None = None,
+    max_measured_samples: int | None = None,
 ) -> tuple[list[SampleTiming], dict[str, float | None], dict[str, list[dict[str, float]]]]:
     tracker = _build_device_tracker_common(target_args, pipe)
     _print_device_status_common(target_args, tracker)
@@ -738,6 +740,8 @@ def _measure_target(
         if tracker is not None:
             tracker.start()
         for sample in tqdm(samples, desc="ASR samples", leave=False, unit="sample"):
+            if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
+                break
             if _should_skip_whisper_long_form_sample(model_id, sample):
                 print(
                     "Skipping sample (>30s Whisper limit): "
@@ -884,12 +888,11 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = _resolve_results_dir(args)
     _collect_host_pc_info(out_dir)
     run_targets = _build_run_targets(args)
-    sampled_samples = None if args.num_samples is None else list(_load_measurement_candidate_samples(args))
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
     if args.dry_run:
         print(f"Resolved {len(run_targets)} target(s).")
-        preview_samples = _load_librispeech(args) if args.num_samples is None else (sampled_samples or [])
+        preview_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
         first, _ = _sample_preview(preview_samples)
         if first is not None:
             print(
@@ -918,7 +921,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         beam_tag = _beam_tag(args.num_beams)
         json_path = _result_json_path(out_dir, mode_base, args.num_beams)
-        current_samples = _load_librispeech(args) if args.num_samples is None else (sampled_samples or [])
+        current_samples = _load_librispeech(args) if args.num_samples is None else _load_measurement_candidate_samples(args)
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
@@ -955,7 +958,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.warmup,
                 native_language=args.language,
             )
-            measure_samples = _limit_measurement_samples(measure_samples, num_samples=args.num_samples)
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
                 target_args,
@@ -963,6 +965,7 @@ def main(argv: list[str] | None = None) -> int:
                 measure_samples,
                 generate_kwargs,
                 native_language=args.language,
+                max_measured_samples=args.num_samples,
             )
             if not timings:
                 reason = "No measured samples remained after warmup/skip filtering."

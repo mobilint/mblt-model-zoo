@@ -435,11 +435,17 @@ def make_rtf_chart(
 
     if not rows:
         return
+
+    def _chart_model_label(row: Mapping[str, Any]) -> str:
+        model_name = str(row.get("model", ""))
+        num_beams = row.get("num_beams")
+        beam_tag = "default" if num_beams is None or num_beams == "" else str(int(num_beams))
+        return f"{model_name}_beams{beam_tag}"
+
     metrics_by_folder: list[dict[str, Any]] = []
     folder_metrics: dict[str, Any] = {}
     for row in rows:
-        model_name = str(row.get("model", ""))
-        folder_metrics[model_name] = row
+        folder_metrics[_chart_model_label(row)] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
     labels = [out_dir.name]

@@ -158,6 +158,9 @@ def test_normalize_model_key_keeps_asr_beam_suffix() -> None:
         normalize_model_key(Path("openai__whisper-small_beamsdefault.json"), "openai/whisper-small")
         == "openai/whisper-small_beamsdefault"
     )
+    assert normalize_model_key(Path("openai__whisper-small_beams4.json"), "openai/whisper-small") == (
+        "openai/whisper-small_beams4"
+    )
 
 
 def test_normalize_model_key_keeps_owner_name_by_default() -> None:
@@ -185,11 +188,11 @@ def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) ->
         },
         "device": {"avg_power_w": 8.0},
     }
-    legacy_payload = dict(payload)
-    legacy_payload["model"] = "openai/whisper-small_beams1"
+    beam_payload = dict(payload)
+    beam_payload["model"] = "openai/whisper-small"
 
     (tmp_path / "openai__whisper-small_beamsdefault.json").write_text(json.dumps(payload), encoding="utf-8")
-    (tmp_path / "openai__whisper-small_beams1.json").write_text(json.dumps(legacy_payload), encoding="utf-8")
+    (tmp_path / "openai__whisper-small_beams1.json").write_text(json.dumps(beam_payload), encoding="utf-8")
 
     metrics = collect_metrics(tmp_path, ASRCompareMetric)
     captured = capsys.readouterr()

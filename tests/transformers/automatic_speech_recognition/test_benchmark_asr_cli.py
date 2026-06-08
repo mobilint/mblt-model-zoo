@@ -209,6 +209,42 @@ def test_measure_target_skips_whisper_long_form_samples() -> None:
     assert device_trace == {}
 
 
+def test_measure_target_keeps_requested_count_after_whisper_skip() -> None:
+    """Verify skipped long-form candidates do not consume the measured sample quota."""
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.tokenizer = None
+
+        def __call__(self, pipeline_input, **kwargs):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return {"text": "hello world"}
+
+    def sample(sample_id: str, duration_s: int) -> dict[str, object]:
+        return {
+            "id": sample_id,
+            "audio": {"array": np.zeros(16000 * duration_s, dtype=np.float32), "sampling_rate": 16000},
+            "reference": "hello world",
+        }
+
+    pipe = DummyPipe()
+    args = asr_bench._parse_args([])
+    args.device_backend = "none"
+
+    timings, _, _ = asr_bench._measure_target(
+        "openai/whisper-small",
+        args,
+        pipe,
+        [sample("measure-1", 5), sample("skip-long", 31), sample("measure-2", 4), sample("unused", 3)],
+        {"max_new_tokens": 444, "return_timestamps": False},
+        max_measured_samples=2,
+    )
+
+    assert [timing.sample_id for timing in timings] == ["measure-1", "measure-2"]
+    assert pipe.calls == 2
+
+
 def test_warmup_skips_whisper_long_form_samples() -> None:
     """Verify warmup also skips >30s Whisper samples and counts completed warmups."""
 
@@ -1425,10 +1461,10 @@ def test_load_librispeech_uses_full_split_when_requested(monkeypatch: pytest.Mon
     assert captured["num_samples"] is None
 
 
-def test_load_measurement_candidate_samples_adds_warmup_to_bounded_requests(
+def test_load_measurement_candidate_samples_uses_unbounded_stream_for_bounded_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify bounded ASR runs load warmup+measurement candidates from the dataset."""
+    """Verify bounded ASR runs can consume replacement candidates after skips."""
 
     captured: list[int | None] = []
 
@@ -1441,7 +1477,7 @@ def test_load_measurement_candidate_samples_adds_warmup_to_bounded_requests(
     args = asr_bench._parse_args(["--num-samples", "3", "--warmup", "2"])
 
     assert asr_bench._load_measurement_candidate_samples(args) == []
-    assert captured == [5]
+    assert captured == [None]
 
 
 def test_load_measurement_candidate_samples_keeps_full_split_unbounded(
@@ -1664,7 +1700,15 @@ def test_main_measures_requested_num_samples_after_warmup(tmp_path: Path, monkey
         for _ in range(n_warmup):
             next(iter(sample_iter))
 
-    def fake_measure_target(model_id, target_args, pipe, measure_samples, generate_kwargs, native_language=None):  # type: ignore[no-untyped-def]
+    def fake_measure_target(  # type: ignore[no-untyped-def]
+        model_id,
+        target_args,
+        pipe,
+        measure_samples,
+        generate_kwargs,
+        native_language=None,
+        max_measured_samples=None,
+    ):
         measured_ids.extend(sample["id"] for sample in measure_samples)
         return [], {}, {}
 
@@ -1834,6 +1878,28 @@ def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
     asr_bench._make_rtf_chart(tmp_path, [{"model": "openai/whisper-small", "rtf": 0.5, "wer": 0.1, "cer": 0.02}])
 
     assert captured["folder_labels"] == [tmp_path.name]
+
+
+def test_make_rtf_chart_preserves_same_model_beam_variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ASR charts key the same model separately for each beam setting."""
+
+    captured: dict[str, object] = {}
+
+    def fake_plot_scalar_chart(**kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+
+    monkeypatch.setattr(asr_bench, "plot_scalar_chart", fake_plot_scalar_chart)
+
+    asr_bench._make_rtf_chart(
+        tmp_path,
+        [
+            {"model": "openai/whisper-small", "num_beams": None, "rtf": 0.5, "wer": 0.1, "cer": 0.02},
+            {"model": "openai/whisper-small", "num_beams": 4, "rtf": 0.4, "wer": 0.08, "cer": 0.01},
+        ],
+    )
+
+    assert captured["models"] == ["openai/whisper-small_beams4", "openai/whisper-small_beamsdefault"]
+    assert set(captured["metrics_by_folder"][0]) == set(captured["models"])
 
 
 def test_write_combined_outputs_unions_row_headers_for_device_metrics(

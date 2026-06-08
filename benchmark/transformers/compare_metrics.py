@@ -118,7 +118,13 @@ def normalize_model_key(path: Path, loaded_model_id: str) -> str:
     """Normalize a model id for cross-folder comparison."""
 
     stem = path.stem
-    if "__" in stem or "_beams" in stem:
+    if "_beams" in stem:
+        restored_stem = _restore_safe_model_id(stem)
+        if loaded_model_id.endswith(stem) or loaded_model_id.endswith(restored_stem):
+            return _strip_group_id(loaded_model_id)
+        beam_suffix = stem.rsplit("_beams", 1)[1]
+        return f"{_restore_safe_model_id(loaded_model_id)}_beams{beam_suffix}"
+    if "__" in stem:
         return _restore_safe_model_id(stem)
     return _restore_safe_model_id(loaded_model_id)
 
