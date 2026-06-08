@@ -92,7 +92,7 @@ def convert_attention_mask_to_numpy(
     if squeeze_channel_dim:
         attention_mask = attention_mask.squeeze(1)
     attention_mask = (attention_mask != 0).to(torch.float32)
-    return attention_mask.contiguous().numpy()
+    return attention_mask.cpu().contiguous().numpy()
 
 
 class CachedRotaryEmbedding(nn.Module):
