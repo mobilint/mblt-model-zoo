@@ -181,6 +181,21 @@ class MobilintQwen3ASRTextModel(
 
         return self._cache
 
+    def _resolve_source_indices(self, inputs_embeds: torch.Tensor) -> list[int]:
+        """Return source ids for rows sharing the same audio-conditioned prompt embeddings."""
+        source_indices: list[int] = []
+        seen_signatures: list[torch.Tensor] = []
+        for row in inputs_embeds.detach().cpu():
+            source_index = next(
+                (index for index, seen_row in enumerate(seen_signatures) if torch.equal(row, seen_row)),
+                None,
+            )
+            if source_index is None:
+                source_index = len(seen_signatures)
+                seen_signatures.append(row.clone())
+            source_indices.append(source_index)
+        return source_indices
+
     def _beam_llm_forward(
         self,
         input_ids: torch.LongTensor,
@@ -203,15 +218,17 @@ class MobilintQwen3ASRTextModel(
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
         logits_list: list[torch.Tensor] = []
-        logits_by_target_tokens: dict[tuple[int, ...], torch.Tensor] = {}
+        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
         self.npu_time = 0.0 if count_npu_time else None
         input_ids = input_ids.view(batch_size, -1)
+        source_indices = self._resolve_source_indices(inputs_embeds)
 
         for beam_index in range(batch_size):
             previous_tokens = past_key_values.get_beam_tokens(beam_index)
             target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
-            target_key = tuple(target_tokens)
-            prefix_length = past_key_values.get_common_prefix_length(target_tokens)
+            source_index = source_indices[beam_index]
+            target_key = (source_index, tuple(target_tokens))
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens, source_index=source_index)
             previous_length = len(previous_tokens)
             if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
                 logits_list.append(logits_by_target_tokens[target_key])
@@ -263,7 +280,7 @@ class MobilintQwen3ASRTextModel(
                 row_logits_ndarray = result[0]
 
             past_key_values.commit_beam_tokens(beam_index, target_tokens)
-            past_key_values.commit_active_tokens(target_tokens)
+            past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
             if row_logits_ndarray is None:
                 raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
             row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)

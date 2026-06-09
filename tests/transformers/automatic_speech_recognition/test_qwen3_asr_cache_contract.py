@@ -17,6 +17,23 @@ from mblt_model_zoo.hf_transformers.models.qwen3_asr.modeling_qwen3_asr import (
     MobilintQwen3ASRTextModel,
     MobilintQwen3ASRThinkerForConditionalGeneration,
 )
+from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintBeamCache  # noqa: E402
+
+
+class _InputsEmbedAwareMxqModel:
+    """MXQ stub that makes logits depend on the supplied decoder embedding row."""
+
+    def __init__(self) -> None:
+        self.infer_calls = 0
+
+    def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
+        """Return logits whose value identifies the forwarded embedding row."""
+        del output_buffer, cache_size
+        row_embeds = inputs[0]
+        self.infer_calls += 1
+        suffix_length = int(row_embeds.shape[2])
+        row_value = float(row_embeds.mean())
+        return [torch.full((suffix_length, 8), row_value, dtype=torch.float32).numpy()]
 
 
 class _DummyCache:
@@ -66,6 +83,25 @@ class _DummyQwen3ASRTextModel(MobilintQwen3ASRTextModel):
             dtype=inputs_embeds.dtype,
             device=inputs_embeds.device,
         )
+
+
+class _DummyQwen3ASRBeamTextModel(MobilintQwen3ASRTextModel):
+    """Minimal Qwen3-ASR text model for exercising beam decode directly."""
+
+    def __init__(self, mxq_model: _InputsEmbedAwareMxqModel) -> None:
+        torch.nn.Module.__init__(self)
+        self.config = SimpleNamespace(use_cache=True, vocab_size=8, hidden_size=2, pad_token_id=0)
+        self.embed_tokens = torch.nn.Embedding(
+            self.config.vocab_size,
+            self.config.hidden_size,
+            self.config.pad_token_id,
+        )
+        self.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+        self.npu_time = None
+
+    def resolve_prefill_chunk_size(self, prefill_chunk_size: int | None) -> int:
+        """Use one chunk per test sequence unless explicitly overridden."""
+        return prefill_chunk_size or 16
 
 
 class _DummyQwen3ASRThinkerTextModel(torch.nn.Module):
@@ -120,6 +156,59 @@ def test_qwen3_asr_forward_creates_cache_for_multi_row_default_cache() -> None:
     assert model.cache_created is True
     assert model.forward_past_key_values is outputs.past_key_values
     assert outputs.past_key_values is not None
+
+
+def test_qwen3_asr_duplicate_logits_are_not_reused_across_audio_rows() -> None:
+    """Identical token rows with different audio-conditioned embeddings should not share logits."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4], [4]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0]],
+            [[7.0, 7.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.tensor([0], dtype=torch.long),
+    )
+
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (2, 1, 8)
+    assert torch.equal(logits[0], torch.full((1, 8), 1.0))
+    assert torch.equal(logits[1], torch.full((1, 8), 7.0))
+
+
+def test_qwen3_asr_duplicate_logits_reuse_single_source_beams() -> None:
+    """Beam-expanded rows from the same audio-conditioned prompt may share logits."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4], [4]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[3.0, 3.0]],
+            [[3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.tensor([0], dtype=torch.long),
+    )
+
+    assert mxq_model.infer_calls == 1
+    assert logits.shape == (2, 1, 8)
+    assert torch.equal(logits[0], logits[1])
 
 
 def test_qwen3_asr_thinker_forward_supports_return_dict_false() -> None:
