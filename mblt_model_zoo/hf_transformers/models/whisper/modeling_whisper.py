@@ -1,3 +1,4 @@
+import os
 from typing import Any, Union, cast
 
 import torch
@@ -20,7 +21,7 @@ from transformers.models.whisper.modeling_whisper import (
 from transformers.utils.generic import logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintWhisperCache
+from ...utils.cache_utils import MobilintWhisperCache, append_whisper_beam_debug_event
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_whisper import MobilintWhisperConfig
@@ -160,12 +161,32 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
             target_key = tuple(target_tokens)
             prefix_length = past_key_values.get_common_prefix_length(target_tokens)
+            append_whisper_beam_debug_event(
+                {
+                    "event": "decoder_beam_before",
+                    "beam_index": beam_index,
+                    "input_ids": [int(token) for token in input_ids[beam_index].detach().cpu().reshape(-1).tolist()],
+                    "target_tokens": list(target_tokens),
+                    "active_tokens": past_key_values.get_active_tokens(),
+                    "stored_beam_tokens": past_key_values.get_beam_tokens(beam_index),
+                    "prefix_length": int(prefix_length),
+                }
+            )
             if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
                 logits_list.append(logits_by_target_tokens[target_key])
                 past_key_values.commit_beam_tokens(beam_index, target_tokens)
+                append_whisper_beam_debug_event(
+                    {
+                        "event": "decoder_beam_duplicate_logits",
+                        "beam_index": beam_index,
+                        "target_tokens": list(target_tokens),
+                    }
+                )
                 continue
             if prefix_length == len(target_tokens):
                 prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
+            if os.environ.get("MBLT_WHISPER_BEAM_FORCE_FULL_REPLAY"):
+                prefix_length = 0
             suffix_hidden_states = self._embed_token_suffix(
                 target_tokens,
                 prefix_length,
@@ -181,10 +202,28 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             logits = torch.tensor(result[0], dtype=hidden_states.dtype, device=hidden_states.device)
             logits = self._normalize_decoder_logits(logits, sequence_length=suffix_length)
             current_logits = logits[:, :, -input_ids.shape[1] :, :]
+            top_values, top_indices = torch.topk(
+                current_logits[:, :, -1, :],
+                k=min(5, current_logits.shape[-1]),
+                dim=-1,
+            )
             logits_list.append(current_logits)
             logits_by_target_tokens[target_key] = current_logits
             past_key_values.commit_beam_tokens(beam_index, target_tokens)
             past_key_values.commit_active_tokens(target_tokens)
+            append_whisper_beam_debug_event(
+                {
+                    "event": "decoder_beam_after",
+                    "beam_index": beam_index,
+                    "target_tokens": list(target_tokens),
+                    "prefix_length": int(prefix_length),
+                    "suffix_tokens": list(target_tokens[prefix_length:]),
+                    "suffix_length": suffix_length,
+                    "top_token_ids": [int(token) for token in top_indices.detach().cpu().reshape(-1).tolist()],
+                    "top_logits": [float(value) for value in top_values.detach().cpu().reshape(-1).tolist()],
+                    "active_tokens": past_key_values.get_active_tokens(),
+                }
+            )
 
         return torch.cat(logits_list, dim=0)
     
