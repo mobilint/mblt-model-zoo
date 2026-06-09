@@ -402,6 +402,33 @@ class MobilintBeamCache(MobilintCache):
 class MobilintWhisperCache(MobilintBeamCache):
     """Whisper cache using token-history beam replay."""
 
+    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
+        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        self._encoder_source_count: int | None = None
+
+    def reset(self) -> None:
+        """Reset beam cache state and forget the current encoder source grouping."""
+        super().reset()
+        self._encoder_source_count = None
+
+    def set_encoder_source_count(self, source_count: int) -> None:
+        """Record the original audio batch size before Hugging Face beam expansion."""
+        source_count = int(source_count)
+        if source_count < 1:
+            raise ValueError(f"source_count must be positive, got {source_count}")
+        self._encoder_source_count = source_count
+
+    def get_encoder_source_count(self) -> int | None:
+        """Return the original encoder source count when it is known."""
+        return self._encoder_source_count
+
+    def copy(self) -> "MobilintWhisperCache":
+        """Return a copy preserving Whisper encoder source grouping metadata."""
+        copied = super().copy()
+        assert isinstance(copied, MobilintWhisperCache)
+        copied._encoder_source_count = self._encoder_source_count
+        return copied
+
 
 class MobilintDeepStackCache(MobilintCache):
     """Mobilint KV cache carrying Qwen3-VL deepstack decoder inputs.

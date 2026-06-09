@@ -96,3 +96,65 @@ def test_whisper_duplicate_logits_still_reuse_single_source_beams() -> None:
     assert mxq_model.infer_calls == 1
     assert logits.shape == (2, 1, 1, 4)
     assert torch.equal(logits[0], logits[1])
+
+
+def test_whisper_duplicate_logits_reuse_beam_expanded_single_source_rows() -> None:
+    """Beam-expanded encoder rows for one audio source should share the same source id."""
+    mxq_model = _EncoderAwareMxqModel()
+    decoder = _make_decoder(mxq_model)
+    cache = MobilintWhisperCache(mxq_model, batch_size=2)
+    cache.set_encoder_source_count(1)
+    hidden_states = torch.ones((2, 1, 1, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.tensor(
+        [
+            [[[3.0, 3.0]]],
+            [[[3.0, 3.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    input_ids = torch.tensor([[42], [42]], dtype=torch.long)
+
+    logits = decoder.decoder_forward(
+        hidden_states,
+        encoder_hidden_states,
+        cache,
+        torch.tensor([0], dtype=torch.long),
+        input_ids=input_ids,
+    )
+
+    assert mxq_model.infer_calls == 1
+    assert logits.shape == (2, 1, 1, 4)
+    assert torch.equal(logits[0], logits[1])
+
+
+def test_whisper_duplicate_logits_reuse_only_within_beam_expanded_source_groups() -> None:
+    """Beam grouping should prevent duplicate logits from crossing original audio sources."""
+    mxq_model = _EncoderAwareMxqModel()
+    decoder = _make_decoder(mxq_model)
+    cache = MobilintWhisperCache(mxq_model, batch_size=4)
+    cache.set_encoder_source_count(2)
+    hidden_states = torch.ones((4, 1, 1, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.tensor(
+        [
+            [[[1.0, 1.0]]],
+            [[[1.0, 1.0]]],
+            [[[7.0, 7.0]]],
+            [[[7.0, 7.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    input_ids = torch.tensor([[42], [42], [42], [42]], dtype=torch.long)
+
+    logits = decoder.decoder_forward(
+        hidden_states,
+        encoder_hidden_states,
+        cache,
+        torch.tensor([0], dtype=torch.long),
+        input_ids=input_ids,
+    )
+
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (4, 1, 1, 4)
+    assert torch.equal(logits[0], logits[1])
+    assert torch.equal(logits[2], logits[3])
+    assert not torch.equal(logits[0], logits[2])

@@ -136,6 +136,61 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             return logits.unsqueeze(0)
         return logits
 
+    def _resolve_source_indices(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        batch_size: int,
+        past_key_values: MobilintWhisperCache,
+    ) -> list[int]:
+        """Map beam-expanded decoder rows back to their original encoder source rows."""
+        encoder_batch_size = int(encoder_hidden_states.shape[0])
+        if encoder_batch_size == 1:
+            return [0] * batch_size
+
+        source_count = past_key_values.get_encoder_source_count()
+        if source_count is not None and source_count > 0 and batch_size % source_count == 0:
+            beams_per_source = batch_size // source_count
+            if encoder_batch_size == batch_size:
+                return [beam_index // beams_per_source for beam_index in range(batch_size)]
+
+        if encoder_batch_size == batch_size:
+            inferred_source_indices = self._infer_source_indices_from_expanded_encoder_rows(encoder_hidden_states)
+            if inferred_source_indices is not None:
+                return inferred_source_indices
+
+        if encoder_batch_size == batch_size:
+            return list(range(batch_size))
+
+        return [0] * batch_size
+
+    def _infer_source_indices_from_expanded_encoder_rows(
+        self,
+        encoder_hidden_states: torch.Tensor,
+    ) -> Union[list[int], None]:
+        """Infer contiguous beam groups when HF expanded identical encoder rows."""
+        flattened_states = encoder_hidden_states.reshape(int(encoder_hidden_states.shape[0]), -1)
+        source_indices: list[int] = []
+        current_source_index = -1
+        previous_state: Union[torch.Tensor, None] = None
+        seen_signatures: list[torch.Tensor] = []
+
+        for state in flattened_states:
+            if previous_state is not None and torch.equal(state, previous_state):
+                source_indices.append(current_source_index)
+                continue
+
+            if any(torch.equal(state, seen_state) for seen_state in seen_signatures):
+                return None
+
+            current_source_index += 1
+            source_indices.append(current_source_index)
+            seen_signatures.append(state.clone())
+            previous_state = state
+
+        if current_source_index + 1 == int(encoder_hidden_states.shape[0]):
+            return None
+        return source_indices
+
     def decoder_forward(
         self,
         hidden_states: torch.Tensor,
@@ -155,11 +210,9 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         input_ids = input_ids.view(batch_size, -1)
 
         past_key_values.ensure_batch_size(batch_size)
-        source_indices = [0] * batch_size
         if encoder_hidden_states.shape[0] == 1 and batch_size > 1:
             encoder_hidden_states = encoder_hidden_states.expand(batch_size, *encoder_hidden_states.shape[1:])
-        elif encoder_hidden_states.shape[0] == batch_size:
-            source_indices = list(range(batch_size))
+        source_indices = self._resolve_source_indices(encoder_hidden_states, batch_size, past_key_values)
 
         logits_list: list[torch.Tensor] = []
         logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
@@ -418,9 +471,11 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.return_dict
+        encoder_source_count = None
 
         if encoder_outputs is None:
             assert input_features is not None, "input_features is None!"
+            encoder_source_count = int(input_features.shape[0])
             input_features = self._mask_input_features(input_features, attention_mask=attention_mask)
 
             encoder_outputs = self.encoder(
@@ -438,6 +493,9 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
             )
             
         assert encoder_outputs is not None, "encoder_outputs is None!"
+
+        if encoder_source_count is not None and isinstance(past_key_values, MobilintWhisperCache):
+            past_key_values.set_encoder_source_count(encoder_source_count)
 
         # decoder outputs consists of (dec_features, past_key_values, dec_hidden, dec_attn)
         encoder_hidden_states = encoder_outputs[0]

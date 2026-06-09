@@ -196,6 +196,26 @@ def test_whisper_cache_copy_preserves_token_histories_safely() -> None:
     assert copied._beam_seq_lengths == [2, 3]
 
 
+def test_whisper_cache_tracks_encoder_source_count() -> None:
+    """Whisper cache should preserve original encoder source count across copies only."""
+    cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
+
+    cache.set_encoder_source_count(2)
+    copied = cache.copy()
+    cache.reset()
+
+    assert copied.get_encoder_source_count() == 2
+    assert cache.get_encoder_source_count() is None
+
+
+def test_whisper_cache_rejects_invalid_encoder_source_count() -> None:
+    """Whisper cache should require positive encoder source counts."""
+    cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=1)
+
+    with pytest.raises(ValueError, match="positive"):
+        cache.set_encoder_source_count(0)
+
+
 def test_deepstack_cache_returns_real_chunk() -> None:
     """Deepstack cache should slice the current forward-call tensor."""
     cache = MobilintDeepStackCache(_FakeMxqModel(), num_deepstack_layers=2, hidden_size=3)
