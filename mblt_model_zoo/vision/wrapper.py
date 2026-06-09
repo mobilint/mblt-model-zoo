@@ -113,6 +113,61 @@ def _resolve_onnx_providers(ort_module: Any, requested_providers: Sequence[str] 
     return resolved_providers or ["CPUExecutionProvider"]
 
 
+def _framework_from_model_path(model_path: str) -> str | None:
+    """Infers the runtime framework from a local model path suffix."""
+
+    suffix = Path(model_path).suffix.lower()
+    if suffix == ".mxq":
+        return "mxq"
+    if suffix == ".onnx":
+        return "onnx"
+    return None
+
+
+def _resolve_framework(framework: str | None, model_path: str = "") -> str:
+    """Resolves the execution framework from explicit input and model path."""
+
+    normalized_framework = framework.lower() if framework is not None else None
+    if normalized_framework is not None and normalized_framework not in SUPPORTED_FRAMEWORKS:
+        raise ValueError(f"Unsupported framework: {framework}. Must be one of {sorted(SUPPORTED_FRAMEWORKS)}.")
+
+    inferred_framework = _framework_from_model_path(model_path) if model_path else None
+    if normalized_framework and inferred_framework and normalized_framework != inferred_framework:
+        raise ValueError(
+            f"Framework `{normalized_framework}` conflicts with model path `{model_path}`. "
+            f"Use framework `{inferred_framework}` or remove the explicit framework."
+        )
+
+    return inferred_framework or normalized_framework or "mxq"
+
+
+def _split_model_paths(
+    *,
+    framework: str,
+    model_path: str = "",
+    mxq_path: str = "",
+    onnx_path: str = "",
+) -> tuple[str, str]:
+    """Resolves generic and framework-specific local model path arguments."""
+
+    resolved_mxq_path = mxq_path
+    resolved_onnx_path = onnx_path
+    if not model_path:
+        return resolved_mxq_path, resolved_onnx_path
+
+    inferred_framework = _framework_from_model_path(model_path)
+    if inferred_framework == "mxq":
+        resolved_mxq_path = resolved_mxq_path or model_path
+    elif inferred_framework == "onnx":
+        resolved_onnx_path = resolved_onnx_path or model_path
+    elif framework == "onnx":
+        resolved_onnx_path = resolved_onnx_path or model_path
+    else:
+        resolved_mxq_path = resolved_mxq_path or model_path
+
+    return resolved_mxq_path, resolved_onnx_path
+
+
 class MBLT_Engine:
     """Main engine class for running vision models from the MBLT zoo.
 
@@ -130,6 +185,7 @@ class MBLT_Engine:
         self,
         model_cls: str | dict[str, Any],
         model_type: str = "DEFAULT",
+        model_path: str = "",
         mxq_path: str = "",
         onnx_path: str = "",
         dev_no: int | None = None,
@@ -137,7 +193,7 @@ class MBLT_Engine:
         target_cores: Sequence[str | CoreId] | None = None,
         target_clusters: Sequence[int | Cluster] | None = None,
         postprocess_kwargs: dict[str, Any] | None = None,
-        framework: str = "mxq",
+        framework: str | None = None,
         onnx_providers: Sequence[str] | None = None,
     ) -> None:
         """Initializes the MBLT_Engine.
@@ -145,6 +201,7 @@ class MBLT_Engine:
         Args:
             model_cls(if dict):
                 file_cfg: Model configuration.
+                    model_path: generic path to local model file
                     mxq_path: path to mxq file
                     onnx_path: path to onnx file
                     dev_no: Accelerator No.
@@ -155,29 +212,10 @@ class MBLT_Engine:
                 post_cfg: Postprocessing configuration.
             model_cls(not dict): model name or yaml path
             postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
-            framework: Execution framework, either "mxq" or "onnx".
+            framework: Execution framework, either "mxq" or "onnx". When omitted,
+                ``model_path`` suffix is used first, then MXQ is the fallback.
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
-
-        _mxq_path_passed = bool(mxq_path)
-        _onnx_path_passed = bool(onnx_path)
-        _dev_no_passed = dev_no is not None
-        _core_mode_passed = core_mode is not None
-        _target_cores_passed = target_cores is not None
-        _target_clusters_passed = target_clusters is not None
-
-        if dev_no is None:
-            dev_no = 0
-        if core_mode is None:
-            core_mode = "single"
-        if target_cores is None:
-            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
-        if target_clusters is None:
-            target_clusters = [0, 1]
-
-        self.framework = framework.lower()
-        if self.framework not in SUPPORTED_FRAMEWORKS:
-            raise ValueError(f"Unsupported framework: {framework}. Must be one of {sorted(SUPPORTED_FRAMEWORKS)}.")
 
         if isinstance(model_cls, dict):  # direct setting
             model_config_part = copy.deepcopy(model_cls)
@@ -219,7 +257,43 @@ class MBLT_Engine:
                         merged_config[key] = value
                 model_config_part = merged_config
 
+        file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
+        framework_model_path = model_path or file_cfg_model_path
+        self.framework = _resolve_framework(framework, framework_model_path)
+        mxq_path, onnx_path = _split_model_paths(
+            framework=self.framework,
+            model_path=model_path,
+            mxq_path=mxq_path,
+            onnx_path=onnx_path,
+        )
+
+        _mxq_path_passed = bool(mxq_path)
+        _onnx_path_passed = bool(onnx_path)
+        _dev_no_passed = dev_no is not None
+        _core_mode_passed = core_mode is not None
+        _target_cores_passed = target_cores is not None
+        _target_clusters_passed = target_clusters is not None
+
+        if dev_no is None:
+            dev_no = 0
+        if core_mode is None:
+            core_mode = "single"
+        if target_cores is None:
+            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+        if target_clusters is None:
+            target_clusters = [0, 1]
+
         self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
+        file_cfg_model_path = self.file_cfg.pop("model_path", "")
+        if file_cfg_model_path:
+            yaml_mxq_path, yaml_onnx_path = _split_model_paths(
+                framework=self.framework,
+                model_path=file_cfg_model_path,
+                mxq_path=str(self.file_cfg.get("mxq_path", "")),
+                onnx_path=str(self.file_cfg.get("onnx_path", "")),
+            )
+            self.file_cfg["mxq_path"] = yaml_mxq_path
+            self.file_cfg["onnx_path"] = yaml_onnx_path
         if _mxq_path_passed or "mxq_path" not in self.file_cfg:
             self.file_cfg["mxq_path"] = mxq_path
         if _onnx_path_passed or "onnx_path" not in self.file_cfg:
@@ -347,6 +421,16 @@ class MBLT_Engine:
     def file_config_cleansing(self) -> None:
         """Validates and resolves the MXQ and ONNX model file paths in ``self.file_cfg``."""
         framework = getattr(self, "framework", "mxq")
+        model_path = self.file_cfg.pop("model_path", "")
+        if model_path:
+            mxq_path, onnx_path = _split_model_paths(
+                framework=framework,
+                model_path=model_path,
+                mxq_path=str(self.file_cfg.get("mxq_path", "")),
+                onnx_path=str(self.file_cfg.get("onnx_path", "")),
+            )
+            self.file_cfg["mxq_path"] = mxq_path
+            self.file_cfg["onnx_path"] = onnx_path
         mxq_path = self.file_cfg.get("mxq_path", "")
         onnx_path = self.file_cfg.get("onnx_path", "")
         onnx_filename = self._derive_onnx_filename()

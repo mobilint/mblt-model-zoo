@@ -63,14 +63,17 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         dev_no: int = 0,
         target_cores: Sequence[str] | None = None,
         target_clusters: Sequence[int] | None = None,
+        model_path: str | None = None,
         mxq_path: str | None = None,
         onnx_path: str | None = None,
-        framework: str = "mxq",
+        framework: str | None = None,
     ) -> None:
         """Initializes a YAML-backed compatibility wrapper.
 
         Args:
-            local_path: Optional local MXQ path using the legacy argument name.
+            local_path: Deprecated legacy MXQ path alias. Prefer ``model_path``
+                for generic MXQ or ONNX loading, or ``mxq_path`` for an
+                explicit MXQ-only override.
             model_type: YAML config variant to load.
             infer_mode: Execution mode forwarded to ``MBLT_Engine``.
             product: Retained for backward compatibility but ignored by the
@@ -78,21 +81,21 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             dev_no: Accelerator device number.
             target_cores: Optional core selection for single-core mode.
             target_clusters: Optional cluster selection for multi/global modes.
+            model_path: Optional explicit local model path for MXQ or ONNX.
             mxq_path: Optional explicit MXQ path alias.
             onnx_path: Optional explicit ONNX path.
-            framework: Execution framework, either ``"mxq"`` or ``"onnx"``.
-                Defaults to ``"mxq"``.
+            framework: Execution framework, either ``"mxq"`` or ``"onnx"``. When
+                omitted, ``model_path`` suffix is used first, then MXQ is the fallback.
         """
 
         del product
-        resolved_mxq_path = mxq_path or local_path or ""
-        resolved_onnx_path = onnx_path or (local_path or "" if framework.lower() == "onnx" else "")
         MBLT_Engine.__init__(
             self,
             model_cls=yaml_name,
             model_type=model_type,
-            mxq_path=resolved_mxq_path,
-            onnx_path=resolved_onnx_path,
+            model_path=model_path or "",
+            mxq_path=mxq_path or local_path or "",
+            onnx_path=onnx_path or "",
             dev_no=dev_no,
             core_mode=infer_mode,
             target_cores=list(target_cores) if target_cores is not None else None,

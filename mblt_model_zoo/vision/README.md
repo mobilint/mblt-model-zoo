@@ -18,7 +18,7 @@ from mblt_model_zoo.vision import YOLO11m
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
 
-model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", model_path="", core_mode="global8")
 ```
 
 ```python
@@ -30,7 +30,9 @@ model = MBLT_Engine(model_cls="alexnet", framework="onnx")
 
 When `framework="onnx"` is selected, the engine prefers available GPU-capable ONNX Runtime
 providers such as `CUDAExecutionProvider` and keeps CPU as a fallback. Pass `onnx_providers` to
-override the provider order explicitly when needed.
+override the provider order explicitly when needed. If `model_path` or `file_cfg.model_path` ends
+with `.mxq` or `.onnx`, the engine auto-detects the framework from that suffix when `framework` is
+omitted.
 
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
@@ -43,7 +45,7 @@ are the preferred discovery and loading APIs for new code.
 For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` for
 backward compatibility, but it is ignored by the YAML-backed registry. If you previously used
 `product` to select non-default artifacts, switch to explicit `model_cls`, `model_type`, or
-`mxq_path` values instead.
+`model_path` values instead.
 
 ## CLI Usage
 
@@ -55,13 +57,20 @@ task from the model configuration.
 mblt-model-zoo predict --source ./cat.png --model resnet50
 ```
 
-Vision commands default to `--framework mxq`. You can switch any supported vision model to ONNX
-with `--framework onnx`, optionally combined with `--onnx-path` when you want to use a local ONNX
-file instead of the published Hugging Face artifact.
+Vision commands accept a shared `--model-path` for local MXQ and local ONNX files. When
+`--framework` is omitted, the command auto-detects `.mxq` and `.onnx` suffixes and otherwise
+falls back to MXQ. If the explicit framework conflicts with the file suffix, the command fails
+with a clear error. For Hugging Face artifacts, omit `--model-path` and select the runtime with
+`--framework` when needed. The compatibility aliases `--mxq-path` and `--onnx-path` are forwarded
+separately, so they keep the engine's framework-specific path resolution behavior.
 
 ```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
+mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --framework onnx
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 The command saves the plotted result image under `runs/vision/predict/` by default. Use `--output`
@@ -97,7 +106,7 @@ output = model(input_img)
 result = model.postprocess(output)
 ```
 
-The same API works with ONNX by passing `framework="onnx"`:
+The same API works with ONNX by passing `framework="onnx"` or by using a local `.onnx` path:
 
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
@@ -107,6 +116,12 @@ model = MBLT_Engine(model_cls="yolo11m", framework="onnx")
 input_img = model.preprocess("./street.jpg")
 output = model(input_img)
 result = model.postprocess(output)
+```
+
+```python
+from mblt_model_zoo.vision import MBLT_Engine
+
+model = MBLT_Engine(model_cls="yolo11m", model_path="./yolo11m.onnx")
 ```
 
 When you want custom thresholds, set them once on the model before postprocessing:
@@ -124,7 +139,7 @@ mblt-model-zoo predict \
   --model resnet50 \
   --framework mxq \
   --model-type DEFAULT \
-  --mxq-path /path/to/model.mxq \
+  --model-path /path/to/model.mxq \
   --core-mode global8 \
   --dev-no 0
 ```
@@ -144,11 +159,16 @@ The vision CLI also provides a unified validation command:
 mblt-model-zoo val --model resnet50
 ```
 
-Validation also supports `--framework onnx` and the optional `--onnx-path` override:
+Validation also supports `--framework onnx`, the shared `--model-path` override, and the
+framework-specific compatibility aliases:
 
 ```bash
+mblt-model-zoo val --model resnet50 --model-path ./resnet50.mxq
+mblt-model-zoo val --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo val --model resnet50 --framework onnx
 mblt-model-zoo val --model yolo11m --framework onnx --data-path /path/to/coco
+mblt-model-zoo val --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 The command loads the model, infers its task, and validates it on the associated benchmark dataset:
