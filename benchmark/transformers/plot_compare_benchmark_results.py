@@ -11,6 +11,7 @@ try:
         common_model_ids,
         default_charts_dir,
         folder_labels,
+        payload_task,
         render_charts,
     )
 except ModuleNotFoundError:
@@ -20,21 +21,9 @@ except ModuleNotFoundError:
         common_model_ids,
         default_charts_dir,
         folder_labels,
+        payload_task,
         render_charts,
     )
-
-
-def _payload_task(payload: Mapping[str, Any]) -> str | None:
-    """Return task from benchmark payloads, including legacy ASR payloads."""
-
-    task = payload.get("task")
-    if isinstance(task, str) and task:
-        return task
-
-    benchmark_type = payload.get("benchmark_type")
-    if isinstance(benchmark_type, str) and benchmark_type in TASK_REGISTRY:
-        return benchmark_type
-    return None
 
 
 def _detect_task_from_folders(folders: list[Path]) -> str:
@@ -51,7 +40,7 @@ def _detect_task_from_folders(folders: list[Path]) -> str:
                 continue
             if not isinstance(payload, Mapping):
                 continue
-            task = _payload_task(payload)
+            task = payload_task(payload)
             if task is None:
                 continue
             if task not in TASK_REGISTRY:

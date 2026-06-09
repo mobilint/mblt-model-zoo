@@ -572,6 +572,12 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
 `plot_compare_benchmark_results.py` compares multiple benchmark result folders and generates
 model-wise bar charts.
 
+When `--task` is omitted, the compare script auto-detects the task from JSON payload `task` fields
+and falls back to `text-generation` for older payloads without task metadata. If the input folders
+contain multiple task types, the script stops instead of guessing; pass `--task text-generation`,
+`--task image-text-to-text`, or `--task automatic-speech-recognition` explicitly for mixed result
+folders.
+
 ### Compare Text-Generation Results
 
 ```bash

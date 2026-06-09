@@ -121,8 +121,8 @@ def _model_name(model_id: str) -> str:
     return restored.rsplit("/", 1)[1] if "/" in restored else restored
 
 
-def _payload_task(payload: Mapping[str, Any]) -> str | None:
-    """Return the benchmark task from the normalized payload schema."""
+def payload_task(payload: Mapping[str, Any]) -> str | None:
+    """Return the benchmark task from normalized and legacy payload schemas."""
 
     task = payload.get("task")
     if isinstance(task, str) and task:
@@ -427,10 +427,10 @@ def collect_metrics(
             continue
         if not isinstance(payload, Mapping):
             continue
-        payload_task = _payload_task(payload)
-        if payload_task is not None and payload_task != metric_cls.TASK:
+        detected_task = payload_task(payload)
+        if detected_task is not None and detected_task != metric_cls.TASK:
             print(
-                f"Warning: skipping {path.name} because task '{payload_task}' "
+                f"Warning: skipping {path.name} because task '{detected_task}' "
                 f"does not match requested task '{metric_cls.TASK}'."
             )
             continue
@@ -512,5 +512,6 @@ __all__ = [
     "default_charts_dir",
     "folder_labels",
     "normalize_model_key",
+    "payload_task",
     "render_charts",
 ]
