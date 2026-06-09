@@ -114,6 +114,13 @@ def _restore_safe_model_id(value: str) -> str:
     return value
 
 
+def _strip_owner_id(model_id: str) -> str:
+    """Compare by model name only, ignoring a leading Hugging Face owner id."""
+
+    restored = _restore_safe_model_id(model_id)
+    return restored.rsplit("/", 1)[1] if "/" in restored else restored
+
+
 def normalize_model_key(path: Path, loaded_model_id: str) -> str:
     """Normalize a model id for cross-folder comparison."""
 
@@ -121,12 +128,12 @@ def normalize_model_key(path: Path, loaded_model_id: str) -> str:
     if "_beams" in stem:
         restored_stem = _restore_safe_model_id(stem)
         if loaded_model_id.endswith(stem) or loaded_model_id.endswith(restored_stem):
-            return _strip_group_id(loaded_model_id)
+            return _strip_owner_id(loaded_model_id)
         beam_suffix = stem.rsplit("_beams", 1)[1]
-        return f"{_restore_safe_model_id(loaded_model_id)}_beams{beam_suffix}"
+        return f"{_strip_owner_id(loaded_model_id)}_beams{beam_suffix}"
     if "__" in stem:
-        return _restore_safe_model_id(stem)
-    return _restore_safe_model_id(loaded_model_id)
+        return _strip_owner_id(stem)
+    return _strip_owner_id(loaded_model_id)
 
 
 @dataclass
@@ -404,7 +411,7 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
                     f"does not match requested task '{metric_cls.TASK}'."
                 )
                 continue
-        model_id = payload.get("model")
+        model_id = payload.get("model_id") or payload.get("model")
         if not isinstance(model_id, str) or not model_id:
             continue
         metric = metric_cls.from_payload(payload)
