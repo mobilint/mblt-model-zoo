@@ -381,6 +381,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="skip target/beam outputs that already exist instead of failing",
     )
     parser.add_argument(
+        "--rebuild-charts",
+        action="store_true",
+        help="skip benchmarking and rebuild combined outputs from existing JSON files",
+    )
+    parser.add_argument(
         "--output-dir",
         default=str(Path(__file__).resolve().parent / "results" / "automatic_speech_recognition"),
         help="results directory",
@@ -921,6 +926,10 @@ def main(argv: list[str] | None = None) -> int:
     _resolve_runtime_defaults(args, raw_argv)
     os.environ.setdefault("MPLBACKEND", "Agg")
     out_dir = _resolve_results_dir(args)
+    if args.rebuild_charts:
+        print("Rebuilding combined ASR outputs from existing JSON files only...")
+        _write_combined_outputs(out_dir)
+        return 0
     _collect_host_pc_info(out_dir)
     run_targets = _build_run_targets(args)
     base_generate_kwargs = _resolve_generate_kwargs(args)
