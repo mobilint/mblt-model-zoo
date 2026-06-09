@@ -93,27 +93,15 @@ def test_fake_prefill_rejects_negative_length() -> None:
         cache.fake_prefill(-1)
 
 
-def test_whisper_cache_reorder_works_with_application_level_blobs() -> None:
-    """Whisper beam reorder should only require application-level KV blobs."""
-    cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
-    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
-    cache._beam_seq_lengths = [2, 3]
-
-    cache.reorder_cache(torch.tensor([1, 0], dtype=torch.long))
-
-    assert cache._beam_cache_buffers == [[b"beam-1"], [b"beam-0"]]
-    assert [cache.get_seq_length(index=i) for i in range(2)] == [3, 2]
-
-
-def test_beam_cache_reorder_works_with_application_level_blobs() -> None:
-    """Generic beam cache should reorder stored KV blobs for beam search."""
+def test_beam_cache_reorder_works_with_token_histories() -> None:
+    """Generic beam cache should reorder token histories for beam search."""
     cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2)
-    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
-    cache._beam_seq_lengths = [2, 3]
+    cache.commit_beam_tokens(0, [10, 11])
+    cache.commit_beam_tokens(1, [20, 21, 22])
 
     cache.reorder_cache(torch.tensor([1, 0], dtype=torch.long))
 
-    assert cache._beam_cache_buffers == [[b"beam-1"], [b"beam-0"]]
+    assert [cache.get_beam_tokens(i) for i in range(2)] == [[20, 21, 22], [10, 11]]
     assert [cache.get_seq_length(index=i) for i in range(2)] == [3, 2]
 
 
@@ -132,46 +120,53 @@ def test_whisper_cache_reorder_rejects_invalid_beam_idx_shape() -> None:
         cache.reorder_cache(torch.tensor([[0, 1]], dtype=torch.long))
 
 
-def test_whisper_cache_reorder_reorders_application_level_blobs() -> None:
-    """Whisper beam reorder should reorder stored KV blobs."""
+def test_whisper_cache_reorder_reorders_token_histories() -> None:
+    """Whisper beam reorder should reorder token histories."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=3)
-    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
-    cache._beam_seq_lengths = [4, 5, 6]
+    cache.commit_beam_tokens(0, [10, 11, 12, 13])
+    cache.commit_beam_tokens(1, [20, 21, 22, 23, 24])
+    cache.commit_beam_tokens(2, [30, 31, 32, 33, 34, 35])
 
     result = cache.reorder_cache(torch.tensor([2, 0, 2], dtype=torch.long))
 
     assert result is cache
-    assert cache._beam_cache_buffers == [[b"beam-2"], [b"beam-0"], [b"beam-2"]]
-    assert cache._beam_cache_buffers[0] is not cache._beam_cache_buffers[2]
+    assert [cache.get_beam_tokens(i) for i in range(3)] == [
+        [30, 31, 32, 33, 34, 35],
+        [10, 11, 12, 13],
+        [30, 31, 32, 33, 34, 35],
+    ]
+    cache._beam_token_histories[0][0] = 99
+    assert cache.get_beam_tokens(2) == [30, 31, 32, 33, 34, 35]
     assert [cache.get_seq_length(index=i) for i in range(3)] == [6, 4, 6]
 
 
 def test_whisper_cache_reorder_identity_order_is_noop() -> None:
     """Whisper beam reorder should no-op for identity beam order."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=1)
-    cache.set_seq_length({0: 2, 1: 2, 2: 2})
-    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
+    cache.commit_beam_tokens(0, [10, 11])
+    cache.commit_beam_tokens(1, [20, 21])
+    cache.commit_beam_tokens(2, [30, 31])
 
     result = cache.reorder_cache(torch.tensor([0, 1, 2], dtype=torch.long))
 
     assert result is cache
     assert cache.batch_size == 3
-    assert cache._beam_cache_buffers == [[b"beam-0"], [b"beam-1"], [b"beam-2"]]
+    assert [cache.get_beam_tokens(i) for i in range(3)] == [[10, 11], [20, 21], [30, 31]]
     assert [cache.get_seq_length(index=i) for i in range(3)] == [2, 2, 2]
 
 
-def test_whisper_cache_copy_preserves_beam_snapshots_safely() -> None:
-    """Whisper cache copy should clone beam snapshots without sharing mutable buffers."""
+def test_whisper_cache_copy_preserves_token_histories_safely() -> None:
+    """Whisper cache copy should clone token histories without sharing mutable lists."""
     cache = MobilintWhisperCache(_FakeMxqModel(), batch_size=2)
-    cache._beam_cache_buffers = [[b"beam-0"], [b"beam-1"]]
-    cache._beam_seq_lengths = [2, 3]
+    cache.commit_beam_tokens(0, [10, 11])
+    cache.commit_beam_tokens(1, [20, 21, 22])
 
     copied = cache.copy()
-    cache._beam_cache_buffers[0][0] = b"changed"
+    cache._beam_token_histories[0][0] = 99
     cache._beam_seq_lengths[0] = 99
 
     assert isinstance(copied, MobilintWhisperCache)
-    assert copied._beam_cache_buffers == [[b"beam-0"], [b"beam-1"]]
+    assert [copied.get_beam_tokens(i) for i in range(2)] == [[10, 11], [20, 21, 22]]
     assert copied._beam_seq_lengths == [2, 3]
 
 
