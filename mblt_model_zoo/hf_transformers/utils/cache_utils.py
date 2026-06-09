@@ -223,6 +223,7 @@ class MobilintBeamCache(MobilintCache):
         super().__init__(mxq_model=mxq_model, batch_size=batch_size)
         self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
         self._active_token_history: list[int] = []
+        self._active_source_index: int | None = None
         self._beam_seq_lengths: list[int] = [0 for _ in range(self.batch_size)]
 
     def reset(self) -> None:
@@ -230,6 +231,7 @@ class MobilintBeamCache(MobilintCache):
         super().reset()
         self._beam_token_histories = [[] for _ in range(self.batch_size)]
         self._active_token_history = []
+        self._active_source_index = None
         self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
 
     def ensure_batch_size(self, batch_size: int) -> None:
@@ -286,8 +288,14 @@ class MobilintBeamCache(MobilintCache):
         """Return a copy of the token history represented by the active qbruntime cache."""
         return list(self._active_token_history)
 
-    def get_common_prefix_length(self, target_tokens: Sequence[int]) -> int:
+    def get_active_source_index(self) -> int | None:
+        """Return the source row represented by the active qbruntime cache."""
+        return self._active_source_index
+
+    def get_common_prefix_length(self, target_tokens: Sequence[int], source_index: int | None = None) -> int:
         """Return how many target tokens already match the active qbruntime cache."""
+        if source_index is not None and self._active_source_index != int(source_index):
+            return 0
         prefix_length = 0
         for active_token, target_token in zip(self._active_token_history, target_tokens):
             if active_token != target_token:
@@ -303,9 +311,10 @@ class MobilintBeamCache(MobilintCache):
         self._beam_seq_lengths[beam_index] = len(token_history)
         self.layers[beam_index].set_seq_length(len(token_history))
 
-    def commit_active_tokens(self, target_tokens: Sequence[int]) -> None:
+    def commit_active_tokens(self, target_tokens: Sequence[int], source_index: int | None = None) -> None:
         """Record which token history is now represented by active qbruntime cache memory."""
         self._active_token_history = [int(token) for token in target_tokens]
+        self._active_source_index = None if source_index is None else int(source_index)
         self.layers[0].set_seq_length(len(self._active_token_history))
 
     def _tensor_to_token_list(self, input_ids: torch.Tensor) -> list[int]:
@@ -329,6 +338,7 @@ class MobilintBeamCache(MobilintCache):
                     "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
                     "beam_seq_lengths": list(self._beam_seq_lengths),
                     "active_token_history": list(self._active_token_history),
+                    "active_source_index": self._active_source_index,
                 }
             )
 
@@ -339,6 +349,7 @@ class MobilintBeamCache(MobilintCache):
                         "event": "cache_reorder_identity",
                         "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
                         "active_token_history": list(self._active_token_history),
+                        "active_source_index": self._active_source_index,
                     }
                 )
             return self
@@ -358,6 +369,7 @@ class MobilintBeamCache(MobilintCache):
                     "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
                     "beam_seq_lengths": list(self._beam_seq_lengths),
                     "active_token_history": list(self._active_token_history),
+                    "active_source_index": self._active_source_index,
                 }
             )
         return self
@@ -382,6 +394,7 @@ class MobilintBeamCache(MobilintCache):
             copied.layers[i] = self.layers[i].copy()
         copied._beam_token_histories = [list(tokens) for tokens in self._beam_token_histories]
         copied._active_token_history = list(self._active_token_history)
+        copied._active_source_index = self._active_source_index
         copied._beam_seq_lengths = list(self._beam_seq_lengths)
         return copied
 

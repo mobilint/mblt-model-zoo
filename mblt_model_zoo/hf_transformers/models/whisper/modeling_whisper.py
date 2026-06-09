@@ -169,7 +169,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
             source_index = source_indices[beam_index]
             target_key = (source_index, tuple(target_tokens))
-            prefix_length = past_key_values.get_common_prefix_length(target_tokens)
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens, source_index=source_index)
             if trace_enabled:
                 append_whisper_beam_debug_event(
                     {
@@ -179,6 +179,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
                         "input_ids": [int(token) for token in input_ids[beam_index].detach().cpu().reshape(-1).tolist()],
                         "target_tokens": list(target_tokens),
                         "active_tokens": past_key_values.get_active_tokens(),
+                        "active_source_index": past_key_values.get_active_source_index(),
                         "stored_beam_tokens": past_key_values.get_beam_tokens(beam_index),
                         "prefix_length": int(prefix_length),
                     }
@@ -218,7 +219,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             logits_list.append(current_logits)
             logits_by_target_tokens[target_key] = current_logits
             past_key_values.commit_beam_tokens(beam_index, target_tokens)
-            past_key_values.commit_active_tokens(target_tokens)
+            past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
             if trace_enabled:
                 top_values, top_indices = torch.topk(
                     current_logits[:, :, -1, :],
@@ -237,6 +238,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
                         "top_token_ids": [int(token) for token in top_indices.detach().cpu().reshape(-1).tolist()],
                         "top_logits": [float(value) for value in top_values.detach().cpu().reshape(-1).tolist()],
                         "active_tokens": past_key_values.get_active_tokens(),
+                        "active_source_index": past_key_values.get_active_source_index(),
                     }
                 )
 
