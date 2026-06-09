@@ -114,26 +114,50 @@ def _restore_safe_model_id(value: str) -> str:
     return value
 
 
-def _strip_owner_id(model_id: str) -> str:
-    """Compare by model name only, ignoring a leading Hugging Face owner id."""
+def _model_name(model_id: str) -> str:
+    """Return the repository name without a leading Hugging Face owner id."""
 
     restored = _restore_safe_model_id(model_id)
     return restored.rsplit("/", 1)[1] if "/" in restored else restored
+
+
+def _compare_model_id(model_id: str, *, strip_owner: bool = False) -> str:
+    """Return a restored model id, optionally ignoring a leading owner id."""
+
+    restored = _restore_safe_model_id(model_id)
+    if strip_owner or restored.startswith("mobilint/"):
+        return _model_name(restored)
+    return restored
+
+
+def _should_strip_owner_for_filename(stem: str, loaded_model_id: str) -> bool:
+    """Return whether a filename indicates Mobilint-vs-parent comparison by basename."""
+
+    restored_stem = _restore_safe_model_id(stem)
+    restored_model_id = _restore_safe_model_id(loaded_model_id)
+    if restored_stem.startswith("mobilint/") or restored_model_id.startswith("mobilint/"):
+        return True
+    if "/" in restored_stem or "/" not in restored_model_id:
+        return False
+
+    stem_model_name = restored_stem.rsplit("_beams", 1)[0]
+    return stem_model_name == _model_name(restored_model_id)
 
 
 def normalize_model_key(path: Path, loaded_model_id: str) -> str:
     """Normalize a model id for cross-folder comparison."""
 
     stem = path.stem
+    strip_owner = _should_strip_owner_for_filename(stem, loaded_model_id)
     if "_beams" in stem:
         restored_stem = _restore_safe_model_id(stem)
         if loaded_model_id.endswith(stem) or loaded_model_id.endswith(restored_stem):
-            return _strip_owner_id(loaded_model_id)
+            return _compare_model_id(loaded_model_id, strip_owner=strip_owner)
         beam_suffix = stem.rsplit("_beams", 1)[1]
-        return f"{_strip_owner_id(loaded_model_id)}_beams{beam_suffix}"
+        return f"{_compare_model_id(loaded_model_id, strip_owner=strip_owner)}_beams{beam_suffix}"
     if "__" in stem:
-        return _strip_owner_id(stem)
-    return _strip_owner_id(loaded_model_id)
+        return _compare_model_id(stem, strip_owner=strip_owner)
+    return _compare_model_id(loaded_model_id, strip_owner=strip_owner)
 
 
 @dataclass
@@ -411,7 +435,9 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
                     f"does not match requested task '{metric_cls.TASK}'."
                 )
                 continue
-        model_id = payload.get("model_id") or payload.get("model")
+        model_id = payload.get("model_id")
+        if not isinstance(model_id, str) or not model_id:
+            model_id = payload.get("model")
         if not isinstance(model_id, str) or not model_id:
             continue
         metric = metric_cls.from_payload(payload)
