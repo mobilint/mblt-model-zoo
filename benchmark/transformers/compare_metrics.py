@@ -121,34 +121,32 @@ def _model_name(model_id: str) -> str:
     return restored.rsplit("/", 1)[1] if "/" in restored else restored
 
 
+def _payload_task(payload: Mapping[str, Any]) -> str | None:
+    """Return the benchmark task from the normalized payload schema."""
+
+    task = payload.get("task")
+    if isinstance(task, str) and task:
+        return task
+
+    benchmark_type = payload.get("benchmark_type")
+    if isinstance(benchmark_type, str) and benchmark_type in TASK_REGISTRY:
+        return benchmark_type
+    return None
+
+
 def _compare_model_id(model_id: str, *, strip_owner: bool = False) -> str:
     """Return a restored model id, optionally ignoring a leading owner id."""
 
     restored = _restore_safe_model_id(model_id)
-    if strip_owner or restored.startswith("mobilint/"):
+    if strip_owner:
         return _model_name(restored)
     return restored
 
 
-def _should_strip_owner_for_filename(stem: str, loaded_model_id: str) -> bool:
-    """Return whether a filename indicates Mobilint-vs-parent comparison by basename."""
-
-    restored_stem = _restore_safe_model_id(stem)
-    restored_model_id = _restore_safe_model_id(loaded_model_id)
-    if restored_stem.startswith("mobilint/") or restored_model_id.startswith("mobilint/"):
-        return True
-    if "/" in restored_stem or "/" not in restored_model_id:
-        return False
-
-    stem_model_name = restored_stem.rsplit("_beams", 1)[0]
-    return stem_model_name == _model_name(restored_model_id)
-
-
-def normalize_model_key(path: Path, loaded_model_id: str) -> str:
+def normalize_model_key(path: Path, loaded_model_id: str, *, strip_owner: bool = False) -> str:
     """Normalize a model id for cross-folder comparison."""
 
     stem = path.stem
-    strip_owner = _should_strip_owner_for_filename(stem, loaded_model_id)
     if "_beams" in stem:
         restored_stem = _restore_safe_model_id(stem)
         if loaded_model_id.endswith(stem) or loaded_model_id.endswith(restored_stem):
@@ -410,7 +408,12 @@ TASK_REGISTRY: dict[str, type[BaseCompareMetric]] = {
 }
 
 
-def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[str, BaseCompareMetric]:
+def collect_metrics(
+    folder: Path,
+    metric_cls: type[BaseCompareMetric],
+    *,
+    strip_owner: bool = False,
+) -> dict[str, BaseCompareMetric]:
     """Collect normalized per-model metrics from one results folder."""
 
     normalized: dict[str, BaseCompareMetric] = {}
@@ -424,17 +427,13 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
             continue
         if not isinstance(payload, Mapping):
             continue
-        benchmark_type = payload.get("benchmark_type")
-        if benchmark_type is not None:
-            if not isinstance(benchmark_type, str):
-                print(f"Warning: skipping {path.name} because benchmark_type is not a string.")
-                continue
-            if benchmark_type != metric_cls.TASK:
-                print(
-                    f"Warning: skipping {path.name} because benchmark_type '{benchmark_type}' "
-                    f"does not match requested task '{metric_cls.TASK}'."
-                )
-                continue
+        payload_task = _payload_task(payload)
+        if payload_task is not None and payload_task != metric_cls.TASK:
+            print(
+                f"Warning: skipping {path.name} because task '{payload_task}' "
+                f"does not match requested task '{metric_cls.TASK}'."
+            )
+            continue
         model_id = payload.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             model_id = payload.get("model")
@@ -443,7 +442,7 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
         metric = metric_cls.from_payload(payload)
         if metric is None:
             continue
-        norm_key = normalize_model_key(path, model_id)
+        norm_key = normalize_model_key(path, model_id, strip_owner=strip_owner)
         if norm_key not in normalized:
             normalized[norm_key] = metric
             normalized_sources[norm_key] = path

@@ -971,7 +971,8 @@ def test_write_combined_outputs_writes_aggregate_files(tmp_path: Path, monkeypat
     """Verify ASR combined outputs are generated from beam-specific result JSON files."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "num_beams": 5,
         "asr": {
@@ -1197,7 +1198,8 @@ def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypat
     """Verify combined rows read each JSON payload's num_beams value."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "num_beams": 7,
         "asr": {
@@ -2095,7 +2097,8 @@ def test_write_combined_outputs_skips_status_only_payloads(tmp_path: Path, monke
     """Verify status-only ASR payloads are summarized but do not become metric rows."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "status": "no_samples",
         "reason": "No measured samples remained after warmup/skip filtering.",
@@ -2150,7 +2153,8 @@ def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
     """Verify ASR chart labels continue to use the output directory name."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "asr": {
             "num_samples": 1,
@@ -2226,14 +2230,16 @@ def test_write_combined_outputs_unions_row_headers_for_device_metrics(
         "avg_tokens_per_sample": 5.0,
     }
     payload_a = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "model-a",
         "num_beams": None,
         "asr": dict(base_asr),
         "device": {"avg_power_w": 1.0},
     }
     payload_b = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "model-b",
         "num_beams": 4,
         "asr": dict(base_asr, wer=0.2),

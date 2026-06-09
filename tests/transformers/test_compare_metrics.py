@@ -168,11 +168,17 @@ def test_normalize_model_key_keeps_owner_name_by_default() -> None:
     assert normalize_model_key(Path("org-a__model-x.json"), "org-a/model-x") == "org-a/model-x"
 
 
+def test_normalize_model_key_strips_owner_when_requested() -> None:
+    assert normalize_model_key(Path("one.json"), "org-a/model-x", strip_owner=True) == "model-x"
+    assert normalize_model_key(Path("org-a__model-x.json"), "org-a/model-x", strip_owner=True) == "model-x"
+
+
 def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) -> None:
     """Verify compare collection keeps beam-specific ASR results as distinct model keys."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small_beamsdefault",
         "asr": {
             "wer": 0.1,
@@ -222,6 +228,23 @@ def test_collect_metrics_keeps_same_basename_from_different_owners(tmp_path: Pat
     assert list(metrics.keys()) == ["org-a/model-x", "org-b/model-x"]
 
 
+def test_collect_metrics_strips_owner_when_requested(tmp_path: Path) -> None:
+    """Verify owner stripping is opt-in for model comparisons."""
+
+    payload = {
+        "model": "org-a/model-x",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+    }
+    (tmp_path / "one.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    metrics = collect_metrics(tmp_path, LLMCompareMetric, strip_owner=True)
+
+    assert list(metrics.keys()) == ["model-x"]
+
+
 def test_plot_compare_benchmark_results_module_help_smoke() -> None:
     """Verify package/module execution path works for compare help output."""
 
@@ -248,7 +271,8 @@ def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) ->
     folder_a.mkdir()
     folder_b.mkdir()
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "mobilint/whisper-small",
         "asr": {
             "wer": 0.1,

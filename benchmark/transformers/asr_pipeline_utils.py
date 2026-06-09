@@ -326,7 +326,9 @@ def write_combined_outputs(
                 payload = json.load(file)
         except (OSError, json.JSONDecodeError):
             continue
-        if payload.get("benchmark_type") != "automatic-speech-recognition":
+        task = payload.get("task")
+        legacy_benchmark_type = payload.get("benchmark_type")
+        if task != "automatic-speech-recognition" and legacy_benchmark_type != "automatic-speech-recognition":
             continue
         if payload.get("status"):
             status_rows.append(

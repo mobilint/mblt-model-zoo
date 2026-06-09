@@ -24,6 +24,19 @@ except ModuleNotFoundError:
     )
 
 
+def _payload_task(payload: Mapping[str, Any]) -> str | None:
+    """Return task from benchmark payloads, including legacy ASR payloads."""
+
+    task = payload.get("task")
+    if isinstance(task, str) and task:
+        return task
+
+    benchmark_type = payload.get("benchmark_type")
+    if isinstance(benchmark_type, str) and benchmark_type in TASK_REGISTRY:
+        return benchmark_type
+    return None
+
+
 def _detect_task_from_folders(folders: list[Path]) -> str:
     """Detect the benchmark task from result payloads, falling back to text-generation."""
 
@@ -38,21 +51,18 @@ def _detect_task_from_folders(folders: list[Path]) -> str:
                 continue
             if not isinstance(payload, Mapping):
                 continue
-            benchmark_type = payload.get("benchmark_type")
-            if benchmark_type is None:
+            task = _payload_task(payload)
+            if task is None:
                 continue
-            if not isinstance(benchmark_type, str):
-                print(f"Warning: ignoring {path.name} because benchmark_type is not a string.")
-                continue
-            if benchmark_type not in TASK_REGISTRY:
-                raise SystemExit(f"Unsupported benchmark_type '{benchmark_type}' found in {path}.")
-            detected_tasks.add(benchmark_type)
+            if task not in TASK_REGISTRY:
+                raise SystemExit(f"Unsupported task '{task}' found in {path}.")
+            detected_tasks.add(task)
 
     if not detected_tasks:
         return "text-generation"
     if len(detected_tasks) > 1:
         tasks = ", ".join(sorted(detected_tasks))
-        raise SystemExit(f"Multiple benchmark_type values found ({tasks}); please pass --task explicitly.")
+        raise SystemExit(f"Multiple task values found ({tasks}); please pass --task explicitly.")
     task = next(iter(detected_tasks))
     print(f"Auto-detected task: {task}")
     return task
@@ -78,8 +88,13 @@ def main() -> int:
         default=None,
         help=(
             "which benchmark payload to compare "
-            "(default: auto-detect from benchmark_type, fallback: text-generation)"
+            "(default: auto-detect from task, fallback: text-generation)"
         ),
+    )
+    parser.add_argument(
+        "--strip-owner",
+        action="store_true",
+        help="compare models by repository name only, ignoring leading Hugging Face owner ids",
     )
     args = parser.parse_args()
 
@@ -99,7 +114,7 @@ def main() -> int:
 
     task = args.task or _detect_task_from_folders(folders)
     metric_cls = TASK_REGISTRY[task]
-    metrics_by_folder = [collect_metrics(folder, metric_cls) for folder in folders]
+    metrics_by_folder = [collect_metrics(folder, metric_cls, strip_owner=args.strip_owner) for folder in folders]
     labels = folder_labels(folders)
     models = common_model_ids(metrics_by_folder)
     for label, folder, metrics in zip(labels, folders, metrics_by_folder):

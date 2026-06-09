@@ -663,7 +663,8 @@ def _build_no_samples_payload(
 
     return {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": label,
         "model_id": target.model_id,
         "label": label,
@@ -810,7 +811,8 @@ def _write_target_json(
     reported_num_beams = _reported_num_beams(sample_timings)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": label,
         "model_id": target.model_id,
         "label": label,
