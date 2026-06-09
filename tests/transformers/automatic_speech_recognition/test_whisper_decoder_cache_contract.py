@@ -158,3 +158,57 @@ def test_whisper_duplicate_logits_reuse_only_within_beam_expanded_source_groups(
     assert torch.equal(logits[0], logits[1])
     assert torch.equal(logits[2], logits[3])
     assert not torch.equal(logits[0], logits[2])
+
+
+def test_whisper_embeds_only_decoder_does_not_create_default_cache() -> None:
+    """Keep embeds-only decoder calls on the non-cache path when cache defaults to enabled."""
+    decoder = object.__new__(MobilintWhisperDecoder)
+    decoder.config = SimpleNamespace(
+        output_attentions=False,
+        output_hidden_states=False,
+        use_cache=True,
+        return_dict=True,
+    )
+
+    def get_mxq_model(self: MobilintWhisperDecoder) -> object:
+        del self
+        raise AssertionError("embeds-only decoder calls must not create a MobilintWhisperCache")
+
+    def embed_positions(
+        inputs: torch.Tensor,
+        *,
+        past_key_values_length: int,
+        position_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        del past_key_values_length, position_ids
+        return torch.zeros_like(inputs)
+
+    def decoder_forward(
+        self: MobilintWhisperDecoder,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        past_key_values: MobilintWhisperCache | None,
+        cache_position: torch.Tensor,
+        *,
+        input_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        del self, encoder_hidden_states, cache_position
+        assert past_key_values is None
+        assert input_ids is None
+        return torch.zeros(
+            (hidden_states.shape[0], 1, hidden_states.shape[2], 4),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+
+    decoder.get_mxq_model = MethodType(get_mxq_model, decoder)
+    decoder.embed_positions = embed_positions
+    decoder.decoder_forward = MethodType(decoder_forward, decoder)
+
+    outputs = decoder.forward(
+        inputs_embeds=torch.ones((1, 2, 3), dtype=torch.float32),
+        encoder_hidden_states=torch.ones((1, 1, 2, 3), dtype=torch.float32),
+    )
+
+    assert outputs.past_key_values is None
+    assert outputs.last_hidden_state.shape == (1, 1, 2, 4)

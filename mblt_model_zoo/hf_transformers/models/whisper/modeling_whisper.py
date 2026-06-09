@@ -336,7 +336,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if encoder_hidden_states is not None and encoder_hidden_states.ndim == 3:
             encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
 
-        if use_cache and past_key_values is None:
+        if use_cache and past_key_values is None and input_ids is not None:
             past_key_values = MobilintWhisperCache(self.get_mxq_model(), batch_size=input_shape[0])
 
         past_key_values_length = 0
