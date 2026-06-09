@@ -296,13 +296,14 @@ class MobilintQwen3ASRTextModel(
         if input_ids is None and inputs_embeds is None:
             raise ValueError("You must specify input_ids, inputs_embeds, or both.")
 
+        explicit_no_cache = use_cache is False
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
         assert inputs_embeds is not None
 
-        if int(inputs_embeds.shape[0]) > 1:
+        if int(inputs_embeds.shape[0]) > 1 and not explicit_no_cache:
             use_cache = True
 
         if use_cache and past_key_values is None:
@@ -419,7 +420,11 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
             audio_feature_lengths = None
 
         if attention_mask is not None and position_ids is None:
-            if cache_position is None or (cache_position is not None and cache_position[0] == 0) or self.rope_deltas is None:
+            if (
+                cache_position is None
+                or (cache_position is not None and cache_position[0] == 0)
+                or self.rope_deltas is None
+            ):
                 delta0 = (1 - attention_mask).sum(dim=-1).unsqueeze(1)
                 position_ids, rope_deltas = self.get_rope_index(attention_mask)
                 rope_deltas = rope_deltas - delta0
