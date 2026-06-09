@@ -222,6 +222,7 @@ class MobilintBeamCache(MobilintCache):
     def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
         super().__init__(mxq_model=mxq_model, batch_size=batch_size)
         self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
+        self._beam_source_indices: list[int | None] = [None for _ in range(self.batch_size)]
         self._active_token_history: list[int] = []
         self._active_source_index: int | None = None
         self._beam_seq_lengths: list[int] = [0 for _ in range(self.batch_size)]
@@ -230,6 +231,7 @@ class MobilintBeamCache(MobilintCache):
         """Reset active qbruntime cache bookkeeping and clear beam token histories."""
         super().reset()
         self._beam_token_histories = [[] for _ in range(self.batch_size)]
+        self._beam_source_indices = [None for _ in range(self.batch_size)]
         self._active_token_history = []
         self._active_source_index = None
         self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
@@ -241,6 +243,7 @@ class MobilintBeamCache(MobilintCache):
         if self.batch_size <= previous_batch_size:
             return
         self._beam_token_histories.extend([[] for _ in range(self.batch_size - previous_batch_size)])
+        self._beam_source_indices.extend([None for _ in range(self.batch_size - previous_batch_size)])
         self._beam_seq_lengths.extend([0 for _ in range(self.batch_size - previous_batch_size)])
 
     def get_seq_length(self, index: int = 0) -> int:
@@ -283,6 +286,17 @@ class MobilintBeamCache(MobilintCache):
         """Return a copy of the stored token history for one logical beam."""
         self.ensure_batch_size(beam_index + 1)
         return list(self._beam_token_histories[beam_index])
+
+    def get_beam_source_index(self, beam_index: int) -> int | None:
+        """Return the source row identity stored for one logical beam."""
+        self.ensure_batch_size(beam_index + 1)
+        return self._beam_source_indices[beam_index]
+
+    def set_beam_source_indices(self, source_indices: Sequence[int | None]) -> None:
+        """Store source row identities for logical beams when they are first resolved."""
+        self.ensure_batch_size(len(source_indices))
+        for beam_index, source_index in enumerate(source_indices):
+            self._beam_source_indices[beam_index] = None if source_index is None else int(source_index)
 
     def get_active_tokens(self) -> list[int]:
         """Return a copy of the token history represented by the active qbruntime cache."""
@@ -336,6 +350,7 @@ class MobilintBeamCache(MobilintCache):
                     "event": "cache_reorder_before",
                     "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
                     "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_source_indices": list(self._beam_source_indices),
                     "beam_seq_lengths": list(self._beam_seq_lengths),
                     "active_token_history": list(self._active_token_history),
                     "active_source_index": self._active_source_index,
@@ -355,9 +370,11 @@ class MobilintBeamCache(MobilintCache):
             return self
 
         old_token_histories = [list(tokens) for tokens in self._beam_token_histories]
+        old_source_indices = list(self._beam_source_indices)
         old_seq_lengths = list(self._beam_seq_lengths)
         beam_indices = [int(index) for index in beam_idx.cpu().tolist()]
         self._beam_token_histories = [list(old_token_histories[index]) for index in beam_indices]
+        self._beam_source_indices = [old_source_indices[index] for index in beam_indices]
         self._beam_seq_lengths = [old_seq_lengths[index] for index in beam_indices]
         for beam_id, seq_length in enumerate(self._beam_seq_lengths):
             self.layers[beam_id].set_seq_length(seq_length)
@@ -367,6 +384,7 @@ class MobilintBeamCache(MobilintCache):
                     "event": "cache_reorder_after",
                     "beam_idx": beam_indices,
                     "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_source_indices": list(self._beam_source_indices),
                     "beam_seq_lengths": list(self._beam_seq_lengths),
                     "active_token_history": list(self._active_token_history),
                     "active_source_index": self._active_source_index,
@@ -393,6 +411,7 @@ class MobilintBeamCache(MobilintCache):
         for i in range(self.batch_size):
             copied.layers[i] = self.layers[i].copy()
         copied._beam_token_histories = [list(tokens) for tokens in self._beam_token_histories]
+        copied._beam_source_indices = list(self._beam_source_indices)
         copied._active_token_history = list(self._active_token_history)
         copied._active_source_index = self._active_source_index
         copied._beam_seq_lengths = list(self._beam_seq_lengths)

@@ -185,6 +185,42 @@ def test_qwen3_asr_duplicate_logits_are_not_reused_across_audio_rows() -> None:
     assert torch.equal(logits[1], torch.full((1, 8), 7.0))
 
 
+def test_qwen3_asr_cached_suffix_keeps_audio_source_identity() -> None:
+    """Keep source ids from the audio-conditioned prompt when later token suffixes match."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+
+    model._beam_llm_forward(
+        input_ids=torch.tensor([[4], [4]], dtype=torch.long),
+        inputs_embeds=torch.tensor(
+            [
+                [[1.0, 1.0]],
+                [[7.0, 7.0]],
+            ],
+            dtype=torch.float32,
+        ),
+        past_key_values=cache,
+        cache_position=torch.tensor([0], dtype=torch.long),
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=torch.tensor([[5], [5]], dtype=torch.long),
+        inputs_embeds=torch.tensor(
+            [
+                [[3.0, 3.0]],
+                [[3.0, 3.0]],
+            ],
+            dtype=torch.float32,
+        ),
+        past_key_values=cache,
+        cache_position=torch.tensor([1], dtype=torch.long),
+    )
+
+    assert mxq_model.infer_calls == 4
+    assert logits.shape == (2, 1, 8)
+
+
 def test_qwen3_asr_duplicate_logits_reuse_single_source_beams() -> None:
     """Beam-expanded rows from the same audio-conditioned prompt may share logits."""
     mxq_model = _InputsEmbedAwareMxqModel()

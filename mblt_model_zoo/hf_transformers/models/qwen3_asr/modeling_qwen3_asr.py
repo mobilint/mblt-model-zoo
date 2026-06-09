@@ -221,7 +221,14 @@ class MobilintQwen3ASRTextModel(
         logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
         self.npu_time = 0.0 if count_npu_time else None
         input_ids = input_ids.view(batch_size, -1)
-        source_indices = self._resolve_source_indices(inputs_embeds)
+        embedding_source_indices = self._resolve_source_indices(inputs_embeds)
+        source_indices: list[int] = []
+        for beam_index in range(batch_size):
+            cached_source_index = past_key_values.get_beam_source_index(beam_index)
+            source_indices.append(
+                embedding_source_indices[beam_index] if cached_source_index is None else cached_source_index
+            )
+        past_key_values.set_beam_source_indices(source_indices)
 
         for beam_index in range(batch_size):
             previous_tokens = past_key_values.get_beam_tokens(beam_index)
@@ -256,7 +263,7 @@ class MobilintQwen3ASRTextModel(
                 suffix_length = 1
                 prefix_length = max(0, len(target_tokens) - 1)
 
-            row_embeds_numpy = row_embeds.type(torch.float32).cpu().numpy()
+            row_embeds_numpy = row_embeds.detach().type(torch.float32).cpu().numpy()
             row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
             num_suffix_chunks = math.ceil(suffix_length / resolved_prefill_chunk_size)
 
