@@ -10,6 +10,11 @@ import torch
 from transformers.cache_utils import Cache, CacheLayerMixin
 
 
+def is_whisper_beam_debug_trace_enabled() -> bool:
+    """Return whether Whisper beam-cache debug tracing is enabled."""
+    return bool(os.environ.get("MBLT_WHISPER_BEAM_DEBUG_TRACE"))
+
+
 def append_whisper_beam_debug_event(event: dict[str, Any]) -> None:
     """Append one Whisper beam-cache debug event when tracing is enabled."""
     trace_path = os.environ.get("MBLT_WHISPER_BEAM_DEBUG_TRACE")
@@ -314,25 +319,28 @@ class MobilintBeamCache(MobilintCache):
     def reorder_cache(self, beam_idx: torch.LongTensor) -> "MobilintBeamCache":
         """Reorder application-level beam token histories in HF beam order."""
         beam_idx = self._validate_beam_indices(beam_idx)
+        trace_enabled = is_whisper_beam_debug_trace_enabled()
 
-        append_whisper_beam_debug_event(
-            {
-                "event": "cache_reorder_before",
-                "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
-                "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
-                "beam_seq_lengths": list(self._beam_seq_lengths),
-                "active_token_history": list(self._active_token_history),
-            }
-        )
-
-        if torch.equal(beam_idx.cpu(), torch.arange(int(beam_idx.numel()), dtype=torch.long)):
+        if trace_enabled:
             append_whisper_beam_debug_event(
                 {
-                    "event": "cache_reorder_identity",
+                    "event": "cache_reorder_before",
                     "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
+                    "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_seq_lengths": list(self._beam_seq_lengths),
                     "active_token_history": list(self._active_token_history),
                 }
             )
+
+        if torch.equal(beam_idx.cpu(), torch.arange(int(beam_idx.numel()), dtype=torch.long)):
+            if trace_enabled:
+                append_whisper_beam_debug_event(
+                    {
+                        "event": "cache_reorder_identity",
+                        "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
+                        "active_token_history": list(self._active_token_history),
+                    }
+                )
             return self
 
         old_token_histories = [list(tokens) for tokens in self._beam_token_histories]
@@ -342,15 +350,16 @@ class MobilintBeamCache(MobilintCache):
         self._beam_seq_lengths = [old_seq_lengths[index] for index in beam_indices]
         for beam_id, seq_length in enumerate(self._beam_seq_lengths):
             self.layers[beam_id].set_seq_length(seq_length)
-        append_whisper_beam_debug_event(
-            {
-                "event": "cache_reorder_after",
-                "beam_idx": beam_indices,
-                "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
-                "beam_seq_lengths": list(self._beam_seq_lengths),
-                "active_token_history": list(self._active_token_history),
-            }
-        )
+        if trace_enabled:
+            append_whisper_beam_debug_event(
+                {
+                    "event": "cache_reorder_after",
+                    "beam_idx": beam_indices,
+                    "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_seq_lengths": list(self._beam_seq_lengths),
+                    "active_token_history": list(self._active_token_history),
+                }
+            )
         return self
 
     def _validate_beam_indices(self, beam_idx: torch.LongTensor) -> torch.LongTensor:

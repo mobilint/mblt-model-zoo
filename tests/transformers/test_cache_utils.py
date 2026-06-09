@@ -11,6 +11,8 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import (
     MobilintDeepStackCache,
     MobilintEagle3Cache,
     MobilintWhisperCache,
+    append_whisper_beam_debug_event,
+    is_whisper_beam_debug_trace_enabled,
 )
 
 
@@ -33,6 +35,30 @@ class _FakeMxqModel:
 
     def load_cache_memory_from(self, cache_dir: str, cache_id: int) -> None:
         del cache_dir, cache_id
+
+
+def test_whisper_beam_debug_trace_predicate_follows_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whisper beam debug trace predicate should only reflect the trace-path environment variable."""
+    monkeypatch.delenv("MBLT_WHISPER_BEAM_DEBUG_TRACE", raising=False)
+
+    assert is_whisper_beam_debug_trace_enabled() is False
+
+    monkeypatch.setenv("MBLT_WHISPER_BEAM_DEBUG_TRACE", "beam_trace.jsonl")
+
+    assert is_whisper_beam_debug_trace_enabled() is True
+
+
+def test_append_whisper_beam_debug_event_is_noop_without_trace_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Whisper beam debug event append should be a no-op when tracing is disabled."""
+    monkeypatch.delenv("MBLT_WHISPER_BEAM_DEBUG_TRACE", raising=False)
+    trace_path = tmp_path / "beam_trace.jsonl"
+
+    append_whisper_beam_debug_event({"event": "noop"})
+
+    assert not trace_path.exists()
 
 
 def test_dump_cache_memory_roundtrip_restores_seq_length() -> None:
