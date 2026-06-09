@@ -398,9 +398,12 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
         labels=None,
         use_cache=None,
         cache_position=None,
+        return_dict=None,
         count_npu_time: bool = False,
         **kwargs,
     ) -> Union[tuple, Qwen3ASRThinkerCausalLMOutputWithPast]:
+        return_dict = return_dict if return_dict is not None else self.config.return_dict
+
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
@@ -457,7 +460,7 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.get_text_config().vocab_size)
 
-        return Qwen3ASRThinkerCausalLMOutputWithPast(
+        output = Qwen3ASRThinkerCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             hidden_states=outputs.hidden_states,
@@ -465,6 +468,10 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
             past_key_values=outputs.past_key_values,
             rope_deltas=self.rope_deltas,
         )
+        if not return_dict:
+            return output.to_tuple()
+
+        return output
 
 
 class MobilintQwen3ASRForConditionalGeneration(
