@@ -63,6 +63,12 @@ because they are the most consistently structured.
   explicitly updates the public contract.
 - Keep public constructor arguments such as `local_path`, `model_type`, `infer_mode`, and
   `product` stable when extending existing models.
+- For vision model loading, prefer `model_path` in new docs, examples, and tests. Treat
+  `mxq_path` and `onnx_path` as compatibility aliases unless the task specifically targets those
+  legacy names.
+- Vision framework selection auto-detects `.mxq` and `.onnx` suffixes from `model_path` when
+  `framework` is omitted. If an explicit framework conflicts with the local file suffix, preserve
+  the fail-fast error behavior instead of silently switching runtimes.
 - `mblt_model_zoo.vision` supports both task-subpackage imports and legacy top-level compatibility
   imports such as `from mblt_model_zoo.vision import ResNet50`. For new docs and examples, prefer
   `MBLT_Engine` or task-subpackage imports unless the change is specifically about backward

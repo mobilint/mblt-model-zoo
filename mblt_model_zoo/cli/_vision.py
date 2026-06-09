@@ -40,12 +40,18 @@ def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output", "--save-path", dest="output", help="Path to save the plotted result image.")
     parser.add_argument(
         "--framework",
-        default="mxq",
+        default=None,
         choices=["mxq", "onnx"],
-        help="Inference framework to use. Defaults to `mxq`.",
+        help="Inference framework to use. When omitted, `--model-path` suffix is used first, then `mxq`.",
     )
-    parser.add_argument("--mxq-path", default="", help="Optional local MXQ model path.")
-    parser.add_argument("--onnx-path", default="", help="Optional local ONNX model path.")
+    parser.add_argument(
+        "--model-path",
+        "--mxq-path",
+        "--onnx-path",
+        dest="model_path",
+        default="",
+        help="Optional local model path for MXQ or ONNX inference.",
+    )
     parser.add_argument("--model-type", default="DEFAULT", help="Model variant from the YAML configuration.")
     parser.add_argument(
         "--core-mode",
@@ -138,8 +144,7 @@ def run_vision_inference(
         model_cls=args.model,
         model_type=args.model_type,
         framework=args.framework,
-        mxq_path=args.mxq_path,
-        onnx_path=args.onnx_path,
+        model_path=args.model_path,
         dev_no=args.dev_no,
         core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,

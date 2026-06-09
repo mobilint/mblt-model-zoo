@@ -50,6 +50,254 @@ def test_file_config_cleansing_prefers_existing_mxq_path(
     assert "revision" not in engine.file_cfg
 
 
+def test_model_path_defaults_to_local_mxq_for_mxq_framework(tmp_path: Path) -> None:
+    """Map ``model_path`` to ``mxq_path`` when MXQ inference is requested."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    engine = MBLT_Engine.__new__(MBLT_Engine)
+    engine.framework = "mxq"
+    engine.file_cfg = {"model_path": str(mxq_path)}
+
+    engine.file_config_cleansing()
+
+    assert engine.file_cfg["mxq_path"] == str(mxq_path)
+    assert "onnx_path" not in engine.file_cfg or not engine.file_cfg["onnx_path"]
+
+
+def test_model_path_defaults_to_local_onnx_for_onnx_framework(tmp_path: Path) -> None:
+    """Map ``model_path`` to ``onnx_path`` when ONNX inference is requested."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    engine = MBLT_Engine.__new__(MBLT_Engine)
+    engine.framework = "onnx"
+    engine.file_cfg = {"model_path": str(onnx_path)}
+
+    engine.file_config_cleansing()
+
+    assert engine.file_cfg["onnx_path"] == str(onnx_path)
+    assert "mxq_path" not in engine.file_cfg or not engine.file_cfg["mxq_path"]
+
+
+def test_engine_init_accepts_local_mxq_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Route API ``model_path`` to the MXQ backend for local MXQ inference."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    backend_kwargs: dict[str, Any] = {}
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            backend_kwargs.update(kwargs)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {},
+            "pre_cfg": {},
+            "post_cfg": {},
+        },
+        model_path=str(mxq_path),
+    )
+
+    try:
+        assert engine.file_cfg["mxq_path"] == str(mxq_path)
+        assert backend_kwargs["mxq_path"] == str(mxq_path)
+    finally:
+        engine.dispose()
+
+
+def test_engine_init_auto_detects_mxq_framework_from_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Infer the MXQ framework from a local MXQ path when framework is omitted."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {},
+            "pre_cfg": {},
+            "post_cfg": {},
+        },
+        model_path=str(mxq_path),
+    )
+
+    try:
+        assert engine.framework == "mxq"
+        assert engine.file_cfg["mxq_path"] == str(mxq_path)
+    finally:
+        engine.dispose()
+
+
+def test_engine_init_accepts_local_onnx_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Route API ``model_path`` to the ONNX runtime session for local ONNX inference."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    class _FakeInput:
+        name = "input"
+        shape = [1, 3, 224, 224]
+
+    class _FakeOutput:
+        name = "output"
+
+    class _FakeSession:
+        def __init__(self, path: str, providers: list[str]) -> None:
+            self.path = path
+            self.providers = providers
+
+        def get_inputs(self) -> list[_FakeInput]:
+            return [_FakeInput()]
+
+        def get_outputs(self) -> list[_FakeOutput]:
+            return [_FakeOutput()]
+
+    class _FakeOrt:
+        def __init__(self) -> None:
+            self.session: _FakeSession | None = None
+
+        @staticmethod
+        def get_available_providers() -> list[str]:
+            return ["CPUExecutionProvider"]
+
+        def InferenceSession(self, path: str, providers: list[str]) -> _FakeSession:
+            self.session = _FakeSession(path, providers)
+            return self.session
+
+    fake_ort = _FakeOrt()
+    monkeypatch.setattr(wrapper, "_load_onnxruntime", lambda: fake_ort)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {},
+            "pre_cfg": {},
+            "post_cfg": {},
+        },
+        framework="onnx",
+        model_path=str(onnx_path),
+    )
+
+    assert engine.file_cfg["onnx_path"] == str(onnx_path)
+    assert fake_ort.session is not None
+    assert fake_ort.session.path == str(onnx_path)
+    assert engine.framework == "onnx"
+
+
+def test_engine_init_rejects_conflicting_framework_and_model_path(tmp_path: Path) -> None:
+    """Fail fast when the explicit framework conflicts with the local model suffix."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    with pytest.raises(ValueError, match="conflicts with model path"):
+        MBLT_Engine(
+            model_cls={
+                "file_cfg": {},
+                "pre_cfg": {},
+                "post_cfg": {},
+            },
+            framework="onnx",
+            model_path=str(mxq_path),
+        )
+
+
+def test_engine_init_defaults_to_mxq_without_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use MXQ as the fallback framework when no model path is provided."""
+
+    backend_kwargs: dict[str, Any] = {}
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            backend_kwargs.update(kwargs)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+    monkeypatch.setattr(wrapper.MBLT_Engine, "_download_hub_artifact", lambda self, **kwargs: "/tmp/model.mxq")
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {
+                "repo_id": "mobilint/example",
+                "filename": "model.mxq",
+                "revision": "main",
+            },
+            "pre_cfg": {},
+            "post_cfg": {},
+        },
+    )
+
+    try:
+        assert engine.framework == "mxq"
+        assert "mxq_path" in backend_kwargs
+    finally:
+        engine.dispose()
+
+
 def test_custom_coco_data_filters_visible_keypoints(tmp_path: Path) -> None:
     """Keep only images that Ultralytics includes for COCO pose validation."""
 

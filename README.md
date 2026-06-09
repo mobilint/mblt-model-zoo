@@ -46,11 +46,11 @@ Vision models are loaded through `MBLT_Engine`. This is the same loading style u
 from mblt_model_zoo.vision import MBLT_Engine
 
 # Load a built-in model config.
-# If mxq_path is empty, the MXQ file is downloaded from Hugging Face Hub and cached automatically.
+# If model_path is empty, the MXQ file is downloaded from Hugging Face Hub and cached automatically.
 model = MBLT_Engine(
     model_cls="resnet50",
     model_type="DEFAULT",
-    mxq_path="",
+    model_path="",
     core_mode="global8",
 )
 
@@ -58,7 +58,7 @@ model = MBLT_Engine(
 model = MBLT_Engine(
     model_cls="resnet50",
     model_type="IMAGENET1K_V1",
-    mxq_path="",
+    model_path="",
     core_mode="global8",
 )
 
@@ -66,18 +66,19 @@ model = MBLT_Engine(
 model = MBLT_Engine(
     model_cls="resnet50",
     model_type="DEFAULT",
-    mxq_path="path/to/resnet50.mxq",
+    model_path="path/to/resnet50.mxq",
     core_mode="global8",
 )
 
 # Run a vision model with ONNX instead of MXQ.
-# If onnx_path is empty, the matching ONNX file is downloaded from the
+# Local `.onnx` and `.mxq` paths auto-detect the framework from the suffix.
+# If model_path is empty, the matching ONNX file is downloaded from the
 # same Hugging Face repo and cached automatically.
 model = MBLT_Engine(
     model_cls="alexnet",
     model_type="IMAGENET1K_V1",
     framework="onnx",
-    onnx_path="",
+    model_path="",
 )
 ```
 
@@ -85,9 +86,9 @@ model = MBLT_Engine(
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
-- `framework`: Inference backend. Defaults to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
-- `mxq_path`: Local MXQ path. Use `""` to download and cache the published MXQ automatically.
-- `onnx_path`: Local ONNX path. Use `""` to download and cache the published ONNX automatically when `framework="onnx"`.
+- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` and otherwise falls back to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
+- `model_path`: Local MXQ or ONNX path. Use `""` to download and cache the published artifact automatically for the selected framework.
+- `mxq_path` and `onnx_path`: Backward-compatible explicit path aliases.
 - `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
@@ -103,7 +104,7 @@ from mblt_model_zoo.vision import MBLT_Engine
 model = MBLT_Engine(
     model_cls="resnet50",
     model_type="DEFAULT",
-    mxq_path="",
+    model_path="",
     core_mode="global8",
 )
 
@@ -177,7 +178,7 @@ For new code, `MBLT_Engine` remains the preferred loading API:
 ```python
 from mblt_model_zoo.vision import MBLT_Engine
 
-model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", mxq_path="", core_mode="global8")
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", model_path="", core_mode="global8")
 ```
 
 The task subpackage imports remain available as compatibility wrappers around `MBLT_Engine`. You
@@ -187,7 +188,7 @@ and `mblt_model_zoo.vision.list_models()`.
 For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` so
 existing call sites do not fail immediately, but it is ignored by the YAML-backed model registry.
 If you previously relied on `product` to choose a non-default artifact, migrate that selection to
-explicit `model_cls`, `model_type`, or `mxq_path` values.
+explicit `model_cls`, `model_type`, or `model_path` values.
 
 ## Model List
 
@@ -235,9 +236,14 @@ mblt-model-zoo predict --source ./cat.png --model resnet50
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
 ```
 
-Vision commands default to `--framework mxq`. You can switch to ONNX with `--framework onnx`.
+Vision commands accept a shared `--model-path` for local MXQ and local ONNX files. When
+`--framework` is omitted, the CLI infers `.mxq` and `.onnx` suffixes and otherwise falls back to
+MXQ. If the explicit framework conflicts with the local file suffix, the command fails with a
+clear error.
 
 ```bash
+mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
+mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
 ```
 
@@ -253,11 +259,13 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
 ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
-Validation also supports `--framework onnx`.
+Validation also supports `--framework onnx` and the shared `--model-path` override.
 
 ```bash
 mblt-model-zoo val --model resnet50
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+mblt-model-zoo val --model resnet50 --model-path ./resnet50.mxq
+mblt-model-zoo val --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo val --model resnet50 --framework onnx
 ```
 
@@ -268,7 +276,7 @@ mblt-model-zoo predict \
   --source ./cat.png \
   --model resnet50 \
   --model-type DEFAULT \
-  --mxq-path /path/to/model.mxq \
+  --model-path /path/to/model.mxq \
   --core-mode global8 \
   --dev-no 0
 ```
