@@ -155,22 +155,27 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         input_ids = input_ids.view(batch_size, -1)
 
         past_key_values.ensure_batch_size(batch_size)
+        source_indices = [0] * batch_size
         if encoder_hidden_states.shape[0] == 1 and batch_size > 1:
             encoder_hidden_states = encoder_hidden_states.expand(batch_size, *encoder_hidden_states.shape[1:])
+        elif encoder_hidden_states.shape[0] == batch_size:
+            source_indices = list(range(batch_size))
 
         logits_list: list[torch.Tensor] = []
-        logits_by_target_tokens: dict[tuple[int, ...], torch.Tensor] = {}
+        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
         mxq_model = self.npu_backend.mxq_model
         trace_enabled = is_whisper_beam_debug_trace_enabled()
         for beam_index in range(batch_size):
             target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
-            target_key = tuple(target_tokens)
+            source_index = source_indices[beam_index]
+            target_key = (source_index, tuple(target_tokens))
             prefix_length = past_key_values.get_common_prefix_length(target_tokens)
             if trace_enabled:
                 append_whisper_beam_debug_event(
                     {
                         "event": "decoder_beam_before",
                         "beam_index": beam_index,
+                        "source_index": source_index,
                         "input_ids": [int(token) for token in input_ids[beam_index].detach().cpu().reshape(-1).tolist()],
                         "target_tokens": list(target_tokens),
                         "active_tokens": past_key_values.get_active_tokens(),
@@ -186,6 +191,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
                         {
                             "event": "decoder_beam_duplicate_logits",
                             "beam_index": beam_index,
+                            "source_index": source_index,
                             "target_tokens": list(target_tokens),
                         }
                     )
@@ -223,6 +229,7 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
                     {
                         "event": "decoder_beam_after",
                         "beam_index": beam_index,
+                        "source_index": source_index,
                         "target_tokens": list(target_tokens),
                         "prefix_length": int(prefix_length),
                         "suffix_tokens": list(target_tokens[prefix_length:]),
