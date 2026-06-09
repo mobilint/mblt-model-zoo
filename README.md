@@ -86,7 +86,7 @@ model = MBLT_Engine(
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
-- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` and otherwise falls back to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
+- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` or `file_cfg.model_path` and otherwise falls back to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
 - `model_path`: Local MXQ or ONNX path. Use `""` to download and cache the published artifact automatically for the selected framework.
 - `mxq_path` and `onnx_path`: Backward-compatible explicit path aliases.
 - `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
@@ -239,12 +239,16 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_d
 Vision commands accept a shared `--model-path` for local MXQ and local ONNX files. When
 `--framework` is omitted, the CLI infers `.mxq` and `.onnx` suffixes and otherwise falls back to
 MXQ. If the explicit framework conflicts with the local file suffix, the command fails with a
-clear error.
+clear error. The compatibility flags `--mxq-path` and `--onnx-path` stay separate from
+`--model-path`, so framework-specific resolution still works when both a local MXQ artifact and an
+explicit ONNX runtime are involved.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 Prediction results are saved under `runs/vision/predict/` by default. Pass `--output` or
@@ -259,7 +263,8 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
 ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
-Validation also supports `--framework onnx` and the shared `--model-path` override.
+Validation also supports `--framework onnx`, the shared `--model-path` override, and the
+framework-specific compatibility aliases.
 
 ```bash
 mblt-model-zoo val --model resnet50
@@ -267,6 +272,8 @@ mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres
 mblt-model-zoo val --model resnet50 --model-path ./resnet50.mxq
 mblt-model-zoo val --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo val --model resnet50 --framework onnx
+mblt-model-zoo val --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 Common NPU and artifact options are shared by the vision commands:

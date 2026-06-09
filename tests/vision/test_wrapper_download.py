@@ -251,6 +251,81 @@ def test_engine_init_rejects_conflicting_framework_and_model_path(tmp_path: Path
         )
 
 
+def test_engine_init_auto_detects_onnx_framework_from_config_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Infer ONNX from ``file_cfg.model_path`` when constructor inputs omit the framework."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    class _FakeInput:
+        name = "input"
+        shape = [1, 3, 224, 224]
+
+    class _FakeOutput:
+        name = "output"
+
+    class _FakeSession:
+        def __init__(self, path: str, providers: list[str]) -> None:
+            self.path = path
+            self.providers = providers
+
+        def get_inputs(self) -> list[_FakeInput]:
+            return [_FakeInput()]
+
+        def get_outputs(self) -> list[_FakeOutput]:
+            return [_FakeOutput()]
+
+    class _FakeOrt:
+        def __init__(self) -> None:
+            self.session: _FakeSession | None = None
+
+        @staticmethod
+        def get_available_providers() -> list[str]:
+            return ["CPUExecutionProvider"]
+
+        def InferenceSession(self, path: str, providers: list[str]) -> _FakeSession:
+            self.session = _FakeSession(path, providers)
+            return self.session
+
+    fake_ort = _FakeOrt()
+    monkeypatch.setattr(wrapper, "_load_onnxruntime", lambda: fake_ort)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {"model_path": str(onnx_path)},
+            "pre_cfg": {},
+            "post_cfg": {},
+        }
+    )
+
+    assert engine.file_cfg["onnx_path"] == str(onnx_path)
+    assert fake_ort.session is not None
+    assert fake_ort.session.path == str(onnx_path)
+    assert engine.framework == "onnx"
+
+
+def test_engine_init_rejects_conflicting_framework_and_config_model_path(tmp_path: Path) -> None:
+    """Fail fast when the explicit framework conflicts with ``file_cfg.model_path``."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    with pytest.raises(ValueError, match="conflicts with model path"):
+        MBLT_Engine(
+            model_cls={
+                "file_cfg": {"model_path": str(onnx_path)},
+                "pre_cfg": {},
+                "post_cfg": {},
+            },
+            framework="mxq",
+        )
+
+
 def test_engine_init_defaults_to_mxq_without_model_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

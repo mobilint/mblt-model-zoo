@@ -30,8 +30,9 @@ model = MBLT_Engine(model_cls="alexnet", framework="onnx")
 
 When `framework="onnx"` is selected, the engine prefers available GPU-capable ONNX Runtime
 providers such as `CUDAExecutionProvider` and keeps CPU as a fallback. Pass `onnx_providers` to
-override the provider order explicitly when needed. If `model_path` ends with `.mxq` or `.onnx`,
-the engine auto-detects the framework from that suffix when `framework` is omitted.
+override the provider order explicitly when needed. If `model_path` or `file_cfg.model_path` ends
+with `.mxq` or `.onnx`, the engine auto-detects the framework from that suffix when `framework` is
+omitted.
 
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
@@ -60,13 +61,16 @@ Vision commands accept a shared `--model-path` for local MXQ and local ONNX file
 `--framework` is omitted, the command auto-detects `.mxq` and `.onnx` suffixes and otherwise
 falls back to MXQ. If the explicit framework conflicts with the file suffix, the command fails
 with a clear error. For Hugging Face artifacts, omit `--model-path` and select the runtime with
-`--framework` when needed.
+`--framework` when needed. The compatibility aliases `--mxq-path` and `--onnx-path` are forwarded
+separately, so they keep the engine's framework-specific path resolution behavior.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --framework onnx
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 The command saves the plotted result image under `runs/vision/predict/` by default. Use `--output`
@@ -155,13 +159,16 @@ The vision CLI also provides a unified validation command:
 mblt-model-zoo val --model resnet50
 ```
 
-Validation also supports `--framework onnx` and the shared `--model-path` override:
+Validation also supports `--framework onnx`, the shared `--model-path` override, and the
+framework-specific compatibility aliases:
 
 ```bash
 mblt-model-zoo val --model resnet50 --model-path ./resnet50.mxq
 mblt-model-zoo val --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo val --model resnet50 --framework onnx
 mblt-model-zoo val --model yolo11m --framework onnx --data-path /path/to/coco
+mblt-model-zoo val --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
+mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 ```
 
 The command loads the model, infers its task, and validates it on the associated benchmark dataset:

@@ -191,6 +191,8 @@ def _run_validation(args: argparse.Namespace) -> float:
         model_type=args.model_type,
         framework=args.framework,
         model_path=args.model_path,
+        mxq_path=args.mxq_path,
+        onnx_path=args.onnx_path,
         dev_no=args.dev_no,
         core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,
@@ -250,11 +252,21 @@ def add_val_parser(
     )
     parser.add_argument(
         "--model-path",
-        "--mxq-path",
-        "--onnx-path",
         dest="model_path",
         default="",
-        help="Optional local model path for MXQ or ONNX inference.",
+        help="Optional generic local model path for MXQ or ONNX inference.",
+    )
+    parser.add_argument(
+        "--mxq-path",
+        dest="mxq_path",
+        default="",
+        help="Optional local MXQ model path. Preserved as a compatibility alias.",
+    )
+    parser.add_argument(
+        "--onnx-path",
+        dest="onnx_path",
+        default="",
+        help="Optional local ONNX model path.",
     )
     parser.add_argument("--model-type", default="DEFAULT", help="Model variant from the YAML configuration.")
     parser.add_argument(

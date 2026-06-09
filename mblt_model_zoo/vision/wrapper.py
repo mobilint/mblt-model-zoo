@@ -217,30 +217,6 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
-        self.framework = _resolve_framework(framework, model_path)
-        mxq_path, onnx_path = _split_model_paths(
-            framework=self.framework,
-            model_path=model_path,
-            mxq_path=mxq_path,
-            onnx_path=onnx_path,
-        )
-
-        _mxq_path_passed = bool(mxq_path)
-        _onnx_path_passed = bool(onnx_path)
-        _dev_no_passed = dev_no is not None
-        _core_mode_passed = core_mode is not None
-        _target_cores_passed = target_cores is not None
-        _target_clusters_passed = target_clusters is not None
-
-        if dev_no is None:
-            dev_no = 0
-        if core_mode is None:
-            core_mode = "single"
-        if target_cores is None:
-            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
-        if target_clusters is None:
-            target_clusters = [0, 1]
-
         if isinstance(model_cls, dict):  # direct setting
             model_config_part = copy.deepcopy(model_cls)
         else:  # setting via yaml file path or model name
@@ -280,6 +256,32 @@ class MBLT_Engine:
                     else:
                         merged_config[key] = value
                 model_config_part = merged_config
+
+        file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
+        framework_model_path = model_path or file_cfg_model_path
+        self.framework = _resolve_framework(framework, framework_model_path)
+        mxq_path, onnx_path = _split_model_paths(
+            framework=self.framework,
+            model_path=model_path,
+            mxq_path=mxq_path,
+            onnx_path=onnx_path,
+        )
+
+        _mxq_path_passed = bool(mxq_path)
+        _onnx_path_passed = bool(onnx_path)
+        _dev_no_passed = dev_no is not None
+        _core_mode_passed = core_mode is not None
+        _target_cores_passed = target_cores is not None
+        _target_clusters_passed = target_clusters is not None
+
+        if dev_no is None:
+            dev_no = 0
+        if core_mode is None:
+            core_mode = "single"
+        if target_cores is None:
+            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+        if target_clusters is None:
+            target_clusters = [0, 1]
 
         self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
         file_cfg_model_path = self.file_cfg.pop("model_path", "")

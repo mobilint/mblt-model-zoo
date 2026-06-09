@@ -20,6 +20,9 @@ def test_cli_predict_example_parses() -> None:
     assert args.source == "./cat.png"
     assert args.model == "resnet50"
     assert args.framework is None
+    assert args.model_path == ""
+    assert args.mxq_path == ""
+    assert args.onnx_path == ""
     assert args.core_mode == "global8"
     assert args.topk == 5
     assert args.conf_thres == 0.25
@@ -33,6 +36,9 @@ def test_cli_val_defaults_to_model_thresholds() -> None:
     args = parser.parse_args(["val", "--model", "yolo11m"])
 
     assert args.framework is None
+    assert args.model_path == ""
+    assert args.mxq_path == ""
+    assert args.onnx_path == ""
     assert args.core_mode == "global8"
     assert args.conf_thres is None
     assert args.iou_thres is None
@@ -78,6 +84,56 @@ def test_cli_predict_parses_mxq_model_path() -> None:
 
     assert args.framework is None
     assert args.model_path == "./resnet50.mxq"
+    assert args.mxq_path == ""
+    assert args.onnx_path == ""
+
+
+def test_cli_predict_preserves_framework_specific_model_paths() -> None:
+    """Keep compatibility path aliases separate from the generic model path."""
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "predict",
+            "--source",
+            "./cat.png",
+            "--model",
+            "resnet50",
+            "--framework",
+            "onnx",
+            "--mxq-path",
+            "./resnet50.mxq",
+        ]
+    )
+
+    assert args.framework == "onnx"
+    assert args.model_path == ""
+    assert args.mxq_path == "./resnet50.mxq"
+    assert args.onnx_path == ""
+
+
+def test_cli_val_preserves_framework_specific_model_paths() -> None:
+    """Keep validation compatibility path aliases separate from the generic model path."""
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "val",
+            "--model",
+            "resnet50",
+            "--framework",
+            "onnx",
+            "--mxq-path",
+            "./resnet50.mxq",
+            "--onnx-path",
+            "./resnet50.onnx",
+        ]
+    )
+
+    assert args.framework == "onnx"
+    assert args.model_path == ""
+    assert args.mxq_path == "./resnet50.mxq"
+    assert args.onnx_path == "./resnet50.onnx"
 
 
 @pytest.mark.parametrize(
