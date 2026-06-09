@@ -498,6 +498,7 @@ def test_qwen3_asr_original_model_prefers_native_qwen_asr_loader(
         "qwen_asr",
         type("QwenAsrStub", (), {"Qwen3ASRModel": Qwen3ASRModelStub})(),
     )
+    monkeypatch.setattr(asr_bench, "_ensure_qwen3_asr_backend_registered", lambda: None)
 
     target = asr_bench.ASRBenchmarkTarget(
         model_id="Qwen/Qwen3-ASR-1.7B",
@@ -564,6 +565,7 @@ def test_qwen3_asr_original_model_uses_native_qwen_asr_loader(monkeypatch: pytes
         "qwen_asr",
         type("QwenAsrStub", (), {"Qwen3ASRModel": Qwen3ASRModelStub})(),
     )
+    monkeypatch.setattr(asr_bench, "_ensure_qwen3_asr_backend_registered", lambda: None)
 
     target = asr_bench.ASRBenchmarkTarget(
         model_id="Qwen/Qwen3-ASR-1.7B",

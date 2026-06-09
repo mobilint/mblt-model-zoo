@@ -143,6 +143,7 @@ def build_asr_pipeline(
     """Build one ASR pipeline/native model for benchmarking."""
 
     if target.is_original and is_qwen3_asr_model(target.model_id):
+        ensure_qwen3_asr_backend_registered()
         try:
             import qwen_asr
         except ModuleNotFoundError as exc:
