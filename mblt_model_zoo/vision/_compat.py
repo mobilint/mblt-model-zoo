@@ -71,7 +71,9 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         """Initializes a YAML-backed compatibility wrapper.
 
         Args:
-            local_path: Optional local MXQ path using the legacy argument name.
+            local_path: Deprecated legacy MXQ path alias. Prefer ``model_path``
+                for generic MXQ or ONNX loading, or ``mxq_path`` for an
+                explicit MXQ-only override.
             model_type: YAML config variant to load.
             infer_mode: Execution mode forwarded to ``MBLT_Engine``.
             product: Retained for backward compatibility but ignored by the
@@ -91,8 +93,8 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             self,
             model_cls=yaml_name,
             model_type=model_type,
-            model_path=model_path or local_path or "",
-            mxq_path=mxq_path or "",
+            model_path=model_path or "",
+            mxq_path=mxq_path or local_path or "",
             onnx_path=onnx_path or "",
             dev_no=dev_no,
             core_mode=infer_mode,

@@ -11,6 +11,7 @@ import torch
 from huggingface_hub.errors import EntryNotFoundError
 
 import mblt_model_zoo.vision.wrapper as wrapper
+from mblt_model_zoo.vision._compat import create_model_class
 from mblt_model_zoo.vision.utils.datasets import CustomCocodata
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
 from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
@@ -324,6 +325,62 @@ def test_engine_init_rejects_conflicting_framework_and_config_model_path(tmp_pat
             },
             framework="mxq",
         )
+
+
+def test_legacy_local_path_stays_mxq_specific_for_onnx_framework(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep legacy ``local_path`` semantics stable in compatibility wrappers."""
+
+    mxq_path = tmp_path / "resnet50.mxq"
+    onnx_path = tmp_path / "resnet50.onnx"
+    mxq_path.write_bytes(b"mxq")
+    onnx_path.write_bytes(b"onnx")
+
+    class _FakeInput:
+        name = "input"
+        shape = [1, 3, 224, 224]
+
+    class _FakeOutput:
+        name = "output"
+
+    class _FakeSession:
+        def __init__(self, path: str, providers: list[str]) -> None:
+            self.path = path
+            self.providers = providers
+
+        def get_inputs(self) -> list[_FakeInput]:
+            return [_FakeInput()]
+
+        def get_outputs(self) -> list[_FakeOutput]:
+            return [_FakeOutput()]
+
+    class _FakeOrt:
+        def __init__(self) -> None:
+            self.session: _FakeSession | None = None
+
+        @staticmethod
+        def get_available_providers() -> list[str]:
+            return ["CPUExecutionProvider"]
+
+        def InferenceSession(self, path: str, providers: list[str]) -> _FakeSession:
+            self.session = _FakeSession(path, providers)
+            return self.session
+
+    fake_ort = _FakeOrt()
+    monkeypatch.setattr(wrapper, "_load_onnxruntime", lambda: fake_ort)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    compat_cls = create_model_class("ResNet50", "mblt_model_zoo.vision.image_classification")
+    engine = compat_cls(local_path=str(mxq_path), framework="onnx")
+
+    assert engine.file_cfg["mxq_path"] == str(mxq_path)
+    assert engine.file_cfg["onnx_path"] == str(onnx_path)
+    assert fake_ort.session is not None
+    assert fake_ort.session.path == str(onnx_path)
+    assert engine.framework == "onnx"
 
 
 def test_engine_init_defaults_to_mxq_without_model_path(
