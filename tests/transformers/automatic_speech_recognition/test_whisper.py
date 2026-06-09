@@ -36,11 +36,7 @@ def test_whisper(pipe):
 
         output = pipe(
             sample,
-            batch_size=8,
-            return_timestamps=True,
-            generate_kwargs={
-                "num_beams": 1,  # Supports for beam search with reorder_cache is not implemented yet
-            },
+            language="en",
         )
 
         print("Result: %s" % output["text"])

@@ -1,3 +1,5 @@
+import math
+import time
 from functools import wraps
 from typing import Optional, Union, cast
 
@@ -14,7 +16,7 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintCache
+from ...utils.cache_utils import MobilintBeamCache, MobilintCache
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
 from ._errors import guard_qwen_asr_import
@@ -166,6 +168,142 @@ class MobilintQwen3ASRTextModel(
     def set_input_embeddings(self, value: nn.Module) -> None:
         self.embed_tokens = value
 
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintBeamCache:
+        """Return a beam-snapshot cache for Qwen3-ASR text generation."""
+        del cache_implementation, max_cache_len, args
+        configured_batch_size = max(1, int(batch_size), getattr(self.config, "max_batch_size", 1))
+        if not hasattr(self, "_cache") or not isinstance(self._cache, MobilintBeamCache):
+            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
+            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        else:
+            self._cache.reset()
+
+        return self._cache
+
+    def _resolve_source_indices(self, inputs_embeds: torch.Tensor) -> list[int]:
+        """Return source ids for rows sharing the same audio-conditioned prompt embeddings."""
+        source_indices: list[int] = []
+        seen_signatures: list[torch.Tensor] = []
+        for row in inputs_embeds.detach().cpu():
+            source_index = next(
+                (index for index, seen_row in enumerate(seen_signatures) if torch.equal(row, seen_row)),
+                None,
+            )
+            if source_index is None:
+                source_index = len(seen_signatures)
+                seen_signatures.append(row.clone())
+            source_indices.append(source_index)
+        return source_indices
+
+    def _beam_llm_forward(
+        self,
+        input_ids: torch.LongTensor,
+        inputs_embeds: torch.Tensor,
+        past_key_values: MobilintBeamCache,
+        cache_position: torch.Tensor,
+        prefill_chunk_size: Optional[int] = None,
+        count_npu_time: bool = False,
+    ) -> torch.Tensor:
+        """Run Qwen3-ASR decoder by forwarding only suffixes missing from active cache."""
+        if inputs_embeds.ndim != 3:
+            raise ValueError(f"Expected rank-3 inputs_embeds for beam decode, got {tuple(inputs_embeds.shape)}")
+
+        batch_size = int(inputs_embeds.shape[0])
+        sequence_length = int(inputs_embeds.shape[1])
+        if sequence_length <= 0:
+            raise ValueError("Qwen3-ASR beam decode received an empty token sequence.")
+
+        past_key_values.ensure_batch_size(batch_size)
+        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        mxq_model = self.npu_backend.mxq_model
+        logits_list: list[torch.Tensor] = []
+        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
+        self.npu_time = 0.0 if count_npu_time else None
+        input_ids = input_ids.view(batch_size, -1)
+        embedding_source_indices = self._resolve_source_indices(inputs_embeds)
+        source_indices: list[int] = []
+        for beam_index in range(batch_size):
+            cached_source_index = past_key_values.get_beam_source_index(beam_index)
+            source_indices.append(
+                embedding_source_indices[beam_index] if cached_source_index is None else cached_source_index
+            )
+        past_key_values.set_beam_source_indices(source_indices)
+
+        for beam_index in range(batch_size):
+            previous_tokens = past_key_values.get_beam_tokens(beam_index)
+            target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
+            source_index = source_indices[beam_index]
+            target_key = (source_index, tuple(target_tokens))
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens, source_index=source_index)
+            previous_length = len(previous_tokens)
+            if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
+                logits_list.append(logits_by_target_tokens[target_key])
+                past_key_values.commit_beam_tokens(beam_index, target_tokens)
+                continue
+            if prefix_length == len(target_tokens):
+                prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
+            local_start_index = max(0, prefix_length - previous_length)
+            timing_phase = "prefill" if prefix_length == 0 else "decode"
+            row_logits_ndarray: np.ndarray | None = None
+
+            if prefix_length < previous_length:
+                suffix_tokens = torch.tensor(
+                    [target_tokens[prefix_length:]],
+                    dtype=torch.long,
+                    device=inputs_embeds.device,
+                )
+                row_embeds = self.embed_tokens(suffix_tokens)
+            else:
+                row_embeds = inputs_embeds[beam_index : beam_index + 1, local_start_index:, :]
+
+            suffix_length = int(row_embeds.shape[1])
+            if suffix_length <= 0:
+                row_embeds = inputs_embeds[beam_index : beam_index + 1, -1:, :]
+                suffix_length = 1
+                prefix_length = max(0, len(target_tokens) - 1)
+
+            row_embeds_numpy = row_embeds.detach().type(torch.float32).cpu().numpy()
+            row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
+            num_suffix_chunks = math.ceil(suffix_length / resolved_prefill_chunk_size)
+
+            for chunk_index in range(num_suffix_chunks):
+                start_index = chunk_index * resolved_prefill_chunk_size
+                end_index = min(start_index + resolved_prefill_chunk_size, suffix_length)
+                cache_size = prefix_length + start_index
+                chunk = row_embeds_numpy[:, :, start_index:end_index, :]
+
+                if count_npu_time:
+                    t0 = time.perf_counter()
+                    result = mxq_model.infer([chunk], None, cache_size)
+                    elapsed = time.perf_counter() - t0
+                    assert self.npu_time is not None
+                    self.npu_time += elapsed
+                    self._record_npu_timing(timing_phase, elapsed)
+                else:
+                    result = mxq_model.infer([chunk], None, cache_size)
+
+                assert result is not None, "mxq infer result is None!"
+                row_logits_ndarray = result[0]
+
+            past_key_values.commit_beam_tokens(beam_index, target_tokens)
+            past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
+            if row_logits_ndarray is None:
+                raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
+            row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+            while row_logits.ndim > 2:
+                singleton_dims = [dim for dim, size in enumerate(row_logits.shape[:-1]) if int(size) == 1]
+                if not singleton_dims:
+                    raise ValueError(f"Unexpected Qwen3-ASR beam logits shape: {tuple(row_logits.shape)}")
+                row_logits = row_logits.squeeze(singleton_dims[0])
+            if row_logits.ndim == 2:
+                row_logits = row_logits.unsqueeze(0)
+            row_logits = row_logits[:, -int(input_ids.shape[1]) :, :]
+            logits_list.append(row_logits)
+            logits_by_target_tokens[target_key] = row_logits
+
+        return torch.cat(logits_list, dim=0)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -179,15 +317,21 @@ class MobilintQwen3ASRTextModel(
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
-        if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You must specify input_ids, inputs_embeds, or both.")
 
-        if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
+        explicit_no_cache = use_cache is False
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
         assert inputs_embeds is not None
+
+        if int(inputs_embeds.shape[0]) > 1 and not explicit_no_cache:
+            use_cache = True
+
+        if use_cache and past_key_values is None:
+            past_key_values = self._get_cache("", int(inputs_embeds.shape[0]), 0)
 
         if cache_position is None:
             past_seen_tokens = (
@@ -202,14 +346,26 @@ class MobilintQwen3ASRTextModel(
                 ),
             )
 
-        logits = self.llm_forward(
-            inputs_embeds=inputs_embeds,
-            past_key_values=past_key_values,
-            cache_position=cache_position,
-            prefill_chunk_size=prefill_chunk_size,
-            count_npu_time=count_npu_time,
-            attention_mask=None,
-        )
+        if isinstance(past_key_values, MobilintBeamCache):
+            if input_ids is None:
+                raise ValueError("MobilintBeamCache requires input_ids to track Qwen3-ASR beam token histories.")
+            logits = self._beam_llm_forward(
+                input_ids=input_ids,
+                inputs_embeds=inputs_embeds,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
+                prefill_chunk_size=prefill_chunk_size,
+                count_npu_time=count_npu_time,
+            )
+        else:
+            logits = self.llm_forward(
+                inputs_embeds=inputs_embeds,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
+                prefill_chunk_size=prefill_chunk_size,
+                count_npu_time=count_npu_time,
+                attention_mask=None,
+            )
 
         return BaseModelOutputWithPast(
             last_hidden_state=cast(torch.FloatTensor, logits),
@@ -247,15 +403,99 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.model.get_mxq_model()
 
+    def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintBeamCache:
+        """Return a beam-snapshot cache for the nested Qwen3-ASR thinker generation loop."""
+        return self.model._get_cache(cache_implementation, batch_size, max_cache_len, *args)
+
     @wraps(Qwen3ASRThinkerForConditionalGeneration.forward)
     def forward(
         self,
-        *args: object,
+        input_ids=None,
+        input_features=None,
+        attention_mask=None,
+        feature_attention_mask=None,
+        audio_feature_lengths=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        rope_deltas=None,
+        labels=None,
+        use_cache=None,
+        cache_position=None,
+        return_dict=None,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs,
     ) -> Union[tuple, Qwen3ASRThinkerCausalLMOutputWithPast]:
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        return_dict = return_dict if return_dict is not None else self.config.return_dict
+
+        if inputs_embeds is None:
+            inputs_embeds = self.get_input_embeddings()(input_ids)
+
+        if input_features is not None:
+            audio_features = self.get_audio_features(
+                input_features,
+                feature_attention_mask=feature_attention_mask,
+                audio_feature_lengths=audio_feature_lengths,
+            )
+            audio_features = audio_features.to(inputs_embeds.device, inputs_embeds.dtype)
+            audio_mask = self.get_placeholder_mask(input_ids, inputs_embeds=inputs_embeds)
+            inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_features)
+
+        if feature_attention_mask is not None:
+            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
+        else:
+            audio_feature_lengths = None
+
+        if attention_mask is not None and position_ids is None:
+            if (
+                cache_position is None
+                or (cache_position is not None and cache_position[0] == 0)
+                or self.rope_deltas is None
+            ):
+                delta0 = (1 - attention_mask).sum(dim=-1).unsqueeze(1)
+                position_ids, rope_deltas = self.get_rope_index(attention_mask)
+                rope_deltas = rope_deltas - delta0
+                self.rope_deltas = rope_deltas
+            else:
+                batch_size, seq_length = input_ids.shape
+                delta = cache_position[0] + self.rope_deltas if cache_position is not None else 0
+                position_ids = torch.arange(seq_length, device=input_ids.device)
+                position_ids = position_ids.view(1, -1).expand(batch_size, -1)
+                position_ids = position_ids.add(delta)
+                position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+        hidden_states = outputs[0]
+        logits = self.lm_head(hidden_states)
+        if isinstance(logits, torch.Tensor) and logits.ndim == 4 and int(logits.shape[1]) == 1:
+            logits = logits.squeeze(1)
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.get_text_config().vocab_size)
+
+        output = Qwen3ASRThinkerCausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            past_key_values=outputs.past_key_values,
+            rope_deltas=self.rope_deltas,
+        )
+        if not return_dict:
+            return output.to_tuple()
+
+        return output
 
 
 class MobilintQwen3ASRForConditionalGeneration(

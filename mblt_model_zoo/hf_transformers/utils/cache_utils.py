@@ -1,10 +1,30 @@
 import copy
+import json
+import os
+import time
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Sequence, Union
 
 import qbruntime
 import torch
 from transformers.cache_utils import Cache, CacheLayerMixin
+
+
+def is_whisper_beam_debug_trace_enabled() -> bool:
+    """Return whether Whisper beam-cache debug tracing is enabled."""
+    return bool(os.environ.get("MBLT_WHISPER_BEAM_DEBUG_TRACE"))
+
+
+def append_whisper_beam_debug_event(event: dict[str, Any]) -> None:
+    """Append one Whisper beam-cache debug event when tracing is enabled."""
+    trace_path = os.environ.get("MBLT_WHISPER_BEAM_DEBUG_TRACE")
+    if not trace_path:
+        return
+    payload = {"time_s": time.time(), **event}
+    path = Path(trace_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 class MobilintLayer(CacheLayerMixin):
@@ -14,7 +34,7 @@ class MobilintLayer(CacheLayerMixin):
         self.mxq_model = mxq_model
         self.cache_id = cache_id
         self._seen_tokens = 0
-        self.buffer: List[bytes] = []
+        self.buffer: list[bytes] = []
         self.buffer_seq_length: Optional[int] = None
 
     def lazy_initialization(self, key_states: torch.Tensor):
@@ -168,10 +188,264 @@ class MobilintCache(Cache):
     def load_cache_memory_from(self, cache_dir: str, index: int = 0):
         self.layers[index].load_cache_memory_from(cache_dir)
 
+    def reset(self) -> None:
+        """Reset all cache entries in this Mobilint cache."""
+        for layer in self.layers:
+            layer.reset()
+
+    def ensure_batch_size(self, batch_size: int) -> None:
+        """Grow logical cache entries so batched generation can track each active row."""
+        batch_size = max(1, int(batch_size))
+        if batch_size <= self.batch_size:
+            return
+        for cache_id in range(self.batch_size, batch_size):
+            self.layers.append(MobilintLayer(self.mxq_model, cache_id))
+        self.batch_size = batch_size
+
     def copy(self):
         copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
         for i in range(self.batch_size):
             copied.layers[i] = self.layers[i].copy()
+        return copied
+
+
+class MobilintBeamCache(MobilintCache):
+    """Mobilint beam cache tracked by token histories instead of KV snapshots.
+
+    qbruntime owns one active KV cache. This class tracks the token history for
+    each logical beam and the token history currently represented by the active
+    qbruntime cache. Callers can compare a target beam history with the active
+    history, skip the common prefix, and forward only the suffix with the proper
+    cache position.
+    """
+
+    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
+        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
+        self._beam_source_indices: list[int | None] = [None for _ in range(self.batch_size)]
+        self._active_token_history: list[int] = []
+        self._active_source_index: int | None = None
+        self._beam_seq_lengths: list[int] = [0 for _ in range(self.batch_size)]
+
+    def reset(self) -> None:
+        """Reset active qbruntime cache bookkeeping and clear beam token histories."""
+        super().reset()
+        self._beam_token_histories = [[] for _ in range(self.batch_size)]
+        self._beam_source_indices = [None for _ in range(self.batch_size)]
+        self._active_token_history = []
+        self._active_source_index = None
+        self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
+
+    def ensure_batch_size(self, batch_size: int) -> None:
+        """Grow logical beam token storage for beam-expanded generation."""
+        previous_batch_size = self.batch_size
+        super().ensure_batch_size(batch_size)
+        if self.batch_size <= previous_batch_size:
+            return
+        self._beam_token_histories.extend([[] for _ in range(self.batch_size - previous_batch_size)])
+        self._beam_source_indices.extend([None for _ in range(self.batch_size - previous_batch_size)])
+        self._beam_seq_lengths.extend([0 for _ in range(self.batch_size - previous_batch_size)])
+
+    def get_seq_length(self, index: int = 0) -> int:
+        """Return the stored sequence length for one logical beam."""
+        self.ensure_batch_size(index + 1)
+        return self._beam_seq_lengths[index]
+
+    def set_seq_length(self, sequence_lengths: Union[dict[int, int], int], index: int = 0) -> None:
+        """Set stored sequence lengths for one or more logical beams."""
+        if isinstance(sequence_lengths, int):
+            self.ensure_batch_size(index + 1)
+            if sequence_lengths < 0:
+                raise ValueError(f"seq_length must be non-negative, got {sequence_lengths}")
+            self._beam_seq_lengths[index] = sequence_lengths
+            self._beam_token_histories[index] = self._beam_token_histories[index][:sequence_lengths]
+            self.layers[index].set_seq_length(sequence_lengths)
+            return
+        if sequence_lengths:
+            self.ensure_batch_size(max(sequence_lengths) + 1)
+        for beam_id, seq_len in sequence_lengths.items():
+            if seq_len < 0:
+                raise ValueError(f"seq_length must be non-negative, got {seq_len}")
+            self._beam_seq_lengths[beam_id] = seq_len
+            self._beam_token_histories[beam_id] = self._beam_token_histories[beam_id][:seq_len]
+            self.layers[beam_id].set_seq_length(seq_len)
+
+    def update_cache_position(self, cache_position: torch.Tensor, index: int = 0) -> None:
+        """Update one logical beam length after its active qbruntime cache advances."""
+        self.ensure_batch_size(index + 1)
+        self._beam_seq_lengths[index] += int(cache_position.numel())
+        self.layers[index].set_seq_length(self._beam_seq_lengths[index])
+
+    def build_target_tokens(self, beam_index: int, input_ids: torch.Tensor) -> list[int]:
+        """Return the target token history for one beam after appending new ids."""
+        self.ensure_batch_size(beam_index + 1)
+        new_tokens = self._tensor_to_token_list(input_ids)
+        return [*self._beam_token_histories[beam_index], *new_tokens]
+
+    def get_beam_tokens(self, beam_index: int) -> list[int]:
+        """Return a copy of the stored token history for one logical beam."""
+        self.ensure_batch_size(beam_index + 1)
+        return list(self._beam_token_histories[beam_index])
+
+    def get_beam_source_index(self, beam_index: int) -> int | None:
+        """Return the source row identity stored for one logical beam."""
+        self.ensure_batch_size(beam_index + 1)
+        return self._beam_source_indices[beam_index]
+
+    def set_beam_source_indices(self, source_indices: Sequence[int | None]) -> None:
+        """Store source row identities for logical beams when they are first resolved."""
+        self.ensure_batch_size(len(source_indices))
+        for beam_index, source_index in enumerate(source_indices):
+            self._beam_source_indices[beam_index] = None if source_index is None else int(source_index)
+
+    def get_active_tokens(self) -> list[int]:
+        """Return a copy of the token history represented by the active qbruntime cache."""
+        return list(self._active_token_history)
+
+    def get_active_source_index(self) -> int | None:
+        """Return the source row represented by the active qbruntime cache."""
+        return self._active_source_index
+
+    def get_common_prefix_length(self, target_tokens: Sequence[int], source_index: int | None = None) -> int:
+        """Return how many target tokens already match the active qbruntime cache."""
+        if source_index is not None and self._active_source_index != int(source_index):
+            return 0
+        prefix_length = 0
+        for active_token, target_token in zip(self._active_token_history, target_tokens):
+            if active_token != target_token:
+                break
+            prefix_length += 1
+        return prefix_length
+
+    def commit_beam_tokens(self, beam_index: int, target_tokens: Sequence[int]) -> None:
+        """Store the completed target history for one logical beam."""
+        self.ensure_batch_size(beam_index + 1)
+        token_history = [int(token) for token in target_tokens]
+        self._beam_token_histories[beam_index] = token_history
+        self._beam_seq_lengths[beam_index] = len(token_history)
+        self.layers[beam_index].set_seq_length(len(token_history))
+
+    def commit_active_tokens(self, target_tokens: Sequence[int], source_index: int | None = None) -> None:
+        """Record which token history is now represented by active qbruntime cache memory."""
+        self._active_token_history = [int(token) for token in target_tokens]
+        self._active_source_index = None if source_index is None else int(source_index)
+        self.layers[0].set_seq_length(len(self._active_token_history))
+
+    def _tensor_to_token_list(self, input_ids: torch.Tensor) -> list[int]:
+        """Convert a one-row token tensor to a flat Python token list."""
+        if not isinstance(input_ids, torch.Tensor):
+            raise TypeError("input_ids must be a torch.Tensor")
+        if input_ids.ndim == 0:
+            input_ids = input_ids.reshape(1)
+        return [int(token) for token in input_ids.reshape(-1).detach().cpu().tolist()]
+
+    def reorder_cache(self, beam_idx: torch.LongTensor) -> "MobilintBeamCache":
+        """Reorder application-level beam token histories in HF beam order."""
+        beam_idx = self._validate_beam_indices(beam_idx)
+        trace_enabled = is_whisper_beam_debug_trace_enabled()
+
+        if trace_enabled:
+            append_whisper_beam_debug_event(
+                {
+                    "event": "cache_reorder_before",
+                    "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
+                    "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_source_indices": list(self._beam_source_indices),
+                    "beam_seq_lengths": list(self._beam_seq_lengths),
+                    "active_token_history": list(self._active_token_history),
+                    "active_source_index": self._active_source_index,
+                }
+            )
+
+        if torch.equal(beam_idx.cpu(), torch.arange(int(beam_idx.numel()), dtype=torch.long)):
+            if trace_enabled:
+                append_whisper_beam_debug_event(
+                    {
+                        "event": "cache_reorder_identity",
+                        "beam_idx": [int(index) for index in beam_idx.cpu().tolist()],
+                        "active_token_history": list(self._active_token_history),
+                        "active_source_index": self._active_source_index,
+                    }
+                )
+            return self
+
+        old_token_histories = [list(tokens) for tokens in self._beam_token_histories]
+        old_source_indices = list(self._beam_source_indices)
+        old_seq_lengths = list(self._beam_seq_lengths)
+        beam_indices = [int(index) for index in beam_idx.cpu().tolist()]
+        self._beam_token_histories = [list(old_token_histories[index]) for index in beam_indices]
+        self._beam_source_indices = [old_source_indices[index] for index in beam_indices]
+        self._beam_seq_lengths = [old_seq_lengths[index] for index in beam_indices]
+        for beam_id, seq_length in enumerate(self._beam_seq_lengths):
+            self.layers[beam_id].set_seq_length(seq_length)
+        if trace_enabled:
+            append_whisper_beam_debug_event(
+                {
+                    "event": "cache_reorder_after",
+                    "beam_idx": beam_indices,
+                    "beam_token_histories": [list(tokens) for tokens in self._beam_token_histories],
+                    "beam_source_indices": list(self._beam_source_indices),
+                    "beam_seq_lengths": list(self._beam_seq_lengths),
+                    "active_token_history": list(self._active_token_history),
+                    "active_source_index": self._active_source_index,
+                }
+            )
+        return self
+
+    def _validate_beam_indices(self, beam_idx: torch.LongTensor) -> torch.LongTensor:
+        """Validate beam indices before reordering token histories."""
+        if not isinstance(beam_idx, torch.Tensor):
+            raise TypeError("beam_idx must be a torch.Tensor")
+        if beam_idx.ndim != 1:
+            raise ValueError(f"beam_idx must be rank 1, got shape {tuple(beam_idx.shape)}")
+
+        beam_idx = beam_idx.to(dtype=torch.long)
+        self.ensure_batch_size(int(beam_idx.numel()))
+        if beam_idx.numel() > 0 and (int(beam_idx.min()) < 0 or int(beam_idx.max()) >= int(beam_idx.numel())):
+            raise ValueError(f"beam_idx contains out-of-range values for {int(beam_idx.numel())} beams")
+        return beam_idx
+
+    def copy(self) -> "MobilintBeamCache":
+        """Return a copy preserving application-level beam token histories."""
+        copied = self.__class__(self.mxq_model, batch_size=self.batch_size)
+        for i in range(self.batch_size):
+            copied.layers[i] = self.layers[i].copy()
+        copied._beam_token_histories = [list(tokens) for tokens in self._beam_token_histories]
+        copied._beam_source_indices = list(self._beam_source_indices)
+        copied._active_token_history = list(self._active_token_history)
+        copied._active_source_index = self._active_source_index
+        copied._beam_seq_lengths = list(self._beam_seq_lengths)
+        return copied
+
+
+class MobilintWhisperCache(MobilintBeamCache):
+    """Whisper cache using token-history beam replay."""
+
+    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
+        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        self._encoder_source_count: int | None = None
+
+    def reset(self) -> None:
+        """Reset beam cache state and forget the current encoder source grouping."""
+        super().reset()
+        self._encoder_source_count = None
+
+    def set_encoder_source_count(self, source_count: int) -> None:
+        """Record the original audio batch size before Hugging Face beam expansion."""
+        source_count = int(source_count)
+        if source_count < 1:
+            raise ValueError(f"source_count must be positive, got {source_count}")
+        self._encoder_source_count = source_count
+
+    def get_encoder_source_count(self) -> int | None:
+        """Return the original encoder source count when it is known."""
+        return self._encoder_source_count
+
+    def copy(self) -> "MobilintWhisperCache":
+        """Return a copy preserving Whisper encoder source grouping metadata."""
+        copied = super().copy()
+        assert isinstance(copied, MobilintWhisperCache)
+        copied._encoder_source_count = self._encoder_source_count
         return copied
 
 

@@ -1,4 +1,5 @@
-from typing import Union, cast
+import os
+from typing import Any, Union, cast
 
 import torch
 import torch.nn as nn
@@ -20,7 +21,11 @@ from transformers.models.whisper.modeling_whisper import (
 from transformers.utils.generic import logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintCache
+from ...utils.cache_utils import (
+    MobilintWhisperCache,
+    append_whisper_beam_debug_event,
+    is_whisper_beam_debug_trace_enabled,
+)
 from ...utils.generation_utils import MobilintGenerationMixin
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_whisper import MobilintWhisperConfig
@@ -100,6 +105,197 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
     
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
+
+    def _embed_token_suffix(
+        self,
+        token_history: list[int],
+        start_index: int,
+        *,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Embed a suffix of a Whisper decoder token history with absolute positions."""
+        suffix_tokens = token_history[start_index:]
+        if not suffix_tokens:
+            raise ValueError("Cannot embed an empty Whisper token suffix.")
+        input_ids = torch.tensor([suffix_tokens], dtype=torch.long, device=device)
+        position_ids = torch.arange(start_index, len(token_history), dtype=torch.long, device=device).unsqueeze(0)
+        inputs_embeds = self.embed_tokens(input_ids)
+        positions = self.embed_positions(input_ids, past_key_values_length=start_index, position_ids=position_ids)
+        return (inputs_embeds + positions.to(inputs_embeds.device)).unsqueeze(1)
+
+    def _normalize_decoder_logits(
+        self,
+        logits: torch.Tensor,
+        *,
+        sequence_length: int,
+    ) -> torch.Tensor:
+        """Normalize raw Whisper decoder logits to ``(batch, 1, seq_len, vocab)``."""
+        if logits.ndim == 2 and int(logits.shape[0]) == sequence_length:
+            return logits.reshape(1, 1, sequence_length, -1)
+        if logits.ndim == 3:
+            return logits.unsqueeze(0)
+        return logits
+
+    def _resolve_source_indices(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        batch_size: int,
+        past_key_values: MobilintWhisperCache,
+    ) -> list[int]:
+        """Map beam-expanded decoder rows back to their original encoder source rows."""
+        encoder_batch_size = int(encoder_hidden_states.shape[0])
+        if encoder_batch_size == 1:
+            return [0] * batch_size
+
+        source_count = past_key_values.get_encoder_source_count()
+        if source_count is not None and source_count > 0 and batch_size % source_count == 0:
+            beams_per_source = batch_size // source_count
+            if encoder_batch_size == batch_size:
+                return [beam_index // beams_per_source for beam_index in range(batch_size)]
+
+        if encoder_batch_size == batch_size:
+            inferred_source_indices = self._infer_source_indices_from_expanded_encoder_rows(encoder_hidden_states)
+            if inferred_source_indices is not None:
+                return inferred_source_indices
+
+        if encoder_batch_size == batch_size:
+            return list(range(batch_size))
+
+        return [0] * batch_size
+
+    def _infer_source_indices_from_expanded_encoder_rows(
+        self,
+        encoder_hidden_states: torch.Tensor,
+    ) -> Union[list[int], None]:
+        """Infer contiguous beam groups when HF expanded identical encoder rows."""
+        flattened_states = encoder_hidden_states.reshape(int(encoder_hidden_states.shape[0]), -1)
+        source_indices: list[int] = []
+        current_source_index = -1
+        previous_state: Union[torch.Tensor, None] = None
+        seen_signatures: list[torch.Tensor] = []
+
+        for state in flattened_states:
+            if previous_state is not None and torch.equal(state, previous_state):
+                source_indices.append(current_source_index)
+                continue
+
+            if any(torch.equal(state, seen_state) for seen_state in seen_signatures):
+                return None
+
+            current_source_index += 1
+            source_indices.append(current_source_index)
+            seen_signatures.append(state.clone())
+            previous_state = state
+
+        if current_source_index + 1 == int(encoder_hidden_states.shape[0]):
+            return None
+        return source_indices
+
+    def decoder_forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        past_key_values: Union[MobilintWhisperCache, None],
+        cache_position: torch.Tensor,
+        input_ids: Union[torch.LongTensor, None] = None,
+    ) -> torch.Tensor:
+        """Run Whisper decoder MXQ by replaying only beam suffixes missing from active cache."""
+        batch_size = int(hidden_states.shape[0])
+        if past_key_values is None:
+            return super().decoder_forward(hidden_states, encoder_hidden_states, past_key_values, cache_position)
+
+        if input_ids is None:
+            raise ValueError("MobilintWhisperCache requires input_ids to track beam token histories.")
+
+        input_ids = input_ids.view(batch_size, -1)
+
+        past_key_values.ensure_batch_size(batch_size)
+        if encoder_hidden_states.shape[0] == 1 and batch_size > 1:
+            encoder_hidden_states = encoder_hidden_states.expand(batch_size, *encoder_hidden_states.shape[1:])
+        source_indices = self._resolve_source_indices(encoder_hidden_states, batch_size, past_key_values)
+
+        logits_list: list[torch.Tensor] = []
+        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
+        mxq_model = self.npu_backend.mxq_model
+        trace_enabled = is_whisper_beam_debug_trace_enabled()
+        for beam_index in range(batch_size):
+            target_tokens = past_key_values.build_target_tokens(beam_index, input_ids[beam_index])
+            source_index = source_indices[beam_index]
+            target_key = (source_index, tuple(target_tokens))
+            prefix_length = past_key_values.get_common_prefix_length(target_tokens, source_index=source_index)
+            if trace_enabled:
+                append_whisper_beam_debug_event(
+                    {
+                        "event": "decoder_beam_before",
+                        "beam_index": beam_index,
+                        "source_index": source_index,
+                        "input_ids": [int(token) for token in input_ids[beam_index].detach().cpu().reshape(-1).tolist()],
+                        "target_tokens": list(target_tokens),
+                        "active_tokens": past_key_values.get_active_tokens(),
+                        "active_source_index": past_key_values.get_active_source_index(),
+                        "stored_beam_tokens": past_key_values.get_beam_tokens(beam_index),
+                        "prefix_length": int(prefix_length),
+                    }
+                )
+            if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
+                logits_list.append(logits_by_target_tokens[target_key])
+                past_key_values.commit_beam_tokens(beam_index, target_tokens)
+                if trace_enabled:
+                    append_whisper_beam_debug_event(
+                        {
+                            "event": "decoder_beam_duplicate_logits",
+                            "beam_index": beam_index,
+                            "source_index": source_index,
+                            "target_tokens": list(target_tokens),
+                        }
+                    )
+                continue
+            if prefix_length == len(target_tokens):
+                prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
+            if os.environ.get("MBLT_WHISPER_BEAM_FORCE_FULL_REPLAY"):
+                prefix_length = 0
+            suffix_hidden_states = self._embed_token_suffix(
+                target_tokens,
+                prefix_length,
+                device=hidden_states.device,
+            )
+            suffix_length = int(suffix_hidden_states.shape[2])
+            hidden_states_numpy = suffix_hidden_states.type(torch.float32).cpu().numpy()
+            encoder_hidden_states_numpy = (
+                encoder_hidden_states[beam_index : beam_index + 1].type(torch.float32).cpu().numpy()
+            )
+            result = mxq_model.infer([hidden_states_numpy, encoder_hidden_states_numpy], None, prefix_length)
+            assert result is not None, "mxq infer result is None!"
+            logits = torch.tensor(result[0], dtype=hidden_states.dtype, device=hidden_states.device)
+            logits = self._normalize_decoder_logits(logits, sequence_length=suffix_length)
+            current_logits = logits[:, :, -input_ids.shape[1] :, :]
+            logits_list.append(current_logits)
+            logits_by_target_tokens[target_key] = current_logits
+            past_key_values.commit_beam_tokens(beam_index, target_tokens)
+            past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
+            if trace_enabled:
+                top_values, top_indices = torch.topk(
+                    current_logits[:, :, -1, :],
+                    k=min(5, current_logits.shape[-1]),
+                    dim=-1,
+                )
+                append_whisper_beam_debug_event(
+                    {
+                        "event": "decoder_beam_after",
+                        "beam_index": beam_index,
+                        "source_index": source_index,
+                        "target_tokens": list(target_tokens),
+                        "prefix_length": int(prefix_length),
+                        "suffix_tokens": list(target_tokens[prefix_length:]),
+                        "suffix_length": suffix_length,
+                        "top_token_ids": [int(token) for token in top_indices.detach().cpu().reshape(-1).tolist()],
+                        "top_logits": [float(value) for value in top_values.detach().cpu().reshape(-1).tolist()],
+                        "active_tokens": past_key_values.get_active_tokens(),
+                        "active_source_index": past_key_values.get_active_source_index(),
+                    }
+                )
+
+        return torch.cat(logits_list, dim=0)
     
     def forward(
         self,
@@ -137,8 +333,11 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
-        if use_cache and past_key_values is None:
-            past_key_values = MobilintCache(self.get_mxq_model())
+        if encoder_hidden_states is not None and encoder_hidden_states.ndim == 3:
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+
+        if use_cache and past_key_values is None and input_ids is not None:
+            past_key_values = MobilintWhisperCache(self.get_mxq_model(), batch_size=input_shape[0])
 
         past_key_values_length = 0
         if cache_position is not None:
@@ -176,7 +375,8 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             hidden_states.unsqueeze(1),
             cast(torch.Tensor, encoder_hidden_states),
             past_key_values,
-            cache_position
+            cache_position,
+            input_ids=input_ids,
         )
 
         next_cache = past_key_values if use_cache else None
@@ -255,7 +455,7 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
         decoder_input_ids: Union[torch.LongTensor, None] = None,
         decoder_attention_mask: Union[torch.LongTensor, None] = None,
         encoder_outputs: Union[tuple[torch.FloatTensor], BaseModelOutput, None] = None,
-        past_key_values: Union[MobilintCache, None] = None,
+        past_key_values: Union[MobilintWhisperCache, None] = None,
         decoder_inputs_embeds: Union[tuple[torch.FloatTensor], None] = None,
         decoder_position_ids: Union[tuple[torch.LongTensor], None] = None,
         use_cache: Union[bool, None] = None,
@@ -271,9 +471,11 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.return_dict
+        encoder_source_count = None
 
         if encoder_outputs is None:
             assert input_features is not None, "input_features is None!"
+            encoder_source_count = int(input_features.shape[0])
             input_features = self._mask_input_features(input_features, attention_mask=attention_mask)
 
             encoder_outputs = self.encoder(
@@ -291,6 +493,9 @@ class MobilintWhisperModel(PretrainedOnlyMixin, MobilintWhisperPreTrainedModel):
             )
             
         assert encoder_outputs is not None, "encoder_outputs is None!"
+
+        if encoder_source_count is not None and isinstance(past_key_values, MobilintWhisperCache):
+            past_key_values.set_encoder_source_count(encoder_source_count)
 
         # decoder outputs consists of (dec_features, past_key_values, dec_hidden, dec_attn)
         encoder_hidden_states = encoder_outputs[0]
@@ -355,7 +560,42 @@ class MobilintWhisperForConditionalGeneration(
 
     def get_cache_mxq_model(self):
         return self.get_decoder().get_mxq_model()
-    
+
+    def _get_cache(
+        self,
+        cache_implementation: str,
+        batch_size: int,
+        max_cache_len: int,
+        *args: Any,
+    ) -> MobilintWhisperCache:
+        """Return a Whisper-specific Mobilint cache for Hugging Face generation."""
+        del cache_implementation, max_cache_len, args
+        configured_batch_size = max(1, int(batch_size), int(getattr(self.config, "max_batch_size", 1)))
+        if not hasattr(self, "_cache"):
+            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        elif not isinstance(self._cache, MobilintWhisperCache):
+            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
+            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+        else:
+            self._cache.reset()
+        return self._cache
+
+    def prepare_inputs_for_generation(
+        self,
+        *args: Any,
+        count_npu_time: bool = False,
+        prefill_chunk_size: Union[int, None] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Prepare Whisper generation inputs while preserving Mobilint kwargs."""
+        return super().prepare_inputs_for_generation(
+            *args,
+            count_npu_time=count_npu_time,
+            prefill_chunk_size=prefill_chunk_size,
+            **kwargs,
+        )
+
     def forward(
         self,
         input_features: Union[torch.FloatTensor, None] = None,
@@ -363,7 +603,7 @@ class MobilintWhisperForConditionalGeneration(
         decoder_input_ids: Union[torch.LongTensor, None] = None,
         decoder_attention_mask: Union[torch.LongTensor, None] = None,
         encoder_outputs: Union[tuple[tuple[torch.FloatTensor]], None] = None,
-        past_key_values: Union[MobilintCache, None] = None,
+        past_key_values: Union[MobilintWhisperCache, None] = None,
         decoder_inputs_embeds: Union[tuple[torch.FloatTensor], None] = None,
         decoder_position_ids: Union[tuple[torch.LongTensor], None] = None,
         labels: Union[torch.LongTensor, None] = None,

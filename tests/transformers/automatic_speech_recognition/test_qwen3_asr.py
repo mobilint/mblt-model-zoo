@@ -61,6 +61,26 @@ def test_via_huggingface_pipeline(pipe):
         print("Answer: %s" % ds[i]["text"])  # type: ignore
 
 
+def test_via_huggingface_pipeline_beam_search(pipe):
+    """Run Qwen3-ASR HF pipeline inference with beam search enabled."""
+    pipe.generation_config.max_new_tokens = 256
+
+    ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+    sample = ds[0]["audio"]  # type: ignore
+
+    output = pipe(
+        sample,
+        generate_kwargs={
+            "num_beams": 2,
+            "early_stopping": True,
+        },
+    )
+
+    assert isinstance(output["text"], str)
+    print("Beam Result: %s" % output["text"])
+    print("Answer: %s" % ds[0]["text"])  # type: ignore
+
+
 @pytest.fixture(params=MODEL_PATHS, scope="module")
 def transcriber(request, revision):
     """Upstream ``qwen_asr.Qwen3ASRModel`` fixture.
