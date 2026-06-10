@@ -83,6 +83,12 @@ because they are the most consistently structured.
 - Prefer targeted validation over running the entire matrix by default.
 - Reuse the documented commands in `tests/vision/TEST.md`, `tests/transformers/TEST.md`,
   `tests/MeloTTS/TEST.md`, and `benchmark/vision/README.md`.
+- The unified vision CLI validation flow currently covers ImageNet-backed image classification and
+  COCO-backed object detection, instance segmentation, and pose estimation. Face detection
+  validation is still pending because WiderFace evaluation is not implemented yet.
+- `benchmark/vision/README.md` currently documents dataset organization for ImageNet, COCO,
+  WiderFace, and DOTAv1, but only ImageNet and COCO benchmark execution commands are fully
+  documented there today. Treat the WiderFace and DOTAv1 benchmark sections as incomplete.
 - Use the shared NPU pytest options from `tests/conftest.py` instead of inventing custom flags.
 - For vision tests that call `MBLT_Engine(**kwargs)`, prefer the typed helper
   `tests.npu_backend_options.build_vision_engine_kwargs()` so `dev_no`, `core_mode`,
