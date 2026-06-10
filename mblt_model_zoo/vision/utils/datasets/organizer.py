@@ -9,12 +9,16 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 from tempfile import TemporaryDirectory
+from time import sleep
 from urllib.parse import urlparse
 
 import requests
 from tqdm import tqdm
 
-DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+DOWNLOAD_CHUNK_SIZE = 1 * 1024 * 1024
+DOWNLOAD_RETRY_LIMIT = 4
+DOWNLOAD_RETRY_BACKOFF_SECONDS = 2.0
+DOWNLOAD_TIMEOUT = (10, 30)
 
 
 def _is_url(path_or_url: str) -> bool:
@@ -33,40 +37,64 @@ def _download_url(url: str, local_path: str) -> str:
     Returns:
         The local destination path.
     """
-    existing_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
-    headers: dict[str, str] = {}
-    mode = "wb"
-    if existing_size > 0:
-        headers["Range"] = f"bytes={existing_size}-"
-        mode = "ab"
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
-    with requests.get(url, stream=True, timeout=(10, 300), headers=headers) as response:
-        response.raise_for_status()
+    for attempt in range(1, DOWNLOAD_RETRY_LIMIT + 1):
+        existing_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
+        headers: dict[str, str] = {}
+        mode = "wb"
+        if existing_size > 0:
+            headers["Range"] = f"bytes={existing_size}-"
+            mode = "ab"
 
-        if response.status_code == 200 and existing_size > 0:
-            existing_size = 0
-            mode = "wb"
+        try:
+            with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT, headers=headers) as response:
+                response.raise_for_status()
 
-        total_size = response.headers.get("Content-Length")
-        total_bytes = existing_size + int(total_size) if total_size is not None else None
+                if response.status_code == 200 and existing_size > 0:
+                    existing_size = 0
+                    mode = "wb"
 
-        desc = f"Downloading {os.path.basename(local_path)}"
-        with tqdm(
-            total=total_bytes,
-            initial=existing_size,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-            desc=desc,
-        ) as pbar:
-            with open(local_path, mode) as file_obj:
-                for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                    if not chunk:
-                        continue
-                    file_obj.write(chunk)
-                    pbar.update(len(chunk))
+                total_size = response.headers.get("Content-Length")
+                total_bytes = existing_size + int(total_size) if total_size is not None else None
 
-    return local_path
+                desc = f"Downloading {os.path.basename(local_path)}"
+                with tqdm(
+                    total=total_bytes,
+                    initial=existing_size,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc=desc,
+                ) as pbar:
+                    with open(local_path, mode) as file_obj:
+                        for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                            if not chunk:
+                                continue
+                            file_obj.write(chunk)
+                            pbar.update(len(chunk))
+            return local_path
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
+            if attempt == DOWNLOAD_RETRY_LIMIT:
+                raise RuntimeError(f"Failed to download {url} after {DOWNLOAD_RETRY_LIMIT} attempts.") from exc
+            resumed_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
+            print(
+                f"Download interrupted for {os.path.basename(local_path)}; "
+                f"retrying from {resumed_size} bytes (attempt {attempt + 1}/{DOWNLOAD_RETRY_LIMIT})..."
+            )
+            sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+
+
+def _should_download_serially(path_or_urls: list[str]) -> bool:
+    """Returns whether URL inputs should be downloaded one by one.
+
+    Dataset hosts such as ImageNet often throttle concurrent archive downloads
+    from the same origin. Serializing same-host downloads is slower in the best
+    case, but much more stable for the large validation archives used here.
+    """
+
+    hosts = [urlparse(path_or_url).netloc for path_or_url in path_or_urls if _is_url(path_or_url)]
+    return len(hosts) > 1 and len(set(hosts)) == 1
 
 
 def _download_if_url(path_or_url: str, download_dir: str) -> str:
@@ -105,6 +133,9 @@ def _resolve_source(path_or_url: str, download_dir: str) -> str:
 
 def _resolve_sources(path_or_urls: list[str], download_dir: str) -> list[str]:
     """Resolves multiple dataset sources, downloading URL inputs in parallel."""
+
+    if _should_download_serially(path_or_urls):
+        return [_resolve_source(path_or_url, download_dir) for path_or_url in path_or_urls]
 
     local_paths: list[str | None] = [None] * len(path_or_urls)
     futures: dict[concurrent.futures.Future[str], int] = {}

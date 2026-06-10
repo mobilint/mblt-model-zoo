@@ -70,8 +70,17 @@ For preprocess or postprocess changes, check these modules first:
 - `mblt_model_zoo/vision/utils/results.py`
 - `mblt_model_zoo/vision/utils/types.py`
 
-Preserve behavior for both local `.mxq` paths and Hugging Face downloads unless the task
-explicitly changes that contract.
+Preserve behavior for the current dual-runtime contract unless the task explicitly changes it:
+
+- Prefer `model_path` in new docs, examples, and tests. Treat `mxq_path` and `onnx_path` as
+  compatibility aliases unless the task is specifically about those legacy names.
+- `mblt_model_zoo/vision/wrapper.py` now auto-detects `mxq` versus `onnx` from
+  `model_path` or `file_cfg.model_path` when `framework` is omitted.
+- If an explicit `framework` conflicts with a local `.mxq` or `.onnx` suffix, preserve the
+  current fail-fast `ValueError` behavior instead of silently switching runtimes.
+- Preserve behavior for both local artifacts and Hugging Face downloads. For ONNX models, the
+  wrapper may resolve a sibling `.onnx` file next to a local `.mxq` artifact or download the
+  configured ONNX artifact from Hugging Face when needed.
 
 ### Transformers and MeloTTS Work
 
@@ -88,6 +97,12 @@ These areas have optional dependencies and heavier runtime assumptions.
 
 - Follow the Markdown rules in `AGENTS.md`.
 - Keep docs operational and repo-specific.
+- Keep vision docs aligned with the current public API:
+  `MBLT_Engine`, `list_models()`, the shared `--model-path` CLI option, and framework auto-detect
+  are the preferred surfaces for new guidance.
+- `benchmark/vision/README.md` currently covers organizer flows for ImageNet, COCO, WiderFace,
+  and DOTAv1. Only ImageNet and COCO benchmark execution sections are complete; WiderFace and
+  DOTAv1 still have pending benchmark steps.
 - For rule or workflow documents, include YAML frontmatter with at least `description` and
   `paths`.
 
@@ -124,6 +139,14 @@ pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
 pytest tests/MeloTTS/test_melo.py -k "KR"
 ```
 
+For the recent vision runtime and CLI path-resolution work, these targeted tests are especially
+relevant:
+
+```bash
+pytest tests/vision/test_cli_vision.py
+pytest tests/vision/test_wrapper_download.py
+```
+
 ### Hardware-Aware Sweeps
 
 Transformers tests expose shared NPU options through `tests/conftest.py`. Reuse existing flags
@@ -139,6 +162,14 @@ such as:
 
 If the environment does not provide Mobilint NPU runtime support, stop at static checks or the
 narrowest safe test and call out the limitation explicitly.
+
+The unified vision validation CLI currently supports:
+
+- ImageNet for image classification models.
+- COCO for object detection, instance segmentation, and pose estimation models.
+
+Face detection validation is intentionally unavailable because WiderFace evaluation is still
+pending in the current codebase.
 
 ## Things to Avoid
 

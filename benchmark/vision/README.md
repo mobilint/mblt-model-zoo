@@ -11,7 +11,7 @@ You can run the benchmark as the following steps:
 > work with local archives that you downloaded yourself.
 > Mobilint model zoo provides utilities on dataset organization, model preparation, and benchmark
 > evaluation, therefore you can easily reproduce the
-> [published benchmark results](../../../mblt_model_zoo/vision/README.md).
+> [published benchmark results](../../mblt_model_zoo/vision/README.md).
 
 Furthermore, you can simply run the benchmark with the model you compiled with custom quantization recipe.
 
@@ -56,7 +56,7 @@ This will organize the dataset into the following structure:
 
 ### Prepare the Model for ImageNet Benchmark
 
-You can prepare the model for ImageNet benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../../mblt_model_zoo/vision/README.md).
+You can prepare the model for ImageNet benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../mblt_model_zoo/vision/README.md).
 
 If you want to try with your own model, refer to the [tutorial guide](https://github.com/mobilint/mblt-sdk-tutorial/) to compile the model with custom quantization recipe.
 
@@ -126,7 +126,7 @@ This will organize the dataset into the following structure:
 
 ### Prepare the Model for COCO Benchmark
 
-You can prepare the model for COCO benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../../mblt_model_zoo/vision/README.md).
+You can prepare the model for COCO benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../mblt_model_zoo/vision/README.md).
 
 If you want to try with your own model, refer to the [tutorial guide](https://github.com/mobilint/mblt-sdk-tutorial/) to compile the model with custom quantization recipe.
 
@@ -201,7 +201,7 @@ This will organize the dataset into the following structure:
 
 ### Prepare the Model for WiderFace Benchmark
 
-You can prepare the model for WiderFace benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../../mblt_model_zoo/vision/README.md).
+You can prepare the model for WiderFace benchmark or simply run the benchmark with the model that is provided in [mblt-model-zoo](../../mblt_model_zoo/vision/README.md).
 
 If you want to try with your own model, refer to the [tutorial guide](https://github.com/mobilint/mblt-sdk-tutorial/) to compile the model with custom quantization recipe.
 
