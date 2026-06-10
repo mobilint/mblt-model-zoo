@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TypeAlias
 
 DEVICE_TRACKER_INTERVAL_SEC = 1.0
@@ -10,6 +10,7 @@ DEFAULT_DEVICE_BACKEND = "none"
 NPU_RAIL_METRIC_CHOICES = ("npu", "ddr", "pmic", "goldfinger")
 CORE_MODE_CHOICES = ("single", "global4", "global8")
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
+DEFAULT_SINGLE_TARGET_CORES = ("0:0",)
 DEVICE_METRIC_KEYS = (
     "avg_power_w",
     "p99_power_w",
@@ -193,6 +194,7 @@ def apply_core_mode_model_kwargs(
     prefix: str | None = None,
     target_cores: list[str] | None = None,
     target_clusters: list[int] | None = None,
+    default_single_target_cores: Sequence[str] | None = DEFAULT_SINGLE_TARGET_CORES,
 ) -> dict[str, Any]:
     key_prefix = f"{prefix}_" if prefix else ""
     if not core_mode:
@@ -205,8 +207,8 @@ def apply_core_mode_model_kwargs(
     model_kwargs[f"{key_prefix}core_mode"] = core_mode
     if target_cores is not None:
         model_kwargs[f"{key_prefix}target_cores"] = target_cores
-    elif core_mode == "single":
-        model_kwargs[f"{key_prefix}target_cores"] = ["0:0"]
+    elif core_mode == "single" and default_single_target_cores is not None:
+        model_kwargs[f"{key_prefix}target_cores"] = list(default_single_target_cores)
 
     if target_clusters is not None:
         model_kwargs[f"{key_prefix}target_clusters"] = target_clusters

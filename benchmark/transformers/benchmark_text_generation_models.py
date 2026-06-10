@@ -340,6 +340,7 @@ def _build_pipeline(
     trust_remote_code: bool = True,
     core_mode: str | None = None,
     mxq_path: str | None = None,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
 ):
     kwargs = {
         "task": "text-generation",
@@ -355,7 +356,11 @@ def _build_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
+    model_kwargs = _apply_core_mode_model_kwargs_common(
+        model_kwargs,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -1044,6 +1049,13 @@ def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bo
     args.core_mode = "single"
 
 
+def _default_single_target_cores_for_batch_mode(args: argparse.Namespace) -> Sequence[str] | None:
+    """Return the default single-mode target cores for the active benchmark mode."""
+    if args.batch_mode == _BATCH_MODE_BATCH:
+        return None
+    return ("0:0",)
+
+
 def _resolve_batch_sweep_lengths(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     """Scale default sweep lengths down for batch text-generation benchmarks."""
     if args.command != "sweep" or args.batch_mode != _BATCH_MODE_BATCH:
@@ -1278,6 +1290,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     mxq_path=mxq_path,
+                    default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
                 )
             except Exception as e:
                 if _is_cuda_oom_error(e):
@@ -1830,6 +1843,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 trust_remote_code=args.trust_remote_code,
                 core_mode=core_mode,
                 mxq_path=mxq_path,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
             )
             measurer = TPSMeasurer(pipeline)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size

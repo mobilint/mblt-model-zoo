@@ -193,6 +193,7 @@ def _build_pipeline(
     revision: str | None,
     mxq_path: str | None,
     core_mode: str | None,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
 ):
     kwargs: dict[str, Any] = {
         "task": "image-text-to-text",
@@ -208,7 +209,11 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_vlm_core_mode_model_kwargs(model_kwargs, core_mode)
+    model_kwargs = _apply_vlm_core_mode_model_kwargs(
+        model_kwargs,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -223,7 +228,12 @@ def _build_pipeline(
     return hf_pipeline(**kwargs)
 
 
-def _apply_vlm_core_mode_model_kwargs(model_kwargs: dict[str, Any], core_mode: str | None) -> dict[str, Any]:
+def _apply_vlm_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    core_mode: str | None,
+    *,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
+) -> dict[str, Any]:
     """Apply shared VLM NPU core-mode kwargs to both vision and text sub-configs.
 
     Image-text-to-text Mobilint models use composite configs with separate ``vision_config`` and
@@ -240,7 +250,11 @@ def _apply_vlm_core_mode_model_kwargs(model_kwargs: dict[str, Any], core_mode: s
         The updated model kwargs.
     """
     expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(expanded, core_mode)
+    _apply_core_mode_model_kwargs_common(
+        expanded,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
 
     for prefix in ("vision", "text"):
         for key, value in expanded.items():
@@ -1212,6 +1226,13 @@ def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bo
     args.core_mode = "single"
 
 
+def _default_single_target_cores_for_batch_mode(args: argparse.Namespace) -> Sequence[str] | None:
+    """Return the default single-mode target cores for the active benchmark mode."""
+    if args.batch_mode == "batch":
+        return None
+    return ("0:0",)
+
+
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> None:
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
     device_explicit = _flag_present(raw_argv, "--device")
@@ -1389,7 +1410,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
+            pipeline = _build_pipeline(
+                args,
+                model_id,
+                revision,
+                target_mxq_path,
+                core_mode,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+            )
             target_args.batch_size = batch_size
             payload, rows = _run_model(target_args, label, pipeline)
             _write_json(json_path, payload)
@@ -1714,7 +1742,14 @@ def _run_measure(args: argparse.Namespace) -> int:
             continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
+            pipeline = _build_pipeline(
+                args,
+                model_id,
+                revision,
+                target_mxq_path,
+                core_mode,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+            )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
             _print_device_status(target_args, tracker)

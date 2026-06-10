@@ -218,6 +218,7 @@ def _apply_vlm_core_mode_model_kwargs(
     *,
     target_cores: list[str] | None = None,
     target_clusters: list[int] | None = None,
+    default_single_target_cores: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Apply shared VLM core-mode kwargs to both vision and text sub-configs."""
     expanded: dict[str, Any] = {}
@@ -226,6 +227,7 @@ def _apply_vlm_core_mode_model_kwargs(
         core_mode,
         target_cores=target_cores,
         target_clusters=target_clusters,
+        default_single_target_cores=default_single_target_cores,
     )
     for prefix in ("vision", "text"):
         for key, value in expanded.items():
@@ -304,6 +306,17 @@ def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
     return _resolve_model_max_batch_size(pipeline, task=args.task)
 
 
+def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
+    """Return default single-mode target cores for the pipeline construction phase.
+
+    Explicit batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
+    available core in single mode. User-provided ``--target-cores`` still takes precedence.
+    """
+    if getattr(args, "batch_size", None) is not None and int(args.batch_size) > 1:
+        return None
+    return ("0:0",)
+
+
 def _require_transformers_deps() -> None:
     try:
         import transformers  # noqa: F401
@@ -333,6 +346,7 @@ def _build_pipeline(
     core_mode: Union[str, None],
     target_cores: Union[list[str], None],
     target_clusters: Union[list[int], None],
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -389,6 +403,7 @@ def _build_pipeline(
             core_mode,
             target_cores=target_cores,
             target_clusters=target_clusters,
+            default_single_target_cores=default_single_target_cores,
         )
     elif eagle3_prefix_requested:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
@@ -447,6 +462,7 @@ def _build_pipeline(
                 prefix_core_mode,
                 target_cores=prefix_target_cores,
                 target_clusters=prefix_target_clusters,
+                default_single_target_cores=default_single_target_cores,
                 prefix=prefix,
             )
         _warn_eagle3_applied_options_summary(model_kwargs)
@@ -456,6 +472,7 @@ def _build_pipeline(
             core_mode,
             target_cores=target_cores,
             target_clusters=target_clusters,
+            default_single_target_cores=default_single_target_cores,
         )
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
@@ -957,6 +974,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        default_single_target_cores=_default_single_target_cores_for_args(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -1245,6 +1263,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        default_single_target_cores=_default_single_target_cores_for_args(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -1473,6 +1492,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        default_single_target_cores=_default_single_target_cores_for_args(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -1946,6 +1966,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         eagle3_options=_extract_eagle3_pipeline_kwargs(args),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        default_single_target_cores=_default_single_target_cores_for_args(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 

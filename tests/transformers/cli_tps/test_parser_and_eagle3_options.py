@@ -224,3 +224,65 @@ def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monk
 
     conflict_warnings = [w for w in record if "Conflicting options detected" in str(w.message)]
     assert len(conflict_warnings) == 0
+
+
+def test_build_pipeline_single_mode_can_omit_default_target_cores(monkeypatch) -> None:
+    """Verify batch TPS paths can keep single-mode target cores unset."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode="single",
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+    )
+
+    assert pipe.model_kwargs == {"core_mode": "single"}
+
+
+def test_build_pipeline_single_mode_preserves_explicit_target_cores(monkeypatch) -> None:
+    """Verify explicit target cores still override batch TPS default suppression."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode="single",
+        target_cores=["0:1", "0:2"],
+        target_clusters=None,
+        default_single_target_cores=None,
+    )
+
+    assert pipe.model_kwargs == {
+        "core_mode": "single",
+        "target_cores": ["0:1", "0:2"],
+    }
+
+
+def test_default_single_target_cores_for_args_disables_explicit_batch_size() -> None:
+    """Verify explicit batched TPS runs disable implicit single target cores."""
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=2)) is None
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1)) == ("0:0",)
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=None)) == ("0:0",)

@@ -142,6 +142,20 @@ def test_vlm_core_mode_none_does_not_add_kwargs() -> None:
     assert vlm_bench._apply_vlm_core_mode_model_kwargs({}, None) == {}
 
 
+def test_vlm_core_mode_can_omit_default_single_target_cores() -> None:
+    """Verify VLM batch benchmarks can keep single-mode target cores unset."""
+    model_kwargs = vlm_bench._apply_vlm_core_mode_model_kwargs(
+        {},
+        "single",
+        default_single_target_cores=None,
+    )
+
+    assert model_kwargs == {
+        "vision_core_mode": "single",
+        "text_core_mode": "single",
+    }
+
+
 def test_vlm_revision_preflight_skips_missing_revision(monkeypatch) -> None:
     """Verify VLM preflight rejects revisions that do not exist on the Hub."""
     monkeypatch.setattr(vlm_bench, "_revision_exists", lambda model_id, revision: False)
@@ -243,6 +257,16 @@ def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
     module._resolve_runtime_defaults(args, [command, "--batch"])
 
     assert args.core_mode == "single"
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+def test_benchmark_batch_mode_disables_default_single_target_cores(module) -> None:
+    """Verify batch benchmark paths do not inject the implicit single target core."""
+    batch_args = module._build_arg_parser().parse_args(["measure", "--batch"])
+    non_batch_args = module._build_arg_parser().parse_args(["measure", "--non-batch"])
+
+    assert module._default_single_target_cores_for_batch_mode(batch_args) is None
+    assert module._default_single_target_cores_for_batch_mode(non_batch_args) == ("0:0",)
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
