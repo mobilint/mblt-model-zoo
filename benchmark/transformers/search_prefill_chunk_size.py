@@ -619,10 +619,10 @@ def _plot_best_chunk_chart(
     plt.close(fig)
 
 
-def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_modes: list[str]) -> None:
+def _rebuild_outputs(output_dir: Path, records: list[dict[str, Any]], core_modes: list[str]) -> None:
     measurement_rows, best_rows = _collect_rows(records)
-    _write_csv(results_dir / "all_measurements.csv", measurement_rows)
-    _write_csv(results_dir / "best_chunks.csv", best_rows)
+    _write_csv(output_dir / "all_measurements.csv", measurement_rows)
+    _write_csv(output_dir / "best_chunks.csv", best_rows)
     prefill_lengths = sorted(
         {int(r["prefill_length"]) for r in measurement_rows if isinstance(r.get("prefill_length"), int)}
     )
@@ -642,7 +642,7 @@ def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_mode
                     mode,
                     int(prefill_length),
                     measurement_rows,
-                    results_dir / f"prefill_tps_{mode}_prefill{prefill_length}_{_safe_filename(revision)}.png",
+                    output_dir / f"prefill_tps_{mode}_prefill{prefill_length}_{_safe_filename(revision)}.png",
                     revision=revision,
                 )
         best_revisions = sorted(
@@ -654,7 +654,7 @@ def _rebuild_outputs(results_dir: Path, records: list[dict[str, Any]], core_mode
             _plot_best_chunk_chart(
                 mode,
                 best_rows,
-                results_dir / f"best_chunk_{mode}_{_safe_filename(revision)}.png",
+                output_dir / f"best_chunk_{mode}_{_safe_filename(revision)}.png",
                 revision=revision,
             )
 
@@ -713,7 +713,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="skip benchmarking and rebuild CSV/charts from existing records",
     )
     parser.add_argument(
-        "--results-dir",
+        "--output-dir",
         type=str,
         default=None,
         help="output directory (default: benchmark/transformers/results/prefill_chunk_search)",
@@ -729,10 +729,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "prefill_chunk_search"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "prefill_chunk_search"
     )
-    records_dir = results_dir / "records"
+    records_dir = output_dir / "records"
     records_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[dict[str, Any]] = []
@@ -741,8 +741,8 @@ def main(argv: list[str] | None = None) -> int:
             loaded = _load_record(record_path)
             if loaded is not None:
                 records.append(loaded)
-        _rebuild_outputs(results_dir, records, args.core_modes)
-        print(f"Rebuilt outputs from existing records: {results_dir}")
+        _rebuild_outputs(output_dir, records, args.core_modes)
+        print(f"Rebuilt outputs from existing records: {output_dir}")
         return 0
 
     if args.mxq_dir:
@@ -776,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
                 "valid_targets": 0,
                 "skipped_files": skipped_mxq_files,
             }
-            _write_json(results_dir / "summary.json", summary_payload)
+            _write_json(output_dir / "summary.json", summary_payload)
             return 0
     else:
         targets, skipped_model_revisions = _discover_targets_from_available_models([str(x) for x in available])
@@ -788,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
                 "valid_targets": 0,
                 "skipped_model_revisions": skipped_model_revisions,
             }
-            _write_json(results_dir / "summary.json", summary_payload)
+            _write_json(output_dir / "summary.json", summary_payload)
             return 0
 
     prefill_lengths = [int(x) for x in args.prefill_lengths]
@@ -909,9 +909,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         pbar.close()
 
-    _rebuild_outputs(results_dir, records, args.core_modes)
+    _rebuild_outputs(output_dir, records, args.core_modes)
     if skipped_mxq_files:
-        _write_csv(results_dir / "skipped_mxq_files.csv", skipped_mxq_files)
+        _write_csv(output_dir / "skipped_mxq_files.csv", skipped_mxq_files)
     failed_pairs = [
         {
             "mxq_file": str(r.get("mxq_file", "")),
@@ -924,7 +924,7 @@ def main(argv: list[str] | None = None) -> int:
         if str(r.get("status")) == "failed"
     ]
     if failed_pairs:
-        _write_csv(results_dir / "failed_pairs.csv", failed_pairs)
+        _write_csv(output_dir / "failed_pairs.csv", failed_pairs)
     summary_payload = {
         "mxq_dir": None if mxq_dir is None else str(mxq_dir),
         "total_mxq_files": (0 if mxq_dir is None else len(list(mxq_dir.glob("*.mxq")))),
@@ -938,9 +938,9 @@ def main(argv: list[str] | None = None) -> int:
         "failed_pairs_count": len(failed_pairs),
         "failed_pairs": failed_pairs,
     }
-    _write_json(results_dir / "summary.json", summary_payload)
-    print(f"Saved outputs to: {results_dir}")
-    print(f"Summary: {results_dir / 'summary.json'}")
+    _write_json(output_dir / "summary.json", summary_payload)
+    print(f"Saved outputs to: {output_dir}")
+    print(f"Summary: {output_dir / 'summary.json'}")
     return 0
 
 

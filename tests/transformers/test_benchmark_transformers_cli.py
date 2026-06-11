@@ -329,7 +329,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
         [
             "measure",
             "--batch",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
         ]
     )
@@ -363,7 +363,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     args = vlm_bench._build_arg_parser().parse_args(
         [
             "measure",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
         ]
     )
@@ -417,7 +417,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
         [
             "measure",
             "--batch",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
             "--repeat",
             "1",

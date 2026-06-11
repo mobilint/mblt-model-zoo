@@ -722,7 +722,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--csv`: CSV output path for CLI sweep rows.
 - `--plot`: PNG output path for CLI sweep plots.
 - `--no-plot`: Disable CLI sweep plot output.
-- `--results-dir`: Output directory for selected benchmark scripts.
+- `--output-dir`: Output directory for benchmark, comparison, and generated artifact scripts.
 - `--skip-existing`: Skip models that already have output files.
 - `--rebuild-charts`: Rebuild CSV, Markdown, and chart outputs from existing JSON or record files.
 

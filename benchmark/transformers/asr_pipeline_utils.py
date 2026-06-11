@@ -300,7 +300,7 @@ def run_one_sample(
 
 def write_combined_outputs(
     *,
-    out_dir: Path,
+    output_dir: Path,
     host_pc_info_filename: str,
     asr_metric_summary_cls: type,
     format_metrics_row_func: Any,
@@ -318,7 +318,7 @@ def write_combined_outputs(
     rows: list[dict[str, Any]] = []
     status_rows: list[list[Any]] = []
     summary_field_names = {field.name for field in dataclasses.fields(asr_metric_summary_cls)}
-    for path in sorted(out_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         if path.name == host_pc_info_filename:
             continue
         try:
@@ -364,9 +364,9 @@ def write_combined_outputs(
             )
         )
 
-    combined_csv = out_dir / "combined.csv"
-    combined_md = out_dir / "combined.md"
-    status_md = out_dir / "combined_status.md"
+    combined_csv = output_dir / "combined.csv"
+    combined_md = output_dir / "combined.md"
+    status_md = output_dir / "combined_status.md"
     if rows:
         headers: list[str] = []
         seen_headers: set[str] = set()
@@ -427,14 +427,14 @@ def write_combined_outputs(
     elif status_md.exists():
         status_md.unlink()
 
-    make_rtf_chart_func(out_dir, rows)
+    make_rtf_chart_func(output_dir, rows)
     write_summary_markdown_func(
-        out_dir / "summary.md",
+        output_dir / "summary.md",
         title="Automatic Speech Recognition Benchmark Summary",
-        host_info_path=out_dir / host_pc_info_filename,
+        host_info_path=output_dir / host_pc_info_filename,
         table_markdown_path=combined_md,
         plot_paths=existing_png_paths_func(
-            out_dir,
+            output_dir,
             prefixes=("rtf", "wer", "cer"),
         ),
         plot_tables={},
@@ -443,7 +443,7 @@ def write_combined_outputs(
 
 def make_rtf_chart(
     *,
-    out_dir: Path,
+    output_dir: Path,
     rows: Sequence[Mapping[str, Any]],
     plot_scalar_chart_func: Any,
 ) -> None:
@@ -464,7 +464,7 @@ def make_rtf_chart(
         folder_metrics[_chart_model_label(row)] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
-    labels = [out_dir.name]
+    labels = [output_dir.name]
 
     def _selector(key: str, scale: float = 1.0):
         return lambda item: None if item.get(key) is None else scale * float(item[key])
@@ -482,7 +482,7 @@ def make_rtf_chart(
                 scalar_selector=_selector(key, scale),
                 title=title,
                 x_label=x_label,
-                output_path=out_dir / filename,
+                output_path=output_dir / filename,
             )
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             print(f"Warning: failed to build {filename}: {exc}")

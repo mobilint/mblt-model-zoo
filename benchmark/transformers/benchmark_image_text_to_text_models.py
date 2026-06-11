@@ -934,12 +934,12 @@ def _as_float(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def _rebuild_combined(results_dir: Path) -> None:
+def _rebuild_combined(output_dir: Path) -> None:
     llm_rows: list[dict[str, Any]] = []
     device_rows: list[dict[str, Any]] = []
     vision_rows: list[dict[str, Any]] = []
     metrics_by_model: dict[str, ModelMetrics] = {}
-    for path in sorted(results_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -976,14 +976,14 @@ def _rebuild_combined(results_dir: Path) -> None:
                     "vision_j_per_img_mean": s.get("vision_j_per_img", {}).get("mean"),
                 }
             )
-    BenchmarkResult.write_combined_csv(str(results_dir / "combined.csv"), llm_rows)
-    BenchmarkResult.write_combined_csv(str(results_dir / "combined_llm.csv"), llm_rows)
-    _write_csv(results_dir / "combined_vision.csv", vision_rows)
-    _write_csv(results_dir / "combined_device.csv", device_rows)
+    BenchmarkResult.write_combined_csv(str(output_dir / "combined.csv"), llm_rows)
+    BenchmarkResult.write_combined_csv(str(output_dir / "combined_llm.csv"), llm_rows)
+    _write_csv(output_dir / "combined_vision.csv", vision_rows)
+    _write_csv(output_dir / "combined_device.csv", device_rows)
     if not llm_rows:
-        _write_vlm_summary(results_dir)
+        _write_vlm_summary(output_dir)
         return
-    _write_token_combined_markdown(results_dir / "combined.md", llm_rows, device_rows)
+    _write_token_combined_markdown(output_dir / "combined.md", llm_rows, device_rows)
     if metrics_by_model:
         models = sorted(metrics_by_model.keys())
         labels = ["benchmark"]
@@ -995,7 +995,7 @@ def _rebuild_combined(results_dir: Path) -> None:
             token_selector=lambda metric: metric.prefill_tps,
             title="Prefill Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=results_dir / "llm_prefill_tps.png",
+            output_path=output_dir / "llm_prefill_tps.png",
         )
         plot_token_chart(
             models=models,
@@ -1004,7 +1004,7 @@ def _rebuild_combined(results_dir: Path) -> None:
             token_selector=lambda metric: metric.decode_tps,
             title="Decode Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=results_dir / "llm_decode_tps.png",
+            output_path=output_dir / "llm_decode_tps.png",
         )
         scalar_specs = [
             (
@@ -1038,24 +1038,24 @@ def _rebuild_combined(results_dir: Path) -> None:
                 scalar_selector=selector,
                 title=title,
                 x_label=x_label,
-                output_path=results_dir / filename,
+                output_path=output_dir / filename,
             )
-    _write_vlm_summary(results_dir)
+    _write_vlm_summary(output_dir)
 
 
-def _write_vlm_summary(results_dir: Path, *, measure: bool = False) -> None:
+def _write_vlm_summary(output_dir: Path, *, measure: bool = False) -> None:
     """Write an image-text-to-text benchmark summary Markdown with host info, plots, and table."""
     table_name = "combined_measure.md" if measure else "combined.md"
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Image Text-to-Text Measure Benchmark Summary" if measure else "Image Text-to-Text Benchmark Summary"
     prefixes = ("measure_",) if measure else None
-    plot_tables = _build_vlm_plot_tables(results_dir, measure=measure)
+    plot_tables = _build_vlm_plot_tables(output_dir, measure=measure)
     _write_summary_markdown(
-        results_dir / summary_name,
+        output_dir / summary_name,
         title=title,
-        host_info_path=results_dir / _HOST_PC_INFO_FILENAME,
-        table_markdown_path=results_dir / table_name,
-        plot_paths=_existing_png_paths(results_dir, prefixes=prefixes),
+        host_info_path=output_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=output_dir / table_name,
+        plot_paths=_existing_png_paths(output_dir, prefixes=prefixes),
         plot_tables=plot_tables,
     )
 
@@ -1146,7 +1146,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--skip-existing", action="store_true", help="skip models with existing outputs")
     parser.add_argument("--rebuild-charts", action="store_true", help="skip benchmark run and rebuild combined outputs")
     parser.add_argument(
-        "--results-dir",
+        "--output-dir",
         default=None,
         help="output directory (default: benchmark/transformers/results/image_text_to_text)",
     )
@@ -1299,16 +1299,16 @@ def _run_sweep(args: argparse.Namespace) -> int:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
     _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.rebuild_charts:
-        _rebuild_combined(results_dir)
+        _rebuild_combined(output_dir)
         return 0
 
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
 
     available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
     if not available_model_ids:
@@ -1384,9 +1384,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
-        json_path = results_dir / f"{base}.json"
-        csv_path = results_dir / f"{base}.csv"
-        png_path = results_dir / f"{base}.png"
+        json_path = output_dir / f"{base}.json"
+        csv_path = output_dir / f"{base}.csv"
+        png_path = output_dir / f"{base}.png"
         if args.skip_existing and json_path.is_file() and csv_path.is_file() and png_path.is_file():
             print(f"Skipping {label} (results exist).")
             continue
@@ -1432,7 +1432,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         finally:
             _release_pipeline(pipeline, args.device)
 
-    _rebuild_combined(results_dir)
+    _rebuild_combined(output_dir)
     return 0
 
 
@@ -1441,16 +1441,16 @@ def _collect_vlm_run_targets(
 ) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int]]]:
     """Resolve image-text-to-text benchmark targets and core-mode expansion."""
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.model:
         available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
         if not available_model_ids:
             print("No image-text-to-text models found.")
-            return results_dir, False, []
+            return output_dir, False, []
     raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1500,7 +1500,7 @@ def _collect_vlm_run_targets(
                     target.max_batch_size,
                 )
             )
-    return results_dir, disable_npu_specific_args, run_targets
+    return output_dir, disable_npu_specific_args, run_targets
 
 
 def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1585,12 +1585,12 @@ def _scalar_plot_table(rows: Sequence[Mapping[str, Any]], *, value_key: str, uni
     return _scalar_plot_table_common(rows, value_key=value_key, unit_header=unit_header)
 
 
-def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[str, str]:
+def _build_vlm_plot_tables(output_dir: Path, *, measure: bool = False) -> dict[str, str]:
     """Build plot-specific Markdown tables for VLM summaries."""
-    rows = _read_csv_rows(results_dir / ("combined_measure.csv" if measure else "combined_device.csv"))
+    rows = _read_csv_rows(output_dir / ("combined_measure.csv" if measure else "combined_device.csv"))
     prefix = "measure_" if measure else ""
     if not measure:
-        metrics_by_model = _collect_vlm_combined_metrics(results_dir)
+        metrics_by_model = _collect_vlm_combined_metrics(output_dir)
         models = sorted(metrics_by_model.keys())
         tables = {
             "llm_prefill_tps.png": _token_sweep_plot_table_common(models, metrics_by_model, value_key="prefill_tps"),
@@ -1630,10 +1630,10 @@ def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[
     }
 
 
-def _collect_vlm_combined_metrics(results_dir: Path) -> dict[str, ModelMetrics]:
+def _collect_vlm_combined_metrics(output_dir: Path) -> dict[str, ModelMetrics]:
     """Collect VLM token-sweep metrics from JSON result files."""
     metrics: dict[str, ModelMetrics] = {}
-    for path in sorted(results_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -1657,21 +1657,21 @@ def _collect_vlm_combined_metrics(results_dir: Path) -> dict[str, ModelMetrics]:
     return metrics
 
 
-def _rebuild_measure_outputs(results_dir: Path) -> None:
+def _rebuild_measure_outputs(output_dir: Path) -> None:
     """Rebuild VLM measure combined outputs."""
     payloads: list[dict[str, Any]] = []
-    for path in sorted(results_dir.glob("*_measure.json")):
+    for path in sorted(output_dir.glob("*_measure.json")):
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
-        _write_vlm_summary(results_dir, measure=True)
+        _write_vlm_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
-    _write_csv(results_dir / "combined_measure.csv", rows)
-    _write_measure_markdown(results_dir / "combined_measure.md", rows)
+    _write_csv(output_dir / "combined_measure.csv", rows)
+    _write_measure_markdown(output_dir / "combined_measure.md", rows)
     models = [str(row["model"]) for row in rows]
     chart_specs = [
         ("measure_llm_prefill_tps.png", "llm_prefill_tps_mean", "Tokens Per Second", "Prefill Tokens Per Second"),
@@ -1700,31 +1700,31 @@ def _rebuild_measure_outputs(results_dir: Path) -> None:
             values=[float(row.get(key) or 0.0) for row in rows],
             x_label=x_label,
             title=title,
-            output_path=results_dir / filename,
+            output_path=output_dir / filename,
         )
-    _write_vlm_summary(results_dir, measure=True)
+    _write_vlm_summary(output_dir, measure=True)
 
 
-def _resolve_vlm_results_dir(args: argparse.Namespace) -> Path:
-    """Resolve and create the image-text-to-text benchmark results directory."""
+def _resolve_vlm_output_dir(args: argparse.Namespace) -> Path:
+    """Resolve and create the image-text-to-text benchmark output directory."""
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
-    return results_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model image-text-to-text fixed image/prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     if args.rebuild_charts:
-        _rebuild_measure_outputs(_resolve_vlm_results_dir(args))
+        _rebuild_measure_outputs(_resolve_vlm_output_dir(args))
         return 0
-    results_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
+    output_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
     if not run_targets:
         return 0
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
     for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):
@@ -1732,7 +1732,7 @@ def _run_measure(args: argparse.Namespace) -> int:
         target_args.batch_size = batch_size
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
-        json_path = results_dir / f"{base}_measure.json"
+        json_path = output_dir / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
             continue
@@ -1891,7 +1891,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, args.device)
-    _rebuild_measure_outputs(results_dir)
+    _rebuild_measure_outputs(output_dir)
     return 0
 
 

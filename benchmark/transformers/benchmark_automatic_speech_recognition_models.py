@@ -388,7 +388,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default=str(Path(__file__).resolve().parent / "results" / "automatic_speech_recognition"),
-        help="results directory",
+        help="output directory",
     )
     parser.add_argument(
         "--save-samples",
@@ -586,10 +586,10 @@ def _beam_tag(num_beams: int | None) -> str:
     return "default" if num_beams is None else str(int(num_beams))
 
 
-def _result_json_path(out_dir: Path, mode_base: str, num_beams: int | None) -> Path:
+def _result_json_path(output_dir: Path, mode_base: str, num_beams: int | None) -> Path:
     """Return the per-target JSON path for one beam configuration."""
 
-    return out_dir / f"{mode_base}_beams{_beam_tag(num_beams)}.json"
+    return output_dir / f"{mode_base}_beams{_beam_tag(num_beams)}.json"
 
 
 def _handle_existing_result(path: Path, *, skip_existing: bool) -> bool:
@@ -842,9 +842,9 @@ def _write_target_json(
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
-def _write_combined_outputs(out_dir: Path) -> None:
+def _write_combined_outputs(output_dir: Path) -> None:
     _write_combined_outputs_shared(
-        out_dir=out_dir,
+        output_dir=output_dir,
         host_pc_info_filename=_HOST_PC_INFO_FILENAME,
         asr_metric_summary_cls=ASRMetricSummary,
         format_metrics_row_func=format_metrics_row,
@@ -855,14 +855,14 @@ def _write_combined_outputs(out_dir: Path) -> None:
     )
 
 
-def _make_rtf_chart(out_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
-    _make_rtf_chart_shared(out_dir=out_dir, rows=rows, plot_scalar_chart_func=plot_scalar_chart)
+def _make_rtf_chart(output_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    _make_rtf_chart_shared(output_dir=output_dir, rows=rows, plot_scalar_chart_func=plot_scalar_chart)
 
 
-def _resolve_results_dir(args: argparse.Namespace) -> Path:
-    out_dir = Path(args.output_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+def _resolve_output_dir(args: argparse.Namespace) -> Path:
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarget, str | None, str, str]]:
@@ -927,12 +927,12 @@ def main(argv: list[str] | None = None) -> int:
     args._core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     _resolve_runtime_defaults(args, raw_argv)
     os.environ.setdefault("MPLBACKEND", "Agg")
-    out_dir = _resolve_results_dir(args)
+    output_dir = _resolve_output_dir(args)
     if args.rebuild_charts:
         print("Rebuilding combined ASR outputs from existing JSON files only...")
-        _write_combined_outputs(out_dir)
+        _write_combined_outputs(output_dir)
         return 0
-    _collect_host_pc_info(out_dir)
+    _collect_host_pc_info(output_dir)
     run_targets = _build_run_targets(args)
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
@@ -968,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
         beam_tag = _beam_tag(args.num_beams)
-        json_path = _result_json_path(out_dir, mode_base, args.num_beams)
+        json_path = _result_json_path(output_dir, mode_base, args.num_beams)
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
@@ -1060,7 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         _release_pipeline(pipe, args.device)
 
-    _write_combined_outputs(out_dir)
+    _write_combined_outputs(output_dir)
     return 0
 
 

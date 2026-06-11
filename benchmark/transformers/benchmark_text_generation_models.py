@@ -714,9 +714,9 @@ def _token_sweep_plot_table(
     return _token_sweep_plot_table_common(models, metrics_by_model, value_key=value_key)
 
 
-def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
+def _build_text_generation_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation sweep summaries."""
-    metrics_by_model = collect_folder_metrics(results_dir)
+    metrics_by_model = collect_folder_metrics(output_dir)
     if not metrics_by_model:
         return {}
     models = sorted(metrics_by_model.keys())
@@ -739,9 +739,9 @@ def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
     return {filename: table for filename, table in tables.items() if table}
 
 
-def _build_text_generation_measure_plot_tables(results_dir: Path) -> dict[str, str]:
+def _build_text_generation_measure_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation measure summaries."""
-    rows = _read_csv_rows(results_dir / "combined_measure.csv")
+    rows = _read_csv_rows(output_dir / "combined_measure.csv")
     if not rows:
         return {}
     specs = [
@@ -770,32 +770,32 @@ def _write_single_combined_markdown(
     _write_token_combined_markdown(path, tps_rows, device_rows)
 
 
-def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = False) -> None:
+def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = False) -> None:
     """Write a text-generation benchmark summary Markdown with host info, plots, and table."""
-    out_dir = Path(results_dir)
+    output_dir = Path(output_dir)
     table_name = "combined_measure.md" if measure else "combined.md"
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Text Generation Measure Benchmark Summary" if measure else "Text Generation Benchmark Summary"
     prefixes = ("measure_",) if measure else None
     plot_tables = (
-        _build_text_generation_measure_plot_tables(out_dir) if measure else _build_text_generation_plot_tables(out_dir)
+        _build_text_generation_measure_plot_tables(output_dir) if measure else _build_text_generation_plot_tables(output_dir)
     )
     _write_summary_markdown(
-        out_dir / summary_name,
+        output_dir / summary_name,
         title=title,
-        host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
-        table_markdown_path=out_dir / table_name,
-        plot_paths=_existing_png_paths(out_dir, prefixes=prefixes),
+        host_info_path=output_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=output_dir / table_name,
+        plot_paths=_existing_png_paths(output_dir, prefixes=prefixes),
         plot_tables=plot_tables,
     )
 
 
-def _rebuild_combined_outputs(results_dir: str | Path) -> None:
-    out_dir = Path(results_dir)
+def _rebuild_combined_outputs(output_dir: str | Path) -> None:
+    output_dir = Path(output_dir)
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    for path in sorted(out_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -838,11 +838,11 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
 
     if not combined_results:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
-        _write_text_generation_summary(out_dir)
+        _write_text_generation_summary(output_dir)
         return
 
-    combined_csv = os.path.join(out_dir, "combined.csv")
-    combined_md = os.path.join(out_dir, "combined.md")
+    combined_csv = os.path.join(output_dir, "combined.csv")
+    combined_md = os.path.join(output_dir, "combined.md")
     BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
     _write_single_combined_markdown(
         combined_md,
@@ -850,7 +850,7 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
         device_rows=combined_device_rows,
     )
 
-    folder_metrics = collect_folder_metrics(out_dir)
+    folder_metrics = collect_folder_metrics(output_dir)
     if folder_metrics:
         models = sorted(folder_metrics.keys())
         labels = ["benchmark"]
@@ -863,7 +863,7 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
             token_selector=lambda m: m.prefill_tps,
             title="Prefill Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=out_dir / "prefill_tps.png",
+            output_path=output_dir / "prefill_tps.png",
         )
         scalar_specs = [
             (
@@ -880,7 +880,7 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
             token_selector=lambda m: m.decode_tps,
             title="Decode Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=out_dir / "decode_tps.png",
+            output_path=output_dir / "decode_tps.png",
         )
         scalar_specs.extend(
             [
@@ -910,14 +910,14 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
                 scalar_selector=selector,
                 title=title,
                 x_label=x_label,
-                output_path=out_dir / filename,
+                output_path=output_dir / filename,
             )
 
     if combined_device_rows:
-        device_csv = os.path.join(out_dir, "combined_device.csv")
+        device_csv = os.path.join(output_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
 
-    _write_text_generation_summary(out_dir)
+    _write_text_generation_summary(output_dir)
 
 
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -981,7 +981,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         help="required free VRAM factor versus estimated model weights (default: 1.15)",
     )
     parser.add_argument(
-        "--results-dir",
+        "--output-dir",
         default=None,
         help="output directory (default: benchmark/transformers/results/text_generation)",
     )
@@ -1137,24 +1137,24 @@ def main(argv: list[str] | None = None) -> int:
     return args._handler(args)
 
 
-def _resolve_text_generation_results_dir(args: argparse.Namespace) -> str:
-    """Resolve and create the text-generation benchmark results directory."""
-    results_dir = str(
-        Path(args.results_dir).resolve()
-        if args.results_dir
+def _resolve_text_generation_output_dir(args: argparse.Namespace) -> str:
+    """Resolve and create the text-generation benchmark output directory."""
+    output_dir = str(
+        Path(args.output_dir).resolve()
+        if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
-    os.makedirs(results_dir, exist_ok=True)
-    return results_dir
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
 
 
 def _run_sweep(args: argparse.Namespace) -> int:
     """Run multi-model text-generation sweep benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
-    results_dir = _resolve_text_generation_results_dir(args)
+    output_dir = _resolve_text_generation_output_dir(args)
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
-        _rebuild_combined_outputs(results_dir)
+        _rebuild_combined_outputs(output_dir)
         return 0
 
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
@@ -1170,7 +1170,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             print("No text-generation models found.")
             return 0
 
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
 
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1245,8 +1245,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.all and not args.mxq_dir and revision is None:
             print("Skipping (missing revisions).")
             continue
-        json_path = os.path.join(results_dir, f"{base}.json")
-        png_path = os.path.join(results_dir, f"{base}.png")
+        json_path = os.path.join(output_dir, f"{base}.json")
+        png_path = os.path.join(output_dir, f"{base}.png")
         if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
@@ -1557,7 +1557,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         _release_pipeline(pipeline, args.device)
 
-    _rebuild_combined_outputs(results_dir)
+    _rebuild_combined_outputs(output_dir)
 
     return 0
 
@@ -1672,7 +1672,7 @@ def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
+def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Create combined measure bar charts."""
     if not rows:
         return
@@ -1709,33 +1709,33 @@ def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> N
         ax.set_xlabel(xlabel)
         ax.grid(axis="x", alpha=0.3)
         fig.tight_layout()
-        fig.savefig(results_dir / filename, dpi=220)
+        fig.savefig(output_dir / filename, dpi=220)
         plt.close(fig)
 
 
-def _rebuild_measure_outputs(results_dir: str | Path) -> None:
+def _rebuild_measure_outputs(output_dir: str | Path) -> None:
     """Rebuild combined text-generation measure CSV, Markdown, and charts."""
-    out_dir = Path(results_dir)
+    output_dir = Path(output_dir)
     payloads: list[dict[str, Any]] = []
-    for path in sorted(out_dir.glob("*_measure.json")):
+    for path in sorted(output_dir.glob("*_measure.json")):
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
-        _write_text_generation_summary(out_dir, measure=True)
+        _write_text_generation_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
     import csv
 
-    with (out_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
+    with (output_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-    _write_measure_markdown(out_dir / "combined_measure.md", rows)
-    _plot_measure_charts(out_dir, rows)
-    _write_text_generation_summary(out_dir, measure=True)
+    _write_measure_markdown(output_dir / "combined_measure.md", rows)
+    _plot_measure_charts(output_dir, rows)
+    _write_text_generation_summary(output_dir, measure=True)
 
 
 def _collect_text_run_targets(
@@ -1747,12 +1747,12 @@ def _collect_text_run_targets(
     if not available_model_ids:
         print("No text-generation models found.")
         return "", False, []
-    results_dir = str(
-        Path(args.results_dir).resolve()
-        if args.results_dir
+    output_dir = str(
+        Path(args.output_dir).resolve()
+        if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets: list[tuple[str, list[str | None], str, str, str | None]]
@@ -1789,21 +1789,21 @@ def _collect_text_run_targets(
                     target.max_batch_size,
                 )
             )
-    return results_dir, disable_npu_specific_args, run_targets
+    return output_dir, disable_npu_specific_args, run_targets
 
 
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model text-generation fixed prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     if args.rebuild_charts:
-        _rebuild_measure_outputs(_resolve_text_generation_results_dir(args))
+        _rebuild_measure_outputs(_resolve_text_generation_output_dir(args))
         return 0
-    results_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
+    output_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
     if not run_targets:
         return 0
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
@@ -1814,7 +1814,7 @@ def _run_measure(args: argparse.Namespace) -> int:
         if args.all and not args.mxq_dir and revision is None:
             print(f"Skipping {label} (missing revisions).")
             continue
-        json_path = Path(results_dir) / f"{base}_measure.json"
+        json_path = Path(output_dir) / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
             continue
@@ -1980,7 +1980,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, args.device)
-    _rebuild_measure_outputs(results_dir)
+    _rebuild_measure_outputs(output_dir)
     return 0
 
 
