@@ -19,6 +19,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker,
     extract_device_metric,
     extract_device_time_series,
+    integrate_power_trace_j,
     parse_npu_rail_metrics,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -434,6 +435,8 @@ def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
         prefill_metric={"avg_power_w": 2.0},
         decode_metric={"avg_power_w": 4.0},
         batch_size=3,
+        prefill_time_series={"power_w": [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 2.0}]},
+        decode_time_series={"power_w": [{"timestamp_s": 0.0, "value": 4.0}, {"timestamp_s": 1.0, "value": 4.0}]},
     )
 
     assert measurement.prefill_tokens_per_j == pytest.approx(3.0)
@@ -442,6 +445,22 @@ def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
     assert measurement.decode_j_per_token == pytest.approx(2.0 / 3.0)
     assert measurement.total_tokens_per_j == pytest.approx(2.25)
     assert measurement.total_j_per_token == pytest.approx(4.0 / 9.0)
+
+
+def test_integrate_power_trace_j_uses_trapezoidal_rule():
+    """Power traces should be integrated from time-series samples, not average power fallbacks."""
+    trace = [
+        {"timestamp_s": 2.0, "value": 4.0},
+        {"timestamp_s": 0.0, "value": 2.0},
+        {"timestamp_s": 1.0, "value": 6.0},
+    ]
+
+    assert integrate_power_trace_j(trace) == pytest.approx(9.0)
+
+
+def test_integrate_power_trace_j_requires_two_valid_points():
+    """A single trace sample cannot produce a reliable energy integration."""
+    assert integrate_power_trace_j([{"timestamp_s": 0.0, "value": 2.0}]) is None
 
 
 def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
@@ -1128,7 +1147,7 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
             return {"avg_power_w": 2.0, "p99_power_w": 3.0}
 
         def get_trace(self) -> list[tuple[float, float]]:
-            return [(0.0, 2.0)]
+            return [(0.0, 2.0), (1.0, 2.0)]
 
     class _FakeTPSMeasurer:
         def __init__(self, pipeline_arg) -> None:
@@ -1208,7 +1227,10 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
     assert events[:4] == ["prefill:start", "prefill:stop", "decode:start", "decode:stop"]
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["batch_size"] == 2
-    assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}]
+    assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [
+        {"timestamp_s": 0.0, "value": 2.0},
+        {"timestamp_s": 1.0, "value": 2.0},
+    ]
 
 
 def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
@@ -1389,7 +1411,7 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
             return {"avg_power_w": 2.0}
 
         def get_trace(self) -> list[tuple[float, float]]:
-            return []
+            return [(0.0, 2.0), (6.0, 2.0)]
 
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline_arg) -> None:

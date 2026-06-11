@@ -405,6 +405,61 @@ def extract_device_metric(tracker: DeviceTracker) -> DeviceMetricMap:
     return out
 
 
+def integrate_power_trace_j(power_trace: Sequence[Mapping[str, object]]) -> float | None:
+    """Integrate a power time series into energy in joules.
+
+    Args:
+        power_trace: Trace points containing ``timestamp_s`` and ``value`` in watts.
+
+    Returns:
+        Energy in joules computed with the trapezoidal rule, or ``None`` when fewer than two valid
+        monotonic points are available.
+    """
+    points: list[tuple[float, float]] = []
+    for item in power_trace:
+        timestamp_s = item.get("timestamp_s")
+        value = item.get("value")
+        if isinstance(timestamp_s, (int, float)) and isinstance(value, (int, float)):
+            points.append((float(timestamp_s), float(value)))
+    if len(points) < 2:
+        return None
+
+    points.sort(key=lambda point: point[0])
+    energy_j = 0.0
+    valid_segments = 0
+    for (left_t, left_w), (right_t, right_w) in zip(points, points[1:]):
+        delta_s = right_t - left_t
+        if delta_s <= 0.0:
+            continue
+        energy_j += ((left_w + right_w) / 2.0) * delta_s
+        valid_segments += 1
+    return energy_j if valid_segments else None
+
+
+def energy_from_device_time_series(
+    device_time_series: Mapping[str, Sequence[Mapping[str, object]]],
+    *,
+    power_key: str = "power_w",
+) -> float | None:
+    """Return integrated energy from a benchmark device time-series payload."""
+    power_trace = device_time_series.get(power_key)
+    if power_trace is None:
+        return None
+    return integrate_power_trace_j(power_trace)
+
+
+def add_trace_energy_to_device_metric(
+    device_metric: Mapping[str, DeviceMetricValue],
+    device_time_series: Mapping[str, Sequence[Mapping[str, object]]],
+    *,
+    power_key: str = "power_w",
+) -> DeviceMetricMap:
+    """Return device metrics augmented with trace-integrated ``total_energy_j``."""
+    augmented: DeviceMetricMap = dict(device_metric)
+    augmented["total_energy_j"] = energy_from_device_time_series(device_time_series, power_key=power_key)
+    return augmented
+
+
 def _normalize_trace(raw_trace: object) -> list[DeviceTracePoint]:
     """Convert mblt-tracker trace tuples into JSON-safe time-series points."""
     if not isinstance(raw_trace, list):

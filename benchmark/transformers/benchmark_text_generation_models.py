@@ -74,6 +74,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_phase_trackers as _build_phase_trackers_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    energy_from_device_time_series as _energy_from_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -609,6 +612,10 @@ def _extract_device_metric(tracker: Any) -> dict[str, float | None]:
 
 def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]]]:
     return _extract_device_time_series_common(tracker)
+
+
+def _energy_from_device_time_series(device_time_series: Mapping[str, Sequence[Mapping[str, object]]]) -> float | None:
+    return _energy_from_device_time_series_common(device_time_series)
 
 
 def _weighted_two(
@@ -1385,8 +1392,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
             decode_phase_duration_s = float(getattr(result, "decode_phase_duration_s", 0.0) or 0.0)
             prefill_avg_power = prefill_metric.get("avg_power_w")
             decode_avg_power = decode_metric.get("avg_power_w")
-            prefill_energy = prefill_avg_power * prefill_phase_duration_s if prefill_avg_power is not None else None
-            decode_energy = decode_avg_power * decode_phase_duration_s if decode_avg_power is not None else None
+            prefill_energy = _energy_from_device_time_series(device_time_series_payload["prefill"])
+            decode_energy = _energy_from_device_time_series(device_time_series_payload["decode"])
             total_energy = None
             if prefill_energy is not None and decode_energy is not None:
                 total_energy = prefill_energy + decode_energy
@@ -1478,16 +1485,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
             )
             prefill_last = float(result.prefill_sweep.tps_values[-1]) if result.prefill_sweep.tps_values else None
             decode_last = float(result.decode_sweep.tps_values[-1]) if result.decode_sweep.tps_values else None
-            prefill_tpj = (
-                _safe_div(prefill_last, prefill_avg_power)
-                if prefill_last is not None and prefill_avg_power is not None
-                else None
-            )
-            decode_tpj = (
-                _safe_div(decode_last, decode_avg_power)
-                if decode_last is not None and decode_avg_power is not None
-                else None
-            )
+            prefill_tokens = max(result.prefill_sweep.x_values) if result.prefill_sweep.x_values else None
+            decode_tokens = max(result.decode_sweep.x_values) if result.decode_sweep.x_values else None
+            prefill_tpj = _safe_div(float(prefill_tokens), prefill_energy) if prefill_tokens and prefill_energy else None
+            decode_tpj = _safe_div(float(decode_tokens), decode_energy) if decode_tokens and decode_energy else None
             device_payload = {
                 "avg_power_w": avg_power,
                 "p99_power_w": p99_power,
@@ -1888,6 +1889,12 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if tracker_prefill is not None and tracker_decode is not None:
                     prefill_metric = _extract_device_metric(tracker_prefill)
                     decode_metric = _extract_device_metric(tracker_decode)
+                    device_time_series = {
+                        "prefill": _extract_device_time_series(tracker_prefill),
+                        "decode": _extract_device_time_series(tracker_decode),
+                    }
+                    prefill_energy = _energy_from_device_time_series(device_time_series["prefill"])
+                    decode_energy = _energy_from_device_time_series(device_time_series["decode"])
                     row["avg_power_w"] = _weighted_two(
                         prefill_metric.get("avg_power_w"),
                         run.prefill_latency,
@@ -1915,18 +1922,16 @@ def _run_measure(args: argparse.Namespace) -> int:
                         run.decode_duration,
                     )
                     row["total_energy_j"] = (
-                        (float(row["avg_power_w"]) * run.total_time)
-                        if isinstance(row.get("avg_power_w"), (int, float))
-                        else None
+                        prefill_energy + decode_energy if prefill_energy is not None and decode_energy is not None else None
                     )
                     row["prefill_tokens_per_j"] = (
-                        _safe_div(run.prefill_tps, float(prefill_metric["avg_power_w"]))
-                        if isinstance(prefill_metric.get("avg_power_w"), (int, float))
+                        _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
+                        if prefill_energy is not None
                         else None
                     )
                     row["decode_tokens_per_j"] = (
-                        _safe_div(run.decode_tps, float(decode_metric["avg_power_w"]))
-                        if isinstance(decode_metric.get("avg_power_w"), (int, float))
+                        _safe_div(float(args.decode) * float(batch_size), decode_energy)
+                        if decode_energy is not None
                         else None
                     )
                     row["prefill_j_per_token"] = (
@@ -1940,10 +1945,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         else None
                     )
                     device_time_series_runs.append(
-                        {
-                            "prefill": _extract_device_time_series(tracker_prefill),
-                            "decode": _extract_device_time_series(tracker_decode),
-                        }
+                        device_time_series
                     )
                 runs.append(row)
             payload = {

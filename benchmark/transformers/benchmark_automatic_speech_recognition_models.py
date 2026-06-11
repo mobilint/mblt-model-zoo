@@ -95,6 +95,9 @@ from benchmark.transformers.benchmark_target_utils import revision_exists as _re
 from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_trace_energy_to_device_metric as _add_trace_energy_to_device_metric_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -794,6 +797,8 @@ def _measure_target(
         _stop_tracker_safe_common(tracker)
     device_metric = _extract_device_metric_common(tracker) if tracker is not None else {}
     device_trace = _extract_device_time_series_common(tracker) if tracker is not None else {}
+    if tracker is not None:
+        device_metric = _add_trace_energy_to_device_metric_common(device_metric, device_trace)
     return timings, device_metric, device_trace
 
 

@@ -69,6 +69,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    energy_from_device_time_series as _energy_from_device_time_series,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -434,7 +437,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             runs.append(run)
             if tracker is not None:
                 metric = _extract_device_metric(tracker)
-                device_time_series_runs.append(_extract_device_time_series(tracker))
+                device_time_series = _extract_device_time_series(tracker)
+                device_time_series_runs.append(device_time_series)
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_util = metric.get("avg_utilization_pct")
@@ -447,7 +451,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 p99_mem_pct = metric.get("p99_memory_used_pct")
                 if avg_power is not None:
                     power_vals.append(float(avg_power))
-                    energy = float(avg_power) * float(run[0])
+                energy = _energy_from_device_time_series(device_time_series)
+                if energy is not None:
                     energy_vals.append(energy)
                     j_per_img_vals.append(energy)
                     tpj = _safe_div(1.0, energy)
@@ -585,7 +590,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             _stop_tracker_safe(tracker)
         if tracker is not None:
             metric = _extract_device_metric(tracker)
-            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
+            device_time_series = _extract_device_time_series(tracker)
+            llm_device_time_series_runs.append(device_time_series)
             run.avg_power_w = metric.get("avg_power_w")
             run.p99_power_w = metric.get("p99_power_w")
             run.avg_utilization_pct = metric.get("avg_utilization_pct")
@@ -596,14 +602,15 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             run.p99_memory_used_mb = metric.get("p99_memory_used_mb")
             run.avg_memory_used_pct = metric.get("avg_memory_used_pct")
             run.p99_memory_used_pct = metric.get("p99_memory_used_pct")
-            if run.avg_power_w is not None:
-                total_time = float(run.prefill_phase_duration_s or 0.0) + float(run.decode_phase_duration_s or 0.0)
-                e = float(run.avg_power_w) * total_time
-                run.total_energy_j = e
+            energy = _energy_from_device_time_series(device_time_series)
+            if energy is not None:
+                run.total_energy_j = energy
                 decode_last_tps = float(run.decode_sweep.tps_values[-1]) if run.decode_sweep.tps_values else 0.0
                 prefill_last_tps = float(run.prefill_sweep.tps_values[-1]) if run.prefill_sweep.tps_values else 0.0
-                t1 = _safe_div(prefill_last_tps, float(run.avg_power_w))
-                t2 = _safe_div(decode_last_tps, float(run.avg_power_w))
+                prefill_tokens = max(run.prefill_sweep.x_values) if run.prefill_sweep.x_values else 0
+                decode_tokens = max(run.decode_sweep.x_values) if run.decode_sweep.x_values else 0
+                t1 = _safe_div(float(prefill_tokens), energy) if prefill_tokens else None
+                t2 = _safe_div(float(decode_tokens), energy) if decode_tokens else None
                 j1 = _safe_div(1.0, t1) if t1 not in (None, 0) else None
                 j2 = _safe_div(1.0, t2) if t2 not in (None, 0) else None
                 run.prefill_tokens_per_j = t1
@@ -1810,7 +1817,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                 llm_runs.append(asdict(llm_result))
                 if tracker is not None:
                     metric = _extract_device_metric(tracker)
-                    device_time_series_runs.append(_extract_device_time_series(tracker))
+                    device_time_series = _extract_device_time_series(tracker)
+                    device_time_series_runs.append(device_time_series)
                     power = metric.get("avg_power_w")
                     temperature = metric.get("avg_temperature_c")
                     utilization = metric.get("avg_utilization_pct")
@@ -1822,11 +1830,10 @@ def _run_measure(args: argparse.Namespace) -> int:
                     if memory_used is not None:
                         avg_memory_used_mb.append(float(memory_used))
                     if power is not None:
-                        vision_batch_latency = vision_latency_per_image * batch_size
-                        total_time = vision_batch_latency + float(llm_result.prefill_phase_duration_s or 0.0)
-                        total_time += float(llm_result.decode_phase_duration_s or 0.0)
                         avg_power_w.append(float(power))
-                        total_energy_j.append(float(power) * total_time)
+                    energy = _energy_from_device_time_series(device_time_series)
+                    if energy is not None:
+                        total_energy_j.append(energy)
             llm_prefill = [
                 float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
             ]
@@ -1844,9 +1851,10 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if r["decode_sweep"]["time_values"]
             ]
             avg_power = _mean(avg_power_w)
-            if avg_power > 0.0:
-                llm_prefill_tok_per_j = [value / avg_power for value in llm_prefill]
-                llm_decode_tok_per_j = [value / avg_power for value in llm_decode]
+            total_energy = sum(total_energy_j) if total_energy_j else None
+            if total_energy is not None and total_energy > 0.0:
+                llm_prefill_tok_per_j = [_safe_div(float(args.prefill) * float(batch_size), total_energy)]
+                llm_decode_tok_per_j = [_safe_div(float(args.decode) * float(batch_size), total_energy)]
             payload = {
                 "model": label,
                 "benchmark_type": "measure",
@@ -1874,10 +1882,10 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "avg_temperature_c": _mean(avg_temperature_c),
                     "avg_utilization_pct": _mean(avg_utilization_pct),
                     "avg_memory_used_mb": _mean(avg_memory_used_mb),
-                    "total_energy_j": sum(total_energy_j) if total_energy_j else None,
+                    "total_energy_j": total_energy,
                     "llm_prefill_tok_per_j": _mean(llm_prefill_tok_per_j),
                     "llm_decode_tok_per_j": _mean(llm_decode_tok_per_j),
-                    "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, sum(total_energy_j))
+                    "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, total_energy)
                     if total_energy_j
                     else None,
                 }

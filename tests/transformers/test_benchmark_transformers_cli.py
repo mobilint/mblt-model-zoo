@@ -412,7 +412,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
 
 
 def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_path) -> None:
-    """Verify VLM fixed measure scales vision latency and image count by batch size."""
+    """Verify VLM fixed measure derives energy and image efficiency from the power trace."""
     args = vlm_bench._build_arg_parser().parse_args(
         [
             "measure",
@@ -461,7 +461,11 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
     monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
-    monkeypatch.setattr(vlm_bench, "_extract_device_time_series", lambda tracker: {})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 0.9, "value": 10.0}]},
+    )
     monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
     monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)

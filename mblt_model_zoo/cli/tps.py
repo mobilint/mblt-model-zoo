@@ -30,6 +30,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_phase_trackers as _build_phase_trackers_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    energy_from_device_time_series as _energy_from_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -752,6 +755,10 @@ def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]
     return _extract_device_time_series_common(tracker)
 
 
+def _energy_from_device_time_series(device_time_series: dict[str, list[dict[str, float]]]) -> Optional[float]:
+    return _energy_from_device_time_series_common(device_time_series)
+
+
 def _weighted_two(
     a: Optional[float],
     a_weight: float,
@@ -791,6 +798,8 @@ def _enrich_single_run_device(
     prefill_metric: dict[str, Optional[float]],
     decode_metric: dict[str, Optional[float]],
     batch_size: int = 1,
+    prefill_time_series: dict[str, list[dict[str, float]]] | None = None,
+    decode_time_series: dict[str, list[dict[str, float]]] | None = None,
 ) -> None:
     """Attach device metrics to a benchmark run.
 
@@ -880,8 +889,8 @@ def _enrich_single_run_device(
     if avg_power is None:
         return
 
-    prefill_energy = prefill_avg_power * prefill_t if prefill_avg_power is not None else None
-    decode_energy = decode_avg_power * decode_t if decode_avg_power is not None else None
+    prefill_energy = _energy_from_device_time_series(prefill_time_series or {})
+    decode_energy = _energy_from_device_time_series(decode_time_series or {})
     total_energy = None
     if prefill_energy is not None and decode_energy is not None:
         total_energy = prefill_energy + decode_energy
@@ -1058,10 +1067,12 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         if tracker_prefill is not None and tracker_decode is not None:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
+            prefill_time_series = _extract_device_time_series(tracker_prefill)
+            decode_time_series = _extract_device_time_series(tracker_decode)
             run_phase_device_time_series.append(
                 {
-                    "prefill": _extract_device_time_series(tracker_prefill),
-                    "decode": _extract_device_time_series(tracker_decode),
+                    "prefill": prefill_time_series,
+                    "decode": decode_time_series,
                 }
             )
             _enrich_single_run_device(
@@ -1069,6 +1080,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 prefill_metric=prefill_metric,
                 decode_metric=decode_metric,
                 batch_size=batch_size,
+                prefill_time_series=prefill_time_series,
+                decode_time_series=decode_time_series,
             )
         runs.append(run)
 
@@ -1381,11 +1394,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         runs.append(run)
         if tracker is not None:
             metric = _extract_device_metric(tracker)
-            avg_power = metric.get("avg_power_w")
-            if avg_power is not None:
-                metric["total_energy_j"] = avg_power * ((run.vision_encode_latency * batch_size) + run.llm.total_time)
+            device_time_series = _extract_device_time_series(tracker)
+            metric["total_energy_j"] = _energy_from_device_time_series(device_time_series)
             device_metrics.append(metric)
-            device_time_series_runs.append(_extract_device_time_series(tracker))
+            device_time_series_runs.append(device_time_series)
 
     vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
     vision_fps = [r.vision_fps for r in runs]
@@ -1593,10 +1605,12 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             prefill_metric = _extract_device_metric(tracker_prefill)
             decode_metric = _extract_device_metric(tracker_decode)
             run_phase_device.append({"prefill": prefill_metric, "decode": decode_metric})
+            prefill_time_series = _extract_device_time_series(tracker_prefill)
+            decode_time_series = _extract_device_time_series(tracker_decode)
             run_phase_device_time_series.append(
                 {
-                    "prefill": _extract_device_time_series(tracker_prefill),
-                    "decode": _extract_device_time_series(tracker_decode),
+                    "prefill": prefill_time_series,
+                    "decode": decode_time_series,
                 }
             )
             prefill_dur = float(getattr(runs[-1], "prefill_phase_duration_s", 0.0) or 0.0)
@@ -1609,7 +1623,10 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
             )
             if avg_power is not None:
                 run_avg_power.append(avg_power)
-                total_energy = avg_power * (prefill_dur + decode_dur)
+            prefill_energy = _energy_from_device_time_series(prefill_time_series)
+            decode_energy = _energy_from_device_time_series(decode_time_series)
+            if prefill_energy is not None and decode_energy is not None:
+                total_energy = prefill_energy + decode_energy
                 run_total_energy.append(total_energy)
             p99_power = max(
                 [v for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w")) if v is not None],
@@ -2039,7 +2056,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             vision_runs.append(single)
             if tracker is not None:
                 metric = _extract_device_metric(tracker)
-                vision_device_time_series_runs.append(_extract_device_time_series(tracker))
+                device_time_series = _extract_device_time_series(tracker)
+                vision_device_time_series_runs.append(device_time_series)
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_utilization = metric.get("avg_utilization_pct")
@@ -2053,8 +2071,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 p99_memory_used_pct = metric.get("p99_memory_used_pct")
                 if avg_power is not None:
                     avg_power_f = float(avg_power)
-                    energy = avg_power_f * float(single[0])
                     vision_power_avg.append(avg_power_f)
+                energy = _energy_from_device_time_series(device_time_series)
+                if energy is not None:
                     vision_energy_j.append(energy)
                     vision_img_per_j.append(1.0 / energy if energy > 0 else 0.0)
                     vision_j_per_img.append(energy)
@@ -2216,13 +2235,15 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             _stop_tracker_safe(tracker)
         if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
             metric = _extract_device_metric(tracker)
-            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
+            device_time_series = _extract_device_time_series(tracker)
+            llm_device_time_series_runs.append(device_time_series)
             _enrich_single_run_device(
                 run=run,
                 prefill_metric=metric,
                 decode_metric=metric,
                 batch_size=batch_size,
             )
+            run.total_energy_j = _energy_from_device_time_series(device_time_series)
         llm_runs.append(run)
 
     llm_result = _aggregate_sweep_results(llm_runs)

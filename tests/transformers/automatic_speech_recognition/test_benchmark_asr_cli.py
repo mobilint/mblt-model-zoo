@@ -285,6 +285,50 @@ def test_measure_target_keeps_requested_count_after_whisper_skip() -> None:
     assert pipe.calls == 2
 
 
+def test_measure_target_adds_trace_integrated_energy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ASR target measurement populates total energy from power traces."""
+
+    class DummyPipe:
+        tokenizer = None
+
+        def __call__(self, pipeline_input, **kwargs):  # type: ignore[no-untyped-def]
+            return {"text": "hello world"}
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": 3.0}
+
+        def get_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, 2.0), (2.0, 4.0)]
+
+    args = asr_bench._parse_args(["--device-backend", "npu"])
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": np.zeros(16000 * 4, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    monkeypatch.setattr(asr_bench, "_build_device_tracker_common", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(asr_bench, "_print_device_status_common", lambda args, tracker: None)
+
+    timings, device_metric, device_trace = asr_bench._measure_target(
+        "facebook/wav2vec2-base-960h",
+        args,
+        DummyPipe(),
+        [sample],
+        {"max_new_tokens": 444, "return_timestamps": False},
+    )
+
+    assert len(timings) == 1
+    assert device_trace["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 4.0}]
+    assert device_metric["total_energy_j"] == pytest.approx(6.0)
+
+
 def test_warmup_skips_whisper_long_form_samples() -> None:
     """Verify warmup also skips >30s Whisper samples and counts completed warmups."""
 
