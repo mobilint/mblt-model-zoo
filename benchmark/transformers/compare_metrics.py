@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, ClassVar, Mapping, Sequence
+
+try:
+    from benchmark.common.summary_utils import markdown_table
+except ModuleNotFoundError:
+    _summary_utils_path = Path(__file__).resolve().parents[1] / "common" / "summary_utils.py"
+    _summary_spec = importlib.util.spec_from_file_location("benchmark_common_summary_utils", _summary_utils_path)
+    if _summary_spec is None or _summary_spec.loader is None:
+        raise
+    _summary_mod = importlib.util.module_from_spec(_summary_spec)
+    _summary_spec.loader.exec_module(_summary_mod)
+    markdown_table = _summary_mod.markdown_table
 
 try:
     from benchmark.transformers.chart_utils import (
@@ -505,6 +517,162 @@ def render_charts(
         )
 
 
+def build_compare_plot_tables(
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> dict[str, str]:
+    """Build plot-specific Markdown tables for benchmark comparison summaries."""
+
+    tables: dict[str, str] = {}
+    for spec in metric_cls.TOKEN_SPECS:
+        table = _token_compare_table(
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            attr=spec.attr,
+        )
+        if table:
+            tables[spec.filename] = table
+    for spec in [*metric_cls.SCALAR_SPECS, *metric_cls.shared_scalar_specs()]:
+        table = _scalar_compare_table(
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            attr=spec.attr,
+            unit_header=spec.x_label,
+        )
+        if table:
+            tables[spec.filename] = table
+    return tables
+
+
+def write_compare_markdown(
+    path: Path | str,
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> None:
+    """Write a combined Markdown table for benchmark comparison metrics."""
+
+    Path(path).write_text(
+        build_compare_markdown(
+            metric_cls=metric_cls,
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+        ),
+        encoding="utf-8",
+    )
+
+
+def build_compare_markdown(
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> str:
+    """Build one wide Markdown table containing all comparable task metrics."""
+
+    headers: list[str] = ["Model"]
+    value_getters: list[tuple[int, str, int | None]] = []
+
+    for spec in metric_cls.TOKEN_SPECS:
+        for token in _tokens_for_attr(models=models, metrics_by_folder=metrics_by_folder, attr=spec.attr):
+            for folder_idx, label in enumerate(labels):
+                headers.append(f"{label} {spec.attr} {token}")
+                value_getters.append((folder_idx, spec.attr, token))
+    for spec in [*metric_cls.SCALAR_SPECS, *metric_cls.shared_scalar_specs()]:
+        for folder_idx, label in enumerate(labels):
+            headers.append(f"{label} {spec.attr}")
+            value_getters.append((folder_idx, spec.attr, None))
+
+    rows: list[list[Any]] = []
+    for model in models:
+        row: list[Any] = [model]
+        for folder_idx, attr, token in value_getters:
+            metric = metrics_by_folder[folder_idx][model]
+            row.append(_metric_value(metric, attr, token=token))
+        rows.append(row)
+    return markdown_table(headers, rows) if rows else "No common benchmark results found.\n"
+
+
+def _token_compare_table(
+    *,
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+) -> str:
+    """Build a Markdown table for one token-keyed comparison plot."""
+
+    tokens = _tokens_for_attr(models=models, metrics_by_folder=metrics_by_folder, attr=attr)
+    if not tokens:
+        return ""
+    headers = ["Model", *(f"{label} {token} tokens" for token in tokens for label in labels)]
+    rows = [
+        [
+            model,
+            *(
+                _metric_value(metrics_by_folder[folder_idx][model], attr, token=token)
+                for token in tokens
+                for folder_idx in range(len(labels))
+            ),
+        ]
+        for model in models
+    ]
+    return markdown_table(headers, rows)
+
+
+def _scalar_compare_table(
+    *,
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+    unit_header: str,
+) -> str:
+    """Build a Markdown table for one scalar comparison plot."""
+
+    headers = ["Model", *(f"{label} {unit_header}" for label in labels)]
+    rows = [
+        [model, *(_metric_value(metrics_by_folder[folder_idx][model], attr) for folder_idx in range(len(labels)))]
+        for model in models
+    ]
+    return markdown_table(headers, rows)
+
+
+def _tokens_for_attr(
+    *,
+    models: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+) -> list[int]:
+    """Return sorted token keys available for one metric attribute."""
+
+    tokens: set[int] = set()
+    for model in models:
+        for folder_metrics in metrics_by_folder:
+            values = getattr(folder_metrics[model], attr)
+            if isinstance(values, Mapping):
+                tokens.update(int(token) for token in values if isinstance(token, int))
+    return sorted(tokens)
+
+
+def _metric_value(metric: BaseCompareMetric, attr: str, *, token: int | None = None) -> Any:
+    """Return a scalar or token-keyed metric value."""
+
+    value = getattr(metric, attr)
+    if token is None:
+        return value
+    return value.get(token) if isinstance(value, Mapping) else None
+
+
 __all__ = [
     "ASRCompareMetric",
     "BaseCompareMetric",
@@ -515,9 +683,12 @@ __all__ = [
     "VLMCompareMetric",
     "collect_metrics",
     "common_model_ids",
+    "build_compare_markdown",
+    "build_compare_plot_tables",
     "default_charts_dir",
     "folder_labels",
     "normalize_model_key",
     "payload_task",
     "render_charts",
+    "write_compare_markdown",
 ]

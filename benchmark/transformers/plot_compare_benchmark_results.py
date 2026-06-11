@@ -1,28 +1,48 @@
 import argparse
 import json
+import sys
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Mapping
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 try:
+    from benchmark.common.summary_utils import (
+        HOST_PC_INFO_FILENAME,
+        existing_png_paths,
+        write_summary_markdown,
+    )
     from benchmark.transformers.compare_metrics import (
         TASK_REGISTRY,
+        build_compare_plot_tables,
         collect_metrics,
         common_model_ids,
         default_charts_dir,
         folder_labels,
         payload_task,
         render_charts,
+        write_compare_markdown,
     )
 except ModuleNotFoundError:
     from compare_metrics import (
         TASK_REGISTRY,
+        build_compare_plot_tables,
         collect_metrics,
         common_model_ids,
         default_charts_dir,
         folder_labels,
         payload_task,
         render_charts,
+        write_compare_markdown,
+    )
+
+    from benchmark.common.summary_utils import (
+        HOST_PC_INFO_FILENAME,
+        existing_png_paths,
+        write_summary_markdown,
     )
 
 
@@ -57,6 +77,30 @@ def _detect_task_from_folders(folders: list[Path]) -> str:
     return task
 
 
+def _write_compare_host_info_json(output_dir: Path, labels: list[str], folders: list[Path]) -> Path:
+    """Write source-labeled host info metadata collected from input folders."""
+
+    payload: dict[str, Any] = {}
+    for label, folder in zip(labels, folders):
+        host_info_path = folder / HOST_PC_INFO_FILENAME
+        entry: dict[str, Any] = {"source": host_info_path.as_posix()}
+        if not host_info_path.is_file():
+            entry.update({"status": "missing", "message": "host_pc_info.json was not found in the input folder."})
+            payload[label] = entry
+            continue
+        try:
+            with host_info_path.open("r", encoding="utf-8") as f:
+                entry.update({"status": "ok", "payload": json.load(f)})
+        except (OSError, json.JSONDecodeError) as exc:
+            entry.update({"status": "error", "message": str(exc)})
+        payload[label] = entry
+
+    output_path = output_dir / HOST_PC_INFO_FILENAME
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Saved source Host PC Info: {output_path.name}")
+    return output_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare N benchmark result folders and generate model-wise bar charts."
@@ -84,6 +128,11 @@ def main() -> int:
         "--strip-owner",
         action="store_true",
         help="compare models by repository name only, ignoring leading Hugging Face owner ids",
+    )
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="save PNG charts only and skip combined.md, host_pc_info.json, and summary.md generation",
     )
     args = parser.parse_args()
 
@@ -124,6 +173,31 @@ def main() -> int:
         metrics_by_folder=metrics_by_folder,
         output_dir=output_dir,
     )
+
+    if not args.no_summary:
+        combined_md = output_dir / "combined.md"
+        write_compare_markdown(
+            combined_md,
+            metric_cls=metric_cls,
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+        )
+        compare_host_info_path = _write_compare_host_info_json(output_dir, labels, folders)
+        write_summary_markdown(
+            output_dir / "summary.md",
+            title=f"{task} Benchmark Comparison Summary",
+            host_info_path=compare_host_info_path,
+            table_markdown_path=combined_md,
+            plot_paths=existing_png_paths(output_dir),
+            plot_tables=build_compare_plot_tables(
+                metric_cls=metric_cls,
+                models=models,
+                labels=labels,
+                metrics_by_folder=metrics_by_folder,
+            ),
+            host_info_paths={label: folder / HOST_PC_INFO_FILENAME for label, folder in zip(labels, folders)},
+        )
 
     print(f"Saved charts to: {output_dir}")
     return 0

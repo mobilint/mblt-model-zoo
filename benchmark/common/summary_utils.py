@@ -36,10 +36,14 @@ _NPU_ARRAY_KEY_RE = re.compile(r"(?:^|\.)npus\[(\d+)\]\.(.+)$")
 
 _PLOT_TITLES_BY_NAME = {
     "rtf.png": "Real-Time Factor",
+    "inverse_rtf.png": "Inverse Real-Time Factor",
     "sec_per_j.png": "Seconds Per Joule",
     "rtf_per_w.png": "RTF Per Watt",
     "wer.png": "Word Error Rate",
     "cer.png": "Character Error Rate",
+    "p95_latency_s.png": "P95 Latency",
+    "throughput_samples_per_s.png": "Throughput",
+    "decode_tokens_per_s.png": "Decode Tokens Per Second",
     "prefill_tps.png": "Prefill Tokens Per Second",
     "measure_prefill_tps.png": "Prefill Tokens Per Second",
     "llm_prefill_tps.png": "Prefill Tokens Per Second",
@@ -66,6 +70,9 @@ _PLOT_TITLES_BY_NAME = {
     "measure_avg_memory_used_mb.png": "Memory Used Megabytes",
     "total_energy_j.png": "Total Energy",
     "measure_total_energy_j.png": "Total Energy",
+    "vision_fps.png": "Vision FPS",
+    "vision_encode_ms.png": "Vision Encode ms",
+    "vision_img_per_j.png": "Vision Images Per Joule",
 }
 
 _PLOT_NAME_ORDER = {name: idx for idx, name in enumerate(_PLOT_TITLES_BY_NAME)}
@@ -141,6 +148,7 @@ def write_summary_markdown(
     table_markdown_path: Path | str | None,
     plot_paths: Sequence[Path | str],
     plot_tables: Mapping[str, str] | None = None,
+    host_info_paths: Mapping[str, Path | str] | None = None,
 ) -> None:
     """Write a benchmark summary Markdown file with host info, plots, and table.
 
@@ -152,10 +160,15 @@ def write_summary_markdown(
         plot_paths: PNG files to embed in the summary.
         plot_tables: Optional Markdown tables keyed by plot PNG filename. When provided, matching tables are rendered
             directly below each plot and the bottom combined table is omitted.
+        host_info_paths: Optional source-labeled host info JSON files. When provided, host info is rendered per source.
     """
     summary_path = Path(path)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    host_info_lines = _host_info_markdown(Path(host_info_path) if host_info_path else None)
+    host_info_lines = (
+        _host_infos_markdown({label: Path(src_path) for label, src_path in host_info_paths.items()})
+        if host_info_paths
+        else _host_info_markdown(Path(host_info_path) if host_info_path else None)
+    )
     lines = [f"# {title}\n\n"]
     lines.extend(_plots_markdown(summary_path.parent, [Path(p) for p in plot_paths], plot_tables=plot_tables))
     if not plot_tables:
@@ -396,6 +409,70 @@ def _host_info_markdown(path: Path | None) -> list[str]:
     return lines
 
 
+def _host_infos_markdown(paths_by_label: Mapping[str, Path]) -> list[str]:
+    """Render source-labeled host info JSON files as merged comparison tables."""
+
+    lines = ["## Host PC Info\n\n"]
+    if not paths_by_label:
+        lines.append("Host PC info is not available.\n\n")
+        return lines
+
+    metadata_rows: list[tuple[str, dict[str, str]]] = [("Source", {}), ("Status", {})]
+    sections_by_label: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    section_order: list[str] = []
+    for label, path in paths_by_label.items():
+        metadata_rows[0][1][label] = path.as_posix()
+        if not path.is_file():
+            metadata_rows[1][1][label] = "missing: host_pc_info.json was not found in the input folder"
+            sections_by_label[label] = {}
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            metadata_rows[1][1][label] = f"error: {e}"
+            sections_by_label[label] = {}
+            continue
+
+        sections = _host_info_sections(payload)
+        if not sections:
+            metadata_rows[1][1][label] = "empty"
+            sections_by_label[label] = {}
+            continue
+        metadata_rows[1][1][label] = "ok"
+        label_sections: dict[str, list[tuple[str, str]]] = {}
+        for title, rows in sections:
+            label_sections[title] = rows
+            if title not in section_order:
+                section_order.append(title)
+        sections_by_label[label] = label_sections
+
+    labels = list(paths_by_label)
+    _append_merged_host_info_table(lines, "Sources", labels, metadata_rows)
+    for section in section_order:
+        field_values: dict[str, dict[str, str]] = {}
+        for label in labels:
+            for field, value in sections_by_label.get(label, {}).get(section, []):
+                field_values.setdefault(field, {})[label] = value
+        rows = [(field, values) for field, values in field_values.items()]
+        _append_merged_host_info_table(lines, section, labels, rows)
+    return lines
+
+
+def _append_merged_host_info_table(
+    lines: list[str], title: str, labels: Sequence[str], rows: Sequence[tuple[str, Mapping[str, str]]]
+) -> None:
+    """Append a source-merged host info table."""
+
+    lines.append(f"### {title}\n\n")
+    lines.append("| Field | " + " | ".join(_escape_markdown(label) for label in labels) + " |\n")
+    lines.append("| --- | " + " | ".join("---" for _ in labels) + " |\n")
+    for field, values_by_label in rows:
+        values = [_escape_markdown(values_by_label.get(label, "")) for label in labels]
+        lines.append(f"| `{_escape_markdown(field)}` | " + " | ".join(values) + " |\n")
+    lines.append("\n")
+
+
 def _plots_markdown(
     base_dir: Path,
     plot_paths: Sequence[Path],
@@ -471,13 +548,17 @@ def _host_info_sections(payload: Any) -> list[tuple[str, list[tuple[str, str]]]]
     return sections
 
 
-def _append_host_info_table(lines: list[str], title: str, rows: Sequence[tuple[str, str]]) -> None:
+def _append_host_info_table(
+    lines: list[str], title: str, rows: Sequence[tuple[str, str]], *, heading_level: int = 3
+) -> None:
     """Append one host info section as a Markdown table."""
-    lines.append(f"### {title}\n\n")
+    lines.append(f"{'#' * heading_level} {title}\n\n")
     _append_field_value_table(lines, rows)
 
 
-def _append_npu_info_markdown(lines: list[str], rows: Sequence[tuple[str, str]]) -> None:
+def _append_npu_info_markdown(
+    lines: list[str], rows: Sequence[tuple[str, str]], *, heading_level: int = 3
+) -> None:
     """Append NPU host info with ``npus`` array entries grouped by index."""
     common_rows: list[tuple[str, str]] = []
     indexed_rows: dict[int, list[tuple[str, str]]] = {}
@@ -490,15 +571,15 @@ def _append_npu_info_markdown(lines: list[str], rows: Sequence[tuple[str, str]])
         indexed_rows.setdefault(index, []).append((field, value))
 
     if not indexed_rows:
-        _append_host_info_table(lines, "NPU", rows)
+        _append_host_info_table(lines, "NPU", rows, heading_level=heading_level)
         return
 
-    lines.append("### NPU\n\n")
+    lines.append(f"{'#' * heading_level} NPU\n\n")
     if common_rows:
-        lines.append("#### General\n\n")
+        lines.append(f"{'#' * (heading_level + 1)} General\n\n")
         _append_field_value_table(lines, common_rows)
     for index in sorted(indexed_rows):
-        lines.append(f"#### NPU {index}\n\n")
+        lines.append(f"{'#' * (heading_level + 1)} NPU {index}\n\n")
         _append_field_value_table(lines, indexed_rows[index])
 
 

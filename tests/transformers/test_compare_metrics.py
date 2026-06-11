@@ -10,6 +10,8 @@ from benchmark.transformers.compare_metrics import (
     ASRCompareMetric,
     LLMCompareMetric,
     VLMCompareMetric,
+    build_compare_markdown,
+    build_compare_plot_tables,
     collect_metrics,
     common_model_ids,
     normalize_model_key,
@@ -154,6 +156,31 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
     assert (output_dir / "avg_power_w.png").is_file()
 
 
+def test_build_compare_markdown_and_plot_tables() -> None:
+    metric_a = LLMCompareMetric(prefill_tps={128: 10.0}, decode_tps={128: 20.0}, avg_power_w=3.0)
+    metric_b = LLMCompareMetric(prefill_tps={128: 11.0}, decode_tps={128: 21.0}, avg_power_w=4.0)
+    metrics_by_folder = [{"model-a": metric_a}, {"model-a": metric_b}]
+
+    combined = build_compare_markdown(
+        metric_cls=LLMCompareMetric,
+        models=["model-a"],
+        labels=["linux", "windows"],
+        metrics_by_folder=metrics_by_folder,
+    )
+    plot_tables = build_compare_plot_tables(
+        metric_cls=LLMCompareMetric,
+        models=["model-a"],
+        labels=["linux", "windows"],
+        metrics_by_folder=metrics_by_folder,
+    )
+
+    assert "linux prefill_tps 128" in combined
+    assert "windows avg_power_w" in combined
+    assert "prefill_tps.png" in plot_tables
+    assert "linux 128 tokens" in plot_tables["prefill_tps.png"]
+    assert "avg_power_w.png" in plot_tables
+
+
 def test_normalize_model_key_keeps_asr_beam_suffix() -> None:
     assert normalize_model_key(Path("whisper-small_beams1.json"), "whisper-small_beams1") == "whisper-small_beams1"
     assert normalize_model_key(Path("whisper-small_beams5.json"), "whisper-small_beams5") == "whisper-small_beams5"
@@ -292,6 +319,8 @@ def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) ->
     }
     (folder_a / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
     (folder_b / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_a / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Linux CPU"}}), encoding="utf-8")
+    (folder_b / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Windows CPU"}}), encoding="utf-8")
 
     result = subprocess.run(
         [
@@ -313,3 +342,12 @@ def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) ->
     assert "Auto-detected task: automatic-speech-recognition" in result.stdout
     assert "Common models across all folders: 1" in result.stdout
     assert (output_dir / "wer.png").is_file()
+    assert (output_dir / "combined.md").is_file()
+    assert (output_dir / "host_pc_info.json").is_file()
+    assert (output_dir / "summary.md").is_file()
+    summary = (output_dir / "summary.md").read_text(encoding="utf-8")
+    assert "| Field | linux_asr | windows_asr |" in summary
+    assert "### Sources" in summary
+    assert "### CPU" in summary
+    assert "Linux CPU" in summary
+    assert "Windows CPU" in summary
