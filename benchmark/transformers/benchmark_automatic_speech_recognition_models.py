@@ -783,16 +783,19 @@ def _measure_target(
     try:
         if tracker is not None:
             tracker.start()
-        for sample in tqdm(samples, desc="ASR samples", leave=False, unit="sample"):
-            if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
-                break
-            if _should_skip_whisper_long_form_sample(model_id, sample):
-                print(
-                    "Skipping sample (>30s Whisper limit): "
-                    f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
-                )
-                continue
-            timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
+        total = int(max_measured_samples) if max_measured_samples is not None else None
+        with tqdm(total=total, desc="ASR samples", leave=False, unit="sample") as progress_bar:
+            for sample in samples:
+                if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
+                    break
+                if _should_skip_whisper_long_form_sample(model_id, sample):
+                    print(
+                        "Skipping sample (>30s Whisper limit): "
+                        f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
+                    )
+                    continue
+                timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
+                progress_bar.update(1)
     finally:
         _stop_tracker_safe_common(tracker)
     device_metric = _extract_device_metric_common(tracker) if tracker is not None else {}
