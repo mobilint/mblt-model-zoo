@@ -90,7 +90,7 @@ def test_asr_compare_metric_from_payload() -> None:
             "decode_tokens_per_s": 77.0,
             "avg_tokens_per_sample": 10.0,
         },
-        "device": {"avg_power_w": 8.0},
+        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0, "sec_per_j": 3.0, "rtf_per_w": 0.0625},
     }
     metric = ASRCompareMetric.from_payload(payload)
     assert metric is not None
@@ -101,6 +101,9 @@ def test_asr_compare_metric_from_payload() -> None:
     assert metric.rtf == 0.5
     assert metric.decode_tokens_per_s == 77.0
     assert metric.avg_power_w == 8.0
+    assert metric.total_energy_j == 4.0
+    assert metric.sec_per_j == 3.0
+    assert metric.rtf_per_w == 0.0625
 
 
 def test_task_registry_contains_all_tasks() -> None:

@@ -80,6 +80,40 @@ def _safe_div(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+def _positive_float(value: Any) -> float | None:
+    """Return a positive float for numeric values."""
+
+    if not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    return numeric if numeric > 0.0 else None
+
+
+def add_device_efficiency_metrics(
+    asr_metric: Mapping[str, Any],
+    device_metric: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return device metrics augmented with ASR energy-efficiency metrics.
+
+    Args:
+        asr_metric: ASR metric payload containing ``total_audio_s`` and ``rtf``.
+        device_metric: Device metric payload containing power or energy values.
+
+    Returns:
+        A copy of ``device_metric`` with ``sec_per_j`` and ``rtf_per_w`` keys added when enough data is available.
+    """
+
+    augmented = dict(device_metric)
+    total_audio_s = _positive_float(asr_metric.get("total_audio_s"))
+    total_energy_j = _positive_float(device_metric.get("total_energy_j"))
+    rtf = _positive_float(asr_metric.get("rtf"))
+    avg_power_w = _positive_float(device_metric.get("avg_power_w"))
+
+    augmented["sec_per_j"] = None if total_audio_s is None or total_energy_j is None else total_audio_s / total_energy_j
+    augmented["rtf_per_w"] = None if rtf is None or avg_power_w is None else rtf / avg_power_w
+    return augmented
+
+
 def _percentile(sorted_values: Sequence[float], percentile: float) -> float:
     """Return a linear-interpolated percentile from pre-sorted values."""
 

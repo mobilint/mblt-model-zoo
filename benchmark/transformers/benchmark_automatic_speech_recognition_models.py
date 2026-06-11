@@ -39,6 +39,7 @@ from benchmark.common.summary_utils import write_summary_markdown as _write_summ
 from benchmark.transformers.asr_metrics import (
     ASRMetricSummary,
     SampleTiming,
+    add_device_efficiency_metrics,
     format_metrics_row,
     summarize_timings,
     summary_to_dict,
@@ -810,6 +811,8 @@ def _write_target_json(
     sample_timings: Sequence[SampleTiming],
 ) -> None:
     reported_num_beams = _reported_num_beams(sample_timings)
+    asr_summary = summary_to_dict(summary)
+    augmented_device_metric = add_device_efficiency_metrics(asr_summary, device_metric)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "measure",
@@ -829,8 +832,8 @@ def _write_target_json(
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
         "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
-        "asr": summary_to_dict(summary),
-        "device": dict(device_metric),
+        "asr": asr_summary,
+        "device": augmented_device_metric,
         "device_trace": dict(device_trace),
     }
     effective_generate_kwargs = [item.effective_generate_kwargs for item in sample_timings]

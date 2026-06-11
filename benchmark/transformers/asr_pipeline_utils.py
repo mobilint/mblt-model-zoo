@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from benchmark.transformers.asr_metrics import SampleTiming
+from benchmark.transformers.asr_metrics import SampleTiming, add_device_efficiency_metrics
 
 
 def asr_pipeline_inputs(sample: Mapping[str, Any]) -> list[tuple[Any, dict[str, Any]]]:
@@ -387,6 +387,7 @@ def write_combined_outputs(
             print(f"Warning: skipping {path.name} because ASR summary is invalid: {exc}")
             continue
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
+        device_metric = add_device_efficiency_metrics(asr, device_metric)
         payload_num_beams = payload.get("num_beams")
         row_num_beams = int(payload_num_beams) if isinstance(payload_num_beams, int) else None
         rows.append(
@@ -428,6 +429,8 @@ def write_combined_outputs(
                     f"{float(row.get('throughput_samples_per_s', 0.0)):.4f}",
                     f"{float(row.get('rtf', 0.0)):.4f}",
                     f"{float(row.get('inverse_rtf', 0.0)):.4f}",
+                    "" if row.get("sec_per_j") is None else f"{float(row['sec_per_j']):.4f}",
+                    "" if row.get("rtf_per_w") is None else f"{float(row['rtf_per_w']):.6f}",
                     f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
                 ]
             )
@@ -443,6 +446,8 @@ def write_combined_outputs(
                     "samples_per_s",
                     "RTF",
                     "inverse_RTF",
+                    "sec/J",
+                    "RTF/W",
                     "decode_tokens_per_s",
                 ],
                 markdown_rows,
@@ -469,7 +474,7 @@ def write_combined_outputs(
         table_markdown_path=combined_md,
         plot_paths=existing_png_paths_func(
             output_dir,
-            prefixes=("rtf", "wer", "cer"),
+            prefixes=("rtf", "wer", "cer", "sec_per_j", "rtf_per_w"),
         ),
         plot_tables={},
     )
@@ -481,7 +486,7 @@ def make_rtf_chart(
     rows: Sequence[Mapping[str, Any]],
     plot_scalar_chart_func: Any,
 ) -> None:
-    """Render summary RTF/WER/CER charts from combined ASR rows."""
+    """Render summary ASR metric charts from combined ASR rows."""
 
     if not rows:
         return
@@ -505,6 +510,8 @@ def make_rtf_chart(
 
     for filename, key, title, x_label, scale in (
         ("rtf.png", "rtf", "Real-Time Factor", "RTF", 1.0),
+        ("sec_per_j.png", "sec_per_j", "Seconds Per Joule", "Seconds Per Joule", 1.0),
+        ("rtf_per_w.png", "rtf_per_w", "RTF Per Watt", "RTF/W", 1.0),
         ("wer.png", "wer", "Word Error Rate", "WER (%)", 100.0),
         ("cer.png", "cer", "Character Error Rate", "CER (%)", 100.0),
     ):

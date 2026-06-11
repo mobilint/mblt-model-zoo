@@ -326,6 +326,8 @@ class ASRCompareMetric(BaseCompareMetric):
     cer: float | None = None
     rtf: float | None = None
     inverse_rtf: float | None = None
+    sec_per_j: float | None = None
+    rtf_per_w: float | None = None
     mean_latency_s: float | None = None
     p50_latency_s: float | None = None
     p95_latency_s: float | None = None
@@ -351,6 +353,8 @@ class ASRCompareMetric(BaseCompareMetric):
         ScalarChartSpec("cer.png", "Character Error Rate", "CER (%)", "cer_pct"),
         ScalarChartSpec("rtf.png", "Real-Time Factor", "RTF", "rtf"),
         ScalarChartSpec("inverse_rtf.png", "Inverse Real-Time Factor", "x realtime", "inverse_rtf"),
+        ScalarChartSpec("sec_per_j.png", "Seconds Per Joule", "Seconds Per Joule", "sec_per_j"),
+        ScalarChartSpec("rtf_per_w.png", "RTF Per Watt", "RTF/W", "rtf_per_w"),
         ScalarChartSpec("p95_latency_s.png", "P95 Latency", "Seconds", "p95_latency_s"),
         ScalarChartSpec(
             "throughput_samples_per_s.png",
@@ -381,6 +385,8 @@ class ASRCompareMetric(BaseCompareMetric):
             cer=_as_float(asr.get("cer")),
             rtf=_as_float(asr.get("rtf")),
             inverse_rtf=_as_float(asr.get("inverse_rtf")),
+            sec_per_j=_as_float(device.get("sec_per_j")),
+            rtf_per_w=_as_float(device.get("rtf_per_w")),
             mean_latency_s=_as_float(asr.get("mean_latency_s")),
             p50_latency_s=_as_float(asr.get("p50_latency_s")),
             p95_latency_s=_as_float(asr.get("p95_latency_s")),

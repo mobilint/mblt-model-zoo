@@ -1276,6 +1276,55 @@ def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypat
     assert captured_rows[0]["num_beams"] == 7
 
 
+def test_write_combined_outputs_adds_asr_efficiency_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify ASR combined outputs derive sec/J and RTF/W from device metrics."""
+
+    payload = {
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "num_beams": 1,
+        "asr": {
+            "num_samples": 1,
+            "total_audio_s": 12.0,
+            "total_generate_s": 6.0,
+            "wer": 0.1,
+            "cer": 0.02,
+            "mean_latency_s": 6.0,
+            "p50_latency_s": 6.0,
+            "p95_latency_s": 6.0,
+            "throughput_samples_per_s": 1.0 / 6.0,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "decode_tokens_per_s": 10.0,
+            "avg_tokens_per_sample": 60.0,
+        },
+        "device": {"total_energy_j": 3.0, "avg_power_w": 10.0},
+    }
+    (tmp_path / "whisper-small_beams1.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+    captured_rows: list[dict[str, object]] = []
+
+    def fake_chart(out_dir, rows):  # type: ignore[no-untyped-def]
+        captured_rows.extend(list(rows))
+
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", fake_chart)
+    monkeypatch.setattr(asr_bench, "_write_summary_markdown", lambda *args, **kwargs: None)
+
+    asr_bench._write_combined_outputs(tmp_path)
+
+    assert captured_rows[0]["sec_per_j"] == 4.0
+    assert captured_rows[0]["rtf_per_w"] == 0.05
+    combined_md = (tmp_path / "combined.md").read_text(encoding="utf-8")
+    assert "sec/J" in combined_md
+    assert "RTF/W" in combined_md
+    csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
+    assert "sec_per_j" in csv_text
+    assert "rtf_per_w" in csv_text
+
+
 def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify CLI language is forwarded into summary metric normalization."""
 
@@ -2306,5 +2355,7 @@ def test_write_combined_outputs_unions_row_headers_for_device_metrics(
     csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
     assert "avg_power_w" in csv_text
     assert "total_energy_j" in csv_text
+    assert "sec_per_j" in csv_text
+    assert "rtf_per_w" in csv_text
     assert "model-a" in csv_text
     assert "model-b" in csv_text
