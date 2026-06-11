@@ -124,6 +124,7 @@ class TextBenchmarkTarget:
     base: str
     mxq_path: str | None
     max_batch_size: int
+    batch_mode: str
 
 
 def _safe_filename(model_id: str) -> str:
@@ -143,26 +144,6 @@ def _print_exception(message: str, exc: BaseException, *, debug_errors: bool) ->
     print(f"{message}: {_format_exception(exc)}")
     if debug_errors:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
-
-
-def _add_batch_selection_args(parser: argparse.ArgumentParser) -> None:
-    """Add mutually exclusive batch target selection flags."""
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--batch",
-        dest="batch_mode",
-        action="store_const",
-        const=_BATCH_MODE_BATCH,
-        default=_BATCH_MODE_NON_BATCH,
-        help="benchmark only targets whose config max_batch_size is greater than 1",
-    )
-    group.add_argument(
-        "--non-batch",
-        dest="batch_mode",
-        action="store_const",
-        const=_BATCH_MODE_NON_BATCH,
-        help="benchmark only targets whose config max_batch_size is 1 (default)",
-    )
 
 
 def _is_gguf_model_id(model_id: str) -> bool:
@@ -246,24 +227,9 @@ def _resolve_config_max_batch_size(model_id: str, revision: str | None, *, task:
     return _extract_config_max_batch_size(payload, task=task)
 
 
-def _target_matches_batch_mode(max_batch_size: int, batch_mode: str) -> bool:
-    """Return whether a resolved batch size belongs to the requested mode."""
-    if batch_mode == _BATCH_MODE_BATCH:
-        return max_batch_size > 1
-    if batch_mode == _BATCH_MODE_NON_BATCH:
-        return max_batch_size == 1
-    raise ValueError(f"Unsupported batch mode: {batch_mode}")
-
-
-def _resolve_filter_max_batch_size(max_batch_size: int | None, batch_mode: str) -> int | None:
-    """Resolve the effective max batch size used for batch-mode filtering."""
-    if max_batch_size is not None:
-        return max_batch_size
-    if batch_mode == _BATCH_MODE_NON_BATCH:
-        return 1
-    if batch_mode == _BATCH_MODE_BATCH:
-        return None
-    raise ValueError(f"Unsupported batch mode: {batch_mode}")
+def _batch_mode_from_max_batch_size(max_batch_size: int) -> str:
+    """Return the benchmark batch mode implied by one target max batch size."""
+    return _BATCH_MODE_BATCH if max_batch_size > 1 else _BATCH_MODE_NON_BATCH
 
 
 def _target_filter_revision(model_id: str, revision_candidates: list[str | None], mxq_path: str | None) -> str | None:
@@ -276,25 +242,19 @@ def _target_filter_revision(model_id: str, revision_candidates: list[str | None]
 def _filter_text_targets_by_batch_mode(
     targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
     *,
-    batch_mode: str,
     task: str = "text-generation",
 ) -> list[TextBenchmarkTarget]:
-    """Filter text-generation targets by GGUF status and config max_batch_size."""
+    """Filter unsupported targets and annotate each supported target with batch metadata."""
     filtered: list[TextBenchmarkTarget] = []
     for model_id, revision_candidates, label, base, mxq_path in targets:
         revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
-        max_batch_size = _resolve_filter_max_batch_size(
-            _resolve_config_max_batch_size(model_id, revision, task=task),
-            batch_mode,
-        )
+        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
         if max_batch_size is None:
-            print(f"Skip {label}: max_batch_size is not available for batch-mode filtering.")
-            continue
-        if not _target_matches_batch_mode(max_batch_size, batch_mode):
-            print(f"Skip {label}: max_batch_size={max_batch_size} does not match --{batch_mode.replace('_', '-')}.")
+            max_batch_size = 1
+        if max_batch_size is None:
             continue
         filtered.append(
             TextBenchmarkTarget(
@@ -304,6 +264,7 @@ def _filter_text_targets_by_batch_mode(
                 base=base,
                 mxq_path=mxq_path,
                 max_batch_size=max_batch_size,
+                batch_mode=_batch_mode_from_max_batch_size(max_batch_size),
             )
         )
     return filtered
@@ -930,7 +891,6 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by text-generation benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    _add_batch_selection_args(parser)
     parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
@@ -1047,46 +1007,59 @@ def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
-def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bool) -> None:
-    """Apply the single-core constraint for batch LLM benchmarks."""
-    if args.batch_mode != _BATCH_MODE_BATCH:
-        return
-    if core_mode_explicit and args.core_mode != "single":
-        raise SystemExit("--batch only supports --core-mode single for batch LLM benchmarks.")
-    args.core_mode = "single"
+def _is_batch_mode(batch_mode: str) -> bool:
+    """Return whether the resolved target batch mode uses batch execution settings."""
+    return batch_mode == _BATCH_MODE_BATCH
 
 
-def _default_single_target_cores_for_batch_mode(args: argparse.Namespace) -> Sequence[str] | None:
+def _default_single_target_cores_for_batch_mode(batch_mode: str) -> Sequence[str] | None:
     """Return the default single-mode target cores for the active benchmark mode."""
-    if args.batch_mode == _BATCH_MODE_BATCH:
+    if _is_batch_mode(batch_mode):
         return None
     return ("0:0",)
 
 
-def _resolve_batch_sweep_lengths(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
-    """Scale default sweep lengths down for batch text-generation benchmarks."""
-    if args.command != "sweep" or args.batch_mode != _BATCH_MODE_BATCH:
-        return
+def _iter_core_modes_for_target(args: argparse.Namespace, batch_mode: str, *, disable_npu_specific_args: bool) -> list[str | None]:
+    """Return core modes to run for one target based on its resolved batch mode."""
+    if disable_npu_specific_args:
+        return [None]
+    if _is_batch_mode(batch_mode):
+        return ["single"]
+    return list(_iter_core_modes_common(args.core_mode))
+
+
+def _target_sweep_lengths(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    batch_mode: str,
+) -> tuple[tuple[int, int, int], list[int]]:
+    """Return per-target sweep lengths, scaling defaults for batch targets."""
+    prefill_range = args.prefill_range
+    cache_lengths = list(args.cache_lengths)
+    if not _is_batch_mode(batch_mode):
+        return prefill_range, cache_lengths
 
     scaled: list[str] = []
     if not _flag_present(raw_argv, "--prefill-range"):
-        original_prefill_range = args.prefill_range
-        args.prefill_range = _scale_range_arg(args.prefill_range, _BATCH_SWEEP_LENGTH_SCALE)
-        scaled.append(f"prefill_range={original_prefill_range}->{args.prefill_range}")
+        original_prefill_range = prefill_range
+        prefill_range = _scale_range_arg(prefill_range, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"prefill_range={original_prefill_range}->{prefill_range}")
     if not _flag_present(raw_argv, "--cache-lengths"):
-        original_cache_lengths = list(args.cache_lengths)
-        args.cache_lengths = _scale_int_list(args.cache_lengths, _BATCH_SWEEP_LENGTH_SCALE)
-        scaled.append(f"cache_lengths={original_cache_lengths}->{args.cache_lengths}")
+        original_cache_lengths = list(cache_lengths)
+        cache_lengths = _scale_int_list(cache_lengths, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"cache_lengths={original_cache_lengths}->{cache_lengths}")
 
     if scaled:
         print(
-            "Auto-scaled --batch sweep lengths by "
+            "Auto-scaled batch target sweep lengths by "
             f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: " + ", ".join(scaled)
         )
+    return prefill_range, cache_lengths
 
 
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
+    args._raw_argv = list(raw_argv)
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
@@ -1117,8 +1090,6 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
-    _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
-    _resolve_batch_sweep_lengths(args, raw_argv)
 
 
 def _args_for_target_device_backend(
@@ -1168,7 +1139,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
 
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
@@ -1215,11 +1185,21 @@ def _run_sweep(args: argparse.Namespace) -> int:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    filtered_targets = _filter_text_targets_by_batch_mode(targets)
+    run_targets: list[
+        tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+    ] = []
     for target in filtered_targets:
-        for core_mode in core_modes:
+        target_prefill_range, target_cache_lengths = _target_sweep_lengths(
+            args,
+            getattr(args, "_raw_argv", []),
+            target.batch_mode,
+        )
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1230,10 +1210,24 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
+                    target_prefill_range,
+                    target_cache_lengths,
                 )
             )
 
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
+    for (
+        model_id,
+        revision_candidates,
+        label,
+        base,
+        mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        prefill_range,
+        cache_lengths,
+    ) in tqdm(
         run_targets,
         desc="Benchmarking models",
         total=len(run_targets),
@@ -1260,14 +1254,15 @@ def _run_sweep(args: argparse.Namespace) -> int:
             continue
         print(
             "Run config: "
-            f"batch_size={batch_size} core_mode={core_mode or 'default'} revision={revision or 'main'} "
+            f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
+            f"revision={revision or 'main'} "
             f"device={args.device} device_backend={target_args.device_backend} "
             f"prefill_chunk_size={args.prefill_chunk_size if args.prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
             f"warmup_prefill={_SWEEP_WARMUP_PREFILL} warmup_decode={_SWEEP_WARMUP_DECODE} "
-            f"prefill_range={args.prefill_range} cache_lengths={args.cache_lengths} "
+            f"prefill_range={prefill_range} cache_lengths={cache_lengths} "
             f"decode_window={args.decode_window} repeat={args.repeat} warmup={args.warmup}"
         )
         if _should_precheck_cuda(args):
@@ -1298,7 +1293,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     mxq_path=mxq_path,
-                    default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+                    default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
                 )
             except Exception as e:
                 if _is_cuda_oom_error(e):
@@ -1334,8 +1329,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 try:
                     run_results.append(
                         measurer.measure_full(
-                            prefill_range=args.prefill_range,
-                            cache_lengths=args.cache_lengths,
+                            prefill_range=prefill_range,
+                            cache_lengths=cache_lengths,
                             decode_window=args.decode_window,
                             batch_size=batch_size,
                             prefill_chunk_size=resolved_prefill_chunk_size,
@@ -1547,7 +1542,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         payload: dict[str, Any] = {
             "model": label,
-            "batch_mode": args.batch_mode,
+            "batch_mode": batch_mode,
             "batch_size": batch_size,
             "benchmark": asdict(result),
             "device": device_payload,
@@ -1742,7 +1737,7 @@ def _rebuild_measure_outputs(output_dir: str | Path) -> None:
 
 def _collect_text_run_targets(
     args: argparse.Namespace,
-) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int]]]:
+) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]]]:
     """Resolve text-generation benchmark targets and core-mode expansion."""
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
@@ -1756,7 +1751,6 @@ def _collect_text_run_targets(
     )
     os.makedirs(output_dir, exist_ok=True)
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets: list[tuple[str, list[str | None], str, str, str | None]]
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1774,11 +1768,14 @@ def _collect_text_run_targets(
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    filtered_targets = _filter_text_targets_by_batch_mode(targets)
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
     for target in filtered_targets:
-        for core_mode in core_modes:
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1789,6 +1786,7 @@ def _collect_text_run_targets(
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
                 )
             )
     return output_dir, disable_npu_specific_args, run_targets
@@ -1806,7 +1804,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
     _collect_host_pc_info(output_dir)
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
+    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
@@ -1845,7 +1843,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 trust_remote_code=args.trust_remote_code,
                 core_mode=core_mode,
                 mxq_path=mxq_path,
-                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
             )
             measurer = TPSMeasurer(pipeline)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
@@ -1953,7 +1951,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "text-generation",
-                "batch_mode": args.batch_mode,
+                "batch_mode": batch_mode,
                 "batch_size": batch_size,
                 "prefill": args.prefill,
                 "decode": args.decode,

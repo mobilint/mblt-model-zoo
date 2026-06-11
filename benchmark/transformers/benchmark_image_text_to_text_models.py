@@ -78,9 +78,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_time_series as _extract_device_time_series,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    iter_core_modes as _iter_core_modes_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -110,27 +107,29 @@ _VLM_WARMUP_DECODE = 32
 
 try:
     from benchmark_text_generation_models import (
-        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
+        _iter_core_modes_for_target,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
+        _target_sweep_lengths,
     )
 except ImportError:
     from .benchmark_text_generation_models import (
-        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
+        _iter_core_modes_for_target,
         _is_cuda_oom_error,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
+        _target_sweep_lengths,
     )
 
 
@@ -144,6 +143,7 @@ class VLMBenchmarkTarget:
     base: str
     mxq_path: str | None
     max_batch_size: int
+    batch_mode: str
 
 
 def _safe_filename(text: str) -> str:
@@ -1104,7 +1104,6 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by image-text-to-text benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    _add_batch_selection_args(parser)
     _add_device_tracking_args(parser)
     parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
@@ -1224,18 +1223,9 @@ def _flag_present(raw_argv: list[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
-def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bool) -> None:
-    """Apply the single-core constraint for batch LLM benchmarks."""
-    if args.batch_mode != "batch":
-        return
-    if core_mode_explicit and args.core_mode != "single":
-        raise SystemExit("--batch only supports --core-mode single for batch LLM benchmarks.")
-    args.core_mode = "single"
-
-
-def _default_single_target_cores_for_batch_mode(args: argparse.Namespace) -> Sequence[str] | None:
-    """Return the default single-mode target cores for the active benchmark mode."""
-    if args.batch_mode == "batch":
+def _default_single_target_cores_for_batch_mode(batch_mode: str) -> Sequence[str] | None:
+    """Return the default single-mode target cores for one resolved target batch mode."""
+    if batch_mode == "batch":
         return None
     return ("0:0",)
 
@@ -1272,7 +1262,7 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
-    _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
+    args._raw_argv = list(raw_argv)
 
 
 def _args_for_target_device_backend(
@@ -1305,7 +1295,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     script_dir = Path(__file__).resolve().parent
     output_dir = (
         Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
@@ -1360,17 +1349,27 @@ def _run_sweep(args: argparse.Namespace) -> int:
             base=target.base,
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
+            batch_mode=target.batch_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
-            batch_mode=args.batch_mode,
             task="image-text-to-text",
         )
     ]
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    run_targets: list[
+        tuple[str, str | None, str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+    ] = []
     for target in targets:
-        for core_mode in core_modes:
+        target_prefill_range, target_cache_lengths = _target_sweep_lengths(
+            args,
+            getattr(args, "_raw_argv", []),
+            target.batch_mode,
+        )
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1381,10 +1380,24 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
+                    target_prefill_range,
+                    target_cache_lengths,
                 )
             )
 
-    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
+    for (
+        model_id,
+        revision,
+        label,
+        base,
+        target_mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        prefill_range,
+        cache_lengths,
+    ) in tqdm(
         run_targets,
         desc="Benchmarking VLM models",
         unit="model-mode",
@@ -1424,9 +1437,12 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 revision,
                 target_mxq_path,
                 core_mode,
-                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
             )
             target_args.batch_size = batch_size
+            target_args.batch_mode = batch_mode
+            target_args.prefill_range = prefill_range
+            target_args.cache_lengths = cache_lengths
             payload, rows = _run_model(target_args, label, pipeline)
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
@@ -1446,7 +1462,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
 def _collect_vlm_run_targets(
     args: argparse.Namespace,
-) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int]]]:
+) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int, str]]]:
     """Resolve image-text-to-text benchmark targets and core-mode expansion."""
     script_dir = Path(__file__).resolve().parent
     output_dir = (
@@ -1476,7 +1492,6 @@ def _collect_vlm_run_targets(
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
             raw_targets.append((model_id, [revision], label, base, args.mxq_path))
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets = [
         VLMBenchmarkTarget(
             model_id=target.model_id,
@@ -1485,17 +1500,20 @@ def _collect_vlm_run_targets(
             base=target.base,
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
+            batch_mode=target.batch_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
-            batch_mode=args.batch_mode,
             task="image-text-to-text",
         )
     ]
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int, str]] = []
     for target in targets:
-        for core_mode in core_modes:
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1506,6 +1524,7 @@ def _collect_vlm_run_targets(
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
                 )
             )
     return output_dir, disable_npu_specific_args, run_targets
@@ -1733,11 +1752,12 @@ def _run_measure(args: argparse.Namespace) -> int:
     if not run_targets:
         return 0
     _collect_host_pc_info(output_dir)
-    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
+    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
         target_args.batch_size = batch_size
+        target_args.batch_mode = batch_mode
         if _is_cuda_device(args.device):
             _clear_cuda_memory(args.device)
         json_path = output_dir / f"{base}_measure.json"
@@ -1756,7 +1776,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 revision,
                 target_mxq_path,
                 core_mode,
-                default_single_target_cores=_default_single_target_cores_for_batch_mode(args),
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
             )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
@@ -1860,7 +1880,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "image-text-to-text",
-                "batch_mode": args.batch_mode,
+                "batch_mode": batch_mode,
                 "batch_size": batch_size,
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
