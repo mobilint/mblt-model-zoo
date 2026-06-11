@@ -113,7 +113,10 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help=("directory to save PNG charts (default: benchmark/transformers/results/charts/<folder1_folder2_...>)"),
+        help=(
+            "directory to save comparison outputs "
+            "(default: benchmark/transformers/results/comparison/<folder1_folder2_...>)"
+        ),
     )
     parser.add_argument(
         "--task",
@@ -199,7 +202,7 @@ def main() -> int:
             host_info_paths={label: folder / HOST_PC_INFO_FILENAME for label, folder in zip(labels, folders)},
         )
 
-    print(f"Saved charts to: {output_dir}")
+    print(f"Saved comparison outputs to: {output_dir}")
     return 0
 
 

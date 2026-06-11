@@ -569,8 +569,8 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
 
 ## Compare Result Folders
 
-`plot_compare_benchmark_results.py` compares multiple benchmark result folders and generates
-model-wise bar charts.
+`compare_benchmark_results.py` compares multiple benchmark result folders and generates
+model-wise bar charts, comparison tables, and a Markdown summary.
 
 When `--task` is omitted, the compare script auto-detects the task from JSON payload `task` fields
 and falls back to `text-generation` for older payloads without task metadata. If the input folders
@@ -581,35 +581,35 @@ folders.
 ### Compare Text-Generation Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/text_generation \
   benchmark/transformers/results/RTX3090/text_generation \
-  --output-dir benchmark/transformers/results/charts/text_generation_compare \
+  --output-dir benchmark/transformers/results/comparison/text_generation_compare \
   --task text-generation
 ```
 
 ### Compare VLM Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/image_text_to_text \
   benchmark/transformers/results/RTX3090/image_text_to_text \
-  --output-dir benchmark/transformers/results/charts/vlm_compare \
+  --output-dir benchmark/transformers/results/comparison/vlm_compare \
   --task image-text-to-text
 ```
 
 ### Compare ASR Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/asr \
   benchmark/transformers/results/RTX3090/asr \
-  --output-dir benchmark/transformers/results/charts/asr_compare \
+  --output-dir benchmark/transformers/results/comparison/asr_compare \
   --task automatic-speech-recognition
 ```
 
-If `--output-dir` is omitted, charts are saved under `benchmark/transformers/results/charts/` using
-a directory name derived from the input folder names.
+If `--output-dir` is omitted, comparison outputs are saved under
+`benchmark/transformers/results/comparison/` using a directory name derived from the input folder names.
 
 ## Search Prefill Chunk Size
 
@@ -741,7 +741,7 @@ uv run python -m py_compile \
   benchmark/transformers/benchmark_text_generation_models.py \
   benchmark/transformers/benchmark_image_text_to_text_models.py \
   benchmark/transformers/search_prefill_chunk_size.py \
-  benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/update_prefill_chunk_size_configs.py \
   benchmark/transformers/chart_utils.py
 ```
@@ -754,7 +754,7 @@ uv run python benchmark/transformers/benchmark_image_text_to_text_models.py --he
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py measure --help
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py sweep --help
 uv run python benchmark/transformers/search_prefill_chunk_size.py --help
-uv run python benchmark/transformers/plot_compare_benchmark_results.py --help
+uv run python benchmark/transformers/compare_benchmark_results.py --help
 uv run python benchmark/transformers/update_prefill_chunk_size_configs.py --help
 uv run mblt-model-zoo tps measure --help
 uv run mblt-model-zoo tps sweep --help

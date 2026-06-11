@@ -73,7 +73,7 @@ def folder_prefix(folders: list[Path]) -> str:
 
 
 def default_charts_dir(script_dir: Path, folders: list[Path]) -> Path:
-    return _default_charts_dir_common(script_dir, folders, use_stem=False)
+    return script_dir / "results" / "comparison" / folder_prefix(folders)
 
 
 def folder_labels(folders: list[Path]) -> list[str]:

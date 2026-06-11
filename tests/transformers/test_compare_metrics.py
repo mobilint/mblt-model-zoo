@@ -275,12 +275,12 @@ def test_collect_metrics_strips_owner_when_requested(tmp_path: Path) -> None:
     assert list(metrics.keys()) == ["model-x"]
 
 
-def test_plot_compare_benchmark_results_module_help_smoke() -> None:
+def test_compare_benchmark_results_module_help_smoke() -> None:
     """Verify package/module execution path works for compare help output."""
 
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        [sys.executable, "-m", "benchmark.transformers.plot_compare_benchmark_results", "--help"],
+        [sys.executable, "-m", "benchmark.transformers.compare_benchmark_results", "--help"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -291,7 +291,7 @@ def test_plot_compare_benchmark_results_module_help_smoke() -> None:
     assert "Compare N benchmark result folders" in result.stdout
 
 
-def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) -> None:
+def test_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) -> None:
     """Verify compare CLI detects ASR payloads when --task is omitted."""
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -326,7 +326,7 @@ def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) ->
         [
             sys.executable,
             "-m",
-            "benchmark.transformers.plot_compare_benchmark_results",
+            "benchmark.transformers.compare_benchmark_results",
             str(folder_a),
             str(folder_b),
             "--output-dir",
@@ -351,3 +351,13 @@ def test_plot_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) ->
     assert "### CPU" in summary
     assert "Linux CPU" in summary
     assert "Windows CPU" in summary
+
+
+def test_transformer_default_compare_output_dir_uses_comparison(tmp_path: Path) -> None:
+    """Verify the default compare output root is named comparison."""
+
+    from benchmark.transformers.chart_utils import default_charts_dir
+
+    output_dir = default_charts_dir(tmp_path, [Path("linux_asr"), Path("windows_asr")])
+
+    assert output_dir == tmp_path / "results" / "comparison" / "linux_asr_windows_asr"
