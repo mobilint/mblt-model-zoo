@@ -72,6 +72,7 @@ from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
 from benchmark.transformers.asr_qwen_utils import is_qwen3_asr_model as _is_qwen3_asr_model
 from benchmark.transformers.asr_qwen_utils import move_native_qwen3_asr_to_device as _move_native_qwen3_asr_to_device
 from benchmark.transformers.asr_qwen_utils import quiet_apscheduler_info_logs as _quiet_apscheduler_info_logs
+from benchmark.transformers.asr_qwen_utils import resolve_native_qwen3_asr_language as _resolve_native_qwen3_asr_language
 from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
     resolve_native_qwen3_asr_pad_token_id as _resolve_native_qwen3_asr_pad_token_id,
 )
@@ -572,6 +573,14 @@ def _generate_kwargs_for_target(args: argparse.Namespace, model_id: str) -> dict
     }
 
 
+def _native_language_for_target(args: argparse.Namespace, model_id: str) -> str | None:
+    """Return the language hint expected by a target's native ASR API."""
+
+    if _is_qwen3_asr_model(model_id):
+        return _resolve_native_qwen3_asr_language(args.language)
+    return args.language
+
+
 def _sample_preview(
     samples: Iterable[Mapping[str, Any]],
 ) -> tuple[Mapping[str, Any] | None, Iterable[Mapping[str, Any]]]:
@@ -1012,13 +1021,14 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
+            native_language = _native_language_for_target(args, target.model_id)
             measure_samples = _consume_warmup_samples(
                 target.model_id,
                 pipe,
                 iter(current_samples),
                 generate_kwargs,
                 args.warmup,
-                native_language=args.language,
+                native_language=native_language,
             )
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
@@ -1026,7 +1036,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipe,
                 measure_samples,
                 generate_kwargs,
-                native_language=args.language,
+                native_language=native_language,
                 max_measured_samples=args.num_samples,
             )
             if not timings:

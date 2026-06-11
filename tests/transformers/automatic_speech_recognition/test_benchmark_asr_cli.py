@@ -1527,6 +1527,24 @@ def test_run_one_sample_native_qwen_without_language_param_keeps_backward_compat
     assert pipe.calls == [([0.0, 0.0, 0.0, 0.0], 16000)]
 
 
+def test_resolve_native_qwen3_asr_language_maps_cli_codes() -> None:
+    """Verify CLI language tags are mapped to native Qwen3-ASR language names."""
+
+    assert asr_bench._resolve_native_qwen3_asr_language("en") == "English"
+    assert asr_bench._resolve_native_qwen3_asr_language("ko") == "Korean"
+    assert asr_bench._resolve_native_qwen3_asr_language("English") == "English"
+    assert asr_bench._resolve_native_qwen3_asr_language(None) is None
+
+
+def test_native_language_for_qwen3_asr_uses_native_language_name() -> None:
+    """Verify Qwen3-ASR native runs receive upstream-supported language names."""
+
+    args = asr_bench._parse_args(["--language", "en"])
+
+    assert asr_bench._native_language_for_target(args, "Qwen/Qwen3-ASR-1.7B") == "English"
+    assert asr_bench._native_language_for_target(args, "openai/whisper-small") == "en"
+
+
 def test_run_one_sample_uses_native_qwen_processor_tokenizer_for_token_count() -> None:
     """Verify native qwen_asr token counts prefer processor.tokenizer when available."""
 
