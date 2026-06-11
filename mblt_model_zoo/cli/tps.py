@@ -330,6 +330,28 @@ def _require_transformers_deps() -> None:
         raise SystemExit(2)
 
 
+def _resolve_asr_pipeline_num_beams(pipeline: Any) -> int:
+    """Return the ASR pipeline beam count from the model config, falling back to greedy search."""
+
+    model = getattr(pipeline, "model", None)
+    generation_config = getattr(model, "generation_config", None)
+    num_beams = getattr(generation_config, "num_beams", None)
+    if num_beams is not None:
+        return int(num_beams)
+    return 1
+
+
+def _configure_asr_pipeline_num_beams(task: str, pipeline: Any) -> Any:
+    """Prevent Transformers ASR pipeline defaults from overriding model beam defaults."""
+
+    if task != "automatic-speech-recognition":
+        return pipeline
+    generation_config = getattr(pipeline, "generation_config", None)
+    if generation_config is not None:
+        generation_config.num_beams = _resolve_asr_pipeline_num_beams(pipeline)
+    return pipeline
+
+
 def _build_pipeline(
     *,
     task: str,
@@ -492,19 +514,19 @@ def _build_pipeline(
     if dtype:
         try:
             pipeline_kwargs["dtype"] = dtype
-            return hf_pipeline(**pipeline_kwargs)
+            return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
         except TypeError:
             pipeline_kwargs.pop("dtype", None)
             pipeline_kwargs["torch_dtype"] = dtype
             try:
-                return hf_pipeline(**pipeline_kwargs)
+                return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
             except Exception as e:
                 _raise_cuda_nvml_hint(e)
         except Exception as e:
             _raise_cuda_nvml_hint(e)
 
     try:
-        return hf_pipeline(**pipeline_kwargs)
+        return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
     except Exception as e:
         _raise_cuda_nvml_hint(e)
 
@@ -1117,9 +1139,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
     acceptance_tokens_sum = [float(r.acceptance_tokens_sum) for r in runs if r.acceptance_tokens_sum is not None]
     acceptance_tokens_avg = [r.acceptance_tokens_avg for r in runs if r.acceptance_tokens_avg is not None]
-    acceptance_ratio_pct = [
-        (r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None
-    ]
+    acceptance_ratio_pct = [(r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None]
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")

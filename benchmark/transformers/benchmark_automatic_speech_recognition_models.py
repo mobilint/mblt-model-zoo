@@ -47,6 +47,9 @@ from benchmark.transformers.asr_output_utils import make_rtf_chart as _make_rtf_
 from benchmark.transformers.asr_output_utils import write_combined_outputs as _write_combined_outputs_shared
 from benchmark.transformers.asr_pipeline_utils import asr_pipeline_inputs as _asr_pipeline_inputs_shared
 from benchmark.transformers.asr_pipeline_utils import build_asr_pipeline as _build_asr_pipeline_shared
+from benchmark.transformers.asr_pipeline_utils import (  # noqa: F401
+    configure_pipeline_num_beams_from_model as _configure_pipeline_num_beams_from_model,
+)
 from benchmark.transformers.asr_pipeline_utils import (
     extract_generated_token_count as _extract_generated_token_count_shared,
 )

@@ -149,6 +149,46 @@ def test_resolve_generate_kwargs_includes_beam_settings_when_specified() -> None
     }
 
 
+def test_configure_pipeline_num_beams_prefers_model_generation_config() -> None:
+    """Verify ASR pipeline default beams are aligned to the loaded model config."""
+
+    model_generation_config = type("ModelGenerationConfigStub", (), {"num_beams": 1})()
+    pipeline_generation_config = type("PipelineGenerationConfigStub", (), {"num_beams": 5})()
+    pipe = type(
+        "PipelineStub",
+        (),
+        {
+            "model": type("ModelStub", (), {"generation_config": model_generation_config})(),
+            "generation_config": pipeline_generation_config,
+        },
+    )()
+
+    configured = asr_bench._configure_pipeline_num_beams_from_model(pipe)
+
+    assert configured is pipe
+    assert pipeline_generation_config.num_beams == 1
+
+
+def test_configure_pipeline_num_beams_falls_back_to_greedy() -> None:
+    """Verify ASR pipeline default beams fall back to greedy when the model omits the value."""
+
+    model_generation_config = type("ModelGenerationConfigStub", (), {"num_beams": None})()
+    pipeline_generation_config = type("PipelineGenerationConfigStub", (), {"num_beams": 5})()
+    pipe = type(
+        "PipelineStub",
+        (),
+        {
+            "model": type("ModelStub", (), {"generation_config": model_generation_config})(),
+            "generation_config": pipeline_generation_config,
+        },
+    )()
+
+    configured = asr_bench._configure_pipeline_num_beams_from_model(pipe)
+
+    assert configured is pipe
+    assert pipeline_generation_config.num_beams == 1
+
+
 def test_should_skip_whisper_long_form_sample_only_for_whisper_over_30s() -> None:
     """Skip only Whisper samples that exceed the 30 second short-form limit."""
 
@@ -306,14 +346,18 @@ def test_result_json_path_includes_beam_suffix() -> None:
     )
 
 
-def test_handle_existing_result_fails_without_skip_existing(tmp_path: Path) -> None:
-    """Verify ASR runs fail fast instead of silently overwriting existing beam outputs."""
+def test_handle_existing_result_overwrites_without_skip_existing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify ASR runs overwrite existing outputs unless skip-existing is enabled."""
 
     path = tmp_path / "openai__whisper-small_beamsdefault.json"
     path.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="Result already exists"):
-        asr_bench._handle_existing_result(path, skip_existing=False)
+    assert asr_bench._handle_existing_result(path, skip_existing=False) is False
+    captured = capsys.readouterr()
+    assert "Overwriting existing result" in captured.out
 
 
 def test_handle_existing_result_skips_with_skip_existing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1885,9 +1929,17 @@ def test_load_librispeech_supports_predecoded_array_payload(monkeypatch: pytest.
         (),
         {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
     )()
-    soundfile_stub = type("SoundfileStub", (), {"read": staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("soundfile.read should not be used for pre-decoded payloads")
-    ))})()
+    soundfile_stub = type(
+        "SoundfileStub",
+        (),
+        {
+            "read": staticmethod(
+                lambda *args, **kwargs: (_ for _ in ()).throw(
+                    AssertionError("soundfile.read should not be used for pre-decoded payloads")
+                )
+            )
+        },
+    )()
     monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
     monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
 
@@ -1916,9 +1968,7 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
 
     def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
         load_calls.append(parsed_args.num_samples)
-        return iter([
-            {"id": "sample-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "hello"}
-        ])
+        return iter([{"id": "sample-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "hello"}])
 
     monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
     monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)

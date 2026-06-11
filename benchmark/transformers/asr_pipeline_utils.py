@@ -120,6 +120,38 @@ def extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
     return len(text.split())
 
 
+def resolve_pipeline_num_beams(pipe: Any) -> int:
+    """Return the beam count that should be used for an ASR pipeline default.
+
+    Hugging Face's ASR pipeline installs its own default generation config with
+    ``num_beams=5``. For benchmarking, prefer the loaded model generation config
+    so omitted ``--num-beams`` values measure the model default instead of the
+    pipeline default. If no model value is available, fall back to greedy search.
+    """
+
+    model = getattr(pipe, "model", None)
+    model_generation_config = getattr(model, "generation_config", None)
+    model_num_beams = getattr(model_generation_config, "num_beams", None)
+    if model_num_beams is not None:
+        return int(model_num_beams)
+    return 1
+
+
+def configure_pipeline_num_beams_from_model(pipe: Any) -> Any:
+    """Align an ASR pipeline generation config beam count with the model default."""
+
+    generation_config = getattr(pipe, "generation_config", None)
+    if generation_config is not None:
+        generation_config.num_beams = resolve_pipeline_num_beams(pipe)
+    return pipe
+
+
+def _has_pipeline_generation_config(pipe: Any) -> bool:
+    """Return whether a pipeline exposes generation config defaults to generate calls."""
+
+    return getattr(pipe, "generation_config", None) is not None
+
+
 def build_asr_pipeline(
     target: Any,
     *,
@@ -199,12 +231,12 @@ def build_asr_pipeline(
     if dtype:
         kwargs["dtype"] = dtype
         try:
-            return hf_pipeline(**kwargs)
+            return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
         except TypeError:
             kwargs.pop("dtype", None)
             kwargs["torch_dtype"] = dtype
-            return hf_pipeline(**kwargs)
-    return hf_pipeline(**kwargs)
+            return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
+    return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
 
 
 def run_one_sample(
@@ -261,6 +293,8 @@ def run_one_sample(
                     **pipeline_call_kwargs_builder(attempt_kwargs),
                 )
                 effective_generate_kwargs = dict(attempt_kwargs)
+                if _has_pipeline_generation_config(pipe):
+                    effective_generate_kwargs.setdefault("num_beams", resolve_pipeline_num_beams(pipe))
                 break
             except TypeError as exc:
                 if retryable_error_checker(exc):
