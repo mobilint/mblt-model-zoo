@@ -316,26 +316,41 @@ def _resolve_image_features_tensor(image_features) -> torch.Tensor:
             return tensors[0]
         return torch.cat(tensors, dim=0)
 
+    def _resolve_nested_features(features: object) -> torch.Tensor | None:
+        if isinstance(features, torch.Tensor):
+            return features
+
+        pooler_output = getattr(features, "pooler_output", None)
+        if isinstance(pooler_output, torch.Tensor):
+            return pooler_output
+        if isinstance(pooler_output, (list, tuple)):
+            tensor = _resolve_tensor_sequence(pooler_output)
+            if tensor is not None:
+                return tensor
+            return _resolve_nested_features(pooler_output)
+
+        if isinstance(features, (list, tuple)):
+            tensor = _resolve_tensor_sequence(features)
+            if tensor is not None:
+                return tensor
+            for feature in features:
+                tensor = _resolve_nested_features(feature)
+                if tensor is not None:
+                    return tensor
+        return None
+
     pooler_output = getattr(image_features, "pooler_output", None)
     if isinstance(pooler_output, torch.Tensor):
         return pooler_output
     if isinstance(pooler_output, (list, tuple)):
-        tensor = _resolve_tensor_sequence(pooler_output)
+        tensor = _resolve_nested_features(pooler_output)
         if tensor is not None:
             return tensor
 
     if isinstance(image_features, (list, tuple)):
-        tensor = _resolve_tensor_sequence(image_features)
+        tensor = _resolve_nested_features(image_features)
         if tensor is not None:
             return tensor
-        for feature in image_features:
-            pooler_output = getattr(feature, "pooler_output", None)
-            if isinstance(pooler_output, torch.Tensor):
-                return pooler_output
-            if isinstance(pooler_output, (list, tuple)):
-                tensor = _resolve_tensor_sequence(pooler_output)
-                if tensor is not None:
-                    return tensor
 
     raise TypeError(f"Could not resolve image feature tensor from {type(image_features).__name__}.")
 

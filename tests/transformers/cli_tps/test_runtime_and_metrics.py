@@ -1631,6 +1631,13 @@ def test_resolve_image_features_tensor_uses_tuple_tensor():
     assert _resolve_image_features_tensor((image_features, None)) is image_features
 
 
+def test_resolve_image_features_tensor_uses_nested_qwen3_vl_tuple():
+    image_features = torch.zeros(2, 4)
+    deepstack_features = [torch.ones(2, 4), torch.full((2, 4), 2.0), torch.full((2, 4), 3.0)]
+
+    assert _resolve_image_features_tensor(((image_features,), deepstack_features)) is image_features
+
+
 def test_resolve_image_features_tensor_requires_tensor():
     with pytest.raises(TypeError, match="image feature tensor"):
         _resolve_image_features_tensor(_DummyVisionOutput())
