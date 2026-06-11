@@ -101,6 +101,40 @@ def _write_compare_host_info_json(output_dir: Path, labels: list[str], folders: 
     return output_path
 
 
+def _model_key_without_owner(model_key: str) -> str:
+    """Return a normalized model key without the leading Hugging Face owner id."""
+
+    return model_key.rsplit("/", 1)[1] if "/" in model_key else model_key
+
+
+def _common_model_keys_without_owner(metrics_by_folder: list[Mapping[str, Any]]) -> list[str]:
+    """Return common normalized model keys after stripping leading owner ids."""
+
+    if not metrics_by_folder:
+        return []
+    model_sets = [
+        {_model_key_without_owner(model_key) for model_key in metrics}
+        for metrics in metrics_by_folder
+    ]
+    if not model_sets:
+        return []
+    return sorted(set.intersection(*model_sets))
+
+
+def _print_strip_owner_hint(metrics_by_folder: list[Mapping[str, Any]], *, limit: int = 10) -> None:
+    """Print a hint when owner-stripped model keys would have common entries."""
+
+    owner_stripped_models = _common_model_keys_without_owner(metrics_by_folder)
+    if not owner_stripped_models:
+        return
+
+    print(
+        "Hint: no common model_id was found, but common repository names were found after stripping "
+        "leading Hugging Face owner ids. Did you mean to pass --strip-owner?"
+    )
+    print(f"[debug] --strip-owner common keys (up to {limit}): {owner_stripped_models[:limit]}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare N benchmark result folders and generate model-wise bar charts."
@@ -167,6 +201,8 @@ def main() -> int:
         for label, metrics in zip(labels, metrics_by_folder):
             sample = sorted(metrics.keys())[:10]
             print(f"[debug] {label} normalized keys (up to 10): {sample}")
+        if not args.strip_owner:
+            _print_strip_owner_hint(metrics_by_folder)
         raise SystemExit("No common model_id found across all input folders.")
 
     render_charts(
