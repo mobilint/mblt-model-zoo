@@ -1106,7 +1106,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     _add_batch_selection_args(parser)
     _add_device_tracking_args(parser)
-    parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
+    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only (skip main)")
@@ -1245,13 +1245,14 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
+    first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
@@ -1261,13 +1262,13 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     args.device_backend = _resolve_default_device_backend_common(
         device_backend=args.device_backend,
         device_backend_explicit=device_backend_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
     )
     if not device_backend_explicit:
-        if args.model or args.mxq_path or args.mxq_dir:
+        if first_model_id or args.mxq_path or args.mxq_dir:
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
@@ -1326,7 +1327,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.model or args.original_models or args.all or args.revision:
+        if args.models or args.original_models or args.all or args.revision:
             print(
                 "Note: --mxq-dir is set, so --model/--original-models/--all/--revision are ignored "
                 "(revision and mxq_path are taken from filename)."
@@ -1337,8 +1338,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        if args.model:
-            model_ids = [str(args.model)]
+        if args.models:
+            model_ids = [str(item) for item in args.models]
         else:
             model_ids = available_model_ids
         if args.original_models:
@@ -1453,7 +1454,7 @@ def _collect_vlm_run_targets(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     available_model_ids: list[str] | None = None
-    if args.mxq_dir or not args.model:
+    if args.mxq_dir or not args.models:
         available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
         if not available_model_ids:
             print("No image-text-to-text models found.")
@@ -1469,7 +1470,7 @@ def _collect_vlm_run_targets(
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
+        model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):

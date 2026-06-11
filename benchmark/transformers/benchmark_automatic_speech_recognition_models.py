@@ -329,9 +329,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=("Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models.")
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    parser.add_argument("--model-id", dest="model_ids", nargs="*", default=None, help="model id list to benchmark")
+    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark")
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
-    parser.add_argument("--all-revisions", action="store_true", help="benchmark W8 and W4V8 revisions only")
+    parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")
     parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
     parser.add_argument(
@@ -432,7 +432,7 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
-    first_model_id = None if args.mxq_dir else ((args.model_ids or [None])[0])
+    first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -884,16 +884,16 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.model_ids or args.original_models or args.all_revisions or args.revision or args.mxq_path:
+        if args.models or args.original_models or args.all or args.revision or args.mxq_path:
             print(
-                "Note: --mxq-dir is set, so --model-id/--original-models/"
-                "--all-revisions/--revision/--mxq-path are ignored."
+                "Note: --mxq-dir is set, so --model/--original-models/"
+                "--all/--revision/--mxq-path are ignored."
             )
         targets = _iter_asr_targets_from_mxq_dir(mxq_dir, available_model_ids)
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(item) for item in args.model_ids] if args.model_ids else _list_default_asr_models()
+        model_ids = [str(item) for item in args.models] if args.models else _list_default_asr_models()
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)
@@ -905,7 +905,7 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
             _iter_asr_targets(
                 model_ids,
                 revision=args.revision,
-                all_revisions=args.all_revisions,
+                all_revisions=args.all,
                 is_original=args.original_models,
             )
         )
@@ -976,7 +976,7 @@ def main(argv: list[str] | None = None) -> int:
             if target.mxq_path
             else _select_revision(target.model_id, target.revision_candidates)
         )
-        if args.all_revisions and not args.mxq_dir and revision is None:
+        if args.all and not args.mxq_dir and revision is None:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
         beam_tag = _beam_tag(args.num_beams)
