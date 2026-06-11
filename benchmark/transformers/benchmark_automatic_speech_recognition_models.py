@@ -378,7 +378,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-existing",
         action="store_true",
-        help="skip target/beam outputs that already exist instead of failing",
+        help="skip target/beam outputs that already exist instead of overwriting them",
     )
     parser.add_argument(
         "--rebuild-charts",
@@ -600,10 +600,8 @@ def _handle_existing_result(path: Path, *, skip_existing: bool) -> bool:
     if skip_existing:
         print(f"Skipping existing result: {path.name}")
         return True
-    raise SystemExit(
-        f"Result already exists: {path}. Reuse --skip-existing to keep the current file or choose a different "
-        "--output-dir."
-    )
+    print(f"Overwriting existing result: {path.name}")
+    return False
 
 
 def _consume_warmup_samples(
