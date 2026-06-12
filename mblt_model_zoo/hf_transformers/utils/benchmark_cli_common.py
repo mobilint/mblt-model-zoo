@@ -511,12 +511,27 @@ def _trace_from_method(tracker: DeviceTracker, method_name: str) -> list[DeviceT
         return []
 
 
+def _trace_from_methods(tracker: DeviceTracker, method_names: Sequence[str]) -> list[DeviceTracePoint]:
+    """Return the first non-empty trace exposed by a compatible tracker method."""
+    for method_name in method_names:
+        trace = _trace_from_method(tracker, method_name)
+        if trace:
+            return trace
+    return []
+
+
 def extract_device_time_series(tracker: DeviceTracker) -> DeviceTimeSeriesMap:
     """Extract JSON-safe device metric time-series from mblt-tracker 1.x trackers."""
     trace_getters: dict[str, Callable[[], list[DeviceTracePoint]]] = {
-        "power_w": lambda: _trace_from_method(tracker, "get_total_power_trace"),
-        "utilization_pct": lambda: _trace_from_method(tracker, "get_total_utilization_trace"),
-        "temperature_c": lambda: _trace_from_method(tracker, "get_temperature_trace"),
+        "power_w": lambda: _trace_from_methods(tracker, ("get_total_power_trace", "get_power_trace", "get_trace")),
+        "utilization_pct": lambda: _trace_from_methods(
+            tracker,
+            ("get_total_utilization_trace", "get_utilization_trace", "get_util_trace"),
+        ),
+        "temperature_c": lambda: _trace_from_methods(
+            tracker,
+            ("get_temperature_trace", "get_temp_trace"),
+        ),
         "memory_used_mb": lambda: _trace_from_method(tracker, "get_memory_used_trace"),
         "memory_used_pct": lambda: _trace_from_method(tracker, "get_memory_used_pct_trace"),
         "npu_power_w": lambda: _trace_from_method(tracker, "get_npu_rail_power_trace"),
