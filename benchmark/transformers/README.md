@@ -32,9 +32,13 @@ inference and model downloads.
   - `global4`: Uses `target_clusters=[0]`.
   - `global8`: Uses `target_clusters=[0, 1]`.
   - `all`: Runs `single`, `global4`, and `global8` sequentially in benchmark scripts.
-- Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
-  `--device cpu` and `--device-backend npu` when those options are omitted. Explicit user values
-  always take precedence.
+- Runtime defaults are target-aware when `--device` and `--device-backend` are omitted.
+  - Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
+    `--device cpu` and `--device-backend npu`.
+  - Other Hugging Face targets default to `--device cuda` and `--device-backend gpu`.
+  - Benchmark scripts reapply this policy for each target model id, so a mixed target list can use
+    NPU tracking for Mobilint targets and GPU tracking for non-Mobilint targets in one run.
+  - Explicit user values always take precedence.
 - CLI defaults and benchmark-script defaults are aligned for shared TPS parameters.
   - `measure` defaults to `--prefill 128`, `--decode 32`, `--repeat 1`, and `--warmup 1`;
     VLM measure also defaults to `--image-resolution 224`.
@@ -57,13 +61,19 @@ inference and model downloads.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
+  - Tracker sampling intervals are fixed by resolved backend: NPU uses `1.0s`; GPU and CPU-oriented
+    tracking use `0.1s`. The console device status line prints the interval used for the resolved
+    backend.
   - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
   - `--device-npu-rail-metrics`: Selects NPU rail power metrics collected by `mblt-tracker`. The
     default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`, and
     `goldfinger`, or pass a comma-separated subset, for example `--device-npu-rail-metrics npu,ddr`.
     Non-NPU rails can have a lower effective sampling rate because their values depend on the
     firmware refresh cadence.
-  - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids.
+  - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids. This option has priority
+    over `--device` for tracker selection. If it is omitted, `--device cuda:<id>` is parsed and the
+    numeric id is forwarded to `GPUDeviceTracker(gpu_id=<id>)`; plain `--device cuda` leaves
+    `gpu_id=None` so the tracker uses its default GPU.
   - `--no-device-metrics`: Disables device metric collection.
   - Console summaries show aggregate scalar metrics such as average and p99 power, utilization,
     temperature, and memory. JSON outputs also include device metric time-series under fields such
@@ -478,8 +488,8 @@ read from the file name suffix.
 ### Benchmark Original HF Models for Comparison
 
 Use `--original-models` to resolve listed Mobilint model ids to their parent/base model ids on the
-Hugging Face Hub, then benchmark the unique parent ids. If `--device` is omitted, the script defaults
-to `cuda:0` and `--device-backend auto`.
+Hugging Face Hub, then benchmark the unique parent ids. If `--device` and `--device-backend` are
+omitted, resolved original Hugging Face targets use `--device cuda` and `--device-backend gpu`.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py sweep \
@@ -685,6 +695,8 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--mxq-path`: Single local `.mxq` file override.
 - `--mxq-dir`: Local `.mxq` directory for benchmark scripts.
 - `--device`: Transformers pipeline device, such as `cpu` or `cuda:0`.
+  When omitted, benchmark scripts use `cpu` for Mobilint/MXQ targets and `cuda` for other Hugging
+  Face targets.
 - `--device-map`: Transformers `device_map`, such as `auto`.
 - `--dtype`: Data type, such as `auto`, `float16`, or `bfloat16`.
 - `--trust-remote-code` / `--no-trust-remote-code`: Whether to trust HF remote code.
@@ -713,7 +725,11 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--target-clusters`: Explicit target clusters for the CLI, for example `"0;1"`.
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
-- `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`.
+  When omitted, benchmark scripts use `npu` for Mobilint/MXQ targets and `gpu` for other Hugging
+  Face targets. NPU tracker sampling uses `1.0s`; GPU tracker sampling uses `0.1s`.
+- `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`. If omitted, `cuda:<id>` in
+  `--device` is parsed for the GPU tracker; plain `cuda` leaves tracker GPU selection at its
+  default.
 - `--device-npu-id`: NPU tracker target logical card id, such as `0` or `0,1`.
 - `--device-npu-rail-metrics`: NPU rail metric selection for `mblt-tracker` 1.x. Accepted values are
   `npu`, `ddr`, `pmic`, `goldfinger`, `all`, or a comma-separated subset such as `npu,ddr`. The
