@@ -430,7 +430,7 @@ def write_combined_outputs(
                     f"{float(row.get('rtf', 0.0)):.4f}",
                     f"{float(row.get('inverse_rtf', 0.0)):.4f}",
                     "" if row.get("sec_per_j") is None else f"{float(row['sec_per_j']):.4f}",
-                    "" if row.get("rtf_per_w") is None else f"{float(row['rtf_per_w']):.6f}",
+                    "" if row.get("j_per_sec") is None else f"{float(row['j_per_sec']):.6f}",
                     f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
                 ]
             )
@@ -447,7 +447,7 @@ def write_combined_outputs(
                     "RTF",
                     "inverse_RTF",
                     "sec/J",
-                    "RTF/W",
+                    "J/sec",
                     "decode_tokens_per_s",
                 ],
                 markdown_rows,
@@ -474,7 +474,7 @@ def write_combined_outputs(
         table_markdown_path=combined_md,
         plot_paths=existing_png_paths_func(
             output_dir,
-            prefixes=("rtf", "wer", "cer", "sec_per_j", "rtf_per_w"),
+            prefixes=("rtf", "wer", "cer", "sec_per_j", "j_per_sec"),
         ),
         plot_tables={},
     )
@@ -511,7 +511,7 @@ def make_rtf_chart(
     for filename, key, title, x_label, scale in (
         ("rtf.png", "rtf", "Real-Time Factor", "RTF", 1.0),
         ("sec_per_j.png", "sec_per_j", "Seconds Per Joule", "Seconds Per Joule", 1.0),
-        ("rtf_per_w.png", "rtf_per_w", "RTF Per Watt", "RTF/W", 1.0),
+        ("j_per_sec.png", "j_per_sec", "Joules Per Audio Second", "Joules Per Audio Second", 1.0),
         ("wer.png", "wer", "Word Error Rate", "WER (%)", 100.0),
         ("cer.png", "cer", "Character Error Rate", "CER (%)", 100.0),
     ):

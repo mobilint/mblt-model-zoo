@@ -38,7 +38,7 @@ _PLOT_TITLES_BY_NAME = {
     "rtf.png": "Real-Time Factor",
     "inverse_rtf.png": "Inverse Real-Time Factor",
     "sec_per_j.png": "Seconds Per Joule",
-    "rtf_per_w.png": "RTF Per Watt",
+    "j_per_sec.png": "Joules Per Audio Second",
     "wer.png": "Word Error Rate",
     "cer.png": "Character Error Rate",
     "p95_latency_s.png": "P95 Latency",
@@ -170,11 +170,23 @@ def write_summary_markdown(
         else _host_info_markdown(Path(host_info_path) if host_info_path else None)
     )
     lines = [f"# {title}\n\n"]
+    lines.extend(_device_energy_note_markdown())
     lines.extend(_plots_markdown(summary_path.parent, [Path(p) for p in plot_paths], plot_tables=plot_tables))
     if not plot_tables:
         lines.extend(_table_markdown(Path(table_markdown_path) if table_markdown_path else None))
     lines.extend(host_info_lines)
     summary_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _device_energy_note_markdown() -> list[str]:
+    """Return a reusable note describing trace-integrated energy limitations."""
+
+    return [
+        "## Device energy note\n\n",
+        "Energy and energy-efficiency metrics are computed from mblt-tracker power traces using "
+        "trapezoidal integration. At least two valid power samples are required, so measurements shorter "
+        "than the tracker sampling interval may leave energy fields empty.\n\n",
+    ]
 
 
 def read_csv_rows(path: Path | str) -> list[dict[str, str]]:

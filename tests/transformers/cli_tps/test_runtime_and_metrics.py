@@ -742,7 +742,7 @@ def test_run_vlm_sweep_ignores_tracker_stop_errors(monkeypatch):
         def get_metric(self) -> dict[str, float]:
             return {}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return []
 
     class _FakeVLMTPSMeasurer:
@@ -1146,7 +1146,7 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
         def get_metric(self) -> dict[str, float]:
             return {"avg_power_w": 2.0, "p99_power_w": 3.0}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return [(0.0, 2.0), (1.0, 2.0)]
 
     class _FakeTPSMeasurer:
@@ -1410,7 +1410,7 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
         def get_metric(self) -> dict[str, float]:
             return {"avg_power_w": 2.0}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return [(0.0, 2.0), (6.0, 2.0)]
 
     class _FakeVLMTPSMeasurer:
@@ -1502,7 +1502,7 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
         def get_metric(self) -> dict[str, float]:
             return {}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return []
 
     class _FakeVLMTPSMeasurer:
@@ -2057,19 +2057,22 @@ def test_extract_device_metric_normalizes_tracker_023_shape():
     assert all(value is None or isinstance(value, float) for value in metric.values())
 
 
-def test_extract_device_time_series_preserves_gpu_legacy_total_traces():
+def test_extract_device_time_series_uses_tracker_100_memory_trace_methods():
     class _FakeTracker:
-        _mem_used_trace = [(1.0, 512), ("bad", 768), (2.0, "bad")]
-        _mem_used_pct_trace = [(1.0, 25.0)]
-
-        def get_trace(self):
+        def get_total_power_trace(self):
             return [(1, 10.5), (2.0, 11)]
 
-        def get_util_trace(self):
+        def get_total_utilization_trace(self):
             return [(1.0, 70.0)]
 
-        def get_temp_trace(self):
+        def get_temperature_trace(self):
             return [(1.0, 55.0), [2.0, 56.0]]
+
+        def get_memory_used_trace(self):
+            return [(1.0, 512), ("bad", 768), (2.0, "bad")]
+
+        def get_memory_used_pct_trace(self):
+            return [(1.0, 25.0)]
 
     series = extract_device_time_series(_FakeTracker())
 
@@ -2077,8 +2080,10 @@ def test_extract_device_time_series_preserves_gpu_legacy_total_traces():
         {"timestamp_s": 1.0, "value": 10.5},
         {"timestamp_s": 2.0, "value": 11.0},
     ]
+    assert series["utilization_pct"] == [{"timestamp_s": 1.0, "value": 70.0}]
     assert series["temperature_c"] == [{"timestamp_s": 1.0, "value": 55.0}]
     assert series["memory_used_mb"] == [{"timestamp_s": 1.0, "value": 512.0}]
+    assert series["memory_used_pct"] == [{"timestamp_s": 1.0, "value": 25.0}]
     assert series["npu_power_w"] == []
     assert series["goldfinger_power_w"] == []
 
@@ -2137,20 +2142,11 @@ def test_extract_device_time_series_uses_tracker_100_trace_methods():
         def get_total_power_trace(self):
             return [(1.0, 100.0)]
 
-        def get_trace(self):
-            return [(1.0, 1.0)]
-
         def get_total_utilization_trace(self):
             return [(2.0, 80.0)]
 
-        def get_util_trace(self):
-            return [(2.0, 8.0)]
-
         def get_temperature_trace(self):
             return [(3.0, 50.0)]
-
-        def get_temp_trace(self):
-            return [(3.0, 5.0)]
 
         def get_npu_rail_power_trace(self):
             return [(4.0, 10.0)]

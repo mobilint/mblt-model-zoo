@@ -92,7 +92,7 @@ def test_asr_compare_metric_from_payload() -> None:
             "decode_tokens_per_s": 77.0,
             "avg_tokens_per_sample": 10.0,
         },
-        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0, "sec_per_j": 3.0, "rtf_per_w": 0.0625},
+        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0, "sec_per_j": 3.0, "j_per_sec": 1 / 3},
     }
     metric = ASRCompareMetric.from_payload(payload)
     assert metric is not None
@@ -105,7 +105,7 @@ def test_asr_compare_metric_from_payload() -> None:
     assert metric.avg_power_w == 8.0
     assert metric.total_energy_j == 4.0
     assert metric.sec_per_j == 3.0
-    assert metric.rtf_per_w == 0.0625
+    assert metric.j_per_sec == 1 / 3
 
 
 def test_task_registry_contains_all_tasks() -> None:
@@ -174,8 +174,8 @@ def test_build_compare_markdown_and_plot_tables() -> None:
         metrics_by_folder=metrics_by_folder,
     )
 
-    assert "linux prefill_tps 128" in combined
-    assert "windows avg_power_w" in combined
+    assert "linux Prefill Tokens Per Second (128 tokens)" in combined
+    assert "windows Power (Power (Watts))" in combined
     assert "prefill_tps.png" in plot_tables
     assert "linux 128 tokens" in plot_tables["prefill_tps.png"]
     assert "avg_power_w.png" in plot_tables

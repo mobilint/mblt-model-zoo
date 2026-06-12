@@ -69,6 +69,9 @@ inference and model downloads.
     temperature, and memory. JSON outputs also include device metric time-series under fields such
     as `device_time_series`, `device_time_series_runs`, or phase-specific `prefill`/`decode`
     entries. CSV outputs keep aggregate columns only.
+  - Energy and energy-efficiency metrics are computed from mblt-tracker power traces using
+    trapezoidal integration. At least two valid power samples are required, so measurements shorter
+    than the tracker sampling interval may leave energy fields empty and print a warning.
 
 ## Quick CLI Usage
 

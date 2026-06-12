@@ -125,7 +125,7 @@ def test_summarize_timings_respects_language_normalization() -> None:
 
 
 def test_add_device_efficiency_metrics_computes_asr_power_metrics() -> None:
-    """Verify ASR energy-efficiency metrics are derived from audio, energy, RTF, and power."""
+    """Verify ASR energy-efficiency metrics are derived from audio and energy."""
 
     metrics = add_device_efficiency_metrics(
         {"total_audio_s": 12.0, "rtf": 0.5},
@@ -133,7 +133,7 @@ def test_add_device_efficiency_metrics_computes_asr_power_metrics() -> None:
     )
 
     assert metrics["sec_per_j"] == 4.0
-    assert metrics["rtf_per_w"] == 0.05
+    assert metrics["j_per_sec"] == 0.25
 
 
 def test_add_device_efficiency_metrics_handles_missing_device_values() -> None:
@@ -145,4 +145,4 @@ def test_add_device_efficiency_metrics_handles_missing_device_values() -> None:
     )
 
     assert metrics["sec_per_j"] is None
-    assert metrics["rtf_per_w"] is None
+    assert metrics["j_per_sec"] is None

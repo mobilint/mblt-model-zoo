@@ -100,17 +100,15 @@ def add_device_efficiency_metrics(
         device_metric: Device metric payload containing power or energy values.
 
     Returns:
-        A copy of ``device_metric`` with ``sec_per_j`` and ``rtf_per_w`` keys added when enough data is available.
+        A copy of ``device_metric`` with ``sec_per_j`` and ``j_per_sec`` keys added when enough data is available.
     """
 
     augmented = dict(device_metric)
     total_audio_s = _positive_float(asr_metric.get("total_audio_s"))
     total_energy_j = _positive_float(device_metric.get("total_energy_j"))
-    rtf = _positive_float(asr_metric.get("rtf"))
-    avg_power_w = _positive_float(device_metric.get("avg_power_w"))
 
     augmented["sec_per_j"] = None if total_audio_s is None or total_energy_j is None else total_audio_s / total_energy_j
-    augmented["rtf_per_w"] = None if rtf is None or avg_power_w is None else rtf / avg_power_w
+    augmented["j_per_sec"] = None if total_audio_s is None or total_energy_j is None else total_energy_j / total_audio_s
     return augmented
 
 

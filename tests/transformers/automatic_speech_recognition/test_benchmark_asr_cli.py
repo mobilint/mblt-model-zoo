@@ -304,7 +304,7 @@ def test_measure_target_adds_trace_integrated_energy(monkeypatch: pytest.MonkeyP
         def get_metric(self) -> dict[str, float]:
             return {"avg_power_w": 3.0}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return [(0.0, 2.0), (2.0, 4.0)]
 
     args = asr_bench._parse_args(["--device-backend", "npu"])
@@ -1324,7 +1324,7 @@ def test_write_combined_outputs_adds_asr_efficiency_metrics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify ASR combined outputs derive sec/J and RTF/W from device metrics."""
+    """Verify ASR combined outputs derive sec/J and J/sec from device metrics."""
 
     payload = {
         "benchmark_type": "measure",
@@ -1360,13 +1360,13 @@ def test_write_combined_outputs_adds_asr_efficiency_metrics(
     asr_bench._write_combined_outputs(tmp_path)
 
     assert captured_rows[0]["sec_per_j"] == 4.0
-    assert captured_rows[0]["rtf_per_w"] == 0.05
+    assert captured_rows[0]["j_per_sec"] == 0.25
     combined_md = (tmp_path / "combined.md").read_text(encoding="utf-8")
     assert "sec/J" in combined_md
-    assert "RTF/W" in combined_md
+    assert "J/sec" in combined_md
     csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
     assert "sec_per_j" in csv_text
-    assert "rtf_per_w" in csv_text
+    assert "j_per_sec" in csv_text
 
 
 def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2418,6 +2418,6 @@ def test_write_combined_outputs_unions_row_headers_for_device_metrics(
     assert "avg_power_w" in csv_text
     assert "total_energy_j" in csv_text
     assert "sec_per_j" in csv_text
-    assert "rtf_per_w" in csv_text
+    assert "j_per_sec" in csv_text
     assert "model-a" in csv_text
     assert "model-b" in csv_text

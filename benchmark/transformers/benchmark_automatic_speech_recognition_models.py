@@ -331,6 +331,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark")
+    parser.add_argument(
+        "--model-id",
+        dest="model_ids",
+        action="append",
+        default=None,
+        help="model id to benchmark; may be repeated. Alias for --model for compatibility",
+    )
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")
@@ -417,6 +424,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_device_tracking_args(parser)
     args = parser.parse_args(argv)
+    if args.model_ids:
+        args.models = [*(args.models or []), *args.model_ids]
+    del args.model_ids
     num_samples_explicit = _flag_present(raw_argv, "--num-samples")
     if isinstance(args.dataset_config, str) and args.dataset_config.casefold() == "none":
         args.dataset_config = None

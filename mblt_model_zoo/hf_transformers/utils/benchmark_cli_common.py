@@ -422,6 +422,10 @@ def integrate_power_trace_j(power_trace: Sequence[Mapping[str, object]]) -> floa
         if isinstance(timestamp_s, (int, float)) and isinstance(value, (int, float)):
             points.append((float(timestamp_s), float(value)))
     if len(points) < 2:
+        print(
+            "[device] warning: at least two power trace points are required for trace-integrated energy; "
+            "short measurements may leave energy-efficiency metrics empty."
+        )
         return None
 
     points.sort(key=lambda point: point[0])
@@ -480,42 +484,19 @@ def _trace_from_method(tracker: DeviceTracker, method_name: str) -> list[DeviceT
         return []
     try:
         return _normalize_trace(method())
-    except Exception:
+    except Exception as exc:
+        print(f"[device] warning: failed to read tracker trace via {method_name}: {exc}")
         return []
 
 
-def _trace_from_method_with_fallback(
-    tracker: DeviceTracker,
-    method_name: str,
-    fallback_method_name: str,
-) -> list[DeviceTracePoint]:
-    """Return a trace from a preferred tracker method, falling back for GPU trackers."""
-    trace = _trace_from_method(tracker, method_name)
-    if trace:
-        return trace
-    return _trace_from_method(tracker, fallback_method_name)
-
-
-def _trace_from_attr(tracker: DeviceTracker, attr_name: str) -> list[DeviceTracePoint]:
-    return _normalize_trace(getattr(tracker, attr_name, []))
-
-
 def extract_device_time_series(tracker: DeviceTracker) -> DeviceTimeSeriesMap:
-    """Extract JSON-safe device metric time-series from mblt-tracker 1.x-compatible trackers."""
+    """Extract JSON-safe device metric time-series from mblt-tracker 1.x trackers."""
     trace_getters: dict[str, Callable[[], list[DeviceTracePoint]]] = {
-        "power_w": lambda: _trace_from_method_with_fallback(tracker, "get_total_power_trace", "get_trace"),
-        "utilization_pct": lambda: _trace_from_method_with_fallback(
-            tracker,
-            "get_total_utilization_trace",
-            "get_util_trace",
-        ),
-        "temperature_c": lambda: _trace_from_method_with_fallback(
-            tracker,
-            "get_temperature_trace",
-            "get_temp_trace",
-        ),
-        "memory_used_mb": lambda: _trace_from_attr(tracker, "_mem_used_trace"),
-        "memory_used_pct": lambda: _trace_from_attr(tracker, "_mem_used_pct_trace"),
+        "power_w": lambda: _trace_from_method(tracker, "get_total_power_trace"),
+        "utilization_pct": lambda: _trace_from_method(tracker, "get_total_utilization_trace"),
+        "temperature_c": lambda: _trace_from_method(tracker, "get_temperature_trace"),
+        "memory_used_mb": lambda: _trace_from_method(tracker, "get_memory_used_trace"),
+        "memory_used_pct": lambda: _trace_from_method(tracker, "get_memory_used_pct_trace"),
         "npu_power_w": lambda: _trace_from_method(tracker, "get_npu_rail_power_trace"),
         "ddr_power_w": lambda: _trace_from_method(tracker, "get_ddr_rail_power_trace"),
         "pmic_power_w": lambda: _trace_from_method(tracker, "get_pmic_rail_power_trace"),

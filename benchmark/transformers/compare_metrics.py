@@ -95,6 +95,7 @@ _SHARED_SCALAR_SPECS: tuple[ScalarChartSpec, ...] = (
     ScalarChartSpec("total_energy_j.png", "Total Energy", "Energy (Joules)", "total_energy_j"),
 )
 
+
 def _as_float(value: Any) -> float | None:
     """Return a float for numeric values."""
 
@@ -339,7 +340,7 @@ class ASRCompareMetric(BaseCompareMetric):
     rtf: float | None = None
     inverse_rtf: float | None = None
     sec_per_j: float | None = None
-    rtf_per_w: float | None = None
+    j_per_sec: float | None = None
     mean_latency_s: float | None = None
     p50_latency_s: float | None = None
     p95_latency_s: float | None = None
@@ -366,7 +367,7 @@ class ASRCompareMetric(BaseCompareMetric):
         ScalarChartSpec("rtf.png", "Real-Time Factor", "RTF", "rtf"),
         ScalarChartSpec("inverse_rtf.png", "Inverse Real-Time Factor", "x realtime", "inverse_rtf"),
         ScalarChartSpec("sec_per_j.png", "Seconds Per Joule", "Seconds Per Joule", "sec_per_j"),
-        ScalarChartSpec("rtf_per_w.png", "RTF Per Watt", "RTF/W", "rtf_per_w"),
+        ScalarChartSpec("j_per_sec.png", "Joules Per Audio Second", "Joules Per Audio Second", "j_per_sec"),
         ScalarChartSpec("p95_latency_s.png", "P95 Latency", "Seconds", "p95_latency_s"),
         ScalarChartSpec(
             "throughput_samples_per_s.png",
@@ -398,7 +399,7 @@ class ASRCompareMetric(BaseCompareMetric):
             rtf=_as_float(asr.get("rtf")),
             inverse_rtf=_as_float(asr.get("inverse_rtf")),
             sec_per_j=_as_float(device.get("sec_per_j")),
-            rtf_per_w=_as_float(device.get("rtf_per_w")),
+            j_per_sec=_as_float(device.get("j_per_sec")),
             mean_latency_s=_as_float(asr.get("mean_latency_s")),
             p50_latency_s=_as_float(asr.get("p50_latency_s")),
             p95_latency_s=_as_float(asr.get("p95_latency_s")),
@@ -459,6 +460,13 @@ def collect_metrics(
             continue
         metric = metric_cls.from_payload(payload)
         if metric is None:
+            status = payload.get("status")
+            if isinstance(status, str) and status:
+                reason = payload.get("reason", "")
+                print(
+                    f"Warning: skipping status-only payload {path} "
+                    f"(status={status}, reason={reason})."
+                )
             continue
         norm_key = normalize_model_key(path, model_id, strip_owner=strip_owner)
         if norm_key not in normalized:
@@ -467,9 +475,10 @@ def collect_metrics(
             continue
 
         original_path = normalized_sources[norm_key]
+        strip_hint = " with --strip-owner" if strip_owner else ""
         print(
             "Warning: duplicate normalized model key "
-            f"'{norm_key}' in {path}; keeping {original_path.name} and skipping {path.name}."
+            f"'{norm_key}'{strip_hint}; keeping source '{original_path}' and skipping duplicate source '{path}'."
         )
     return normalized
 
@@ -585,11 +594,11 @@ def build_compare_markdown(
     for spec in metric_cls.TOKEN_SPECS:
         for token in _tokens_for_attr(models=models, metrics_by_folder=metrics_by_folder, attr=spec.attr):
             for folder_idx, label in enumerate(labels):
-                headers.append(f"{label} {spec.attr} {token}")
+                headers.append(f"{label} {spec.title} ({token} tokens)")
                 value_getters.append((folder_idx, spec.attr, token))
     for spec in [*metric_cls.SCALAR_SPECS, *metric_cls.shared_scalar_specs()]:
         for folder_idx, label in enumerate(labels):
-            headers.append(f"{label} {spec.attr}")
+            headers.append(f"{label} {spec.title} ({spec.x_label})")
             value_getters.append((folder_idx, spec.attr, None))
 
     rows: list[list[Any]] = []
