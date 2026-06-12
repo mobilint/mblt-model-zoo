@@ -269,12 +269,12 @@ consumed before measurement. In other words, the loader fetches enough candidate
 - Per-target JSON files are written as `<target>_beams<beam>.json`, for example
   `openai__whisper-small_beamsdefault.json` or `openai__whisper-small_beams5.json`.
 - The same `--output-dir` can store multiple beam-search runs side by side.
-- If a per-target beam JSON already exists, the benchmark stops instead of overwriting it.
+- If a per-target beam JSON already exists, the benchmark overwrites it by default.
 - Use `--skip-existing` to keep existing beam results and continue with the remaining targets.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id mobilint/whisper-small \
+  --model mobilint/whisper-small \
   --revision W8 \
   --num-samples 5 \
   --num-beams 1 \
@@ -286,7 +286,7 @@ For original Hugging Face models, omit Mobilint quantized revisions such as `W8`
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id openai/whisper-small \
+  --model openai/whisper-small \
   --num-samples 5 \
   --num-beams 5 \
   --device cpu
@@ -317,7 +317,7 @@ Original Hugging Face parent models can be benchmarked with `--original-models`:
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --original-models \
-  --model-id mobilint/whisper-small mobilint/whisper-medium \
+  --model mobilint/whisper-small mobilint/whisper-medium \
   --device cuda:0 \
   --dtype float16 \
   --device-backend gpu \
@@ -329,7 +329,7 @@ contract:
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id facebook/wav2vec2-base-960h \
+  --model facebook/wav2vec2-base-960h \
   --num-samples 5 \
   --num-beams 1 \
   --device cuda:0 \

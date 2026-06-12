@@ -415,10 +415,10 @@ def test_handle_existing_result_skips_with_skip_existing(tmp_path: Path, capsys:
     assert "Skipping existing result" in captured.out
 
 
-def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify explicit --model-id avoids eager default list resolution."""
+def test_build_run_targets_with_explicit_models_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify explicit --model avoids eager default list resolution and accepts multiple models."""
 
-    args = asr_bench._parse_args(["--model-id", "openai/whisper-small"])
+    args = asr_bench._parse_args(["--model", "openai/whisper-small", "facebook/wav2vec2-base-960h"])
 
     def fail_list_default_asr_models():
         raise AssertionError("_list_default_asr_models should not be called")
@@ -427,8 +427,10 @@ def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(m
 
     targets = asr_bench._build_run_targets(args)
 
-    assert len(targets) == 1
-    assert targets[0][0].model_id == "openai/whisper-small"
+    assert [target.model_id for target, *_rest in targets] == [
+        "openai/whisper-small",
+        "facebook/wav2vec2-base-960h",
+    ]
 
 
 def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
