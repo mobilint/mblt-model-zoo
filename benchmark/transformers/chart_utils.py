@@ -14,9 +14,6 @@ import numpy as np
 
 try:
     from benchmark.common.chart_utils import (
-        default_charts_dir as _default_charts_dir_common,
-    )
-    from benchmark.common.chart_utils import (
         plot_grouped_scalar_barh,
     )
     from benchmark.common.chart_utils import (
@@ -35,7 +32,6 @@ except ModuleNotFoundError:
         raise
     _common_mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_common_mod)
-    _default_charts_dir_common = _common_mod.default_charts_dir
     plot_grouped_scalar_barh = _common_mod.plot_grouped_scalar_barh
     _sanitize_text_common = _common_mod.sanitize_text
     _source_labels_common = _common_mod.source_labels

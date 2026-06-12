@@ -886,9 +886,6 @@ def _enrich_single_run_device(
     )
 
     avg_power = run.avg_power_w
-    if avg_power is None:
-        return
-
     prefill_energy = _energy_from_device_time_series(prefill_time_series or {})
     decode_energy = _energy_from_device_time_series(decode_time_series or {})
     total_energy = None
@@ -914,7 +911,7 @@ def _enrich_single_run_device(
     total_decode_tokens = num_decode * batch_size
     total_tokens = total_prefill_tokens + total_decode_tokens
 
-    run.avg_power_w = float(avg_power)
+    run.avg_power_w = float(avg_power) if avg_power is not None else None
     run.total_energy_j = total_energy
     run.prefill_tokens_per_j = (
         _safe_div(float(total_prefill_tokens), prefill_energy) if prefill_energy is not None else None

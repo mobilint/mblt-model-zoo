@@ -447,6 +447,38 @@ def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
     assert measurement.total_j_per_token == pytest.approx(4.0 / 9.0)
 
 
+def test_enrich_single_run_device_computes_energy_metrics_without_avg_power():
+    """Trace-integrated energy metrics should not require scalar average power values."""
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=8.0,
+        decode_duration=1.0,
+        decode_tps=8.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.25,
+        avg_npu_prefill_token_latency=None,
+        avg_total_decode_token_latency=0.25,
+        avg_npu_decode_token_latency=None,
+    )
+
+    tps_cli._enrich_single_run_device(
+        run=measurement,
+        prefill_metric={},
+        decode_metric={},
+        batch_size=2,
+        prefill_time_series={"power_w": [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 2.0}]},
+        decode_time_series={"power_w": [{"timestamp_s": 0.0, "value": 4.0}, {"timestamp_s": 1.0, "value": 4.0}]},
+    )
+
+    assert measurement.avg_power_w is None
+    assert measurement.total_energy_j == pytest.approx(8.0)
+    assert measurement.prefill_tokens_per_j == pytest.approx(2.0)
+    assert measurement.decode_tokens_per_j == pytest.approx(1.0)
+    assert measurement.total_tokens_per_j == pytest.approx(1.5)
+
+
 def test_integrate_power_trace_j_uses_trapezoidal_rule():
     """Power traces should be integrated from time-series samples, not average power fallbacks."""
     trace = [
