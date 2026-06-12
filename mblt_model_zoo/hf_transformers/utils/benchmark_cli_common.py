@@ -458,7 +458,11 @@ def add_trace_energy_to_device_metric(
     *,
     power_key: str = "power_w",
 ) -> DeviceMetricMap:
-    """Return device metrics augmented with trace-integrated ``total_energy_j``."""
+    """Return device metrics augmented with trace-integrated ``total_energy_j``.
+
+    Trace-integrated energy is the benchmark source of truth and intentionally replaces any scalar
+    tracker-provided ``total_energy_j`` value.
+    """
     augmented: DeviceMetricMap = dict(device_metric)
     augmented["total_energy_j"] = energy_from_device_time_series(device_time_series, power_key=power_key)
     return augmented

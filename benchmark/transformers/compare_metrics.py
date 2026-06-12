@@ -447,6 +447,11 @@ def collect_metrics(
         if not isinstance(payload, Mapping):
             continue
         detected_task = payload_task(payload)
+        if detected_task is None and payload.get("benchmark_type") == "measure" and "task" not in payload:
+            print(
+                f"Warning: {path.name} has benchmark_type='measure' but no task field; "
+                f"attempting to parse as '{metric_cls.TASK}' for legacy compatibility."
+            )
         if detected_task is not None and detected_task != metric_cls.TASK:
             print(
                 f"Warning: skipping {path.name} because task '{detected_task}' "
