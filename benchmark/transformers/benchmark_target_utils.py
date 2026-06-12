@@ -299,20 +299,32 @@ def args_for_target_device_backend(
     *,
     model_id: str,
     mxq_path: str | None,
+    resolve_default_device: Callable[..., str | None] | None = None,
     resolve_default_device_backend: Callable[..., str | None],
 ) -> argparse.Namespace:
-    """Return an args copy with backend policy resolved for one target.
+    """Return an args copy with runtime policy resolved for one target.
 
     Args:
         args: Parsed benchmark arguments.
         model_id: Target model id.
         mxq_path: Optional MXQ path for the specific target.
+        resolve_default_device: Optional shared device-policy resolver.
         resolve_default_device_backend: Shared backend-policy resolver.
 
     Returns:
-        A shallow copy of ``args`` with a per-target ``device_backend`` value.
+        A shallow copy of ``args`` with per-target ``device`` and ``device_backend`` values.
     """
     resolved = copy.copy(args)
+    if resolve_default_device is not None:
+        requested_device = getattr(args, "_device_requested", args.device)
+        resolved.device = resolve_default_device(
+            device=requested_device,
+            device_explicit=bool(getattr(args, "_device_explicit", False)),
+            model_id=model_id,
+            mxq_path=mxq_path,
+            mxq_dir=args.mxq_dir,
+            original_models=args.original_models,
+        )
     requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
     resolved.device_backend = resolve_default_device_backend(
         device_backend=requested_backend,

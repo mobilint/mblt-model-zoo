@@ -242,6 +242,7 @@ def _target_filter_revision(model_id: str, revision_candidates: list[str | None]
 def _filter_text_targets_by_batch_mode(
     targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
     *,
+    batch_mode: str | None = None,
     task: str = "text-generation",
 ) -> list[TextBenchmarkTarget]:
     """Filter unsupported targets and annotate each supported target with batch metadata."""
@@ -256,6 +257,9 @@ def _filter_text_targets_by_batch_mode(
             max_batch_size = 1
         if max_batch_size is None:
             continue
+        resolved_batch_mode = _batch_mode_from_max_batch_size(max_batch_size)
+        if batch_mode is not None and resolved_batch_mode != batch_mode:
+            continue
         filtered.append(
             TextBenchmarkTarget(
                 model_id=model_id,
@@ -264,7 +268,7 @@ def _filter_text_targets_by_batch_mode(
                 base=base,
                 mxq_path=mxq_path,
                 max_batch_size=max_batch_size,
-                batch_mode=_batch_mode_from_max_batch_size(max_batch_size),
+                batch_mode=resolved_batch_mode,
             )
         )
     return filtered
@@ -891,6 +895,22 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by text-generation benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
+    batch_group = parser.add_mutually_exclusive_group()
+    batch_group.add_argument(
+        "--batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_BATCH,
+        default=_BATCH_MODE_NON_BATCH,
+        help="benchmark only batch-capable model targets",
+    )
+    batch_group.add_argument(
+        "--non-batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_NON_BATCH,
+        help="benchmark only non-batch model targets (default)",
+    )
     parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
@@ -1007,12 +1027,20 @@ def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
-def _is_batch_mode(batch_mode: str) -> bool:
+def _normalize_batch_mode(batch_mode: argparse.Namespace | str) -> str:
+    """Return a batch-mode string from a raw string or parsed args object."""
+
+    if isinstance(batch_mode, argparse.Namespace):
+        return str(getattr(batch_mode, "batch_mode", _BATCH_MODE_NON_BATCH))
+    return str(batch_mode)
+
+
+def _is_batch_mode(batch_mode: argparse.Namespace | str) -> bool:
     """Return whether the resolved target batch mode uses batch execution settings."""
-    return batch_mode == _BATCH_MODE_BATCH
+    return _normalize_batch_mode(batch_mode) == _BATCH_MODE_BATCH
 
 
-def _default_single_target_cores_for_batch_mode(batch_mode: str) -> Sequence[str] | None:
+def _default_single_target_cores_for_batch_mode(batch_mode: argparse.Namespace | str) -> Sequence[str] | None:
     """Return the default single-mode target cores for the active benchmark mode."""
     if _is_batch_mode(batch_mode):
         return None
@@ -1064,9 +1092,15 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
+    if _is_batch_mode(args.batch_mode):
+        if core_mode_explicit and args.core_mode != "single":
+            raise SystemExit("batch benchmark only supports --core-mode single")
+        args.core_mode = "single"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1103,6 +1137,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -1185,7 +1220,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets)
+    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
     run_targets: list[
         tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
     ] = []
@@ -1235,8 +1270,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
         # Ensure pre-check sees memory state after releasing previous model.
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         print(f"=== {label} ===")
         if mxq_path:
             print(f"Using local mxq: {mxq_path}")
@@ -1256,7 +1291,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             "Run config: "
             f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
             f"revision={revision or 'main'} "
-            f"device={args.device} device_backend={target_args.device_backend} "
+            f"device={target_args.device} device_backend={target_args.device_backend} "
             f"prefill_chunk_size={args.prefill_chunk_size if args.prefill_chunk_size is not None else 'auto'}"
         )
         print(
@@ -1265,9 +1300,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
             f"prefill_range={prefill_range} cache_lengths={cache_lengths} "
             f"decode_window={args.decode_window} repeat={args.repeat} warmup={args.warmup}"
         )
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1277,7 +1312,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         f"free={_format_gib(free_b)} required~={_format_gib(required)} "
                         f"estimated_weights={_format_gib(estimated)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
 
         pipeline = None
@@ -1287,7 +1322,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     model_id,
                     tokenizer=args.tokenizer,
                     revision=revision,
-                    device=args.device,
+                    device=target_args.device,
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
@@ -1298,7 +1333,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             except Exception as e:
                 if _is_cuda_oom_error(e):
                     print(f"Skipping (CUDA OOM while loading model): {e}")
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
                     _print_exception(
@@ -1349,10 +1384,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
         except Exception as e:
             if _is_cuda_oom_error(e):
                 print(f"Skipping (CUDA OOM during benchmark): {e}")
-                _release_pipeline(pipeline, args.device)
+                _release_pipeline(pipeline, target_args.device)
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
             continue
 
         if result.prefill_sweep.avg_total_token_latency_values:
@@ -1552,7 +1587,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
-        _release_pipeline(pipeline, args.device)
+        _release_pipeline(pipeline, target_args.device)
 
     _rebuild_combined_outputs(output_dir)
 
@@ -1768,7 +1803,7 @@ def _collect_text_run_targets(
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets)
+    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
     for target in filtered_targets:
         for core_mode in _iter_core_modes_for_target(
@@ -1808,8 +1843,8 @@ def _run_measure(args: argparse.Namespace) -> int:
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
         if args.all and not args.mxq_dir and revision is None:
             print(f"Skipping {label} (missing revisions).")
@@ -1818,9 +1853,9 @@ def _run_measure(args: argparse.Namespace) -> int:
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
             continue
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1829,7 +1864,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         f"Skipping {label} (pre-check VRAM insufficient): "
                         f"free={_format_gib(free_b)} required~={_format_gib(required)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:
@@ -1837,7 +1872,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 model_id,
                 tokenizer=args.tokenizer,
                 revision=revision,
-                device=args.device,
+                device=target_args.device,
                 device_map=args.device_map,
                 dtype=args.dtype,
                 trust_remote_code=args.trust_remote_code,
@@ -1980,7 +2015,7 @@ def _run_measure(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
     _rebuild_measure_outputs(output_dir)
     return 0
 

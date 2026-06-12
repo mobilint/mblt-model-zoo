@@ -431,6 +431,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
@@ -469,6 +471,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -978,8 +981,8 @@ def main(argv: list[str] | None = None) -> int:
     ):
         generate_kwargs = {**base_generate_kwargs, **_optional_generate_kwargs_for_model(args, target.model_id)}
         target_args = _args_for_target_device_backend(args, model_id=target.model_id, mxq_path=target.mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         revision = (
             target.revision_candidates[0]
             if target.mxq_path
@@ -993,7 +996,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
-            f"device={args.device} device_backend={target_args.device_backend} "
+            f"device={target_args.device} device_backend={target_args.device_backend} "
             f"samples={('full-split' if args.num_samples is None else int(args.num_samples))}"
         )
         if _handle_existing_result(json_path, skip_existing=args.skip_existing):
@@ -1007,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipe = _build_asr_pipeline(
                     target,
                     revision=revision,
-                    device=args.device,
+                    device=target_args.device,
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
@@ -1017,7 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:
                 if _is_cuda_oom_error(exc):
                     print(f"Skipping (CUDA OOM while loading model): {exc}")
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
@@ -1053,14 +1056,14 @@ def main(argv: list[str] | None = None) -> int:
                         reason=reason,
                     ),
                 )
-                _release_pipeline(pipe, args.device)
+                _release_pipeline(pipe, target_args.device)
                 continue
             summary = summarize_timings(timings, language=args.language)
             _write_target_json(
                 json_path,
                 target=target,
                 label=mode_label,
-                args=args,
+                args=target_args,
                 revision=revision,
                 core_mode=core_mode,
                 summary=summary,
@@ -1075,12 +1078,12 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             if _is_cuda_oom_error(exc):
                 print(f"Skipping (CUDA OOM during benchmark): {exc}")
-                _release_pipeline(pipe, args.device)
+                _release_pipeline(pipe, target_args.device)
                 continue
             _print_exception("Skipping (benchmark failed)", exc, debug_errors=args.debug_errors)
-            _release_pipeline(pipe, args.device)
+            _release_pipeline(pipe, target_args.device)
             continue
-        _release_pipeline(pipe, args.device)
+        _release_pipeline(pipe, target_args.device)
 
     _write_combined_outputs(output_dir)
     return 0

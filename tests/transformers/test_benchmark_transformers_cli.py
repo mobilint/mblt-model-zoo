@@ -11,6 +11,11 @@ if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
 from benchmark.transformers import benchmark_automatic_speech_recognition_models as asr_bench  # noqa: E402
 from benchmark.transformers import benchmark_image_text_to_text_models as vlm_bench  # noqa: E402
 from benchmark.transformers import benchmark_text_generation_models as text_bench  # noqa: E402
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (  # noqa: E402
+    resolve_default_device,
+    resolve_default_device_backend,
+    resolve_device_tracker_interval_sec,
+)
 
 
 def test_text_benchmark_requires_subcommand() -> None:
@@ -347,6 +352,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
                 base="mobilint_vlm-a",
                 mxq_path=None,
                 max_batch_size=2,
+                batch_mode="batch",
             )
         ]
 
@@ -355,7 +361,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
     _, _, run_targets = vlm_bench._collect_vlm_run_targets(args)
 
     assert len(run_targets) == 1
-    assert run_targets[0][-1] == 2
+    assert run_targets[0][-2:] == (2, "batch")
 
 
 def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_path) -> None:
@@ -486,8 +492,10 @@ def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:
     mobilint_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
     other_args = text_bench._args_for_target_device_backend(args, model_id="other/model-a")
 
+    assert mobilint_args.device == "cpu"
     assert mobilint_args.device_backend == "npu"
-    assert other_args.device_backend == "none"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
 
 
 def test_vlm_benchmark_resolves_mobilint_backend_per_target() -> None:
@@ -499,8 +507,90 @@ def test_vlm_benchmark_resolves_mobilint_backend_per_target() -> None:
     mobilint_args = vlm_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
     other_args = vlm_bench._args_for_target_device_backend(args, model_id="other/model-a")
 
+    assert mobilint_args.device == "cpu"
     assert mobilint_args.device_backend == "npu"
-    assert other_args.device_backend == "none"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
+
+
+def test_asr_benchmark_resolves_mobilint_backend_per_target() -> None:
+    """Verify ASR Mobilint targets use NPU metrics even when the initial command has no model."""
+    args = asr_bench._parse_args(["--all"])
+
+    asr_bench._resolve_runtime_defaults(args, ["--all"])
+
+    mobilint_args = asr_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+    other_args = asr_bench._args_for_target_device_backend(args, model_id="other/model-a")
+
+    assert mobilint_args.device == "cpu"
+    assert mobilint_args.device_backend == "npu"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
+
+
+@pytest.mark.parametrize(
+    ("model_id", "mxq_path", "mxq_dir", "expected_device", "expected_backend"),
+    [
+        ("mobilint/model-a", None, None, "cpu", "npu"),
+        ("other/model-a", None, None, "cuda", "gpu"),
+        ("other/model-a", "model.mxq", None, "cpu", "npu"),
+        ("other/model-a", None, "mxq", "cpu", "npu"),
+    ],
+)
+def test_benchmark_common_runtime_default_policy(
+    model_id: str,
+    mxq_path: str | None,
+    mxq_dir: str | None,
+    expected_device: str,
+    expected_backend: str,
+) -> None:
+    """Verify shared benchmark runtime defaults are target-aware."""
+    assert (
+        resolve_default_device(
+            device=None,
+            device_explicit=False,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            mxq_dir=mxq_dir,
+        )
+        == expected_device
+    )
+    assert (
+        resolve_default_device_backend(
+            device_backend="gpu",
+            device_backend_explicit=False,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            mxq_dir=mxq_dir,
+        )
+        == expected_backend
+    )
+
+
+def test_benchmark_common_runtime_default_policy_preserves_explicit_values() -> None:
+    """Verify explicit device/backend values are not overwritten by target policy."""
+    assert (
+        resolve_default_device(
+            device="cuda:1",
+            device_explicit=True,
+            model_id="mobilint/model-a",
+        )
+        == "cuda:1"
+    )
+    assert (
+        resolve_default_device_backend(
+            device_backend="gpu",
+            device_backend_explicit=True,
+            model_id="mobilint/model-a",
+        )
+        == "gpu"
+    )
+
+
+@pytest.mark.parametrize(("backend", "expected"), [("npu", 1.0), ("gpu", 0.1), ("cpu", 0.1)])
+def test_benchmark_common_tracker_interval_policy(backend: str, expected: float) -> None:
+    """Verify tracker sampling intervals are selected by resolved backend."""
+    assert resolve_device_tracker_interval_sec(backend) == pytest.approx(expected)
 
 
 def test_benchmark_target_backend_preserves_explicit_backend() -> None:
@@ -511,6 +601,16 @@ def test_benchmark_target_backend_preserves_explicit_backend() -> None:
     target_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
 
     assert target_args.device_backend == "gpu"
+
+
+def test_benchmark_target_device_preserves_explicit_device() -> None:
+    """Verify explicit device choices still override target device policy."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--all", "--device", "cuda:1"])
+
+    text_bench._resolve_runtime_defaults(args, ["measure", "--all", "--device", "cuda:1"])
+    target_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+
+    assert target_args.device == "cuda:1"
 
 
 def test_text_measure_rebuild_outputs(tmp_path) -> None:

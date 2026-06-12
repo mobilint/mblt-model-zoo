@@ -1105,6 +1105,22 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by image-text-to-text benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     _add_device_tracking_args(parser)
+    batch_group = parser.add_mutually_exclusive_group()
+    batch_group.add_argument(
+        "--batch",
+        dest="batch_mode",
+        action="store_const",
+        const="batch",
+        default="non_batch",
+        help="benchmark only batch-capable model targets",
+    )
+    batch_group.add_argument(
+        "--non-batch",
+        dest="batch_mode",
+        action="store_const",
+        const="non_batch",
+        help="benchmark only non-batch model targets (default)",
+    )
     parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
@@ -1225,6 +1241,8 @@ def _flag_present(raw_argv: list[str], flag: str) -> bool:
 
 def _default_single_target_cores_for_batch_mode(batch_mode: str) -> Sequence[str] | None:
     """Return the default single-mode target cores for one resolved target batch mode."""
+    if isinstance(batch_mode, argparse.Namespace):
+        batch_mode = str(getattr(batch_mode, "batch_mode", "non_batch"))
     if batch_mode == "batch":
         return None
     return ("0:0",)
@@ -1236,9 +1254,15 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
+    if args.batch_mode == "batch":
+        if core_mode_explicit and args.core_mode != "single":
+            raise SystemExit("batch benchmark only supports --core-mode single")
+        args.core_mode = "single"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1276,6 +1300,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -1353,6 +1378,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
+            batch_mode=args.batch_mode,
             task="image-text-to-text",
         )
     ]
@@ -1403,8 +1429,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         unit="model-mode",
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         json_path = output_dir / f"{base}.json"
         csv_path = output_dir / f"{base}.csv"
         png_path = output_dir / f"{base}.png"
@@ -1415,9 +1441,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if not artifacts_available:
             print(f"Skipping {label} ({skip_reason}).")
             continue
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1427,12 +1453,12 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         f"free={_format_gib(free_b)} required~={_format_gib(required)} "
                         f"estimated_weights={_format_gib(estimated)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:
             pipeline = _build_pipeline(
-                args,
+                target_args,
                 model_id,
                 revision,
                 target_mxq_path,
@@ -1454,7 +1480,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             else:
                 print(f"Skipping {label} (benchmark failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
 
     _rebuild_combined(output_dir)
     return 0
@@ -1504,6 +1530,7 @@ def _collect_vlm_run_targets(
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
+            batch_mode=args.batch_mode,
             task="image-text-to-text",
         )
     ]
@@ -1758,8 +1785,8 @@ def _run_measure(args: argparse.Namespace) -> int:
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
         target_args.batch_size = batch_size
         target_args.batch_mode = batch_mode
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         json_path = output_dir / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
@@ -1771,7 +1798,7 @@ def _run_measure(args: argparse.Namespace) -> int:
         pipeline = None
         try:
             pipeline = _build_pipeline(
-                args,
+                target_args,
                 model_id,
                 revision,
                 target_mxq_path,
@@ -1919,7 +1946,7 @@ def _run_measure(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
     _rebuild_measure_outputs(output_dir)
     return 0
 

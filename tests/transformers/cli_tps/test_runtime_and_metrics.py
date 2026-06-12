@@ -2169,6 +2169,41 @@ def test_build_device_tracker_forwards_npu_rail_metrics(monkeypatch: pytest.Monk
     assert created == {"interval": 1.0, "npu_id": 0, "rail_metrics": "all"}
 
 
+def test_build_device_tracker_uses_gpu_interval_and_device_id(monkeypatch):
+    """Verify GPU tracking samples at 0.1s and parses cuda device ids."""
+    created = {}
+
+    class _FakeGPUDeviceTracker:
+        def __init__(self, **kwargs) -> None:
+            created.update(kwargs)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {}
+
+    fake_module = types.SimpleNamespace(GPUDeviceTracker=_FakeGPUDeviceTracker)
+    monkeypatch.setitem(sys.modules, "mblt_tracker", fake_module)
+    args = argparse.Namespace(
+        device_metrics=True,
+        device_backend="gpu",
+        device_npu_id=None,
+        device_npu_rail_metrics="npu",
+        device="cuda:1",
+        device_gpu_id=None,
+    )
+    pipeline = SimpleNamespace(model=SimpleNamespace())
+
+    tracker = build_device_tracker(args, pipeline)
+
+    assert isinstance(tracker, _FakeGPUDeviceTracker)
+    assert created == {"interval": 0.1, "gpu_id": 1}
+
+
 def test_extract_device_time_series_uses_tracker_100_trace_methods():
     class _FakeTracker:
         def get_total_power_trace(self):

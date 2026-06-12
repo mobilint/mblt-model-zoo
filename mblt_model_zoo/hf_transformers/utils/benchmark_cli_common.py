@@ -4,9 +4,12 @@ import argparse
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TypeAlias
 
-DEVICE_TRACKER_INTERVAL_SEC = 1.0
+NPU_DEVICE_TRACKER_INTERVAL_SEC = 1.0
+GPU_DEVICE_TRACKER_INTERVAL_SEC = 0.1
+CPU_DEVICE_TRACKER_INTERVAL_SEC = 0.1
+DEVICE_TRACKER_INTERVAL_SEC = NPU_DEVICE_TRACKER_INTERVAL_SEC
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
-DEFAULT_DEVICE_BACKEND = "none"
+DEFAULT_DEVICE_BACKEND = "gpu"
 NPU_RAIL_METRIC_CHOICES = ("npu", "ddr", "pmic", "goldfinger")
 CORE_MODE_CHOICES = ("single", "global4", "global8")
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
@@ -138,6 +141,17 @@ def is_mobilint_target(model_id: str | None, mxq_path: str | None = None, mxq_di
     return bool(model_id and str(model_id).strip().startswith("mobilint/"))
 
 
+def resolve_device_tracker_interval_sec(device_backend: str | None) -> float:
+    """Return the tracker sampling interval for a resolved device backend."""
+
+    backend = (device_backend or "none").strip().lower()
+    if backend == "npu":
+        return NPU_DEVICE_TRACKER_INTERVAL_SEC
+    if backend == "cpu":
+        return CPU_DEVICE_TRACKER_INTERVAL_SEC
+    return GPU_DEVICE_TRACKER_INTERVAL_SEC
+
+
 def resolve_default_device(
     *,
     device: str | None,
@@ -151,10 +165,10 @@ def resolve_default_device(
     if device_explicit:
         return device
     if original_models:
-        return "cuda:0"
+        return "cuda"
     if is_mobilint_target(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir):
         return "cpu"
-    return device if device is not None else "cpu"
+    return "cuda"
 
 
 def resolve_default_device_backend(
@@ -170,10 +184,10 @@ def resolve_default_device_backend(
     if device_backend_explicit:
         return device_backend
     if original_models:
-        return "auto"
+        return "gpu"
     if is_mobilint_target(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir):
         return "npu"
-    return DEFAULT_DEVICE_BACKEND
+    return "gpu"
 
 
 def append_core_mode_suffix(
@@ -220,6 +234,8 @@ def apply_core_mode_model_kwargs(
 
 
 def infer_gpu_ids(device: str | None, device_gpu_id: Optional[list[int]]) -> Optional[int | list[int]]:
+    """Infer GPU tracker ids from explicit tracker args or CUDA device text."""
+
     if device_gpu_id is not None:
         return device_gpu_id[0] if len(device_gpu_id) == 1 else device_gpu_id
     text = (device or "").strip().lower()
@@ -355,11 +371,12 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any) -> DeviceTrack
     if backend == "npu":
         from mblt_tracker import NPUDeviceTracker
 
+        interval = resolve_device_tracker_interval_sec(backend)
         npu_id = infer_npu_ids(getattr(args, "device_npu_id", None))
         rail_metrics = getattr(args, "device_npu_rail_metrics", "npu")
         try:
             return NPUDeviceTracker(
-                interval=DEVICE_TRACKER_INTERVAL_SEC,
+                interval=interval,
                 npu_id=npu_id,
                 rail_metrics=rail_metrics,
             )
@@ -370,9 +387,10 @@ def build_device_tracker(args: argparse.Namespace, pipeline: Any) -> DeviceTrack
     if backend == "gpu":
         from mblt_tracker import GPUDeviceTracker
 
+        interval = resolve_device_tracker_interval_sec(backend)
         gpu_id = infer_gpu_ids(args.device, args.device_gpu_id)
         try:
-            return GPUDeviceTracker(interval=DEVICE_TRACKER_INTERVAL_SEC, gpu_id=gpu_id)
+            return GPUDeviceTracker(interval=interval, gpu_id=gpu_id)
         except Exception as e:
             print(f"[device] failed to initialize GPU tracker: {e}")
             return None
@@ -540,4 +558,6 @@ def print_device_status(args: argparse.Namespace, tracker: DeviceTracker | None)
     if tracker is None:
         print("[device] enabled but no compatible tracker initialized (auto detection fallback)")
         return
-    print(f"[device] enabled with {tracker.__class__.__name__} (interval={DEVICE_TRACKER_INTERVAL_SEC}s fixed)")
+    backend = getattr(args, "device_backend", None)
+    interval = resolve_device_tracker_interval_sec(backend)
+    print(f"[device] enabled with {tracker.__class__.__name__} (interval={interval}s fixed)")
