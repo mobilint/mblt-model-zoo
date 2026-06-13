@@ -482,7 +482,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     assert vlm_bench._run_measure(args) == 0
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
-    assert payload["device"]["total_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(18.0)
     assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
 
 
@@ -550,7 +550,7 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     assert vlm_bench._run_measure(args) == 0
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
-    assert payload["device"]["total_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(40.0)
     assert payload["device"]["llm_prefill_tps_per_w"] == pytest.approx((128 * 4 * 2) / 20.0)
     assert payload["device"]["llm_decode_tps_per_w"] == pytest.approx((32 * 4 * 2) / 20.0)
 
@@ -571,7 +571,7 @@ def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
 
 
 def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
-    """Verify VLM benchmark sweep derives phase efficiency from whole LLM trace energy."""
+    """Verify VLM benchmark sweep derives phase efficiency from phase trace energy."""
     args = Namespace(
         llm_resolution=224,
         image_resolutions=[224],
@@ -611,6 +611,7 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
 
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", lambda args, pipeline: (_FakeTracker(), _FakeTracker()))
     monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(vlm_bench, "_stop_tracker_safe", lambda tracker: None)
     monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
@@ -625,7 +626,7 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
     llm_run = payload["benchmark"]["llm_results"]["runs"][0]
     llm_summary = payload["benchmark"]["llm_results"]["summary"]
     llm_rows = [row for row in rows if row["type"] == "llm"]
-    assert llm_run["total_energy_j"] == pytest.approx(10.0)
+    assert llm_run["total_energy_j"] == pytest.approx(20.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(((128 + 256) * 2) / 10.0)
     assert llm_run["decode_tps_per_w"] == pytest.approx((32 * 3 * 2) / 10.0)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
@@ -711,6 +712,7 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: object())
     monkeypatch.setattr(tps_cli, "_resolve_cli_batch_size", lambda args, pipeline: 2)
     monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (_FakeTracker(), _FakeTracker()))
     monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(tps_cli, "_stop_tracker_safe", lambda tracker: None)
     monkeypatch.setattr(tps_cli, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
@@ -734,7 +736,7 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     prefill_tps_per_w = ((128 + 256) * 2) / 10.0
     decode_tps_per_w = (32 * 3 * 2) / 10.0
 
-    assert llm_run["total_energy_j"] == pytest.approx(10.0)
+    assert llm_run["total_energy_j"] == pytest.approx(20.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
     assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))

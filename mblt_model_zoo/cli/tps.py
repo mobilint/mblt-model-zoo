@@ -1372,7 +1372,14 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             decode_prefill_mode=(result.decode_prefill_modes[decode_idx] if result.decode_prefill_modes else "real"),
         )
 
-    def _measure_fixed_vlm_run(*, show_progress: bool) -> VLMSingleMeasurement:
+    def _measure_fixed_vlm_run(
+        *,
+        show_progress: bool,
+        on_prefill_start=None,
+        on_prefill_end=None,
+        on_decode_start=None,
+        on_decode_end=None,
+    ) -> VLMSingleMeasurement:
         """Measure VLM vision plus LLM with the requested fixed prefill length."""
         vision_latency, vision_fps = measurer.measure_vision(
             image_resolution=args.image_resolution,
@@ -1390,6 +1397,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             prefill_chunk_size=args.prefill_chunk_size,
             show_progress=show_progress,
             batch_size=batch_size,
+            on_prefill_start=on_prefill_start,
+            on_prefill_end=on_prefill_end,
+            on_decode_start=on_decode_start,
+            on_decode_end=on_decode_end,
         )
         return VLMSingleMeasurement(
             image_resolution=args.image_resolution,
@@ -1400,6 +1411,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
+    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker)
 
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
@@ -1412,9 +1424,53 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         if tracker is not None:
             tracker.start()
         try:
-            run = _measure_fixed_vlm_run(show_progress=False)
+            vision_latency, vision_fps = measurer.measure_vision(
+                image_resolution=args.image_resolution,
+                repeat=1,
+                prompt=args.prompt,
+                batch_size=batch_size,
+                show_progress=False,
+            )[0]
         finally:
             _stop_tracker_safe(tracker)
+        llm_result = None
+        try:
+            llm_result = measurer.measure_llm_full(
+                image_resolution=args.image_resolution,
+                prompt=args.prompt,
+                prefill_range=(args.prefill, args.prefill, args.prefill),
+                cache_lengths=[args.prefill],
+                decode_window=args.decode,
+                prefill_chunk_size=args.prefill_chunk_size,
+                show_progress=False,
+                batch_size=batch_size,
+                on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
+                on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
+                on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
+                on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
+            )
+        finally:
+            _stop_tracker_safe(llm_tracker_prefill)
+            _stop_tracker_safe(llm_tracker_decode)
+        run = VLMSingleMeasurement(
+            image_resolution=args.image_resolution,
+            vision_encode_latency=vision_latency,
+            vision_fps=vision_fps,
+            llm=_single_llm_measurement(llm_result),
+        )
+        if llm_tracker_prefill is not None and llm_tracker_decode is not None:
+            prefill_metric = _extract_device_metric(llm_tracker_prefill)
+            decode_metric = _extract_device_metric(llm_tracker_decode)
+            prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+            decode_time_series = _extract_device_time_series(llm_tracker_decode)
+            _enrich_single_run_device(
+                run=run.llm,
+                prefill_metric=prefill_metric,
+                decode_metric=decode_metric,
+                batch_size=batch_size,
+                prefill_time_series=prefill_time_series,
+                decode_time_series=decode_time_series,
+            )
         runs.append(run)
         if tracker is not None:
             metric = _extract_device_metric(tracker)
@@ -2035,6 +2091,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
+    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker)
 
     resolution_payloads = []
@@ -2241,10 +2298,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             batch_size=batch_size,
         )
     llm_runs = []
-    llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+    llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
-        if tracker is not None:
-            tracker.start()
         try:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
@@ -2254,44 +2309,30 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 decode_window=args.decode_window,
                 show_progress=False,
                 batch_size=batch_size,
+                on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
+                on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
+                on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
+                on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
             )
         finally:
-            _stop_tracker_safe(tracker)
-        if tracker is not None and (run.prefill_sweep.x_values or run.decode_sweep.x_values):
-            metric = _extract_device_metric(tracker)
-            device_time_series = _extract_device_time_series(tracker)
-            llm_device_time_series_runs.append(device_time_series)
+            _stop_tracker_safe(llm_tracker_prefill)
+            _stop_tracker_safe(llm_tracker_decode)
+        if llm_tracker_prefill is not None and llm_tracker_decode is not None and (
+            run.prefill_sweep.x_values or run.decode_sweep.x_values
+        ):
+            prefill_metric = _extract_device_metric(llm_tracker_prefill)
+            decode_metric = _extract_device_metric(llm_tracker_decode)
+            prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+            decode_time_series = _extract_device_time_series(llm_tracker_decode)
+            llm_device_time_series_runs.append({"prefill": prefill_time_series, "decode": decode_time_series})
             _enrich_single_run_device(
                 run=run,
-                prefill_metric=metric,
-                decode_metric=metric,
+                prefill_metric=prefill_metric,
+                decode_metric=decode_metric,
                 batch_size=batch_size,
+                prefill_time_series=prefill_time_series,
+                decode_time_series=decode_time_series,
                 decode_window=args.decode_window,
-            )
-            total_energy = _energy_from_device_time_series(device_time_series)
-            run.total_energy_j = total_energy
-            total_prefill_tokens = _measured_prefill_token_count(run, batch_size)
-            total_decode_tokens = _measured_decode_token_count(run, batch_size, args.decode_window)
-            total_tokens = total_prefill_tokens + total_decode_tokens
-            run.prefill_tps_per_w = (
-                _safe_div(float(total_prefill_tokens), total_energy) if total_energy is not None else None
-            )
-            run.decode_tps_per_w = (
-                _safe_div(float(total_decode_tokens), total_energy) if total_energy is not None else None
-            )
-            run.prefill_j_per_token = (
-                _safe_div(total_energy, float(total_prefill_tokens))
-                if total_energy is not None and total_prefill_tokens > 0
-                else None
-            )
-            run.decode_j_per_token = (
-                _safe_div(total_energy, float(total_decode_tokens))
-                if total_energy is not None and total_decode_tokens > 0
-                else None
-            )
-            run.total_tps_per_w = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
-            run.total_j_per_token = (
-                _safe_div(total_energy, float(total_tokens)) if total_energy is not None and total_tokens > 0 else None
             )
         llm_runs.append(run)
 
