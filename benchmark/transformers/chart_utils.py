@@ -44,8 +44,8 @@ class ModelMetrics:
     decode_tps: dict[int, float]
     prefill_latency_ms: dict[int, float]
     decode_duration_ms: dict[int, float]
-    prefill_tokens_per_j: Optional[float]
-    decode_tokens_per_j: Optional[float]
+    prefill_tps_per_w: Optional[float]
+    decode_tps_per_w: Optional[float]
     prefill_j_per_token: Optional[float]
     decode_j_per_token: Optional[float]
     avg_power_w: Optional[float]
@@ -137,8 +137,8 @@ def load_model_metrics(path: Path) -> Optional[tuple[str, ModelMetrics]]:
         decode_tps=decode_tps_map,
         prefill_latency_ms=prefill_latency_map,
         decode_duration_ms=decode_duration_map,
-        prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
-        decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+        prefill_tps_per_w=_as_float(device.get("prefill_tps_per_w_last")),
+        decode_tps_per_w=_as_float(device.get("decode_tps_per_w_last")),
         prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
         decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
         avg_power_w=_as_float(device.get("avg_power_w")),

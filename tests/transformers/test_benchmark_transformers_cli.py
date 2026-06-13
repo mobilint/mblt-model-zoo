@@ -483,8 +483,8 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
 
 
-def test_vlm_measure_tokens_per_j_scales_by_measured_repeat_count(monkeypatch, tmp_path) -> None:
-    """Verify VLM fixed measure tokens/J uses all repeated runs included in total energy."""
+def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_path) -> None:
+    """Verify VLM fixed measure TPS/W uses all repeated runs included in total energy."""
     args = vlm_bench._build_arg_parser().parse_args(
         [
             "measure",
@@ -548,8 +548,8 @@ def test_vlm_measure_tokens_per_j_scales_by_measured_repeat_count(monkeypatch, t
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
     assert payload["device"]["total_energy_j"] == pytest.approx(20.0)
-    assert payload["device"]["llm_prefill_tok_per_j"] == pytest.approx((128 * 4 * 2) / 20.0)
-    assert payload["device"]["llm_decode_tok_per_j"] == pytest.approx((32 * 4 * 2) / 20.0)
+    assert payload["device"]["llm_prefill_tps_per_w"] == pytest.approx((128 * 4 * 2) / 20.0)
+    assert payload["device"]["llm_decode_tps_per_w"] == pytest.approx((32 * 4 * 2) / 20.0)
 
 
 def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:

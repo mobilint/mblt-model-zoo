@@ -458,8 +458,8 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         "total_energy_j",
         "prefill_tps_last",
         "decode_tps_last",
-        "prefill_tok_per_j_last",
-        "decode_tok_per_j_last",
+        "prefill_tps_per_w_last",
+        "decode_tps_per_w_last",
         "prefill_j_per_tok_last",
         "decode_j_per_tok_last",
     ):
@@ -626,8 +626,8 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
                 "total_energy_j",
                 "prefill_tps_last",
                 "decode_tps_last",
-                "prefill_tok_per_j_last",
-                "decode_tok_per_j_last",
+                "prefill_tps_per_w_last",
+                "decode_tps_per_w_last",
                 "prefill_j_per_tok_last",
                 "decode_j_per_tok_last",
             ],
@@ -698,8 +698,8 @@ def _build_text_generation_plot_tables(output_dir: Path) -> dict[str, str]:
     }
     rows = [{"model": model, **vars(metrics_by_model[model])} for model in models]
     scalar_specs = [
-        ("prefill_tokens_per_j.png", "prefill_tokens_per_j", "tokens/J"),
-        ("decode_tokens_per_j.png", "decode_tokens_per_j", "tokens/J"),
+        ("prefill_tps_per_w.png", "prefill_tps_per_w", "TPS/W"),
+        ("decode_tps_per_w.png", "decode_tps_per_w", "TPS/W"),
         ("avg_power_w.png", "avg_power_w", "W"),
         ("avg_temperature_c.png", "avg_temperature_c", "°C"),
         ("avg_utilization_pct.png", "avg_utilization_pct", "%"),
@@ -718,9 +718,9 @@ def _build_text_generation_measure_plot_tables(output_dir: Path) -> dict[str, st
         return {}
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "tokens/s"),
-        ("measure_prefill_tokens_per_j.png", "prefill_tok_per_j_mean", "tokens/J"),
+        ("measure_prefill_tps_per_w.png", "prefill_tps_per_w_mean", "TPS/W"),
         ("measure_decode_tps.png", "decode_tps_mean", "tokens/s"),
-        ("measure_decode_tokens_per_j.png", "decode_tok_per_j_mean", "tokens/J"),
+        ("measure_decode_tps_per_w.png", "decode_tps_per_w_mean", "TPS/W"),
         ("measure_avg_power_w.png", "avg_power_w", "W"),
         ("measure_avg_temperature_c.png", "avg_temperature_c", "°C"),
         ("measure_avg_utilization_pct.png", "avg_utilization_pct", "%"),
@@ -801,8 +801,8 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
                     "total_energy_j": device.get("total_energy_j"),
                     "prefill_tps_last": device.get("prefill_tps_last"),
                     "decode_tps_last": device.get("decode_tps_last"),
-                    "prefill_tok_per_j_last": device.get("prefill_tok_per_j_last"),
-                    "decode_tok_per_j_last": device.get("decode_tok_per_j_last"),
+                    "prefill_tps_per_w_last": device.get("prefill_tps_per_w_last"),
+                    "decode_tps_per_w_last": device.get("decode_tps_per_w_last"),
                     "prefill_j_per_tok_last": device.get("prefill_j_per_tok_last"),
                     "decode_j_per_tok_last": device.get("decode_j_per_tok_last"),
                 }
@@ -839,10 +839,10 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
         )
         scalar_specs = [
             (
-                "prefill_tokens_per_j.png",
-                "Prefill Tokens Per Joule",
-                "Tokens Per Joule",
-                lambda m: m.prefill_tokens_per_j,
+                "prefill_tps_per_w.png",
+                "Prefill TPS/W",
+                "TPS/W",
+                lambda m: m.prefill_tps_per_w,
             ),
         ]
         plot_token_chart(
@@ -857,10 +857,10 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
         scalar_specs.extend(
             [
                 (
-                    "decode_tokens_per_j.png",
-                    "Decode Tokens Per Joule",
-                    "Tokens Per Joule",
-                    lambda m: m.decode_tokens_per_j,
+                    "decode_tps_per_w.png",
+                    "Decode TPS/W",
+                    "TPS/W",
+                    lambda m: m.decode_tps_per_w,
                 ),
                 ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
                 ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
@@ -1535,8 +1535,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 "total_energy_j": total_energy,
                 "prefill_tps_last": prefill_last,
                 "decode_tps_last": decode_last,
-                "prefill_tok_per_j_last": prefill_tpj,
-                "decode_tok_per_j_last": decode_tpj,
+                "prefill_tps_per_w_last": prefill_tpj,
+                "decode_tps_per_w_last": decode_tpj,
                 "prefill_j_per_tok_last": _safe_div(1.0, prefill_tpj) if prefill_tpj else None,
                 "decode_j_per_tok_last": _safe_div(1.0, decode_tpj) if decode_tpj else None,
                 "prefill_avg_power_w": prefill_metric.get("avg_power_w"),
@@ -1571,8 +1571,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 f"avg_mem_used={avg_memory_used_mb if avg_memory_used_mb is not None else 'n/a'}MB "
                 f"prefill_avg_power={prefill_avg_power if prefill_avg_power is not None else 'n/a'}W "
                 f"decode_avg_power={decode_avg_power if decode_avg_power is not None else 'n/a'}W "
-                f"prefill_tok_per_j(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
-                f"decode_tok_per_j(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
+                f"prefill_tps_per_w(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
+                f"decode_tps_per_w(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
             )
 
         payload: dict[str, Any] = {
@@ -1640,8 +1640,8 @@ def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | 
         "avg_memory_used_pct",
         "p99_memory_used_pct",
         "total_energy_j",
-        "prefill_tokens_per_j",
-        "decode_tokens_per_j",
+        "prefill_tps_per_w",
+        "decode_tps_per_w",
         "prefill_j_per_token",
         "decode_j_per_token",
     )
@@ -1686,8 +1686,8 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
                 "avg_temperature_c": device.get("avg_temperature_c"),
                 "avg_memory_used_mb": device.get("avg_memory_used_mb"),
                 "total_energy_j": device.get("total_energy_j"),
-                "prefill_tok_per_j_mean": device.get("prefill_tokens_per_j"),
-                "decode_tok_per_j_mean": device.get("decode_tokens_per_j"),
+                "prefill_tps_per_w_mean": device.get("prefill_tps_per_w"),
+                "decode_tps_per_w_mean": device.get("decode_tps_per_w"),
             }
         )
     return rows
@@ -1714,17 +1714,17 @@ def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> No
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill Tokens Per Second", "Tokens Per Second"),
         (
-            "measure_prefill_tokens_per_j.png",
-            "prefill_tok_per_j_mean",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
+            "measure_prefill_tps_per_w.png",
+            "prefill_tps_per_w_mean",
+            "Prefill TPS/W",
+            "TPS/W",
         ),
         ("measure_decode_tps.png", "decode_tps_mean", "Decode Tokens Per Second", "Tokens Per Second"),
         (
-            "measure_decode_tokens_per_j.png",
-            "decode_tok_per_j_mean",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
+            "measure_decode_tps_per_w.png",
+            "decode_tps_per_w_mean",
+            "Decode TPS/W",
+            "TPS/W",
         ),
         ("measure_avg_power_w.png", "avg_power_w", "Power", "Power (Watts)"),
         ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature", "Temperature (Celsius)"),
@@ -1958,24 +1958,24 @@ def _run_measure(args: argparse.Namespace) -> int:
                     row["total_energy_j"] = (
                         prefill_energy + decode_energy if prefill_energy is not None and decode_energy is not None else None
                     )
-                    row["prefill_tokens_per_j"] = (
+                    row["prefill_tps_per_w"] = (
                         _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
                         if prefill_energy is not None
                         else None
                     )
-                    row["decode_tokens_per_j"] = (
+                    row["decode_tps_per_w"] = (
                         _safe_div(float(args.decode) * float(batch_size), decode_energy)
                         if decode_energy is not None
                         else None
                     )
                     row["prefill_j_per_token"] = (
-                        _safe_div(1.0, float(row["prefill_tokens_per_j"]))
-                        if isinstance(row.get("prefill_tokens_per_j"), (int, float))
+                        _safe_div(1.0, float(row["prefill_tps_per_w"]))
+                        if isinstance(row.get("prefill_tps_per_w"), (int, float))
                         else None
                     )
                     row["decode_j_per_token"] = (
-                        _safe_div(1.0, float(row["decode_tokens_per_j"]))
-                        if isinstance(row.get("decode_tokens_per_j"), (int, float))
+                        _safe_div(1.0, float(row["decode_tps_per_w"]))
+                        if isinstance(row.get("decode_tps_per_w"), (int, float))
                         else None
                     )
                     device_time_series_runs.append(

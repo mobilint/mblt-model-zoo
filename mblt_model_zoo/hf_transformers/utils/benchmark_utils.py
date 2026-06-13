@@ -459,11 +459,11 @@ class SingleMeasurement:
     decode_avg_memory_used_pct: Optional[float] = None
     decode_p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
-    prefill_tokens_per_j: Optional[float] = None
+    prefill_tps_per_w: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
-    decode_tokens_per_j: Optional[float] = None
+    decode_tps_per_w: Optional[float] = None
     decode_j_per_token: Optional[float] = None
-    total_tokens_per_j: Optional[float] = None
+    total_tps_per_w: Optional[float] = None
     total_j_per_token: Optional[float] = None
     acceptance_steps: Optional[int] = None
     acceptance_tokens_sum: Optional[int] = None
@@ -526,9 +526,9 @@ class BenchmarkResult:
     avg_memory_used_pct: Optional[float] = None
     p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
-    prefill_tokens_per_j: Optional[float] = None
+    prefill_tps_per_w: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
-    decode_tokens_per_j: Optional[float] = None
+    decode_tps_per_w: Optional[float] = None
     decode_j_per_token: Optional[float] = None
 
     @staticmethod

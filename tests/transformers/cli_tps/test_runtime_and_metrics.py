@@ -439,11 +439,11 @@ def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
         decode_time_series={"power_w": [{"timestamp_s": 0.0, "value": 4.0}, {"timestamp_s": 1.0, "value": 4.0}]},
     )
 
-    assert measurement.prefill_tokens_per_j == pytest.approx(3.0)
+    assert measurement.prefill_tps_per_w == pytest.approx(3.0)
     assert measurement.prefill_j_per_token == pytest.approx(1.0 / 3.0)
-    assert measurement.decode_tokens_per_j == pytest.approx(1.5)
+    assert measurement.decode_tps_per_w == pytest.approx(1.5)
     assert measurement.decode_j_per_token == pytest.approx(2.0 / 3.0)
-    assert measurement.total_tokens_per_j == pytest.approx(2.25)
+    assert measurement.total_tps_per_w == pytest.approx(2.25)
     assert measurement.total_j_per_token == pytest.approx(4.0 / 9.0)
 
 
@@ -474,9 +474,9 @@ def test_enrich_single_run_device_computes_energy_metrics_without_avg_power():
 
     assert measurement.avg_power_w is None
     assert measurement.total_energy_j == pytest.approx(8.0)
-    assert measurement.prefill_tokens_per_j == pytest.approx(2.0)
-    assert measurement.decode_tokens_per_j == pytest.approx(1.0)
-    assert measurement.total_tokens_per_j == pytest.approx(1.5)
+    assert measurement.prefill_tps_per_w == pytest.approx(2.0)
+    assert measurement.decode_tps_per_w == pytest.approx(1.0)
+    assert measurement.total_tps_per_w == pytest.approx(1.5)
 
 
 def test_integrate_power_trace_j_uses_trapezoidal_rule():
@@ -2061,14 +2061,14 @@ def test_cli_aggregate_sweep_results_tolerates_missing_latency_values():
     assert result.prefill_sweep.avg_npu_token_latency_values == [None]
 
 
-def test_cli_attach_tokens_per_j_uses_whole_sweep_token_scope():
-    """Verify sweep tokens/J uses the same whole-phase scope as trace energy."""
+def test_cli_attach_tps_per_w_uses_whole_sweep_token_scope():
+    """Verify sweep TPS/W uses the same whole-phase scope as trace energy."""
     result = BenchmarkResult(
         prefill_sweep=SweepData(x_values=[8, 16], tps_values=[10.0, 20.0], time_values=[0.8, 0.8]),
         decode_sweep=SweepData(x_values=[32, 64], tps_values=[30.0, 40.0], time_values=[0.2, 0.2]),
     )
 
-    tps_cli._attach_tokens_per_j(
+    tps_cli._attach_tps_per_w(
         result,
         prefill_energy=12.0,
         decode_energy=8.0,
@@ -2077,9 +2077,9 @@ def test_cli_attach_tokens_per_j_uses_whole_sweep_token_scope():
         decode_window=4,
     )
 
-    assert result.prefill_tokens_per_j == pytest.approx(((8 + 16) * 2) / 12.0)
-    assert result.decode_tokens_per_j == pytest.approx((4 * 2 * 2) / 8.0)
-    assert result.total_tokens_per_j == pytest.approx((((8 + 16) * 2) + (4 * 2 * 2)) / 20.0)
+    assert result.prefill_tps_per_w == pytest.approx(((8 + 16) * 2) / 12.0)
+    assert result.decode_tps_per_w == pytest.approx((4 * 2 * 2) / 8.0)
+    assert result.total_tps_per_w == pytest.approx((((8 + 16) * 2) + (4 * 2 * 2)) / 20.0)
 
 
 def test_extract_device_metric_normalizes_tracker_023_shape():

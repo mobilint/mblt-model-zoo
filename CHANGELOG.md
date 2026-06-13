@@ -17,6 +17,10 @@
   `benchmark/transformers/plot_compare_benchmark_results.py` to
   `benchmark/transformers/compare_benchmark_results.py`. The old transformers wrapper is no longer
   shipped.
+- Transformers benchmark and CLI tokens-per-joule energy-efficiency fields were renamed to TPS/W.
+  Result keys and plot filenames such as `prefill_tok_per_j`, `decode_tokens_per_j`, and
+  `*_tokens_per_j.png` now use `prefill_tps_per_w`, `decode_tps_per_w`, and `*_tps_per_w.png`.
+  Joules-per-token (`J/tok`) fields remain as a separate energy-efficiency metric.
 
 ### Changed
 
@@ -29,6 +33,8 @@
 - Transformers benchmark comparison output now supports text-generation, image-text-to-text, and
   automatic speech recognition result folders, including measure/sweep type detection, mixed-type
   rejection, source Host PC info summaries, and task-specific charts/tables.
+- Transformers benchmark summaries and charts now label throughput-per-power efficiency as `TPS/W`
+  while retaining `J/tok` as the inverse efficiency metric.
 - Mobilint and non-Mobilint benchmark targets now resolve omitted runtime defaults per target, so a
   mixed target list can use NPU defaults for Mobilint targets and GPU defaults for Hugging Face
   targets while preserving explicit user-provided `--device` and `--device-backend` values.

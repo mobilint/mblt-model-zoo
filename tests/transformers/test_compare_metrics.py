@@ -37,8 +37,8 @@ def test_llm_compare_metric_from_payload() -> None:
         },
         "device": {
             "avg_power_w": 11.0,
-            "prefill_tok_per_j_last": 1.5,
-            "decode_tok_per_j_last": 2.5,
+            "prefill_tps_per_w_last": 1.5,
+            "decode_tps_per_w_last": 2.5,
         },
     }
     metric = LLMCompareMetric.from_payload(payload)
@@ -47,7 +47,7 @@ def test_llm_compare_metric_from_payload() -> None:
     assert metric.decode_tps == {128: 30.0, 256: 40.0}
     assert metric.prefill_latency_ms == {128: 1200.0, 256: 2300.0}
     assert metric.avg_power_w == 11.0
-    assert metric.prefill_tokens_per_j == 1.5
+    assert metric.prefill_tps_per_w == 1.5
 
 
 def test_llm_compare_metric_from_measure_payload() -> None:
@@ -67,8 +67,8 @@ def test_llm_compare_metric_from_measure_payload() -> None:
         },
         "device": {
             "avg_power_w": 11.0,
-            "prefill_tokens_per_j": 1.5,
-            "decode_tokens_per_j": 2.5,
+            "prefill_tps_per_w": 1.5,
+            "decode_tps_per_w": 2.5,
         },
     }
 
@@ -80,7 +80,7 @@ def test_llm_compare_metric_from_measure_payload() -> None:
     assert metric.prefill_latency_ms == {128: 30.0}
     assert metric.decode_duration_ms == {32: 40.0}
     assert metric.avg_power_w == 11.0
-    assert metric.prefill_tokens_per_j == 1.5
+    assert metric.prefill_tps_per_w == 1.5
 
 
 def test_vlm_compare_metric_from_payload() -> None:
@@ -91,7 +91,7 @@ def test_vlm_compare_metric_from_payload() -> None:
                 "summary": {
                     "llm_prefill_tps": {"mean": 12.0},
                     "llm_decode_tps": {"mean": 34.0},
-                    "prefill_tok_per_j": {"mean": 0.9},
+                    "prefill_tps_per_w": {"mean": 0.9},
                 }
             },
             "vision_summary": {
@@ -105,7 +105,7 @@ def test_vlm_compare_metric_from_payload() -> None:
     assert metric is not None
     assert metric.llm_prefill_tps == 12.0
     assert metric.llm_decode_tps == 34.0
-    assert metric.llm_prefill_tok_per_j == 0.9
+    assert metric.llm_prefill_tps_per_w == 0.9
     assert metric.vision_encode_ms == 45.0
     assert metric.vision_fps == 22.0
     assert metric.avg_power_w == 55.0
@@ -126,7 +126,7 @@ def test_vlm_compare_metric_from_measure_payload() -> None:
             "llm_ttft_ms": {"mean": 56.0},
             "llm_decode_duration_ms": {"mean": 78.0},
         },
-        "device": {"avg_power_w": 55.0, "llm_prefill_tok_per_j": 0.9, "vision_img_per_j": 0.2},
+        "device": {"avg_power_w": 55.0, "llm_prefill_tps_per_w": 0.9, "vision_img_per_j": 0.2},
     }
 
     metric = VLMCompareMetric.from_payload(payload)
@@ -137,7 +137,7 @@ def test_vlm_compare_metric_from_measure_payload() -> None:
     assert metric.llm_ttft_ms == 56.0
     assert metric.vision_encode_ms == 45.0
     assert metric.vision_fps == 22.0
-    assert metric.llm_prefill_tok_per_j == 0.9
+    assert metric.llm_prefill_tps_per_w == 0.9
     assert metric.vision_img_per_j == 0.2
 
 
@@ -213,8 +213,8 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
     metric = LLMCompareMetric(
         prefill_tps={128: 10.0},
         decode_tps={128: 20.0},
-        prefill_tokens_per_j=1.1,
-        decode_tokens_per_j=2.2,
+        prefill_tps_per_w=1.1,
+        decode_tps_per_w=2.2,
         avg_power_w=3.3,
     )
     output_dir = tmp_path / "charts"

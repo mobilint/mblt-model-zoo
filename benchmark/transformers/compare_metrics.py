@@ -204,8 +204,8 @@ class LLMCompareMetric(BaseCompareMetric):
     decode_tps: dict[int, float] = field(default_factory=dict)
     prefill_latency_ms: dict[int, float] = field(default_factory=dict)
     decode_duration_ms: dict[int, float] = field(default_factory=dict)
-    prefill_tokens_per_j: float | None = None
-    decode_tokens_per_j: float | None = None
+    prefill_tps_per_w: float | None = None
+    decode_tps_per_w: float | None = None
     prefill_j_per_token: float | None = None
     decode_j_per_token: float | None = None
 
@@ -216,16 +216,16 @@ class LLMCompareMetric(BaseCompareMetric):
     )
     SCALAR_SPECS: ClassVar[Sequence[ScalarChartSpec]] = (
         ScalarChartSpec(
-            "prefill_tokens_per_j.png",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
-            "prefill_tokens_per_j",
+            "prefill_tps_per_w.png",
+            "Prefill TPS/W",
+            "TPS/W",
+            "prefill_tps_per_w",
         ),
         ScalarChartSpec(
-            "decode_tokens_per_j.png",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
-            "decode_tokens_per_j",
+            "decode_tps_per_w.png",
+            "Decode TPS/W",
+            "TPS/W",
+            "decode_tps_per_w",
         ),
     )
 
@@ -261,8 +261,8 @@ class LLMCompareMetric(BaseCompareMetric):
                     if decode_token is not None and decode_duration_ms is not None
                     else {}
                 ),
-                prefill_tokens_per_j=_first_float(device, "prefill_tokens_per_j", "prefill_tok_per_j_last"),
-                decode_tokens_per_j=_first_float(device, "decode_tokens_per_j", "decode_tok_per_j_last"),
+                prefill_tps_per_w=_first_float(device, "prefill_tps_per_w", "prefill_tps_per_w_last"),
+                decode_tps_per_w=_first_float(device, "decode_tps_per_w", "decode_tps_per_w_last"),
                 prefill_j_per_token=_first_float(device, "prefill_j_per_token", "prefill_j_per_tok_last"),
                 decode_j_per_token=_first_float(device, "decode_j_per_token", "decode_j_per_tok_last"),
                 avg_power_w=_as_float(device.get("avg_power_w")),
@@ -297,8 +297,8 @@ class LLMCompareMetric(BaseCompareMetric):
             decode_tps=_token_map(decode, "tps_values"),
             prefill_latency_ms=_token_map(prefill, "time_values", ms=True),
             decode_duration_ms=_token_map(decode, "time_values", ms=True),
-            prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
-            decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+            prefill_tps_per_w=_as_float(device.get("prefill_tps_per_w_last")),
+            decode_tps_per_w=_as_float(device.get("decode_tps_per_w_last")),
             prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
             decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
             avg_power_w=_as_float(device.get("avg_power_w")),
@@ -328,8 +328,8 @@ class VLMCompareMetric(BaseCompareMetric):
     vision_fps: float | None = None
     vision_img_per_j: float | None = None
     vision_j_per_img: float | None = None
-    llm_prefill_tok_per_j: float | None = None
-    llm_decode_tok_per_j: float | None = None
+    llm_prefill_tps_per_w: float | None = None
+    llm_decode_tps_per_w: float | None = None
     llm_prefill_j_per_tok: float | None = None
     llm_decode_j_per_tok: float | None = None
 
@@ -337,17 +337,17 @@ class VLMCompareMetric(BaseCompareMetric):
     SCALAR_SPECS: ClassVar[Sequence[ScalarChartSpec]] = (
         ScalarChartSpec("llm_prefill_tps.png", "Prefill Tokens Per Second", "Tokens Per Second", "llm_prefill_tps"),
         ScalarChartSpec(
-            "llm_prefill_tokens_per_j.png",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
-            "llm_prefill_tok_per_j",
+            "llm_prefill_tps_per_w.png",
+            "Prefill TPS/W",
+            "TPS/W",
+            "llm_prefill_tps_per_w",
         ),
         ScalarChartSpec("llm_decode_tps.png", "Decode Tokens Per Second", "Tokens Per Second", "llm_decode_tps"),
         ScalarChartSpec(
-            "llm_decode_tokens_per_j.png",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
-            "llm_decode_tok_per_j",
+            "llm_decode_tps_per_w.png",
+            "Decode TPS/W",
+            "TPS/W",
+            "llm_decode_tps_per_w",
         ),
         ScalarChartSpec("vision_fps.png", "Vision FPS", "Frames Per Second", "vision_fps"),
         ScalarChartSpec("vision_encode_ms.png", "Vision Encode ms", "Milliseconds", "vision_encode_ms"),
@@ -373,8 +373,8 @@ class VLMCompareMetric(BaseCompareMetric):
                 vision_encode_ms=_summary_mean(summary, "vision_encode_ms"),
                 vision_fps=_summary_mean(summary, "vision_fps"),
                 vision_img_per_j=_as_float(device.get("vision_img_per_j")),
-                llm_prefill_tok_per_j=_as_float(device.get("llm_prefill_tok_per_j")),
-                llm_decode_tok_per_j=_as_float(device.get("llm_decode_tok_per_j")),
+                llm_prefill_tps_per_w=_as_float(device.get("llm_prefill_tps_per_w")),
+                llm_decode_tps_per_w=_as_float(device.get("llm_decode_tps_per_w")),
                 avg_power_w=_as_float(device.get("avg_power_w")),
                 p99_power_w=_as_float(device.get("p99_power_w")),
                 total_energy_j=_as_float(device.get("total_energy_j")),
@@ -406,8 +406,8 @@ class VLMCompareMetric(BaseCompareMetric):
             vision_fps=_summary_mean(vision_summary, "vision_fps"),
             vision_img_per_j=_summary_mean(vision_summary, "vision_img_per_j"),
             vision_j_per_img=_summary_mean(vision_summary, "vision_j_per_img"),
-            llm_prefill_tok_per_j=_summary_mean(llm_summary, "prefill_tok_per_j"),
-            llm_decode_tok_per_j=_summary_mean(llm_summary, "decode_tok_per_j"),
+            llm_prefill_tps_per_w=_summary_mean(llm_summary, "prefill_tps_per_w"),
+            llm_decode_tps_per_w=_summary_mean(llm_summary, "decode_tps_per_w"),
             llm_prefill_j_per_tok=_summary_mean(llm_summary, "prefill_j_per_tok"),
             llm_decode_j_per_tok=_summary_mean(llm_summary, "decode_j_per_tok"),
             avg_power_w=_as_float(device.get("avg_power_w")),

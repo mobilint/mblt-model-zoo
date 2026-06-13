@@ -814,7 +814,7 @@ def _measured_decode_token_count(run: Any, batch_size: int, decode_window: int |
     return int(getattr(run, "num_decode", 0) or 0) * batch_size
 
 
-def _attach_tokens_per_j(
+def _attach_tps_per_w(
     run: Any,
     *,
     prefill_energy: float | None,
@@ -823,12 +823,12 @@ def _attach_tokens_per_j(
     batch_size: int,
     decode_window: int | None = None,
 ) -> None:
-    """Attach token-per-joule metrics whose token scope matches the supplied energy scope."""
+    """Attach TPS/W metrics whose token scope matches the supplied energy scope."""
     total_prefill_tokens = _measured_prefill_token_count(run, batch_size)
     total_decode_tokens = _measured_decode_token_count(run, batch_size, decode_window)
     total_tokens = total_prefill_tokens + total_decode_tokens
 
-    run.prefill_tokens_per_j = (
+    run.prefill_tps_per_w = (
         _safe_div(float(total_prefill_tokens), prefill_energy) if prefill_energy is not None else None
     )
     run.prefill_j_per_token = (
@@ -836,7 +836,7 @@ def _attach_tokens_per_j(
         if prefill_energy is not None and total_prefill_tokens > 0
         else None
     )
-    run.decode_tokens_per_j = (
+    run.decode_tps_per_w = (
         _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
     )
     run.decode_j_per_token = (
@@ -844,7 +844,7 @@ def _attach_tokens_per_j(
         if decode_energy is not None and total_decode_tokens > 0
         else None
     )
-    run.total_tokens_per_j = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
+    run.total_tps_per_w = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
     run.total_j_per_token = (
         _safe_div(total_energy, float(total_tokens)) if total_energy is not None and total_tokens > 0 else None
     )
@@ -952,7 +952,7 @@ def _enrich_single_run_device(
 
     run.avg_power_w = float(avg_power) if avg_power is not None else None
     run.total_energy_j = total_energy
-    _attach_tokens_per_j(
+    _attach_tps_per_w(
         run,
         prefill_energy=prefill_energy,
         decode_energy=decode_energy,
@@ -1169,8 +1169,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         r.decode_p99_memory_used_pct for r in runs if r.decode_p99_memory_used_pct is not None
     ]
     total_energy_j = [r.total_energy_j for r in runs if r.total_energy_j is not None]
-    prefill_tok_per_j = [r.prefill_tokens_per_j for r in runs if r.prefill_tokens_per_j is not None]
-    decode_tok_per_j = [r.decode_tokens_per_j for r in runs if r.decode_tokens_per_j is not None]
+    prefill_tps_per_w = [r.prefill_tps_per_w for r in runs if r.prefill_tps_per_w is not None]
+    decode_tps_per_w = [r.decode_tps_per_w for r in runs if r.decode_tps_per_w is not None]
     prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
     decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
     acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
@@ -1228,8 +1228,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         _print_summary("decode_avg_mem_used_pct", decode_avg_memory_used_pct, "%")
         _print_summary("decode_p99_mem_used_pct", decode_p99_memory_used_pct, "%")
         _print_summary("total_energy", total_energy_j, "J")
-        _print_summary("prefill_tok_per_j", prefill_tok_per_j, "tok/J")
-        _print_summary("decode_tok_per_j", decode_tok_per_j, "tok/J")
+        _print_summary("prefill_tps_per_w", prefill_tps_per_w, "TPS/W")
+        _print_summary("decode_tps_per_w", decode_tps_per_w, "TPS/W")
         _print_summary("prefill_j_per_tok", prefill_j_per_tok, "J/tok")
         _print_summary("decode_j_per_tok", decode_j_per_tok, "J/tok")
     _print_summary_footer()
@@ -1288,8 +1288,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "decode_avg_memory_used_pct": _summary(decode_avg_memory_used_pct),
                 "decode_p99_memory_used_pct": _summary(decode_p99_memory_used_pct),
                 "total_energy_j": _summary(total_energy_j),
-                "prefill_tok_per_j": _summary(prefill_tok_per_j),
-                "decode_tok_per_j": _summary(decode_tok_per_j),
+                "prefill_tps_per_w": _summary(prefill_tps_per_w),
+                "decode_tps_per_w": _summary(decode_tps_per_w),
                 "prefill_j_per_tok": _summary(prefill_j_per_tok),
                 "decode_j_per_tok": _summary(decode_j_per_tok),
             },
@@ -1880,8 +1880,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         _print_summary("decode_avg_mem_used_pct", run_decode_avg_mem_used_pct, "%")
         _print_summary("decode_p99_mem_used_pct", run_decode_p99_mem_used_pct, "%")
         _print_summary("total_energy", run_total_energy, "J")
-        _print_summary("prefill_tok_per_j(last)", prefill_last_tpj, "tok/J")
-        _print_summary("decode_tok_per_j(last)", decode_last_tpj, "tok/J")
+        _print_summary("prefill_tps_per_w(last)", prefill_last_tpj, "TPS/W")
+        _print_summary("decode_tps_per_w(last)", decode_last_tpj, "TPS/W")
         _print_summary("prefill_j_per_tok(last)", prefill_last_jpt, "J/tok")
         _print_summary("decode_j_per_tok(last)", decode_last_jpt, "J/tok")
     _print_summary_footer()
@@ -1929,8 +1929,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                 "decode_avg_memory_used_pct": _summary(run_decode_avg_mem_used_pct),
                 "decode_p99_memory_used_pct": _summary(run_decode_p99_mem_used_pct),
                 "total_energy_j": _summary(run_total_energy),
-                "prefill_tok_per_j_last": _summary(prefill_last_tpj),
-                "decode_tok_per_j_last": _summary(decode_last_tpj),
+                "prefill_tps_per_w_last": _summary(prefill_last_tpj),
+                "decode_tps_per_w_last": _summary(decode_last_tpj),
                 "prefill_j_per_tok_last": _summary(prefill_last_jpt),
                 "decode_j_per_tok_last": _summary(decode_last_jpt),
             },
@@ -2186,8 +2186,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     if idx - 1 < len(vision_mem_used_pct_p99)
                     else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
-                    "prefill_tok_per_j": None,
-                    "decode_tok_per_j": None,
+                    "prefill_tps_per_w": None,
+                    "decode_tps_per_w": None,
                     "prefill_j_per_tok": None,
                     "decode_j_per_tok": None,
                     "vision_img_per_j": vision_img_per_j[idx - 1] if idx - 1 < len(vision_img_per_j) else None,
@@ -2270,7 +2270,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             )
             total_energy = _energy_from_device_time_series(device_time_series)
             run.total_energy_j = total_energy
-            _attach_tokens_per_j(
+            _attach_tps_per_w(
                 run,
                 prefill_energy=total_energy,
                 decode_energy=total_energy,
@@ -2411,8 +2411,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "avg_memory_used_pct": getattr(run, "avg_memory_used_pct", None),
                 "p99_memory_used_pct": getattr(run, "p99_memory_used_pct", None),
                 "total_energy_j": getattr(run, "total_energy_j", None),
-                "prefill_tok_per_j": None,
-                "decode_tok_per_j": None,
+                "prefill_tps_per_w": None,
+                "decode_tps_per_w": None,
                 "prefill_j_per_tok": None,
                 "decode_j_per_tok": None,
                 "vision_img_per_j": None,
