@@ -2270,13 +2270,12 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             )
             total_energy = _energy_from_device_time_series(device_time_series)
             run.total_energy_j = total_energy
-            _attach_tps_per_w(
-                run,
-                prefill_energy=total_energy,
-                decode_energy=total_energy,
-                total_energy=total_energy,
-                batch_size=batch_size,
-                decode_window=args.decode_window,
+            total_prefill_tokens = _measured_prefill_token_count(run, batch_size)
+            total_decode_tokens = _measured_decode_token_count(run, batch_size, args.decode_window)
+            total_tokens = total_prefill_tokens + total_decode_tokens
+            run.total_tps_per_w = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
+            run.total_j_per_token = (
+                _safe_div(total_energy, float(total_tokens)) if total_energy is not None and total_tokens > 0 else None
             )
         llm_runs.append(run)
 

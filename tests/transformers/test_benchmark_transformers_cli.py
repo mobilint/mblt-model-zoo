@@ -556,11 +556,31 @@ def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
     """Verify VLM sweep token helpers match whole-sweep trace energy scope."""
     result = vlm_bench.BenchmarkResult(
         prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
-        decode_sweep=vlm_bench.SweepData(x_values=[128, 256, 512], tps_values=[30.0, 40.0, 50.0], time_values=[0.3, 0.4, 0.5]),
+        decode_sweep=vlm_bench.SweepData(
+            x_values=[128, 256, 512],
+            tps_values=[30.0, 40.0, 50.0],
+            time_values=[0.3, 0.4, 0.5],
+        ),
     )
 
     assert vlm_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
     assert vlm_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
+
+
+
+def test_text_sweep_token_helpers_use_whole_sweep_scope() -> None:
+    """Verify text sweep token helpers match whole-sweep trace energy scope."""
+    result = text_bench.BenchmarkResult(
+        prefill_sweep=text_bench.SweepData(x_values=[128, 256], tps_values=[1.0, 2.0], time_values=[1.0, 1.0]),
+        decode_sweep=text_bench.SweepData(
+            x_values=[128, 256, 512],
+            tps_values=[3.0, 4.0, 5.0],
+            time_values=[1.0, 1.0, 1.0],
+        ),
+    )
+
+    assert text_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
+    assert text_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
 
 
 def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:

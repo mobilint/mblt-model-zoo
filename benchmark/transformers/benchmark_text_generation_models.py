@@ -750,7 +750,9 @@ def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = Fa
     title = "Text Generation Measure Benchmark Summary" if measure else "Text Generation Benchmark Summary"
     prefixes = ("measure_",) if measure else None
     plot_tables = (
-        _build_text_generation_measure_plot_tables(output_dir) if measure else _build_text_generation_plot_tables(output_dir)
+        _build_text_generation_measure_plot_tables(output_dir)
+        if measure
+        else _build_text_generation_plot_tables(output_dir)
     )
     _write_summary_markdown(
         output_dir / summary_name,
@@ -1047,7 +1049,12 @@ def _default_single_target_cores_for_batch_mode(batch_mode: argparse.Namespace |
     return ("0:0",)
 
 
-def _iter_core_modes_for_target(args: argparse.Namespace, batch_mode: str, *, disable_npu_specific_args: bool) -> list[str | None]:
+def _iter_core_modes_for_target(
+    args: argparse.Namespace,
+    batch_mode: str,
+    *,
+    disable_npu_specific_args: bool,
+) -> list[str | None]:
     """Return core modes to run for one target based on its resolved batch mode."""
     if disable_npu_specific_args:
         return [None]
@@ -1516,9 +1523,15 @@ def _run_sweep(args: argparse.Namespace) -> int:
             )
             prefill_last = float(result.prefill_sweep.tps_values[-1]) if result.prefill_sweep.tps_values else None
             decode_last = float(result.decode_sweep.tps_values[-1]) if result.decode_sweep.tps_values else None
-            prefill_tokens = max(result.prefill_sweep.x_values) if result.prefill_sweep.x_values else None
-            decode_tokens = max(result.decode_sweep.x_values) if result.decode_sweep.x_values else None
-            prefill_tpj = _safe_div(float(prefill_tokens), prefill_energy) if prefill_tokens and prefill_energy else None
+            prefill_tokens = _sweep_prefill_token_count(result, batch_size)
+            decode_tokens = _sweep_decode_token_count(
+                result,
+                decode_window=args.decode_window,
+                batch_size=batch_size,
+            )
+            prefill_tpj = (
+                _safe_div(float(prefill_tokens), prefill_energy) if prefill_tokens and prefill_energy else None
+            )
             decode_tpj = _safe_div(float(decode_tokens), decode_energy) if decode_tokens and decode_energy else None
             device_payload = {
                 "avg_power_w": avg_power,
@@ -1623,6 +1636,16 @@ def _mean_or_none(values: Sequence[float]) -> float | None:
     """Return a mean value, or None when no values are present."""
     vals = [float(v) for v in values]
     return sum(vals) / len(vals) if vals else None
+
+
+def _sweep_prefill_token_count(result: BenchmarkResult, batch_size: int) -> int:
+    """Return the number of prefill tokens covered by a full sweep trace."""
+    return sum(int(value) for value in result.prefill_sweep.x_values) * max(1, int(batch_size))
+
+
+def _sweep_decode_token_count(result: BenchmarkResult, *, decode_window: int, batch_size: int) -> int:
+    """Return the number of decode tokens covered by a full sweep trace."""
+    return int(decode_window) * len(result.decode_sweep.x_values) * max(1, int(batch_size))
 
 
 def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1956,7 +1979,9 @@ def _run_measure(args: argparse.Namespace) -> int:
                         run.decode_duration,
                     )
                     row["total_energy_j"] = (
-                        prefill_energy + decode_energy if prefill_energy is not None and decode_energy is not None else None
+                        prefill_energy + decode_energy
+                        if prefill_energy is not None and decode_energy is not None
+                        else None
                     )
                     row["prefill_tps_per_w"] = (
                         _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
