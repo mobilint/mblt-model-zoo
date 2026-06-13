@@ -4,10 +4,10 @@ import argparse
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TypeAlias
 
-NPU_DEVICE_TRACKER_INTERVAL_SEC = 1.0
-GPU_DEVICE_TRACKER_INTERVAL_SEC = 0.1
-CPU_DEVICE_TRACKER_INTERVAL_SEC = 0.1
-DEVICE_TRACKER_INTERVAL_SEC = NPU_DEVICE_TRACKER_INTERVAL_SEC
+DEVICE_TRACKER_INTERVAL_SEC = 1.0
+NPU_DEVICE_TRACKER_INTERVAL_SEC = DEVICE_TRACKER_INTERVAL_SEC
+GPU_DEVICE_TRACKER_INTERVAL_SEC = DEVICE_TRACKER_INTERVAL_SEC
+CPU_DEVICE_TRACKER_INTERVAL_SEC = DEVICE_TRACKER_INTERVAL_SEC
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
 DEFAULT_DEVICE_BACKEND = "gpu"
 NPU_RAIL_METRIC_CHOICES = ("npu", "ddr", "pmic", "goldfinger")
@@ -144,12 +144,8 @@ def is_mobilint_target(model_id: str | None, mxq_path: str | None = None, mxq_di
 def resolve_device_tracker_interval_sec(device_backend: str | None) -> float:
     """Return the tracker sampling interval for a resolved device backend."""
 
-    backend = (device_backend or "none").strip().lower()
-    if backend == "npu":
-        return NPU_DEVICE_TRACKER_INTERVAL_SEC
-    if backend == "cpu":
-        return CPU_DEVICE_TRACKER_INTERVAL_SEC
-    return GPU_DEVICE_TRACKER_INTERVAL_SEC
+    del device_backend
+    return DEVICE_TRACKER_INTERVAL_SEC
 
 
 def resolve_default_device(

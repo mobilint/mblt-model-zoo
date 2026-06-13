@@ -587,9 +587,10 @@ def test_benchmark_common_runtime_default_policy_preserves_explicit_values() -> 
     )
 
 
-@pytest.mark.parametrize(("backend", "expected"), [("npu", 1.0), ("gpu", 0.1), ("cpu", 0.1)])
+@pytest.mark.parametrize(("backend", "expected"), [("npu", 1.0), ("gpu", 1.0), ("cpu", 1.0)])
 def test_benchmark_common_tracker_interval_policy(backend: str, expected: float) -> None:
-    """Verify tracker sampling intervals are selected by resolved backend."""
+    """Verify tracker sampling intervals are fixed across resolved backends."""
+
     assert resolve_device_tracker_interval_sec(backend) == pytest.approx(expected)
 
 

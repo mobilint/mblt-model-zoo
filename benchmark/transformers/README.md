@@ -61,9 +61,8 @@ inference and model downloads.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
-  - Tracker sampling intervals are fixed by resolved backend: NPU uses `1.0s`; GPU and CPU-oriented
-    tracking use `0.1s`. The console device status line prints the interval used for the resolved
-    backend.
+  - Tracker sampling intervals are fixed to `1.0s` for all resolved backends. The console device
+    status line prints the interval used for the resolved backend.
   - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
   - `--device-npu-rail-metrics`: Selects NPU rail power metrics collected by `mblt-tracker`. The
     default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`, and
@@ -726,7 +725,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
   When omitted, benchmark scripts use `npu` for Mobilint/MXQ targets and `gpu` for other Hugging
-  Face targets. NPU tracker sampling uses `1.0s`; GPU tracker sampling uses `0.1s`.
+  Face targets. Tracker sampling uses `1.0s` for all backends.
 - `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`. If omitted, `cuda:<id>` in
   `--device` is parsed for the GPU tracker; plain `cuda` leaves tracker GPU selection at its
   default.

@@ -2170,7 +2170,7 @@ def test_build_device_tracker_forwards_npu_rail_metrics(monkeypatch: pytest.Monk
 
 
 def test_build_device_tracker_uses_gpu_interval_and_device_id(monkeypatch):
-    """Verify GPU tracking samples at 0.1s and parses cuda device ids."""
+    """Verify GPU tracking uses the common interval and parses cuda device ids."""
     created = {}
 
     class _FakeGPUDeviceTracker:
@@ -2201,7 +2201,7 @@ def test_build_device_tracker_uses_gpu_interval_and_device_id(monkeypatch):
     tracker = build_device_tracker(args, pipeline)
 
     assert isinstance(tracker, _FakeGPUDeviceTracker)
-    assert created == {"interval": 0.1, "gpu_id": 1}
+    assert created == {"interval": 1.0, "gpu_id": 1}
 
 
 def test_extract_device_time_series_uses_tracker_100_trace_methods():
