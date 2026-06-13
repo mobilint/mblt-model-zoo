@@ -2018,6 +2018,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             llm_prefill_tps_per_w: list[float] = []
             llm_decode_tps_per_w: list[float] = []
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                current_vision_energy: float | None = None
                 if tracker is not None:
                     tracker.start()
                 try:
@@ -2049,6 +2050,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         avg_power_w.append(float(power))
                     energy = _energy_from_device_time_series(vision_device_time_series)
                     if energy is not None:
+                        current_vision_energy = energy
                         vision_energy_j.append(energy)
 
                 llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
@@ -2102,7 +2104,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     llm_result.llm_decode_energy_j = decode_energy
                     llm_result.llm_total_energy_j = llm_energy
                     true_total_energy = _sum_required_energies(
-                        vision_energy_j[-1] if vision_energy_j else None,
+                        current_vision_energy,
                         llm_energy,
                     )
                     llm_result.total_energy_j = true_total_energy
@@ -2204,7 +2206,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "llm_prefill_tps_per_w": _mean(llm_prefill_tps_per_w) if llm_prefill_tps_per_w else None,
                     "llm_decode_tps_per_w": _mean(llm_decode_tps_per_w) if llm_decode_tps_per_w else None,
                     "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, vision_energy)
-                    if vision_energy_j
+                    if vision_energy is not None
                     else None,
                 }
                 if avg_power_w or llm_total_energy_j or vision_energy_j
