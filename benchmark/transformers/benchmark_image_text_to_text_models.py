@@ -181,6 +181,16 @@ def _summary(values: Sequence[float]) -> dict[str, float]:
     }
 
 
+def _sweep_prefill_token_count(result: BenchmarkResult, batch_size: int) -> int:
+    """Return the number of prefill tokens covered by a VLM LLM sweep."""
+    return sum(int(value) for value in result.prefill_sweep.x_values) * max(1, int(batch_size))
+
+
+def _sweep_decode_token_count(result: BenchmarkResult, *, decode_window: int, batch_size: int) -> int:
+    """Return the number of decode tokens covered by a VLM LLM sweep."""
+    return int(decode_window) * len(result.decode_sweep.x_values) * max(1, int(batch_size))
+
+
 def _vlm_warmup_llm_kwargs() -> dict[str, Any]:
     """Return the lightweight VLM LLM warmup dimensions."""
     return {
@@ -605,10 +615,12 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             energy = _energy_from_device_time_series(device_time_series)
             if energy is not None:
                 run.total_energy_j = energy
-                decode_last_tps = float(run.decode_sweep.tps_values[-1]) if run.decode_sweep.tps_values else 0.0
-                prefill_last_tps = float(run.prefill_sweep.tps_values[-1]) if run.prefill_sweep.tps_values else 0.0
-                prefill_tokens = max(run.prefill_sweep.x_values) if run.prefill_sweep.x_values else 0
-                decode_tokens = max(run.decode_sweep.x_values) if run.decode_sweep.x_values else 0
+                prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
+                decode_tokens = _sweep_decode_token_count(
+                    run,
+                    decode_window=args.decode_window,
+                    batch_size=args.batch_size,
+                )
                 t1 = _safe_div(float(prefill_tokens), energy) if prefill_tokens else None
                 t2 = _safe_div(float(decode_tokens), energy) if decode_tokens else None
                 j1 = _safe_div(1.0, t1) if t1 not in (None, 0) else None
@@ -1901,8 +1913,13 @@ def _run_measure(args: argparse.Namespace) -> int:
             avg_power = _mean(avg_power_w)
             total_energy = sum(total_energy_j) if total_energy_j else None
             if total_energy is not None and total_energy > 0.0:
-                llm_prefill_tok_per_j = [_safe_div(float(args.prefill) * float(batch_size), total_energy)]
-                llm_decode_tok_per_j = [_safe_div(float(args.decode) * float(batch_size), total_energy)]
+                measured_run_count = len(total_energy_j)
+                llm_prefill_tok_per_j = [
+                    _safe_div(float(args.prefill) * float(batch_size) * float(measured_run_count), total_energy)
+                ]
+                llm_decode_tok_per_j = [
+                    _safe_div(float(args.decode) * float(batch_size) * float(measured_run_count), total_energy)
+                ]
             payload = {
                 "model": label,
                 "benchmark_type": "measure",

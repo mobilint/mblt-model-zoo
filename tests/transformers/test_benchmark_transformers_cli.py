@@ -398,7 +398,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1)]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1, "non_batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -455,7 +455,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4)]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -481,6 +481,86 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
     assert payload["device"]["total_energy_j"] == pytest.approx(9.0)
     assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
+
+
+def test_vlm_measure_tokens_per_j_scales_by_measured_repeat_count(monkeypatch, tmp_path) -> None:
+    """Verify VLM fixed measure tokens/J uses all repeated runs included in total energy."""
+    args = vlm_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--output-dir",
+            str(tmp_path),
+            "--repeat",
+            "2",
+            "--prefill",
+            "128",
+            "--decode",
+            "32",
+        ]
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[20.0], time_values=[0.2]),
+                decode_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[40.0], time_values=[0.3]),
+            )
+
+    monkeypatch.setattr(
+        vlm_bench,
+        "_collect_vlm_run_targets",
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+    )
+    monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(
+        vlm_bench,
+        "_vlm_revision_artifacts_available",
+        lambda model_id, revision, mxq_path: (True, None),
+    )
+    monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
+
+    assert vlm_bench._run_measure(args) == 0
+
+    payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
+    assert payload["device"]["total_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_prefill_tok_per_j"] == pytest.approx((128 * 4 * 2) / 20.0)
+    assert payload["device"]["llm_decode_tok_per_j"] == pytest.approx((32 * 4 * 2) / 20.0)
+
+
+def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
+    """Verify VLM sweep token helpers match whole-sweep trace energy scope."""
+    result = vlm_bench.BenchmarkResult(
+        prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+        decode_sweep=vlm_bench.SweepData(x_values=[128, 256, 512], tps_values=[30.0, 40.0, 50.0], time_values=[0.3, 0.4, 0.5]),
+    )
+
+    assert vlm_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
+    assert vlm_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
 
 
 def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:

@@ -2061,6 +2061,27 @@ def test_cli_aggregate_sweep_results_tolerates_missing_latency_values():
     assert result.prefill_sweep.avg_npu_token_latency_values == [None]
 
 
+def test_cli_attach_tokens_per_j_uses_whole_sweep_token_scope():
+    """Verify sweep tokens/J uses the same whole-phase scope as trace energy."""
+    result = BenchmarkResult(
+        prefill_sweep=SweepData(x_values=[8, 16], tps_values=[10.0, 20.0], time_values=[0.8, 0.8]),
+        decode_sweep=SweepData(x_values=[32, 64], tps_values=[30.0, 40.0], time_values=[0.2, 0.2]),
+    )
+
+    tps_cli._attach_tokens_per_j(
+        result,
+        prefill_energy=12.0,
+        decode_energy=8.0,
+        total_energy=20.0,
+        batch_size=2,
+        decode_window=4,
+    )
+
+    assert result.prefill_tokens_per_j == pytest.approx(((8 + 16) * 2) / 12.0)
+    assert result.decode_tokens_per_j == pytest.approx((4 * 2 * 2) / 8.0)
+    assert result.total_tokens_per_j == pytest.approx((((8 + 16) * 2) + (4 * 2 * 2)) / 20.0)
+
+
 def test_extract_device_metric_normalizes_tracker_023_shape():
     class _FakeTracker:
         def get_metric(self):
