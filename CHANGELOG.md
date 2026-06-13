@@ -10,6 +10,28 @@
 - Legacy `product` selection on compatibility model constructors is no longer functional in the
   YAML-backed vision registry. The argument is still accepted so older call sites do not fail at
   construction time, but it is ignored in `2.0.0`.
+- The benchmark device-tracking integration now requires `mblt-tracker>=1.0.0`. The transformers
+  benchmark tools use the tracker 1.x time-series APIs for power traces, NPU rail metrics, and
+  trace-integrated energy values.
+- The transformers benchmark comparison script was renamed from
+  `benchmark/transformers/plot_compare_benchmark_results.py` to
+  `benchmark/transformers/compare_benchmark_results.py`. The old transformers wrapper is no longer
+  shipped.
+
+### Changed
+
+- Transformers benchmark energy and energy-efficiency metrics are now computed from mblt-tracker
+  power traces with trapezoidal integration. At least two valid power samples are required, so very
+  short runs can leave energy-derived fields empty.
+- Transformers benchmark device tracking now supports NPU rail metric selection through
+  `--device-npu-rail-metrics`, including `npu`, `ddr`, `pmic`, `goldfinger`, `all`, and
+  comma-separated subsets.
+- Transformers benchmark comparison output now supports text-generation, image-text-to-text, and
+  automatic speech recognition result folders, including measure/sweep type detection, mixed-type
+  rejection, source Host PC info summaries, and task-specific charts/tables.
+- Mobilint and non-Mobilint benchmark targets now resolve omitted runtime defaults per target, so a
+  mixed target list can use NPU defaults for Mobilint targets and GPU defaults for Hugging Face
+  targets while preserving explicit user-provided `--device` and `--device-backend` values.
 
 ### Migration Guide
 
@@ -20,3 +42,9 @@
   selection to explicit `model_cls`, `model_type`, and `mxq_path` values.
 - Use `mblt_model_zoo.vision.list_tasks()` and `mblt_model_zoo.vision.list_models()` to discover
   supported task and model names programmatically.
+- Upgrade benchmark environments to `mblt-tracker>=1.0.0` before running transformers benchmark
+  commands with device metrics enabled.
+- Replace transformers compare-script invocations such as
+  `python benchmark/transformers/plot_compare_benchmark_results.py ...` with
+  `python benchmark/transformers/compare_benchmark_results.py ...` or
+  `python -m benchmark.transformers.compare_benchmark_results ...`.
