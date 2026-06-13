@@ -22,6 +22,7 @@ try:
         common_model_ids,
         default_charts_dir,
         folder_labels,
+        payload_benchmark_type,
         payload_task,
         render_charts,
         write_compare_markdown,
@@ -34,6 +35,7 @@ except ModuleNotFoundError:
         common_model_ids,
         default_charts_dir,
         folder_labels,
+        payload_benchmark_type,
         payload_task,
         render_charts,
         write_compare_markdown,
@@ -75,6 +77,40 @@ def _detect_task_from_folders(folders: list[Path]) -> str:
     task = next(iter(detected_tasks))
     print(f"Auto-detected task: {task}")
     return task
+
+
+def _detect_benchmark_type_from_folders(folders: list[Path]) -> str:
+    """Detect a single benchmark type from input folders."""
+
+    detected_sources: dict[str, list[Path]] = {}
+    for folder in folders:
+        for path in sorted(folder.glob("*.json")):
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    payload: Any = json.load(file)
+            except (OSError, JSONDecodeError) as exc:
+                print(f"Warning: failed to parse {path}: {exc}")
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            benchmark_type = payload_benchmark_type(payload)
+            if benchmark_type is None:
+                continue
+            detected_sources.setdefault(benchmark_type, []).append(path)
+
+    if not detected_sources:
+        return "sweep"
+    if len(detected_sources) > 1:
+        values = ", ".join(sorted(detected_sources))
+        print(f"Error: mixed benchmark_type values found ({values}).")
+        print("Compare supports only one benchmark_type at a time; measure and sweep results cannot be mixed.")
+        for benchmark_type, paths in sorted(detected_sources.items()):
+            sample = ", ".join(str(path) for path in paths[:5])
+            print(f" - {benchmark_type}: {sample}")
+        raise SystemExit("Mixed benchmark_type values found; please compare measure with measure or sweep with sweep.")
+    benchmark_type = next(iter(detected_sources))
+    print(f"Auto-detected benchmark_type: {benchmark_type}")
+    return benchmark_type
 
 
 def _write_compare_host_info_json(output_dir: Path, labels: list[str], folders: list[Path]) -> Path:
@@ -162,6 +198,12 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--benchmark-type",
+        choices=("measure", "sweep"),
+        default=None,
+        help="which benchmark type to compare (default: auto-detect; measure and sweep cannot be mixed)",
+    )
+    parser.add_argument(
         "--strip-owner",
         action="store_true",
         help="compare models by repository name only, ignoring leading Hugging Face owner ids",
@@ -188,8 +230,12 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     task = args.task or _detect_task_from_folders(folders)
+    benchmark_type = args.benchmark_type or _detect_benchmark_type_from_folders(folders)
     metric_cls = TASK_REGISTRY[task]
-    metrics_by_folder = [collect_metrics(folder, metric_cls, strip_owner=args.strip_owner) for folder in folders]
+    metrics_by_folder = [
+        collect_metrics(folder, metric_cls, benchmark_type=benchmark_type, strip_owner=args.strip_owner)
+        for folder in folders
+    ]
     labels = folder_labels(folders)
     models = common_model_ids(metrics_by_folder)
     for label, folder, metrics in zip(labels, folders, metrics_by_folder):
@@ -225,7 +271,7 @@ def main() -> int:
         compare_host_info_path = _write_compare_host_info_json(output_dir, labels, folders)
         write_summary_markdown(
             output_dir / "summary.md",
-            title=f"{task} Benchmark Comparison Summary",
+            title=f"{task} {benchmark_type} Benchmark Comparison Summary",
             host_info_path=compare_host_info_path,
             table_markdown_path=combined_md,
             plot_paths=existing_png_paths(output_dir),

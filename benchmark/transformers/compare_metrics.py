@@ -111,6 +111,31 @@ def _summary_mean(mapping: Mapping[str, Any], key: str) -> float | None:
     return _as_float(value.get("mean"))
 
 
+def _first_float(mapping: Mapping[str, Any], *keys: str) -> float | None:
+    """Return the first numeric value found for one of ``keys``."""
+
+    for key in keys:
+        value = _as_float(mapping.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def payload_benchmark_type(payload: Mapping[str, Any]) -> str | None:
+    """Return normalized benchmark type for compare-compatible payloads."""
+
+    benchmark_type = payload.get("benchmark_type")
+    if benchmark_type in {"measure", "sweep"}:
+        return str(benchmark_type)
+    benchmark = payload.get("benchmark", payload)
+    if isinstance(benchmark, Mapping):
+        if isinstance(benchmark.get("prefill_sweep"), Mapping) and isinstance(benchmark.get("decode_sweep"), Mapping):
+            return "sweep"
+        if isinstance(benchmark.get("llm_results"), Mapping) and isinstance(benchmark.get("vision_summary"), Mapping):
+            return "sweep"
+    return None
+
+
 def _strip_group_id(model_id: str) -> str:
     """Compare by model id only, ignoring a leading group id prefix."""
 
@@ -208,6 +233,51 @@ class LLMCompareMetric(BaseCompareMetric):
     def from_payload(cls, payload: Mapping[str, Any]) -> LLMCompareMetric | None:
         """Parse one text-generation benchmark payload."""
 
+        device = payload.get("device", {})
+        if not isinstance(device, Mapping):
+            device = {}
+        if payload_benchmark_type(payload) == "measure":
+            summary = payload.get("summary", {})
+            if not isinstance(summary, Mapping):
+                return None
+            prefill = payload.get("prefill")
+            decode = payload.get("decode")
+            prefill_token = int(prefill) if isinstance(prefill, int) else None
+            decode_token = int(decode) if isinstance(decode, int) else None
+            prefill_tps = _summary_mean(summary, "prefill_tps")
+            decode_tps = _summary_mean(summary, "decode_tps")
+            prefill_latency_ms = _summary_mean(summary, "ttft_ms")
+            decode_duration_ms = _summary_mean(summary, "decode_duration_ms")
+            return cls(
+                prefill_tps={prefill_token: prefill_tps} if prefill_token is not None and prefill_tps is not None else {},
+                decode_tps={decode_token: decode_tps} if decode_token is not None and decode_tps is not None else {},
+                prefill_latency_ms=(
+                    {prefill_token: prefill_latency_ms}
+                    if prefill_token is not None and prefill_latency_ms is not None
+                    else {}
+                ),
+                decode_duration_ms=(
+                    {decode_token: decode_duration_ms}
+                    if decode_token is not None and decode_duration_ms is not None
+                    else {}
+                ),
+                prefill_tokens_per_j=_first_float(device, "prefill_tokens_per_j", "prefill_tok_per_j_last"),
+                decode_tokens_per_j=_first_float(device, "decode_tokens_per_j", "decode_tok_per_j_last"),
+                prefill_j_per_token=_first_float(device, "prefill_j_per_token", "prefill_j_per_tok_last"),
+                decode_j_per_token=_first_float(device, "decode_j_per_token", "decode_j_per_tok_last"),
+                avg_power_w=_as_float(device.get("avg_power_w")),
+                p99_power_w=_as_float(device.get("p99_power_w")),
+                total_energy_j=_as_float(device.get("total_energy_j")),
+                avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
+                p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+                avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+                p99_temperature_c=_as_float(device.get("p99_temperature_c")),
+                avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
+                p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
+                avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
+                p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+            )
+
         benchmark = payload.get("benchmark", payload)
         if not isinstance(benchmark, Mapping):
             return None
@@ -215,10 +285,6 @@ class LLMCompareMetric(BaseCompareMetric):
         decode = benchmark.get("decode_sweep", {})
         if not isinstance(prefill, Mapping) or not isinstance(decode, Mapping):
             return None
-        device = payload.get("device", {})
-        if not isinstance(device, Mapping):
-            device = {}
-
         def _token_map(phase: Mapping[str, Any], value_key: str, *, ms: bool = False) -> dict[int, float]:
             out: dict[int, float] = {}
             for token, value in zip(phase.get("x_values", []), phase.get(value_key, [])):
@@ -292,17 +358,44 @@ class VLMCompareMetric(BaseCompareMetric):
     def from_payload(cls, payload: Mapping[str, Any]) -> VLMCompareMetric | None:
         """Parse one image-text-to-text benchmark payload."""
 
+        device = payload.get("device", {})
+        if not isinstance(device, Mapping):
+            device = {}
+        if payload_benchmark_type(payload) == "measure":
+            summary = payload.get("summary", {})
+            if not isinstance(summary, Mapping):
+                return None
+            return cls(
+                llm_prefill_tps=_summary_mean(summary, "llm_prefill_tps"),
+                llm_decode_tps=_summary_mean(summary, "llm_decode_tps"),
+                llm_ttft_ms=_summary_mean(summary, "llm_ttft_ms"),
+                llm_decode_duration_ms=_summary_mean(summary, "llm_decode_duration_ms"),
+                vision_encode_ms=_summary_mean(summary, "vision_encode_ms"),
+                vision_fps=_summary_mean(summary, "vision_fps"),
+                vision_img_per_j=_as_float(device.get("vision_img_per_j")),
+                llm_prefill_tok_per_j=_as_float(device.get("llm_prefill_tok_per_j")),
+                llm_decode_tok_per_j=_as_float(device.get("llm_decode_tok_per_j")),
+                avg_power_w=_as_float(device.get("avg_power_w")),
+                p99_power_w=_as_float(device.get("p99_power_w")),
+                total_energy_j=_as_float(device.get("total_energy_j")),
+                avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
+                p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+                avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+                p99_temperature_c=_as_float(device.get("p99_temperature_c")),
+                avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
+                p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
+                avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
+                p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+            )
+
         benchmark = payload.get("benchmark", {})
         if not isinstance(benchmark, Mapping):
             return None
         llm_results = benchmark.get("llm_results", {})
         llm_summary = llm_results.get("summary", {}) if isinstance(llm_results, Mapping) else {}
         vision_summary = benchmark.get("vision_summary", {})
-        device = payload.get("device", {})
         if not isinstance(llm_summary, Mapping) or not isinstance(vision_summary, Mapping):
             return None
-        if not isinstance(device, Mapping):
-            device = {}
         return cls(
             llm_prefill_tps=_summary_mean(llm_summary, "llm_prefill_tps"),
             llm_decode_tps=_summary_mean(llm_summary, "llm_decode_tps"),
@@ -431,6 +524,7 @@ def collect_metrics(
     folder: Path,
     metric_cls: type[BaseCompareMetric],
     *,
+    benchmark_type: str | None = None,
     strip_owner: bool = False,
 ) -> dict[str, BaseCompareMetric]:
     """Collect normalized per-model metrics from one results folder."""
@@ -445,6 +539,13 @@ def collect_metrics(
             print(f"Warning: failed to parse {path}: {exc}")
             continue
         if not isinstance(payload, Mapping):
+            continue
+        detected_benchmark_type = payload_benchmark_type(payload)
+        if benchmark_type is not None and detected_benchmark_type is not None and detected_benchmark_type != benchmark_type:
+            print(
+                f"Warning: skipping {path.name} because benchmark_type '{detected_benchmark_type}' "
+                f"does not match requested benchmark_type '{benchmark_type}'."
+            )
             continue
         detected_task = payload_task(payload)
         if detected_task is None and payload.get("benchmark_type") == "measure" and "task" not in payload:
@@ -702,6 +803,7 @@ __all__ = [
     "default_charts_dir",
     "folder_labels",
     "normalize_model_key",
+    "payload_benchmark_type",
     "payload_task",
     "render_charts",
     "write_compare_markdown",

@@ -15,6 +15,7 @@ from benchmark.transformers.compare_metrics import (
     collect_metrics,
     common_model_ids,
     normalize_model_key,
+    payload_benchmark_type,
     render_charts,
 )
 
@@ -49,6 +50,39 @@ def test_llm_compare_metric_from_payload() -> None:
     assert metric.prefill_tokens_per_j == 1.5
 
 
+def test_llm_compare_metric_from_measure_payload() -> None:
+    """Verify text-generation measure payloads can be compared."""
+
+    payload = {
+        "model": "repo/model-a",
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+        },
+        "device": {
+            "avg_power_w": 11.0,
+            "prefill_tokens_per_j": 1.5,
+            "decode_tokens_per_j": 2.5,
+        },
+    }
+
+    metric = LLMCompareMetric.from_payload(payload)
+
+    assert metric is not None
+    assert metric.prefill_tps == {128: 10.0}
+    assert metric.decode_tps == {32: 20.0}
+    assert metric.prefill_latency_ms == {128: 30.0}
+    assert metric.decode_duration_ms == {32: 40.0}
+    assert metric.avg_power_w == 11.0
+    assert metric.prefill_tokens_per_j == 1.5
+
+
 def test_vlm_compare_metric_from_payload() -> None:
     payload = {
         "model": "repo/vlm-a",
@@ -75,6 +109,36 @@ def test_vlm_compare_metric_from_payload() -> None:
     assert metric.vision_encode_ms == 45.0
     assert metric.vision_fps == 22.0
     assert metric.avg_power_w == 55.0
+
+
+def test_vlm_compare_metric_from_measure_payload() -> None:
+    """Verify image-text-to-text measure payloads can be compared."""
+
+    payload = {
+        "model": "repo/vlm-a",
+        "benchmark_type": "measure",
+        "task": "image-text-to-text",
+        "summary": {
+            "vision_encode_ms": {"mean": 45.0},
+            "vision_fps": {"mean": 22.0},
+            "llm_prefill_tps": {"mean": 12.0},
+            "llm_decode_tps": {"mean": 34.0},
+            "llm_ttft_ms": {"mean": 56.0},
+            "llm_decode_duration_ms": {"mean": 78.0},
+        },
+        "device": {"avg_power_w": 55.0, "llm_prefill_tok_per_j": 0.9, "vision_img_per_j": 0.2},
+    }
+
+    metric = VLMCompareMetric.from_payload(payload)
+
+    assert metric is not None
+    assert metric.llm_prefill_tps == 12.0
+    assert metric.llm_decode_tps == 34.0
+    assert metric.llm_ttft_ms == 56.0
+    assert metric.vision_encode_ms == 45.0
+    assert metric.vision_fps == 22.0
+    assert metric.llm_prefill_tok_per_j == 0.9
+    assert metric.vision_img_per_j == 0.2
 
 
 def test_asr_compare_metric_from_payload() -> None:
@@ -112,6 +176,16 @@ def test_task_registry_contains_all_tasks() -> None:
     assert TASK_REGISTRY[LLMCompareMetric.TASK] is LLMCompareMetric
     assert TASK_REGISTRY[VLMCompareMetric.TASK] is VLMCompareMetric
     assert TASK_REGISTRY[ASRCompareMetric.TASK] is ASRCompareMetric
+
+
+def test_payload_benchmark_type_detects_normalized_and_legacy_payloads() -> None:
+    """Verify compare benchmark-type detection handles current and legacy schemas."""
+
+    assert payload_benchmark_type({"benchmark_type": "measure"}) == "measure"
+    assert payload_benchmark_type({"benchmark_type": "sweep"}) == "sweep"
+    assert payload_benchmark_type({"benchmark": {"prefill_sweep": {}, "decode_sweep": {}}}) == "sweep"
+    assert payload_benchmark_type({"benchmark": {"llm_results": {}, "vision_summary": {}}}) == "sweep"
+    assert payload_benchmark_type({"status": "failed"}) is None
 
 
 def test_collect_metrics_and_common_models(tmp_path: Path) -> None:
@@ -351,6 +425,107 @@ def test_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) -> None
     assert "### CPU" in summary
     assert "Linux CPU" in summary
     assert "Windows CPU" in summary
+
+
+def test_compare_benchmark_results_compares_text_measure_payloads(tmp_path: Path) -> None:
+    """Verify compare CLI supports text-generation measure folders."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "linux_text_measure"
+    folder_b = tmp_path / "windows_text_measure"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    payload = {
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "model": "mobilint/model-a",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+        },
+        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0},
+    }
+    (folder_a / "model-a_measure.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_b / "model-a_measure.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Auto-detected benchmark_type: measure" in result.stdout
+    assert "Common models across all folders: 1" in result.stdout
+    assert (output_dir / "prefill_tps.png").is_file()
+    combined = (output_dir / "combined.md").read_text(encoding="utf-8")
+    assert "128 tokens" in combined
+    assert "32 tokens" in combined
+
+
+def test_compare_benchmark_results_rejects_mixed_measure_and_sweep(tmp_path: Path) -> None:
+    """Verify compare CLI rejects mixed benchmark types with a diagnostic."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "measure"
+    folder_b = tmp_path / "sweep"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    measure_payload = {
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "model": "model-a",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {"prefill_tps": {"mean": 10.0}, "decode_tps": {"mean": 20.0}},
+    }
+    sweep_payload = {
+        "task": "text-generation",
+        "model": "model-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+    }
+    (folder_a / "model-a_measure.json").write_text(json.dumps(measure_payload), encoding="utf-8")
+    (folder_b / "model-a.json").write_text(json.dumps(sweep_payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "mixed benchmark_type values found" in output
+    assert "measure and sweep results cannot be mixed" in output
 
 
 def test_transformer_default_compare_output_dir_uses_comparison(tmp_path: Path) -> None:

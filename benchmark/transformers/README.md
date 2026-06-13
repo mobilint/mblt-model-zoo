@@ -590,6 +590,13 @@ contain multiple task types, the script stops instead of guessing; pass `--task 
 `--task image-text-to-text`, or `--task automatic-speech-recognition` explicitly for mixed result
 folders.
 
+The compare script also auto-detects whether the inputs contain `measure` or `sweep` payloads.
+`measure` results can be compared with other `measure` results, and `sweep` results can be compared
+with other `sweep` results. `measure` and `sweep` payloads are not comparable with each other; if the
+input folders contain both benchmark types, the script prints the detected file samples and exits
+with an error. Pass `--benchmark-type measure` or `--benchmark-type sweep` to select one type when a
+folder contains unrelated JSON files.
+
 ### Compare Text-Generation Results
 
 ```bash
@@ -597,7 +604,20 @@ python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/text_generation \
   benchmark/transformers/results/RTX3090/text_generation \
   --output-dir benchmark/transformers/results/comparison/text_generation_compare \
-  --task text-generation
+  --task text-generation \
+  --benchmark-type sweep
+```
+
+Use `--benchmark-type measure` to compare fixed-case text-generation measure outputs from two result
+folders:
+
+```bash
+python benchmark/transformers/compare_benchmark_results.py \
+  benchmark/transformers/results/MLA100/text_generation \
+  benchmark/transformers/results/RTX3090/text_generation \
+  --output-dir benchmark/transformers/results/comparison/text_generation_measure_compare \
+  --task text-generation \
+  --benchmark-type measure
 ```
 
 ### Compare VLM Results
@@ -607,7 +627,8 @@ python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/image_text_to_text \
   benchmark/transformers/results/RTX3090/image_text_to_text \
   --output-dir benchmark/transformers/results/comparison/vlm_compare \
-  --task image-text-to-text
+  --task image-text-to-text \
+  --benchmark-type sweep
 ```
 
 ### Compare ASR Results
@@ -617,7 +638,8 @@ python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/asr \
   benchmark/transformers/results/RTX3090/asr \
   --output-dir benchmark/transformers/results/comparison/asr_compare \
-  --task automatic-speech-recognition
+  --task automatic-speech-recognition \
+  --benchmark-type measure
 ```
 
 If `--output-dir` is omitted, comparison outputs are saved under
