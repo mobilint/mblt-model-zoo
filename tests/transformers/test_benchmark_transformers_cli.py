@@ -1,5 +1,7 @@
+import csv
 import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
 from benchmark.transformers import benchmark_automatic_speech_recognition_models as asr_bench  # noqa: E402
 from benchmark.transformers import benchmark_image_text_to_text_models as vlm_bench  # noqa: E402
 from benchmark.transformers import benchmark_text_generation_models as text_bench  # noqa: E402
+from mblt_model_zoo.cli import tps as tps_cli  # noqa: E402
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (  # noqa: E402
     resolve_default_device,
     resolve_default_device_backend,
@@ -566,6 +569,180 @@ def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
     assert vlm_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
     assert vlm_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
 
+
+def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
+    """Verify VLM benchmark sweep derives phase efficiency from whole LLM trace energy."""
+    args = Namespace(
+        llm_resolution=224,
+        image_resolutions=[224],
+        original_models=False,
+        mxq_dir=None,
+        prefill_chunk_size=None,
+        warmup=0,
+        repeat=1,
+        prompt="prompt",
+        batch_size=2,
+        prefill_range=(128, 256, 128),
+        cache_lengths=[128, 256, 512],
+        decode_window=32,
+        batch_mode="batch",
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+                decode_sweep=vlm_bench.SweepData(
+                    x_values=[128, 256, 512],
+                    tps_values=[30.0, 40.0, 50.0],
+                    time_values=[0.3, 0.4, 0.5],
+                ),
+            )
+
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_stop_tracker_safe", lambda tracker: None)
+    monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+
+    payload, rows = vlm_bench._run_model(args, "model-a", object())
+
+    llm_run = payload["benchmark"]["llm_results"]["runs"][0]
+    llm_summary = payload["benchmark"]["llm_results"]["summary"]
+    llm_rows = [row for row in rows if row["type"] == "llm"]
+    assert llm_run["total_energy_j"] == pytest.approx(10.0)
+    assert llm_run["prefill_tps_per_w"] == pytest.approx(((128 + 256) * 2) / 10.0)
+    assert llm_run["decode_tps_per_w"] == pytest.approx((32 * 3 * 2) / 10.0)
+    assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
+    assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
+    assert llm_summary["prefill_tps_per_w"]["mean"] == pytest.approx(llm_run["prefill_tps_per_w"])
+    assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(llm_run["decode_tps_per_w"])
+    assert [row["prefill_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["prefill_tps_per_w"])] * len(
+        llm_rows
+    )
+    assert [row["decode_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["decode_tps_per_w"])] * len(
+        llm_rows
+    )
+
+
+def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None:
+    """Verify TPS CLI VLM sweep writes phase efficiency to JSON and CSV rows."""
+    args = Namespace(
+        task="image-text-to-text",
+        model="model-a",
+        tokenizer=None,
+        device=None,
+        device_backend=None,
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        batch_size=2,
+        image_resolutions=[224],
+        llm_resolution=None,
+        warmup=0,
+        repeat=1,
+        prompt="prompt",
+        prefill_range=(128, 256, 128),
+        cache_lengths=[128, 256, 512],
+        decode_window=32,
+        prefill_chunk_size=None,
+        device_metrics=True,
+        json=str(tmp_path / "vlm.json"),
+        csv=str(tmp_path / "vlm.csv"),
+        plot=None,
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+                decode_sweep=vlm_bench.SweepData(
+                    x_values=[128, 256, 512],
+                    tps_values=[30.0, 40.0, 50.0],
+                    time_values=[0.3, 0.4, 0.5],
+                ),
+            )
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: object())
+    monkeypatch.setattr(tps_cli, "_resolve_cli_batch_size", lambda args, pipeline: 2)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_stop_tracker_safe", lambda tracker: None)
+    monkeypatch.setattr(tps_cli, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        tps_cli,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+    monkeypatch.setattr(
+        "mblt_model_zoo.hf_transformers.utils.benchmark_utils.VLMTPSMeasurer",
+        _FakeVLMTPSMeasurer,
+    )
+
+    assert tps_cli._run_vlm_sweep(args) == 0
+
+    payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
+    llm_run = payload["llm_results"]["runs"][0]
+    llm_summary = payload["llm_results"]["summary"]
+    rows = list(csv.DictReader(Path(args.csv).open(encoding="utf-8")))
+    llm_rows = [row for row in rows if row["type"] == "llm"]
+    prefill_tps_per_w = ((128 + 256) * 2) / 10.0
+    decode_tps_per_w = (32 * 3 * 2) / 10.0
+
+    assert llm_run["total_energy_j"] == pytest.approx(10.0)
+    assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
+    assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
+    assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
+    assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
+    assert llm_summary["prefill_tps_per_w"]["mean"] == pytest.approx(prefill_tps_per_w)
+    assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(decode_tps_per_w)
+    assert [float(row["prefill_tps_per_w"]) for row in llm_rows] == [pytest.approx(prefill_tps_per_w)]
+    assert [float(row["decode_tps_per_w"]) for row in llm_rows] == [pytest.approx(decode_tps_per_w)]
 
 
 def test_text_sweep_token_helpers_use_whole_sweep_scope() -> None:

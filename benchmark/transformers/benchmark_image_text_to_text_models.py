@@ -617,6 +617,19 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             energy = _energy_from_device_time_series(device_time_series)
             if energy is not None:
                 run.total_energy_j = energy
+                prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
+                decode_tokens = _sweep_decode_token_count(
+                    run,
+                    decode_window=args.decode_window,
+                    batch_size=args.batch_size,
+                )
+                total_tokens = prefill_tokens + decode_tokens
+                run.prefill_tps_per_w = _safe_div(float(prefill_tokens), energy)
+                run.decode_tps_per_w = _safe_div(float(decode_tokens), energy)
+                run.prefill_j_per_token = _safe_div(energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+                run.decode_j_per_token = _safe_div(energy, float(decode_tokens)) if decode_tokens > 0 else None
+                run.total_tps_per_w = _safe_div(float(total_tokens), energy)
+                run.total_j_per_token = _safe_div(energy, float(total_tokens)) if total_tokens > 0 else None
         llm_runs.append(run)
     llm_prefill = [float(r.prefill_sweep.tps_values[-1]) for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]

@@ -2273,6 +2273,22 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             total_prefill_tokens = _measured_prefill_token_count(run, batch_size)
             total_decode_tokens = _measured_decode_token_count(run, batch_size, args.decode_window)
             total_tokens = total_prefill_tokens + total_decode_tokens
+            run.prefill_tps_per_w = (
+                _safe_div(float(total_prefill_tokens), total_energy) if total_energy is not None else None
+            )
+            run.decode_tps_per_w = (
+                _safe_div(float(total_decode_tokens), total_energy) if total_energy is not None else None
+            )
+            run.prefill_j_per_token = (
+                _safe_div(total_energy, float(total_prefill_tokens))
+                if total_energy is not None and total_prefill_tokens > 0
+                else None
+            )
+            run.decode_j_per_token = (
+                _safe_div(total_energy, float(total_decode_tokens))
+                if total_energy is not None and total_decode_tokens > 0
+                else None
+            )
             run.total_tps_per_w = _safe_div(float(total_tokens), total_energy) if total_energy is not None else None
             run.total_j_per_token = (
                 _safe_div(total_energy, float(total_tokens)) if total_energy is not None and total_tokens > 0 else None
@@ -2334,6 +2350,18 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         r.p99_memory_used_pct for r in llm_runs if getattr(r, "p99_memory_used_pct", None) is not None
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
+    llm_prefill_tps_per_w = [
+        r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
+    ]
+    llm_decode_tps_per_w = [
+        r.decode_tps_per_w for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None
+    ]
+    llm_prefill_j_per_token = [
+        r.prefill_j_per_token for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None
+    ]
+    llm_decode_j_per_token = [
+        r.decode_j_per_token for r in llm_runs if getattr(r, "decode_j_per_token", None) is not None
+    ]
 
     print(
         f"\nllm_reference_resolution={llm_resolution} warmup={args.warmup} runs={args.repeat} batch_size={batch_size}"
@@ -2358,6 +2386,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         _print_summary("llm_avg_mem_used_pct", llm_avg_memory_used_pct, "%")
         _print_summary("llm_p99_mem_used_pct", llm_p99_memory_used_pct, "%")
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
+        _print_summary("llm_prefill_tps_per_w", llm_prefill_tps_per_w, "TPS/W")
+        _print_summary("llm_decode_tps_per_w", llm_decode_tps_per_w, "TPS/W")
+        _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_token, "J/tok")
+        _print_summary("llm_decode_j_per_tok", llm_decode_j_per_token, "J/tok")
         if not llm_avg_power_w:
             print("[device] warning: no llm device samples were collected")
     _print_summary_footer()
@@ -2410,10 +2442,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "avg_memory_used_pct": getattr(run, "avg_memory_used_pct", None),
                 "p99_memory_used_pct": getattr(run, "p99_memory_used_pct", None),
                 "total_energy_j": getattr(run, "total_energy_j", None),
-                "prefill_tps_per_w": None,
-                "decode_tps_per_w": None,
-                "prefill_j_per_tok": None,
-                "decode_j_per_tok": None,
+                "prefill_tps_per_w": getattr(run, "prefill_tps_per_w", None),
+                "decode_tps_per_w": getattr(run, "decode_tps_per_w", None),
+                "prefill_j_per_tok": getattr(run, "prefill_j_per_token", None),
+                "decode_j_per_tok": getattr(run, "decode_j_per_token", None),
                 "vision_img_per_j": None,
                 "vision_j_per_img": None,
             }
@@ -2457,6 +2489,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                         "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
                         "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
                         "total_energy_j": _summary(llm_total_energy_j),
+                        "prefill_tps_per_w": _summary(llm_prefill_tps_per_w),
+                        "decode_tps_per_w": _summary(llm_decode_tps_per_w),
+                        "prefill_j_per_tok": _summary(llm_prefill_j_per_token),
+                        "decode_j_per_tok": _summary(llm_decode_j_per_token),
                     },
                 },
             },
