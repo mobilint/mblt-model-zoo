@@ -1427,12 +1427,15 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
     assert payload["summary"]["total_ms"]["mean"] == pytest.approx(6000.0)
 
 
-def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_path):
+def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, tmp_path):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
     pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=4)))
 
     class _FakeTracker:
+        def __init__(self, power_trace: list[tuple[float, float]]) -> None:
+            self._power_trace = power_trace
+
         def start(self) -> None:
             pass
 
@@ -1443,7 +1446,7 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
             return {"avg_power_w": 2.0}
 
         def get_total_power_trace(self) -> list[tuple[float, float]]:
-            return [(0.0, 2.0), (6.0, 2.0)]
+            return self._power_trace
 
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline_arg) -> None:
@@ -1468,7 +1471,12 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
 
     json_path = tmp_path / "vlm_measure_energy.json"
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
-    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker([(0.0, 2.0), (1.0, 2.0)]))
+    monkeypatch.setattr(
+        tps_cli,
+        "_build_phase_trackers",
+        lambda args, pipeline: (_FakeTracker([(0.0, 2.0), (2.0, 2.0)]), _FakeTracker([(0.0, 2.0), (3.0, 2.0)])),
+    )
     monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
 
@@ -1515,6 +1523,8 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
 
     assert tps_cli._run_vlm_measure(args) == 0
     payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["device_runs"][0]["vision_energy_j"] == pytest.approx(2.0)
+    assert payload["device_runs"][0]["llm_total_energy_j"] == pytest.approx(10.0)
     assert payload["device_runs"][0]["total_energy_j"] == pytest.approx(12.0)
     assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
 

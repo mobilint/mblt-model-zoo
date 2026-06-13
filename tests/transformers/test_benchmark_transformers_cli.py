@@ -736,7 +736,9 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     prefill_tps_per_w = ((128 + 256) * 2) / 10.0
     decode_tps_per_w = (32 * 3 * 2) / 10.0
 
-    assert llm_run["total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["vision_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["total_energy_j"] == pytest.approx(30.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
     assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))

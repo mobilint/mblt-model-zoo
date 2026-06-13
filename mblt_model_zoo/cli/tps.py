@@ -1009,6 +1009,33 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
     )
 
 
+def _vlm_llm_run_payload(run: Any) -> dict[str, Any]:
+    """Return a JSON payload for a VLM LLM sweep run including dynamic energy fields."""
+    payload = asdict(run)
+    payload["llm_total_energy_j"] = getattr(run, "llm_total_energy_j", None)
+    payload["vision_energy_j"] = getattr(run, "vision_energy_j", None)
+    payload["total_energy_j"] = getattr(run, "total_energy_j", None)
+    return payload
+
+
+def _vlm_llm_aggregate_payload(result: Any) -> dict[str, Any]:
+    """Return a JSON payload for an aggregated VLM LLM sweep result."""
+    payload = asdict(result)
+    for key in (
+        "llm_total_energy_j",
+        "vision_energy_j",
+        "total_energy_j",
+        "prefill_tps_per_w",
+        "decode_tps_per_w",
+        "prefill_j_per_token",
+        "decode_j_per_token",
+        "total_tps_per_w",
+        "total_j_per_token",
+    ):
+        payload[key] = getattr(result, key, None)
+    return payload
+
+
 def _cmd_measure(args: argparse.Namespace) -> int:
     """Dispatch a single TPS measurement to the text or VLM measurement path."""
     if _is_vlm_task(args.task):
@@ -2530,8 +2557,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "llm_results": {
                     "repeat": args.repeat,
                     "batch_size": batch_size,
-                    "aggregate": asdict(llm_result),
-                    "runs": [asdict(r) for r in llm_runs],
+                    "aggregate": _vlm_llm_aggregate_payload(llm_result),
+                    "runs": [_vlm_llm_run_payload(r) for r in llm_runs],
                     "device_time_series_runs": llm_device_time_series_runs,
                     "summary": {
                         "llm_prefill_tps": _summary(llm_prefill_tps),
