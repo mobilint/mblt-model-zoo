@@ -160,6 +160,36 @@ def _mean(values: list[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
 
 
+def _sum_required_energies(*energies: float | None) -> float | None:
+    """Return total energy only when every required phase was measured."""
+    if any(energy is None for energy in energies):
+        return None
+    return sum(float(energy) for energy in energies if energy is not None)
+
+
+def _vlm_llm_run_payload(run: Any) -> dict[str, Any]:
+    """Return a serialized VLM LLM run with dynamic phase energy fields."""
+    payload = asdict(run)
+    for key in (
+        "llm_prefill_energy_j",
+        "llm_decode_energy_j",
+        "llm_total_energy_j",
+        "vision_energy_j",
+        "total_energy_j",
+        "prefill_tps_per_w",
+        "decode_tps_per_w",
+        "prefill_j_per_token",
+        "decode_j_per_token",
+        "total_tps_per_w",
+        "total_j_per_token",
+    ):
+        payload[key] = getattr(run, key, None)
+    payload["llm_prefill_energy_j"] = getattr(run, "llm_prefill_energy_j", getattr(run, "prefill_energy_j", None))
+    payload["llm_decode_energy_j"] = getattr(run, "llm_decode_energy_j", getattr(run, "decode_energy_j", None))
+    return payload
+
+
+
 def _percentile(values: list[float], q: float) -> float:
     if not values:
         return 0.0
@@ -580,7 +610,10 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_memory_used_mb: list[float] = []
     llm_avg_memory_used_pct: list[float] = []
     llm_p99_memory_used_pct: list[float] = []
+    llm_prefill_energy_j: list[float] = []
+    llm_decode_energy_j: list[float] = []
     llm_total_energy_j: list[float] = []
+    vlm_total_energy_j: list[float] = []
     llm_prefill_tps_per_w: list[float] = []
     llm_decode_tps_per_w: list[float] = []
     llm_prefill_j_per_tok: list[float] = []
@@ -682,9 +715,17 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             )
             prefill_energy = _energy_from_device_time_series(prefill_time_series)
             decode_energy = _energy_from_device_time_series(decode_time_series)
-            if prefill_energy is not None and decode_energy is not None:
-                total_energy = prefill_energy + decode_energy
-                run.total_energy_j = total_energy
+            total_energy = _sum_required_energies(prefill_energy, decode_energy)
+            run.llm_prefill_energy_j = prefill_energy
+            run.llm_decode_energy_j = decode_energy
+            run.llm_total_energy_j = total_energy
+            run.total_energy_j = total_energy
+            if prefill_energy is not None:
+                llm_prefill_energy_j.append(prefill_energy)
+            if decode_energy is not None:
+                llm_decode_energy_j.append(decode_energy)
+            if total_energy is not None:
+                llm_total_energy_j.append(total_energy)
                 prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
                 decode_tokens = _sweep_decode_token_count(
                     run,
@@ -746,7 +787,29 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_memory_used_mb = [float(r.p99_memory_used_mb) for r in llm_runs if r.p99_memory_used_mb is not None]
     llm_avg_memory_used_pct = [float(r.avg_memory_used_pct) for r in llm_runs if r.avg_memory_used_pct is not None]
     llm_p99_memory_used_pct = [float(r.p99_memory_used_pct) for r in llm_runs if r.p99_memory_used_pct is not None]
-    llm_total_energy_j = [float(r.total_energy_j) for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
+    reference_vision_energy_j = None
+    for row in vision_results:
+        if row.get("image_resolution") != llm_resolution:
+            continue
+        value = row.get("summary", {}).get("total_energy_j", {}).get("mean")
+        if isinstance(value, (int, float)):
+            reference_vision_energy_j = float(value)
+        break
+    for run in llm_runs:
+        llm_only_energy = getattr(run, "llm_total_energy_j", getattr(run, "total_energy_j", None))
+        run.llm_total_energy_j = llm_only_energy
+        run.vision_energy_j = reference_vision_energy_j
+        run.total_energy_j = _sum_required_energies(reference_vision_energy_j, llm_only_energy)
+    llm_prefill_energy_j = [
+        float(r.llm_prefill_energy_j) for r in llm_runs if getattr(r, "llm_prefill_energy_j", None) is not None
+    ]
+    llm_decode_energy_j = [
+        float(r.llm_decode_energy_j) for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None
+    ]
+    llm_total_energy_j = [
+        float(r.llm_total_energy_j) for r in llm_runs if getattr(r, "llm_total_energy_j", None) is not None
+    ]
+    vlm_total_energy_j = [float(r.total_energy_j) for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
     llm_prefill_tps_per_w = [
         float(r.prefill_tps_per_w) for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
     ]
@@ -794,6 +857,10 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_memory_used_mb": r.p99_memory_used_mb,
                     "avg_memory_used_pct": r.avg_memory_used_pct,
                     "p99_memory_used_pct": r.p99_memory_used_pct,
+                    "vision_energy_j": getattr(r, "vision_energy_j", None),
+                    "llm_prefill_energy_j": getattr(r, "llm_prefill_energy_j", None),
+                    "llm_decode_energy_j": getattr(r, "llm_decode_energy_j", None),
+                    "llm_total_energy_j": getattr(r, "llm_total_energy_j", None),
                     "total_energy_j": getattr(r, "total_energy_j", None),
                     "prefill_tps_per_w": getattr(r, "prefill_tps_per_w", None),
                     "decode_tps_per_w": getattr(r, "decode_tps_per_w", None),
@@ -834,7 +901,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "vision_j_per_img": _summary(all_vision_j_per_img),
             },
             "llm_results": {
-                "runs": [asdict(r) for r in llm_runs],
+                "runs": [_vlm_llm_run_payload(r) for r in llm_runs],
                 "device_time_series_runs": llm_device_time_series_runs,
                 "summary": {
                     "llm_prefill_tps": _summary(llm_prefill),
@@ -854,7 +921,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_memory_used_mb": _summary(llm_p99_memory_used_mb),
                     "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
                     "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
-                    "total_energy_j": _summary(llm_total_energy_j),
+                    "llm_prefill_energy_j": _summary(llm_prefill_energy_j),
+                    "llm_decode_energy_j": _summary(llm_decode_energy_j),
+                    "llm_total_energy_j": _summary(llm_total_energy_j),
+                    "vision_energy_j": _summary([reference_vision_energy_j] if reference_vision_energy_j is not None else []),
+                    "total_energy_j": _summary(vlm_total_energy_j),
                     "prefill_tps_per_w": _summary(llm_prefill_tps_per_w),
                     "decode_tps_per_w": _summary(llm_decode_tps_per_w),
                     "prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
@@ -873,7 +944,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             "p99_memory_used_mb": max(llm_p99_memory_used_mb) if llm_p99_memory_used_mb else None,
             "avg_memory_used_pct": _mean(llm_avg_memory_used_pct),
             "p99_memory_used_pct": max(llm_p99_memory_used_pct) if llm_p99_memory_used_pct else None,
-            "total_energy_j": _mean(llm_total_energy_j),
+            "vision_energy_j": reference_vision_energy_j,
+            "llm_prefill_energy_j": _mean(llm_prefill_energy_j) if llm_prefill_energy_j else None,
+            "llm_decode_energy_j": _mean(llm_decode_energy_j) if llm_decode_energy_j else None,
+            "llm_total_energy_j": _mean(llm_total_energy_j) if llm_total_energy_j else None,
+            "total_energy_j": _mean(vlm_total_energy_j) if vlm_total_energy_j else None,
             "prefill_tps_last": llm_prefill[-1] if llm_prefill else None,
             "decode_tps_last": llm_decode[-1] if llm_decode else None,
             "prefill_tps_per_w_last": llm_prefill_tps_per_w[-1] if llm_prefill_tps_per_w else None,
@@ -1665,6 +1740,10 @@ def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]
                 "avg_temperature_c": device.get("avg_temperature_c"),
                 "avg_utilization_pct": device.get("avg_utilization_pct"),
                 "avg_memory_used_mb": device.get("avg_memory_used_mb"),
+                "vision_energy_j": device.get("vision_energy_j"),
+                "llm_prefill_energy_j": device.get("llm_prefill_energy_j"),
+                "llm_decode_energy_j": device.get("llm_decode_energy_j"),
+                "llm_total_energy_j": device.get("llm_total_energy_j"),
                 "total_energy_j": device.get("total_energy_j"),
                 "llm_prefill_tps_per_w_mean": device.get("llm_prefill_tps_per_w"),
                 "llm_decode_tps_per_w_mean": device.get("llm_decode_tps_per_w"),
@@ -1756,6 +1835,10 @@ def _build_vlm_plot_tables(output_dir: Path, *, measure: bool = False) -> dict[s
         (f"{prefix}avg_temperature_c.png", "avg_temperature_c", "°C"),
         (f"{prefix}avg_utilization_pct.png", "avg_utilization_pct", "%"),
         (f"{prefix}avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+        (f"{prefix}vision_energy_j.png", "vision_energy_j", "J"),
+        (f"{prefix}llm_prefill_energy_j.png", "llm_prefill_energy_j", "J"),
+        (f"{prefix}llm_decode_energy_j.png", "llm_decode_energy_j", "J"),
+        (f"{prefix}llm_total_energy_j.png", "llm_total_energy_j", "J"),
         (f"{prefix}total_energy_j.png", "total_energy_j", "J"),
     ]
     if not rows:
@@ -1829,6 +1912,10 @@ def _rebuild_measure_outputs(output_dir: Path) -> None:
         ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature (Celsius)", "Temperature"),
         ("measure_avg_utilization_pct.png", "avg_utilization_pct", "Utilization (Percent)", "Utilization"),
         ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used (Megabytes)", "Memory Used Megabytes"),
+        ("measure_vision_energy_j.png", "vision_energy_j", "Energy (Joules)", "Vision Energy"),
+        ("measure_llm_prefill_energy_j.png", "llm_prefill_energy_j", "Energy (Joules)", "LLM Prefill Energy"),
+        ("measure_llm_decode_energy_j.png", "llm_decode_energy_j", "Energy (Joules)", "LLM Decode Energy"),
+        ("measure_llm_total_energy_j.png", "llm_total_energy_j", "Energy (Joules)", "LLM Total Energy"),
         ("measure_total_energy_j.png", "total_energy_j", "Energy (Joules)", "Total Energy"),
     ]
     for filename, key, x_label, title in chart_specs:
@@ -1918,8 +2005,11 @@ def _run_measure(args: argparse.Namespace) -> int:
             avg_temperature_c: list[float] = []
             avg_utilization_pct: list[float] = []
             avg_memory_used_mb: list[float] = []
-            total_energy_j: list[float] = []
             vision_energy_j: list[float] = []
+            llm_prefill_energy_j: list[float] = []
+            llm_decode_energy_j: list[float] = []
+            llm_total_energy_j: list[float] = []
+            vlm_total_energy_j: list[float] = []
             llm_prefill_tps_per_w: list[float] = []
             llm_decode_tps_per_w: list[float] = []
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
@@ -2001,10 +2091,21 @@ def _run_measure(args: argparse.Namespace) -> int:
                     )
                     prefill_energy = _energy_from_device_time_series(prefill_time_series)
                     decode_energy = _energy_from_device_time_series(decode_time_series)
-                    if prefill_energy is not None and decode_energy is not None:
-                        llm_energy = prefill_energy + decode_energy
-                        total_energy_j.append(llm_energy)
-                        llm_result.total_energy_j = llm_energy
+                    llm_energy = _sum_required_energies(prefill_energy, decode_energy)
+                    llm_result.llm_prefill_energy_j = prefill_energy
+                    llm_result.llm_decode_energy_j = decode_energy
+                    llm_result.llm_total_energy_j = llm_energy
+                    true_total_energy = _sum_required_energies(
+                        vision_energy_j[-1] if vision_energy_j else None,
+                        llm_energy,
+                    )
+                    llm_result.total_energy_j = true_total_energy
+                    if prefill_energy is not None:
+                        llm_prefill_energy_j.append(prefill_energy)
+                    if decode_energy is not None:
+                        llm_decode_energy_j.append(decode_energy)
+                    if llm_energy is not None:
+                        llm_total_energy_j.append(llm_energy)
                         prefill_tokens = _sweep_prefill_token_count(llm_result, batch_size)
                         decode_tokens = _sweep_decode_token_count(
                             llm_result,
@@ -2026,9 +2127,11 @@ def _run_measure(args: argparse.Namespace) -> int:
                             llm_prefill_tps_per_w.append(float(llm_result.prefill_tps_per_w))
                         if llm_result.decode_tps_per_w is not None:
                             llm_decode_tps_per_w.append(float(llm_result.decode_tps_per_w))
+                    if true_total_energy is not None:
+                        vlm_total_energy_j.append(true_total_energy)
 
                 vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
-                llm_runs.append(asdict(llm_result))
+                llm_runs.append(_vlm_llm_run_payload(llm_result))
                 device_time_series_runs.append({"vision": vision_device_time_series, "llm": llm_device_time_series})
             llm_prefill = [
                 float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
@@ -2047,8 +2150,17 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if r["decode_sweep"]["time_values"]
             ]
             avg_power = _mean(avg_power_w)
-            total_energy = sum(total_energy_j) if total_energy_j else None
-            vision_energy = sum(vision_energy_j) if vision_energy_j else None
+            expected_runs = int(args.repeat)
+
+            def _sum_complete(energies: Sequence[float]) -> float | None:
+                """Return a repeat-total only when every measured repeat produced this energy."""
+                return sum(float(energy) for energy in energies) if len(energies) == expected_runs else None
+
+            vision_energy = _sum_complete(vision_energy_j)
+            llm_prefill_energy = _sum_complete(llm_prefill_energy_j)
+            llm_decode_energy = _sum_complete(llm_decode_energy_j)
+            llm_total_energy = _sum_complete(llm_total_energy_j)
+            total_energy = _sum_required_energies(vision_energy, llm_total_energy)
             payload = {
                 "model": label,
                 "benchmark_type": "measure",
@@ -2076,14 +2188,18 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "avg_temperature_c": _mean(avg_temperature_c),
                     "avg_utilization_pct": _mean(avg_utilization_pct),
                     "avg_memory_used_mb": _mean(avg_memory_used_mb),
-                    "total_energy_j": total_energy,
-                    "llm_prefill_tps_per_w": _mean(llm_prefill_tps_per_w),
-                    "llm_decode_tps_per_w": _mean(llm_decode_tps_per_w),
+                    "vision_energy_j": vision_energy,
+                    "llm_prefill_energy_j": llm_prefill_energy,
+                    "llm_decode_energy_j": llm_decode_energy,
+                    "llm_total_energy_j": llm_total_energy,
+                    "total_energy_j": total_energy if len(vlm_total_energy_j) == expected_runs else None,
+                    "llm_prefill_tps_per_w": _mean(llm_prefill_tps_per_w) if llm_prefill_tps_per_w else None,
+                    "llm_decode_tps_per_w": _mean(llm_decode_tps_per_w) if llm_decode_tps_per_w else None,
                     "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, vision_energy)
                     if vision_energy_j
                     else None,
                 }
-                if avg_power_w or total_energy_j or vision_energy_j
+                if avg_power_w or llm_total_energy_j or vision_energy_j
                 else None,
                 "device_time_series_runs": device_time_series_runs,
             }

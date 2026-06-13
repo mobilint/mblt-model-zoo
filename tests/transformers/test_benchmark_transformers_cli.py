@@ -482,7 +482,14 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     assert vlm_bench._run_measure(args) == 0
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
-    assert payload["device"]["total_energy_j"] == pytest.approx(18.0)
+    assert payload["device"]["vision_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_prefill_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_decode_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_total_energy_j"] == pytest.approx(18.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(27.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(
+        payload["device"]["vision_energy_j"] + payload["device"]["llm_total_energy_j"]
+    )
     assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
 
 
@@ -550,9 +557,11 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     assert vlm_bench._run_measure(args) == 0
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
-    assert payload["device"]["total_energy_j"] == pytest.approx(40.0)
-    assert payload["device"]["llm_prefill_tps_per_w"] == pytest.approx((128 * 4 * 2) / 20.0)
-    assert payload["device"]["llm_decode_tps_per_w"] == pytest.approx((32 * 4 * 2) / 20.0)
+    assert payload["device"]["vision_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_prefill_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_decode_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_total_energy_j"] == pytest.approx(40.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(60.0)
 
 
 def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
@@ -626,7 +635,13 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
     llm_run = payload["benchmark"]["llm_results"]["runs"][0]
     llm_summary = payload["benchmark"]["llm_results"]["summary"]
     llm_rows = [row for row in rows if row["type"] == "llm"]
-    assert llm_run["total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["vision_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_prefill_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["total_energy_j"] == pytest.approx(30.0)
+    assert llm_summary["llm_total_energy_j"]["mean"] == pytest.approx(20.0)
+    assert llm_summary["total_energy_j"]["mean"] == pytest.approx(30.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(((128 + 256) * 2) / 10.0)
     assert llm_run["decode_tps_per_w"] == pytest.approx((32 * 3 * 2) / 10.0)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
@@ -737,8 +752,12 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     decode_tps_per_w = (32 * 3 * 2) / 10.0
 
     assert llm_run["vision_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_prefill_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
     assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
     assert llm_run["total_energy_j"] == pytest.approx(30.0)
+    assert llm_summary["llm_prefill_energy_j"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["llm_decode_energy_j"]["mean"] == pytest.approx(10.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
     assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
@@ -747,6 +766,11 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(decode_tps_per_w)
     assert [float(row["prefill_tps_per_w"]) for row in llm_rows] == [pytest.approx(prefill_tps_per_w)]
     assert [float(row["decode_tps_per_w"]) for row in llm_rows] == [pytest.approx(decode_tps_per_w)]
+    assert [float(row["vision_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_prefill_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_decode_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_total_energy_j"]) for row in llm_rows] == [pytest.approx(20.0)]
+    assert [float(row["total_energy_j"]) for row in llm_rows] == [pytest.approx(30.0)]
 
 
 def test_text_sweep_token_helpers_use_whole_sweep_scope() -> None:

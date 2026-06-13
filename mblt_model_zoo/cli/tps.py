@@ -956,6 +956,11 @@ def _enrich_single_run_device(
     total_energy = _sum_required_energies(prefill_energy, decode_energy)
 
     run.avg_power_w = float(avg_power) if avg_power is not None else None
+    run.prefill_energy_j = prefill_energy
+    run.decode_energy_j = decode_energy
+    run.llm_prefill_energy_j = prefill_energy
+    run.llm_decode_energy_j = decode_energy
+    run.llm_total_energy_j = total_energy
     run.total_energy_j = total_energy
     _attach_tps_per_w(
         run,
@@ -1012,9 +1017,24 @@ def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
 def _vlm_llm_run_payload(run: Any) -> dict[str, Any]:
     """Return a JSON payload for a VLM LLM sweep run including dynamic energy fields."""
     payload = asdict(run)
+    payload["llm_prefill_energy_j"] = getattr(run, "llm_prefill_energy_j", getattr(run, "prefill_energy_j", None))
+    payload["llm_decode_energy_j"] = getattr(run, "llm_decode_energy_j", getattr(run, "decode_energy_j", None))
     payload["llm_total_energy_j"] = getattr(run, "llm_total_energy_j", None)
     payload["vision_energy_j"] = getattr(run, "vision_energy_j", None)
     payload["total_energy_j"] = getattr(run, "total_energy_j", None)
+    return payload
+
+
+def _vlm_measure_run_payload(run: Any) -> dict[str, Any]:
+    """Return a JSON payload for a fixed VLM run including nested LLM energy fields."""
+    payload = asdict(run)
+    llm_payload = dict(payload.get("llm", {}))
+    llm = getattr(run, "llm", None)
+    if llm is not None:
+        llm_payload["llm_prefill_energy_j"] = getattr(llm, "llm_prefill_energy_j", getattr(llm, "prefill_energy_j", None))
+        llm_payload["llm_decode_energy_j"] = getattr(llm, "llm_decode_energy_j", getattr(llm, "decode_energy_j", None))
+        llm_payload["llm_total_energy_j"] = getattr(llm, "llm_total_energy_j", getattr(llm, "total_energy_j", None))
+    payload["llm"] = llm_payload
     return payload
 
 
@@ -1022,6 +1042,8 @@ def _vlm_llm_aggregate_payload(result: Any) -> dict[str, Any]:
     """Return a JSON payload for an aggregated VLM LLM sweep result."""
     payload = asdict(result)
     for key in (
+        "llm_prefill_energy_j",
+        "llm_decode_energy_j",
         "llm_total_energy_j",
         "vision_energy_j",
         "total_energy_j",
@@ -1508,8 +1530,12 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             metric = _extract_device_metric(tracker)
             device_time_series = _extract_device_time_series(tracker)
             vision_energy = _energy_from_device_time_series(device_time_series)
+            llm_prefill_energy = getattr(run.llm, "prefill_energy_j", None)
+            llm_decode_energy = getattr(run.llm, "decode_energy_j", None)
             llm_energy = getattr(run.llm, "total_energy_j", None)
             metric["vision_energy_j"] = vision_energy
+            metric["llm_prefill_energy_j"] = llm_prefill_energy
+            metric["llm_decode_energy_j"] = llm_decode_energy
             metric["llm_total_energy_j"] = llm_energy
             metric["total_energy_j"] = _sum_required_energies(vision_energy, llm_energy)
             device_metrics.append(metric)
@@ -1537,6 +1563,14 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     total_memory_mb = [m["total_memory_mb"] for m in device_metrics if m.get("total_memory_mb") is not None]
     avg_memory_used_pct = [m["avg_memory_used_pct"] for m in device_metrics if m.get("avg_memory_used_pct") is not None]
     p99_memory_used_pct = [m["p99_memory_used_pct"] for m in device_metrics if m.get("p99_memory_used_pct") is not None]
+    vision_energy_j = [m["vision_energy_j"] for m in device_metrics if m.get("vision_energy_j") is not None]
+    llm_prefill_energy_j = [
+        m["llm_prefill_energy_j"] for m in device_metrics if m.get("llm_prefill_energy_j") is not None
+    ]
+    llm_decode_energy_j = [
+        m["llm_decode_energy_j"] for m in device_metrics if m.get("llm_decode_energy_j") is not None
+    ]
+    llm_total_energy_j = [m["llm_total_energy_j"] for m in device_metrics if m.get("llm_total_energy_j") is not None]
     total_energy_j = [m["total_energy_j"] for m in device_metrics if m.get("total_energy_j") is not None]
 
     print(f"warmup: {args.warmup}")
@@ -1569,6 +1603,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         _print_summary("total_memory", total_memory_mb, "MB")
         _print_summary("avg_memory_used_pct", avg_memory_used_pct, "%")
         _print_summary("p99_memory_used_pct", p99_memory_used_pct, "%")
+        _print_summary("vision_energy", vision_energy_j, "J")
+        _print_summary("llm_prefill_energy", llm_prefill_energy_j, "J")
+        _print_summary("llm_decode_energy", llm_decode_energy_j, "J")
+        _print_summary("llm_total_energy", llm_total_energy_j, "J")
         _print_summary("total_energy", total_energy_j, "J")
     _print_summary_footer()
 
@@ -1580,7 +1618,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             "image_resolution": args.image_resolution,
             "repeat": args.repeat,
             "batch_size": batch_size,
-            "runs": [asdict(r) for r in runs],
+            "runs": [_vlm_measure_run_payload(r) for r in runs],
             "summary": {
                 "vision_encode_ms": _summary(vision_ms),
                 "vision_fps": _summary(vision_fps),
@@ -1603,6 +1641,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "total_memory_mb": _summary(total_memory_mb),
                 "avg_memory_used_pct": _summary(avg_memory_used_pct),
                 "p99_memory_used_pct": _summary(p99_memory_used_pct),
+                "vision_energy_j": _summary(vision_energy_j),
+                "llm_prefill_energy_j": _summary(llm_prefill_energy_j),
+                "llm_decode_energy_j": _summary(llm_decode_energy_j),
+                "llm_total_energy_j": _summary(llm_total_energy_j),
                 "total_energy_j": _summary(total_energy_j),
             },
             "device_runs": device_metrics,
@@ -2280,6 +2322,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "p99_memory_used_pct": vision_mem_used_pct_p99[idx - 1]
                     if idx - 1 < len(vision_mem_used_pct_p99)
                     else None,
+                    "vision_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "total_energy_j": vision_energy_j[idx - 1] if idx - 1 < len(vision_energy_j) else None,
                     "prefill_tps_per_w": None,
                     "decode_tps_per_w": None,
@@ -2316,6 +2359,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "total_memory_mb": _summary(vision_mem_total_mb),
                     "avg_memory_used_pct": _summary(vision_mem_used_pct_avg),
                     "p99_memory_used_pct": _summary(vision_mem_used_pct_p99),
+                    "vision_energy_j": _summary(vision_energy_j),
                     "energy_j": _summary(vision_energy_j),
                     "vision_img_per_j": _summary(vision_img_per_j),
                     "vision_j_per_img": _summary(vision_j_per_img),
@@ -2435,9 +2479,15 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     llm_only_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
     for run in llm_runs:
         llm_only_energy = getattr(run, "total_energy_j", None)
+        run.llm_prefill_energy_j = getattr(run, "prefill_energy_j", None)
+        run.llm_decode_energy_j = getattr(run, "decode_energy_j", None)
         run.llm_total_energy_j = llm_only_energy
         run.vision_energy_j = reference_vision_energy_j
         run.total_energy_j = _sum_required_energies(reference_vision_energy_j, llm_only_energy)
+    llm_prefill_energy_j = [
+        r.llm_prefill_energy_j for r in llm_runs if getattr(r, "llm_prefill_energy_j", None) is not None
+    ]
+    llm_decode_energy_j = [r.llm_decode_energy_j for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
     llm_prefill_tps_per_w = [
         r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
@@ -2530,6 +2580,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "total_memory_mb": getattr(run, "total_memory_mb", None),
                 "avg_memory_used_pct": getattr(run, "avg_memory_used_pct", None),
                 "p99_memory_used_pct": getattr(run, "p99_memory_used_pct", None),
+                "vision_energy_j": getattr(run, "vision_energy_j", None),
+                "llm_prefill_energy_j": getattr(run, "llm_prefill_energy_j", None),
+                "llm_decode_energy_j": getattr(run, "llm_decode_energy_j", None),
                 "llm_total_energy_j": getattr(run, "llm_total_energy_j", None),
                 "total_energy_j": getattr(run, "total_energy_j", None),
                 "prefill_tps_per_w": getattr(run, "prefill_tps_per_w", None),
@@ -2578,6 +2631,11 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                         "total_memory_mb": _summary(llm_total_memory_mb),
                         "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
                         "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
+                        "vision_energy_j": _summary(
+                            [reference_vision_energy_j] if reference_vision_energy_j is not None else []
+                        ),
+                        "llm_prefill_energy_j": _summary(llm_prefill_energy_j),
+                        "llm_decode_energy_j": _summary(llm_decode_energy_j),
                         "llm_total_energy_j": _summary(llm_only_total_energy_j),
                         "total_energy_j": _summary(llm_total_energy_j),
                         "prefill_tps_per_w": _summary(llm_prefill_tps_per_w),

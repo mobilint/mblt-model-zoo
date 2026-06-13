@@ -1524,8 +1524,14 @@ def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, t
     assert tps_cli._run_vlm_measure(args) == 0
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["device_runs"][0]["vision_energy_j"] == pytest.approx(2.0)
+    assert payload["device_runs"][0]["llm_prefill_energy_j"] == pytest.approx(4.0)
+    assert payload["device_runs"][0]["llm_decode_energy_j"] == pytest.approx(6.0)
     assert payload["device_runs"][0]["llm_total_energy_j"] == pytest.approx(10.0)
     assert payload["device_runs"][0]["total_energy_j"] == pytest.approx(12.0)
+    assert payload["summary"]["vision_energy_j"]["mean"] == pytest.approx(2.0)
+    assert payload["summary"]["llm_prefill_energy_j"]["mean"] == pytest.approx(4.0)
+    assert payload["summary"]["llm_decode_energy_j"]["mean"] == pytest.approx(6.0)
+    assert payload["summary"]["llm_total_energy_j"]["mean"] == pytest.approx(10.0)
     assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
 
 

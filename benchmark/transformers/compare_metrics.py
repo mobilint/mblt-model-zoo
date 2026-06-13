@@ -328,6 +328,10 @@ class VLMCompareMetric(BaseCompareMetric):
     vision_fps: float | None = None
     vision_img_per_j: float | None = None
     vision_j_per_img: float | None = None
+    vision_energy_j: float | None = None
+    llm_prefill_energy_j: float | None = None
+    llm_decode_energy_j: float | None = None
+    llm_total_energy_j: float | None = None
     llm_prefill_tps_per_w: float | None = None
     llm_decode_tps_per_w: float | None = None
     llm_prefill_j_per_tok: float | None = None
@@ -352,6 +356,8 @@ class VLMCompareMetric(BaseCompareMetric):
         ScalarChartSpec("vision_fps.png", "Vision FPS", "Frames Per Second", "vision_fps"),
         ScalarChartSpec("vision_encode_ms.png", "Vision Encode ms", "Milliseconds", "vision_encode_ms"),
         ScalarChartSpec("vision_img_per_j.png", "Vision Images Per Joule", "Images Per Joule", "vision_img_per_j"),
+        ScalarChartSpec("vision_energy_j.png", "Vision Energy", "Energy (Joules)", "vision_energy_j"),
+        ScalarChartSpec("llm_total_energy_j.png", "LLM Total Energy", "Energy (Joules)", "llm_total_energy_j"),
     )
 
     @classmethod
@@ -373,6 +379,10 @@ class VLMCompareMetric(BaseCompareMetric):
                 vision_encode_ms=_summary_mean(summary, "vision_encode_ms"),
                 vision_fps=_summary_mean(summary, "vision_fps"),
                 vision_img_per_j=_as_float(device.get("vision_img_per_j")),
+                vision_energy_j=_as_float(device.get("vision_energy_j")),
+                llm_prefill_energy_j=_as_float(device.get("llm_prefill_energy_j")),
+                llm_decode_energy_j=_as_float(device.get("llm_decode_energy_j")),
+                llm_total_energy_j=_as_float(device.get("llm_total_energy_j")),
                 llm_prefill_tps_per_w=_as_float(device.get("llm_prefill_tps_per_w")),
                 llm_decode_tps_per_w=_as_float(device.get("llm_decode_tps_per_w")),
                 avg_power_w=_as_float(device.get("avg_power_w")),
@@ -406,6 +416,10 @@ class VLMCompareMetric(BaseCompareMetric):
             vision_fps=_summary_mean(vision_summary, "vision_fps"),
             vision_img_per_j=_summary_mean(vision_summary, "vision_img_per_j"),
             vision_j_per_img=_summary_mean(vision_summary, "vision_j_per_img"),
+            vision_energy_j=_as_float(device.get("vision_energy_j")),
+            llm_prefill_energy_j=_as_float(device.get("llm_prefill_energy_j")),
+            llm_decode_energy_j=_as_float(device.get("llm_decode_energy_j")),
+            llm_total_energy_j=_as_float(device.get("llm_total_energy_j")),
             llm_prefill_tps_per_w=_summary_mean(llm_summary, "prefill_tps_per_w"),
             llm_decode_tps_per_w=_summary_mean(llm_summary, "decode_tps_per_w"),
             llm_prefill_j_per_tok=_summary_mean(llm_summary, "prefill_j_per_tok"),
