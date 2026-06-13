@@ -27,7 +27,7 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.num_samples == 50
     assert args.full_split is False
     assert args.num_beams is None
-    assert args.max_new_tokens == 444
+    assert args.max_new_tokens is None
     assert args.warmup == 2
     assert args.dry_run is False
 
@@ -126,12 +126,11 @@ def test_optional_generate_kwargs_only_enable_whisper_hints() -> None:
 
 
 def test_resolve_generate_kwargs_omits_num_beams_when_unspecified() -> None:
-    """Verify default beam settings defer to the model by omitting num_beams."""
+    """Verify default generation settings defer to the model where possible."""
 
     args = asr_bench._parse_args([])
 
     assert asr_bench._resolve_generate_kwargs(args) == {
-        "max_new_tokens": 444,
         "return_timestamps": False,
     }
 
@@ -143,9 +142,19 @@ def test_resolve_generate_kwargs_includes_beam_settings_when_specified() -> None
 
     assert asr_bench._resolve_generate_kwargs(args) == {
         "num_beams": 4,
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "early_stopping": True,
+    }
+
+
+def test_resolve_generate_kwargs_includes_explicit_max_new_tokens() -> None:
+    """Verify explicit max-new-tokens settings are forwarded into generate kwargs."""
+
+    args = asr_bench._parse_args(["--max-new-tokens", "123"])
+
+    assert asr_bench._resolve_generate_kwargs(args) == {
+        "return_timestamps": False,
+        "max_new_tokens": 123,
     }
 
 
@@ -239,7 +248,7 @@ def test_measure_target_skips_whisper_long_form_samples() -> None:
         args,
         pipe,
         [short_sample, long_sample],
-        {"max_new_tokens": 444, "return_timestamps": False},
+        {"return_timestamps": False},
     )
 
     assert len(timings) == 1
@@ -277,7 +286,7 @@ def test_measure_target_keeps_requested_count_after_whisper_skip() -> None:
         args,
         pipe,
         [sample("measure-1", 5), sample("skip-long", 31), sample("measure-2", 4), sample("unused", 3)],
-        {"max_new_tokens": 444, "return_timestamps": False},
+        {"return_timestamps": False},
         max_measured_samples=2,
     )
 
@@ -321,7 +330,7 @@ def test_measure_target_adds_trace_integrated_energy(monkeypatch: pytest.MonkeyP
         args,
         DummyPipe(),
         [sample],
-        {"max_new_tokens": 444, "return_timestamps": False},
+        {"return_timestamps": False},
     )
 
     assert len(timings) == 1
@@ -921,7 +930,6 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     assert result.hypothesis == "test output"
     assert result.effective_generate_kwargs == {
         "num_beams": 4,
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "early_stopping": True,
     }
@@ -959,7 +967,6 @@ def test_run_one_sample_preserves_qwen3_asr_num_beams() -> None:
     assert pipe.calls == [
         {
             "num_beams": 4,
-            "max_new_tokens": 444,
             "return_timestamps": False,
             "early_stopping": True,
         }
@@ -1131,7 +1138,7 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
         num_beams=4,
         reference="hello",
         hypothesis="hello",
-        effective_generate_kwargs={"num_beams": 4, "max_new_tokens": 444},
+        effective_generate_kwargs={"num_beams": 4},
     )
     out_path = tmp_path / "openai__whisper-small_beams4.json"
 
@@ -1151,14 +1158,13 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
     payload = asr_bench.json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == asr_bench._ASR_BENCHMARK_SCHEMA_VERSION
     assert payload["generate_kwargs"] == {
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "num_beams": 4,
         "early_stopping": True,
         "task": "transcribe",
         "language": "en",
     }
-    assert payload["effective_generate_kwargs"] == {"num_beams": 4, "max_new_tokens": 444}
+    assert payload["effective_generate_kwargs"] == {"num_beams": 4}
 
 
 def test_write_target_json_reports_effective_num_beams_after_fallback(tmp_path: Path) -> None:

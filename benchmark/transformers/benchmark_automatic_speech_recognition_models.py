@@ -375,7 +375,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="beam value to benchmark; omit to use model default",
     )
-    parser.add_argument("--max-new-tokens", type=_parse_positive_int, default=444, help="maximum generated token count")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=_parse_positive_int,
+        default=None,
+        help="maximum generated token count; omit to use the model/pipeline generation config default",
+    )
     parser.add_argument(
         "--warmup",
         type=int,
@@ -557,9 +562,10 @@ def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[di
 
 def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
-        "max_new_tokens": int(args.max_new_tokens),
         "return_timestamps": False,
     }
+    if args.max_new_tokens is not None:
+        kwargs["max_new_tokens"] = int(args.max_new_tokens)
     if args.num_beams is not None:
         kwargs["num_beams"] = int(args.num_beams)
     if args.num_beams is not None and int(args.num_beams) > 1:
