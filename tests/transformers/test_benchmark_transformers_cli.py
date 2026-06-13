@@ -440,6 +440,14 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
         def stop(self) -> None:
             pass
 
+    phase_tracker_runs: list[tuple[_FakeTracker, _FakeTracker]] = []
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        trackers = (_FakeTracker(), _FakeTracker())
+        phase_tracker_runs.append(trackers)
+        return trackers
+
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline) -> None:
             pass
@@ -469,6 +477,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", _fake_build_phase_trackers)
     monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
     monkeypatch.setattr(
         vlm_bench,
@@ -480,6 +489,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
 
     assert vlm_bench._run_measure(args) == 0
+    assert len(phase_tracker_runs) == 1
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
     assert payload["device"]["vision_energy_j"] == pytest.approx(9.0)
@@ -517,6 +527,14 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
         def stop(self) -> None:
             pass
 
+    phase_tracker_runs: list[tuple[_FakeTracker, _FakeTracker]] = []
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        trackers = (_FakeTracker(), _FakeTracker())
+        phase_tracker_runs.append(trackers)
+        return trackers
+
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline) -> None:
             pass
@@ -544,6 +562,7 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", _fake_build_phase_trackers)
     monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
     monkeypatch.setattr(
         vlm_bench,
@@ -555,6 +574,9 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
 
     assert vlm_bench._run_measure(args) == 0
+    assert len(phase_tracker_runs) == 2
+    assert phase_tracker_runs[0][0] is not phase_tracker_runs[1][0]
+    assert phase_tracker_runs[0][1] is not phase_tracker_runs[1][1]
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
     assert payload["device"]["vision_energy_j"] == pytest.approx(20.0)

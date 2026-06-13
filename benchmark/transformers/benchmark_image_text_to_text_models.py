@@ -400,7 +400,6 @@ def _revision_exists(model_id: str, revision: str) -> bool | None:
 def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
-    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker)
 
     csv_rows: list[dict[str, Any]] = []
@@ -624,6 +623,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
         desc=f"{label} llm@{llm_resolution} runs",
         leave=False,
     ):
+        llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
@@ -696,7 +696,11 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 decode_duration,
             )
             run.p99_memory_used_mb = max(
-                [v for v in (prefill_metric.get("p99_memory_used_mb"), decode_metric.get("p99_memory_used_mb")) if v is not None],
+                [
+                    v
+                    for v in (prefill_metric.get("p99_memory_used_mb"), decode_metric.get("p99_memory_used_mb"))
+                    if v is not None
+                ],
                 default=None,
             )
             run.avg_memory_used_pct = _weighted_two(
@@ -924,7 +928,9 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "llm_prefill_energy_j": _summary(llm_prefill_energy_j),
                     "llm_decode_energy_j": _summary(llm_decode_energy_j),
                     "llm_total_energy_j": _summary(llm_total_energy_j),
-                    "vision_energy_j": _summary([reference_vision_energy_j] if reference_vision_energy_j is not None else []),
+                    "vision_energy_j": _summary(
+                        [reference_vision_energy_j] if reference_vision_energy_j is not None else []
+                    ),
                     "total_energy_j": _summary(vlm_total_energy_j),
                     "prefill_tps_per_w": _summary(llm_prefill_tps_per_w),
                     "decode_tps_per_w": _summary(llm_decode_tps_per_w),
@@ -1977,7 +1983,6 @@ def _run_measure(args: argparse.Namespace) -> int:
             )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
-            llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
             _print_device_status(target_args, tracker)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
             warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
@@ -2046,6 +2051,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     if energy is not None:
                         vision_energy_j.append(energy)
 
+                llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
                 try:
                     llm_result = measurer.measure_llm_full(
                         image_resolution=args.image_resolution,
@@ -2122,7 +2128,9 @@ def _run_measure(args: argparse.Namespace) -> int:
                             _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
                         )
                         llm_result.total_tps_per_w = _safe_div(float(total_tokens), llm_energy)
-                        llm_result.total_j_per_token = _safe_div(llm_energy, float(total_tokens)) if total_tokens > 0 else None
+                        llm_result.total_j_per_token = (
+                            _safe_div(llm_energy, float(total_tokens)) if total_tokens > 0 else None
+                        )
                         if llm_result.prefill_tps_per_w is not None:
                             llm_prefill_tps_per_w.append(float(llm_result.prefill_tps_per_w))
                         if llm_result.decode_tps_per_w is not None:
