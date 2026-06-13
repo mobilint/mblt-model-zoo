@@ -10,7 +10,7 @@
 - Legacy `product` selection on compatibility model constructors is no longer functional in the
   YAML-backed vision registry. The argument is still accepted so older call sites do not fail at
   construction time, but it is ignored in `2.0.0`.
-- The benchmark device-tracking integration now requires `mblt-tracker>=1.0.0`. The transformers
+- The benchmark device-tracking integration now requires `mblt-tracker>=1.0.1`. The transformers
   benchmark tools use the tracker 1.x time-series APIs for power traces, NPU rail metrics, and
   trace-integrated energy values.
 - The transformers benchmark comparison script was renamed from
@@ -50,7 +50,7 @@
   selection to explicit `model_cls`, `model_type`, and `mxq_path` values.
 - Use `mblt_model_zoo.vision.list_tasks()` and `mblt_model_zoo.vision.list_models()` to discover
   supported task and model names programmatically.
-- Upgrade benchmark environments to `mblt-tracker>=1.0.0` before running transformers benchmark
+- Upgrade benchmark environments to `mblt-tracker>=1.0.1` before running transformers benchmark
   commands with device metrics enabled.
 - Replace transformers compare-script invocations such as
   `python benchmark/transformers/plot_compare_benchmark_results.py ...` with
