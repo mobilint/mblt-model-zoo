@@ -111,8 +111,8 @@ try:
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
-        _iter_core_modes_for_target,
         _is_cuda_oom_error,
+        _iter_core_modes_for_target,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
@@ -124,8 +124,8 @@ except ImportError:
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
-        _iter_core_modes_for_target,
         _is_cuda_oom_error,
+        _iter_core_modes_for_target,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
@@ -464,8 +464,10 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 energy = _energy_from_device_time_series(device_time_series)
                 if energy is not None:
                     energy_vals.append(energy)
-                    j_per_img_vals.append(energy)
-                    tpj = _safe_div(1.0, energy)
+                    j_per_img = _safe_div(energy, float(args.batch_size))
+                    if j_per_img is not None:
+                        j_per_img_vals.append(j_per_img)
+                    tpj = _safe_div(float(args.batch_size), energy)
                     if tpj is not None:
                         img_per_j_vals.append(tpj)
                 if p99_power is not None:
