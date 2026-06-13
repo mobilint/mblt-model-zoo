@@ -96,11 +96,12 @@ def add_device_efficiency_metrics(
     """Return device metrics augmented with ASR energy-efficiency metrics.
 
     Args:
-        asr_metric: ASR metric payload containing ``total_audio_s`` and ``rtf``.
-        device_metric: Device metric payload containing power or energy values.
+        asr_metric: ASR metric payload containing ``total_audio_s``.
+        device_metric: Device metric payload containing ``total_energy_j``.
 
     Returns:
-        A copy of ``device_metric`` with ``sec_per_j`` and ``j_per_sec`` keys added when enough data is available.
+        A copy of ``device_metric`` with ``sec_per_j`` and ``j_per_sec`` keys derived from total
+        audio duration and total energy when both values are available.
     """
 
     augmented = dict(device_metric)
