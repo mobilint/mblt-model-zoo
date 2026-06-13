@@ -21,6 +21,8 @@
   Result keys and plot filenames such as `prefill_tok_per_j`, `decode_tokens_per_j`, and
   `*_tokens_per_j.png` now use `prefill_tps_per_w`, `decode_tps_per_w`, and `*_tps_per_w.png`.
   Joules-per-token (`J/tok`) fields remain as a separate energy-efficiency metric.
+- Automatic speech recognition benchmark flags were renamed: replace `--model-id` with `--model`
+  and `--all-revisions` with `--all` in existing benchmark scripts.
 
 ### Changed
 
@@ -54,3 +56,5 @@
   `python benchmark/transformers/plot_compare_benchmark_results.py ...` with
   `python benchmark/transformers/compare_benchmark_results.py ...` or
   `python -m benchmark.transformers.compare_benchmark_results ...`.
+- Replace automatic speech recognition benchmark invocations that use `--model-id` or
+  `--all-revisions` with `--model` and `--all`.

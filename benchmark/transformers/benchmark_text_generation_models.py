@@ -1669,12 +1669,13 @@ def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | 
         "decode_j_per_token",
     )
     payload: dict[str, Any] = {}
+    expected_runs = len(runs)
     for key in device_keys:
         vals = [float(run[key]) for run in runs if isinstance(run.get(key), (int, float))]
         if key.startswith("p99_") or key == "total_memory_mb":
             payload[key] = max(vals) if vals else None
         elif key == "total_energy_j":
-            payload[key] = sum(vals) if vals else None
+            payload[key] = sum(vals) if vals and len(vals) == expected_runs else None
         else:
             payload[key] = _mean_or_none(vals)
     payload["prefill_tps_last"] = runs[-1].get("prefill_tps") if runs else None

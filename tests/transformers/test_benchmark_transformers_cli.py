@@ -945,6 +945,37 @@ def test_text_measure_rebuild_outputs(tmp_path) -> None:
     assert (tmp_path / "combined_measure.md").is_file()
 
 
+def test_text_measure_device_payload_requires_complete_energy_repeats() -> None:
+    """Verify measure aggregate energy is omitted when any repeat lacks trace-integrated energy."""
+
+    payload = text_bench._measure_device_payload(
+        [
+            {"avg_power_w": 4.0, "p99_power_w": 5.0, "total_energy_j": 2.0, "prefill_tps": 10.0},
+            {"avg_power_w": 6.0, "p99_power_w": 7.0, "total_energy_j": None, "prefill_tps": 20.0},
+        ]
+    )
+
+    assert payload is not None
+    assert payload["avg_power_w"] == pytest.approx(5.0)
+    assert payload["p99_power_w"] == pytest.approx(7.0)
+    assert payload["total_energy_j"] is None
+    assert payload["prefill_tps_last"] == pytest.approx(20.0)
+
+
+def test_text_measure_device_payload_sums_complete_energy_repeats() -> None:
+    """Verify measure aggregate energy is summed only when all repeats have energy."""
+
+    payload = text_bench._measure_device_payload(
+        [
+            {"avg_power_w": 4.0, "total_energy_j": 2.0},
+            {"avg_power_w": 6.0, "total_energy_j": 3.0},
+        ]
+    )
+
+    assert payload is not None
+    assert payload["total_energy_j"] == pytest.approx(5.0)
+
+
 def test_vlm_measure_rebuild_outputs(tmp_path) -> None:
     """Verify VLM measure rebuild creates combined files from synthetic JSON."""
     payload = {

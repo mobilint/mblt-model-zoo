@@ -333,6 +333,9 @@ python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --num-samples 5
 ```
 
+Migration note: the ASR benchmark now uses `--model` and `--all`. Older invocations that used
+`--model-id` or `--all-revisions` should be updated before running this script.
+
 You can also benchmark non-Whisper ASR models as long as they follow the Transformers ASR pipeline
 contract:
 
