@@ -675,6 +675,160 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
     assert full_calls == [3]
 
 
+def test_run_text_sweep_repeat_aggregates_trace_energy_scope(monkeypatch, tmp_path):
+    """Verify text sweep repeat energy and TPS/W use the repeated sweep scope."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    tracker_pairs: list[tuple[str, str]] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=2)))
+
+    class _FakeTracker:
+        def __init__(self, name: str, power_w: float) -> None:
+            self.name = name
+            self.power_w = power_w
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": self.power_w, "p99_power_w": self.power_w}
+
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, self.power_w), (1.0, self.power_w)]
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=1.0,
+                decode_duration=1.0,
+                decode_tps=1.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+        def measure_full(self, **kwargs) -> BenchmarkResult:
+            if kwargs.get("on_prefill_start") is not None:
+                kwargs["on_prefill_start"]()
+                kwargs["on_prefill_end"]()
+                kwargs["on_decode_start"]()
+                kwargs["on_decode_end"]()
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.extend([8, 16])
+            result.prefill_sweep.tps_values.extend([8.0, 16.0])
+            result.prefill_sweep.time_values.extend([1.0, 1.0])
+            result.prefill_sweep.avg_total_token_latency_values.extend([0.125, 0.0625])
+            result.prefill_sweep.avg_npu_token_latency_values.extend([None, None])
+            result.decode_sweep.x_values.extend([4, 8])
+            result.decode_sweep.tps_values.extend([4.0, 8.0])
+            result.decode_sweep.time_values.extend([1.0, 1.0])
+            result.decode_sweep.avg_total_token_latency_values.extend([0.5, 0.5])
+            result.decode_sweep.avg_npu_token_latency_values.extend([None, None])
+            return result
+
+        def plot_and_save(self, result, save_path) -> None:
+            del result, save_path
+
+    tracker_specs = iter(
+        [
+            ("status-prefill", 0.0, "status-decode", 0.0),
+            ("run1-prefill", 2.0, "run1-decode", 3.0),
+            ("run2-prefill", 4.0, "run2-decode", 6.0),
+        ]
+    )
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        prefill_name, prefill_power, decode_name, decode_power = next(tracker_specs)
+        tracker_pairs.append((prefill_name, decode_name))
+        return _FakeTracker(prefill_name, prefill_power), _FakeTracker(decode_name, decode_power)
+
+    json_path = tmp_path / "sweep.json"
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", _fake_build_phase_trackers)
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=0,
+        repeat=2,
+        prefill_range=(8, 16, 8),
+        cache_lengths=[4, 8],
+        decode_window=2,
+        prefill_chunk_size=None,
+        trace=None,
+        device_metrics=True,
+        json=str(json_path),
+        csv=None,
+        plot=None,
+        device_backend="npu",
+    )
+
+    assert tps_cli._run_text_sweep(args) == 0
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    aggregate = payload["aggregate"]
+    runs = payload["runs"]
+
+    assert tracker_pairs == [
+        ("status-prefill", "status-decode"),
+        ("run1-prefill", "run1-decode"),
+        ("run2-prefill", "run2-decode"),
+    ]
+    assert [run["prefill_energy_j"] for run in runs] == [pytest.approx(2.0), pytest.approx(4.0)]
+    assert [run["decode_energy_j"] for run in runs] == [pytest.approx(3.0), pytest.approx(6.0)]
+    assert [run["total_energy_j"] for run in runs] == [pytest.approx(5.0), pytest.approx(10.0)]
+    assert runs[0]["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2) / 2.0)
+    assert runs[0]["decode_tps_per_w"] == pytest.approx((2 * 2 * 2) / 3.0)
+
+    assert aggregate["prefill_energy_j"] == pytest.approx(6.0)
+    assert aggregate["decode_energy_j"] == pytest.approx(9.0)
+    assert aggregate["total_energy_j"] == pytest.approx(15.0)
+    assert aggregate["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2 * 2) / 6.0)
+    assert aggregate["decode_tps_per_w"] == pytest.approx((2 * 2 * 2 * 2) / 9.0)
+    assert aggregate["total_tps_per_w"] == pytest.approx((((8 + 16) * 2 * 2) + (2 * 2 * 2 * 2)) / 15.0)
+    assert len(payload["device_time_series_runs"]) == 2
+
+
 def test_run_vlm_sweep_writes_plot(monkeypatch, tmp_path):
     """Verify VLM sweeps honor the shared --plot output path."""
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils

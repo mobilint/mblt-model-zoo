@@ -829,10 +829,12 @@ def _attach_tps_per_w(
     total_energy: float | None,
     batch_size: int,
     decode_window: int | None = None,
+    repeat_count: int = 1,
 ) -> None:
     """Attach TPS/W metrics whose token scope matches the supplied energy scope."""
-    total_prefill_tokens = _measured_prefill_token_count(run, batch_size)
-    total_decode_tokens = _measured_decode_token_count(run, batch_size, decode_window)
+    repeat_count = max(1, int(repeat_count))
+    total_prefill_tokens = _measured_prefill_token_count(run, batch_size) * repeat_count
+    total_decode_tokens = _measured_decode_token_count(run, batch_size, decode_window) * repeat_count
     total_tokens = total_prefill_tokens + total_decode_tokens
 
     run.prefill_tps_per_w = (
@@ -969,6 +971,38 @@ def _enrich_single_run_device(
         total_energy=total_energy,
         batch_size=batch_size,
         decode_window=decode_window,
+    )
+
+
+def _attach_aggregate_sweep_device(
+    result: Any,
+    runs: Sequence[Any],
+    *,
+    batch_size: int,
+    decode_window: int | None = None,
+) -> None:
+    """Attach repeat-aggregate device energy and efficiency to a sweep result."""
+    if not runs:
+        return
+
+    prefill_energy = _sum_required_energies(*(getattr(run, "prefill_energy_j", None) for run in runs))
+    decode_energy = _sum_required_energies(*(getattr(run, "decode_energy_j", None) for run in runs))
+    total_energy = _sum_required_energies(prefill_energy, decode_energy)
+
+    result.prefill_energy_j = prefill_energy
+    result.decode_energy_j = decode_energy
+    result.llm_prefill_energy_j = prefill_energy
+    result.llm_decode_energy_j = decode_energy
+    result.llm_total_energy_j = total_energy
+    result.total_energy_j = total_energy
+    _attach_tps_per_w(
+        result,
+        prefill_energy=prefill_energy,
+        decode_energy=decode_energy,
+        total_energy=total_energy,
+        batch_size=batch_size,
+        decode_window=decode_window,
+        repeat_count=len(runs),
     )
 
 
@@ -1777,6 +1811,15 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                     "decode": decode_time_series,
                 }
             )
+            _enrich_single_run_device(
+                run=runs[-1],
+                prefill_metric=prefill_metric,
+                decode_metric=decode_metric,
+                batch_size=batch_size,
+                prefill_time_series=prefill_time_series,
+                decode_time_series=decode_time_series,
+                decode_window=args.decode_window,
+            )
             prefill_dur = float(getattr(runs[-1], "prefill_phase_duration_s", 0.0) or 0.0)
             decode_dur = float(getattr(runs[-1], "decode_phase_duration_s", 0.0) or 0.0)
             avg_power = _weighted_two(
@@ -1924,6 +1967,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                     dst.append(float(v))
 
     result = _aggregate_sweep_results(runs)
+    _attach_aggregate_sweep_device(result, runs, batch_size=batch_size, decode_window=args.decode_window)
 
     prefill_last = [r.prefill_sweep.tps_values[-1] for r in runs if r.prefill_sweep.tps_values]
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]

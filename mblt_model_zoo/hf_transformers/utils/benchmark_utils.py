@@ -525,11 +525,15 @@ class BenchmarkResult:
     p99_memory_used_mb: Optional[float] = None
     avg_memory_used_pct: Optional[float] = None
     p99_memory_used_pct: Optional[float] = None
+    prefill_energy_j: Optional[float] = None
+    decode_energy_j: Optional[float] = None
     total_energy_j: Optional[float] = None
     prefill_tps_per_w: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
     decode_tps_per_w: Optional[float] = None
     decode_j_per_token: Optional[float] = None
+    total_tps_per_w: Optional[float] = None
+    total_j_per_token: Optional[float] = None
 
     @staticmethod
     def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
