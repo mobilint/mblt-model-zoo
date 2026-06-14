@@ -74,6 +74,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_phase_trackers as _build_phase_trackers_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    energy_from_device_time_series as _energy_from_device_time_series_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -121,6 +124,7 @@ class TextBenchmarkTarget:
     base: str
     mxq_path: str | None
     max_batch_size: int
+    batch_mode: str
 
 
 def _safe_filename(model_id: str) -> str:
@@ -140,26 +144,6 @@ def _print_exception(message: str, exc: BaseException, *, debug_errors: bool) ->
     print(f"{message}: {_format_exception(exc)}")
     if debug_errors:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
-
-
-def _add_batch_selection_args(parser: argparse.ArgumentParser) -> None:
-    """Add mutually exclusive batch target selection flags."""
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--batch",
-        dest="batch_mode",
-        action="store_const",
-        const=_BATCH_MODE_BATCH,
-        default=_BATCH_MODE_NON_BATCH,
-        help="benchmark only targets whose config max_batch_size is greater than 1",
-    )
-    group.add_argument(
-        "--non-batch",
-        dest="batch_mode",
-        action="store_const",
-        const=_BATCH_MODE_NON_BATCH,
-        help="benchmark only targets whose config max_batch_size is 1 (default)",
-    )
 
 
 def _is_gguf_model_id(model_id: str) -> bool:
@@ -243,24 +227,9 @@ def _resolve_config_max_batch_size(model_id: str, revision: str | None, *, task:
     return _extract_config_max_batch_size(payload, task=task)
 
 
-def _target_matches_batch_mode(max_batch_size: int, batch_mode: str) -> bool:
-    """Return whether a resolved batch size belongs to the requested mode."""
-    if batch_mode == _BATCH_MODE_BATCH:
-        return max_batch_size > 1
-    if batch_mode == _BATCH_MODE_NON_BATCH:
-        return max_batch_size == 1
-    raise ValueError(f"Unsupported batch mode: {batch_mode}")
-
-
-def _resolve_filter_max_batch_size(max_batch_size: int | None, batch_mode: str) -> int | None:
-    """Resolve the effective max batch size used for batch-mode filtering."""
-    if max_batch_size is not None:
-        return max_batch_size
-    if batch_mode == _BATCH_MODE_NON_BATCH:
-        return 1
-    if batch_mode == _BATCH_MODE_BATCH:
-        return None
-    raise ValueError(f"Unsupported batch mode: {batch_mode}")
+def _batch_mode_from_max_batch_size(max_batch_size: int) -> str:
+    """Return the benchmark batch mode implied by one target max batch size."""
+    return _BATCH_MODE_BATCH if max_batch_size > 1 else _BATCH_MODE_NON_BATCH
 
 
 def _target_filter_revision(model_id: str, revision_candidates: list[str | None], mxq_path: str | None) -> str | None:
@@ -273,25 +242,23 @@ def _target_filter_revision(model_id: str, revision_candidates: list[str | None]
 def _filter_text_targets_by_batch_mode(
     targets: Sequence[tuple[str, list[str | None], str, str, str | None]],
     *,
-    batch_mode: str,
+    batch_mode: str | None = None,
     task: str = "text-generation",
 ) -> list[TextBenchmarkTarget]:
-    """Filter text-generation targets by GGUF status and config max_batch_size."""
+    """Filter unsupported targets and annotate each supported target with batch metadata."""
     filtered: list[TextBenchmarkTarget] = []
     for model_id, revision_candidates, label, base, mxq_path in targets:
         revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
-        max_batch_size = _resolve_filter_max_batch_size(
-            _resolve_config_max_batch_size(model_id, revision, task=task),
-            batch_mode,
-        )
+        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
         if max_batch_size is None:
-            print(f"Skip {label}: max_batch_size is not available for batch-mode filtering.")
+            max_batch_size = 1
+        if max_batch_size is None:
             continue
-        if not _target_matches_batch_mode(max_batch_size, batch_mode):
-            print(f"Skip {label}: max_batch_size={max_batch_size} does not match --{batch_mode.replace('_', '-')}.")
+        resolved_batch_mode = _batch_mode_from_max_batch_size(max_batch_size)
+        if batch_mode is not None and resolved_batch_mode != batch_mode:
             continue
         filtered.append(
             TextBenchmarkTarget(
@@ -301,6 +268,7 @@ def _filter_text_targets_by_batch_mode(
                 base=base,
                 mxq_path=mxq_path,
                 max_batch_size=max_batch_size,
+                batch_mode=resolved_batch_mode,
             )
         )
     return filtered
@@ -340,6 +308,7 @@ def _build_pipeline(
     trust_remote_code: bool = True,
     core_mode: str | None = None,
     mxq_path: str | None = None,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
 ):
     kwargs = {
         "task": "text-generation",
@@ -355,7 +324,11 @@ def _build_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
+    model_kwargs = _apply_core_mode_model_kwargs_common(
+        model_kwargs,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -485,8 +458,8 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         "total_energy_j",
         "prefill_tps_last",
         "decode_tps_last",
-        "prefill_tok_per_j_last",
-        "decode_tok_per_j_last",
+        "prefill_tps_per_w_last",
+        "decode_tps_per_w_last",
         "prefill_j_per_tok_last",
         "decode_j_per_tok_last",
     ):
@@ -606,6 +579,10 @@ def _extract_device_time_series(tracker: Any) -> dict[str, list[dict[str, float]
     return _extract_device_time_series_common(tracker)
 
 
+def _energy_from_device_time_series(device_time_series: Mapping[str, Sequence[Mapping[str, object]]]) -> float | None:
+    return _energy_from_device_time_series_common(device_time_series)
+
+
 def _weighted_two(
     a: float | None,
     a_weight: float,
@@ -649,8 +626,8 @@ def _write_device_combined_csv(path: str, rows: Sequence[dict[str, float | str |
                 "total_energy_j",
                 "prefill_tps_last",
                 "decode_tps_last",
-                "prefill_tok_per_j_last",
-                "decode_tok_per_j_last",
+                "prefill_tps_per_w_last",
+                "decode_tps_per_w_last",
                 "prefill_j_per_tok_last",
                 "decode_j_per_tok_last",
             ],
@@ -709,9 +686,9 @@ def _token_sweep_plot_table(
     return _token_sweep_plot_table_common(models, metrics_by_model, value_key=value_key)
 
 
-def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
+def _build_text_generation_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation sweep summaries."""
-    metrics_by_model = collect_folder_metrics(results_dir)
+    metrics_by_model = collect_folder_metrics(output_dir)
     if not metrics_by_model:
         return {}
     models = sorted(metrics_by_model.keys())
@@ -721,8 +698,8 @@ def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
     }
     rows = [{"model": model, **vars(metrics_by_model[model])} for model in models]
     scalar_specs = [
-        ("prefill_tokens_per_j.png", "prefill_tokens_per_j", "tokens/J"),
-        ("decode_tokens_per_j.png", "decode_tokens_per_j", "tokens/J"),
+        ("prefill_tps_per_w.png", "prefill_tps_per_w", "TPS/W"),
+        ("decode_tps_per_w.png", "decode_tps_per_w", "TPS/W"),
         ("avg_power_w.png", "avg_power_w", "W"),
         ("avg_temperature_c.png", "avg_temperature_c", "°C"),
         ("avg_utilization_pct.png", "avg_utilization_pct", "%"),
@@ -734,16 +711,16 @@ def _build_text_generation_plot_tables(results_dir: Path) -> dict[str, str]:
     return {filename: table for filename, table in tables.items() if table}
 
 
-def _build_text_generation_measure_plot_tables(results_dir: Path) -> dict[str, str]:
+def _build_text_generation_measure_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation measure summaries."""
-    rows = _read_csv_rows(results_dir / "combined_measure.csv")
+    rows = _read_csv_rows(output_dir / "combined_measure.csv")
     if not rows:
         return {}
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "tokens/s"),
-        ("measure_prefill_tokens_per_j.png", "prefill_tok_per_j_mean", "tokens/J"),
+        ("measure_prefill_tps_per_w.png", "prefill_tps_per_w_mean", "TPS/W"),
         ("measure_decode_tps.png", "decode_tps_mean", "tokens/s"),
-        ("measure_decode_tokens_per_j.png", "decode_tok_per_j_mean", "tokens/J"),
+        ("measure_decode_tps_per_w.png", "decode_tps_per_w_mean", "TPS/W"),
         ("measure_avg_power_w.png", "avg_power_w", "W"),
         ("measure_avg_temperature_c.png", "avg_temperature_c", "°C"),
         ("measure_avg_utilization_pct.png", "avg_utilization_pct", "%"),
@@ -765,32 +742,34 @@ def _write_single_combined_markdown(
     _write_token_combined_markdown(path, tps_rows, device_rows)
 
 
-def _write_text_generation_summary(results_dir: str | Path, *, measure: bool = False) -> None:
+def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = False) -> None:
     """Write a text-generation benchmark summary Markdown with host info, plots, and table."""
-    out_dir = Path(results_dir)
+    output_dir = Path(output_dir)
     table_name = "combined_measure.md" if measure else "combined.md"
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Text Generation Measure Benchmark Summary" if measure else "Text Generation Benchmark Summary"
     prefixes = ("measure_",) if measure else None
     plot_tables = (
-        _build_text_generation_measure_plot_tables(out_dir) if measure else _build_text_generation_plot_tables(out_dir)
+        _build_text_generation_measure_plot_tables(output_dir)
+        if measure
+        else _build_text_generation_plot_tables(output_dir)
     )
     _write_summary_markdown(
-        out_dir / summary_name,
+        output_dir / summary_name,
         title=title,
-        host_info_path=out_dir / _HOST_PC_INFO_FILENAME,
-        table_markdown_path=out_dir / table_name,
-        plot_paths=_existing_png_paths(out_dir, prefixes=prefixes),
+        host_info_path=output_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=output_dir / table_name,
+        plot_paths=_existing_png_paths(output_dir, prefixes=prefixes),
         plot_tables=plot_tables,
     )
 
 
-def _rebuild_combined_outputs(results_dir: str | Path) -> None:
-    out_dir = Path(results_dir)
+def _rebuild_combined_outputs(output_dir: str | Path) -> None:
+    output_dir = Path(output_dir)
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    for path in sorted(out_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -824,8 +803,8 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
                     "total_energy_j": device.get("total_energy_j"),
                     "prefill_tps_last": device.get("prefill_tps_last"),
                     "decode_tps_last": device.get("decode_tps_last"),
-                    "prefill_tok_per_j_last": device.get("prefill_tok_per_j_last"),
-                    "decode_tok_per_j_last": device.get("decode_tok_per_j_last"),
+                    "prefill_tps_per_w_last": device.get("prefill_tps_per_w_last"),
+                    "decode_tps_per_w_last": device.get("decode_tps_per_w_last"),
                     "prefill_j_per_tok_last": device.get("prefill_j_per_tok_last"),
                     "decode_j_per_tok_last": device.get("decode_j_per_tok_last"),
                 }
@@ -833,11 +812,11 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
 
     if not combined_results:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
-        _write_text_generation_summary(out_dir)
+        _write_text_generation_summary(output_dir)
         return
 
-    combined_csv = os.path.join(out_dir, "combined.csv")
-    combined_md = os.path.join(out_dir, "combined.md")
+    combined_csv = os.path.join(output_dir, "combined.csv")
+    combined_md = os.path.join(output_dir, "combined.md")
     BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
     _write_single_combined_markdown(
         combined_md,
@@ -845,7 +824,7 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
         device_rows=combined_device_rows,
     )
 
-    folder_metrics = collect_folder_metrics(out_dir)
+    folder_metrics = collect_folder_metrics(output_dir)
     if folder_metrics:
         models = sorted(folder_metrics.keys())
         labels = ["benchmark"]
@@ -858,14 +837,14 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
             token_selector=lambda m: m.prefill_tps,
             title="Prefill Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=out_dir / "prefill_tps.png",
+            output_path=output_dir / "prefill_tps.png",
         )
         scalar_specs = [
             (
-                "prefill_tokens_per_j.png",
-                "Prefill Tokens Per Joule",
-                "Tokens Per Joule",
-                lambda m: m.prefill_tokens_per_j,
+                "prefill_tps_per_w.png",
+                "Prefill TPS/W",
+                "TPS/W",
+                lambda m: m.prefill_tps_per_w,
             ),
         ]
         plot_token_chart(
@@ -875,15 +854,15 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
             token_selector=lambda m: m.decode_tps,
             title="Decode Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=out_dir / "decode_tps.png",
+            output_path=output_dir / "decode_tps.png",
         )
         scalar_specs.extend(
             [
                 (
-                    "decode_tokens_per_j.png",
-                    "Decode Tokens Per Joule",
-                    "Tokens Per Joule",
-                    lambda m: m.decode_tokens_per_j,
+                    "decode_tps_per_w.png",
+                    "Decode TPS/W",
+                    "TPS/W",
+                    lambda m: m.decode_tps_per_w,
                 ),
                 ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
                 ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
@@ -905,21 +884,36 @@ def _rebuild_combined_outputs(results_dir: str | Path) -> None:
                 scalar_selector=selector,
                 title=title,
                 x_label=x_label,
-                output_path=out_dir / filename,
+                output_path=output_dir / filename,
             )
 
     if combined_device_rows:
-        device_csv = os.path.join(out_dir, "combined_device.csv")
+        device_csv = os.path.join(output_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
 
-    _write_text_generation_summary(out_dir)
+    _write_text_generation_summary(output_dir)
 
 
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by text-generation benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    _add_batch_selection_args(parser)
-    parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
+    batch_group = parser.add_mutually_exclusive_group()
+    batch_group.add_argument(
+        "--batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_BATCH,
+        default=_BATCH_MODE_NON_BATCH,
+        help="benchmark only batch-capable model targets",
+    )
+    batch_group.add_argument(
+        "--non-batch",
+        dest="batch_mode",
+        action="store_const",
+        const=_BATCH_MODE_NON_BATCH,
+        help="benchmark only non-batch model targets (default)",
+    )
+    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
     parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
@@ -976,7 +970,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         help="required free VRAM factor versus estimated model weights (default: 1.15)",
     )
     parser.add_argument(
-        "--results-dir",
+        "--output-dir",
         default=None,
         help="output directory (default: benchmark/transformers/results/text_generation)",
     )
@@ -1035,49 +1029,89 @@ def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
-def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bool) -> None:
-    """Apply the single-core constraint for batch LLM benchmarks."""
-    if args.batch_mode != _BATCH_MODE_BATCH:
-        return
-    if core_mode_explicit and args.core_mode != "single":
-        raise SystemExit("--batch only supports --core-mode single for batch LLM benchmarks.")
-    args.core_mode = "single"
+def _normalize_batch_mode(batch_mode: argparse.Namespace | str) -> str:
+    """Return a batch-mode string from a raw string or parsed args object."""
+
+    if isinstance(batch_mode, argparse.Namespace):
+        return str(getattr(batch_mode, "batch_mode", _BATCH_MODE_NON_BATCH))
+    return str(batch_mode)
 
 
-def _resolve_batch_sweep_lengths(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
-    """Scale default sweep lengths down for batch text-generation benchmarks."""
-    if args.command != "sweep" or args.batch_mode != _BATCH_MODE_BATCH:
-        return
+def _is_batch_mode(batch_mode: argparse.Namespace | str) -> bool:
+    """Return whether the resolved target batch mode uses batch execution settings."""
+    return _normalize_batch_mode(batch_mode) == _BATCH_MODE_BATCH
+
+
+def _default_single_target_cores_for_batch_mode(batch_mode: argparse.Namespace | str) -> Sequence[str] | None:
+    """Return the default single-mode target cores for the active benchmark mode."""
+    if _is_batch_mode(batch_mode):
+        return None
+    return ("0:0",)
+
+
+def _iter_core_modes_for_target(
+    args: argparse.Namespace,
+    batch_mode: str,
+    *,
+    disable_npu_specific_args: bool,
+) -> list[str | None]:
+    """Return core modes to run for one target based on its resolved batch mode."""
+    if disable_npu_specific_args:
+        return [None]
+    if _is_batch_mode(batch_mode):
+        return ["single"]
+    return list(_iter_core_modes_common(args.core_mode))
+
+
+def _target_sweep_lengths(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    batch_mode: str,
+) -> tuple[tuple[int, int, int], list[int]]:
+    """Return per-target sweep lengths, scaling defaults for batch targets."""
+    prefill_range = args.prefill_range
+    cache_lengths = list(args.cache_lengths)
+    if not _is_batch_mode(batch_mode):
+        return prefill_range, cache_lengths
 
     scaled: list[str] = []
     if not _flag_present(raw_argv, "--prefill-range"):
-        original_prefill_range = args.prefill_range
-        args.prefill_range = _scale_range_arg(args.prefill_range, _BATCH_SWEEP_LENGTH_SCALE)
-        scaled.append(f"prefill_range={original_prefill_range}->{args.prefill_range}")
+        original_prefill_range = prefill_range
+        prefill_range = _scale_range_arg(prefill_range, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"prefill_range={original_prefill_range}->{prefill_range}")
     if not _flag_present(raw_argv, "--cache-lengths"):
-        original_cache_lengths = list(args.cache_lengths)
-        args.cache_lengths = _scale_int_list(args.cache_lengths, _BATCH_SWEEP_LENGTH_SCALE)
-        scaled.append(f"cache_lengths={original_cache_lengths}->{args.cache_lengths}")
+        original_cache_lengths = list(cache_lengths)
+        cache_lengths = _scale_int_list(cache_lengths, _BATCH_SWEEP_LENGTH_SCALE)
+        scaled.append(f"cache_lengths={original_cache_lengths}->{cache_lengths}")
 
     if scaled:
         print(
-            "Auto-scaled --batch sweep lengths by "
+            "Auto-scaled batch target sweep lengths by "
             f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: " + ", ".join(scaled)
         )
+    return prefill_range, cache_lengths
 
 
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     """Apply benchmark runtime defaults that depend on explicit CLI flags."""
+    args._raw_argv = list(raw_argv)
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
+    first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
+    if _is_batch_mode(args.batch_mode):
+        if core_mode_explicit and args.core_mode != "single":
+            raise SystemExit("batch benchmark only supports --core-mode single")
+        args.core_mode = "single"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
@@ -1085,7 +1119,7 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     args.device_backend = _resolve_default_device_backend_common(
         device_backend=args.device_backend,
         device_backend_explicit=device_backend_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
@@ -1093,12 +1127,10 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     if not device_explicit:
         print(f"Auto-set --device={args.device}")
     if not device_backend_explicit:
-        if args.model or args.mxq_path or args.mxq_dir:
+        if first_model_id or args.mxq_path or args.mxq_dir:
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
-    _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
-    _resolve_batch_sweep_lengths(args, raw_argv)
 
 
 def _args_for_target_device_backend(
@@ -1112,6 +1144,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -1125,46 +1158,45 @@ def main(argv: list[str] | None = None) -> int:
     return args._handler(args)
 
 
-def _resolve_text_generation_results_dir(args: argparse.Namespace) -> str:
-    """Resolve and create the text-generation benchmark results directory."""
-    results_dir = str(
-        Path(args.results_dir).resolve()
-        if args.results_dir
+def _resolve_text_generation_output_dir(args: argparse.Namespace) -> str:
+    """Resolve and create the text-generation benchmark output directory."""
+    output_dir = str(
+        Path(args.output_dir).resolve()
+        if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
-    os.makedirs(results_dir, exist_ok=True)
-    return results_dir
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
 
 
 def _run_sweep(args: argparse.Namespace) -> int:
     """Run multi-model text-generation sweep benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
-    results_dir = _resolve_text_generation_results_dir(args)
+    output_dir = _resolve_text_generation_output_dir(args)
     if args.rebuild_charts:
         print("Rebuilding combined outputs from existing JSON files only...")
-        _rebuild_combined_outputs(results_dir)
+        _rebuild_combined_outputs(output_dir)
         return 0
 
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
 
     available_model_ids: list[str] | None = None
-    if args.mxq_dir or not args.model:
+    if args.mxq_dir or not args.models:
         available = list_models(tasks="text-generation")
         available_model_ids = available.get("text-generation", [])
         if not available_model_ids:
             print("No text-generation models found.")
             return 0
 
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
 
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.model or args.original_models or args.all or args.revision or args.mxq_path:
+        if args.models or args.original_models or args.all or args.revision or args.mxq_path:
             print(
                 "Note: --mxq-dir is set, so --model/--original-models/--all/--revision/--mxq-path are ignored "
                 "(revision is taken from mxq filename suffix)."
@@ -1177,7 +1209,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
-        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
+        model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)
@@ -1196,10 +1228,20 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
     filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    run_targets: list[
+        tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+    ] = []
     for target in filtered_targets:
-        for core_mode in core_modes:
+        target_prefill_range, target_cache_lengths = _target_sweep_lengths(
+            args,
+            getattr(args, "_raw_argv", []),
+            target.batch_mode,
+        )
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1210,10 +1252,24 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
+                    target_prefill_range,
+                    target_cache_lengths,
                 )
             )
 
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
+    for (
+        model_id,
+        revision_candidates,
+        label,
+        base,
+        mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        prefill_range,
+        cache_lengths,
+    ) in tqdm(
         run_targets,
         desc="Benchmarking models",
         total=len(run_targets),
@@ -1221,8 +1277,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
         # Ensure pre-check sees memory state after releasing previous model.
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         print(f"=== {label} ===")
         if mxq_path:
             print(f"Using local mxq: {mxq_path}")
@@ -1233,26 +1289,27 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.all and not args.mxq_dir and revision is None:
             print("Skipping (missing revisions).")
             continue
-        json_path = os.path.join(results_dir, f"{base}.json")
-        png_path = os.path.join(results_dir, f"{base}.png")
+        json_path = os.path.join(output_dir, f"{base}.json")
+        png_path = os.path.join(output_dir, f"{base}.png")
         if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
         print(
             "Run config: "
-            f"batch_size={batch_size} core_mode={core_mode or 'default'} revision={revision or 'main'} "
-            f"device={args.device} device_backend={target_args.device_backend} "
+            f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
+            f"revision={revision or 'main'} "
+            f"device={target_args.device} device_backend={target_args.device_backend} "
             f"prefill_chunk_size={args.prefill_chunk_size if args.prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
             f"warmup_prefill={_SWEEP_WARMUP_PREFILL} warmup_decode={_SWEEP_WARMUP_DECODE} "
-            f"prefill_range={args.prefill_range} cache_lengths={args.cache_lengths} "
+            f"prefill_range={prefill_range} cache_lengths={cache_lengths} "
             f"decode_window={args.decode_window} repeat={args.repeat} warmup={args.warmup}"
         )
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1262,7 +1319,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         f"free={_format_gib(free_b)} required~={_format_gib(required)} "
                         f"estimated_weights={_format_gib(estimated)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
 
         pipeline = None
@@ -1272,17 +1329,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     model_id,
                     tokenizer=args.tokenizer,
                     revision=revision,
-                    device=args.device,
+                    device=target_args.device,
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     mxq_path=mxq_path,
+                    default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
                 )
             except Exception as e:
                 if _is_cuda_oom_error(e):
                     print(f"Skipping (CUDA OOM while loading model): {e}")
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
                     _print_exception(
@@ -1313,8 +1371,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 try:
                     run_results.append(
                         measurer.measure_full(
-                            prefill_range=args.prefill_range,
-                            cache_lengths=args.cache_lengths,
+                            prefill_range=prefill_range,
+                            cache_lengths=cache_lengths,
                             decode_window=args.decode_window,
                             batch_size=batch_size,
                             prefill_chunk_size=resolved_prefill_chunk_size,
@@ -1333,10 +1391,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
         except Exception as e:
             if _is_cuda_oom_error(e):
                 print(f"Skipping (CUDA OOM during benchmark): {e}")
-                _release_pipeline(pipeline, args.device)
+                _release_pipeline(pipeline, target_args.device)
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
             continue
 
         if result.prefill_sweep.avg_total_token_latency_values:
@@ -1372,8 +1430,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
             decode_phase_duration_s = float(getattr(result, "decode_phase_duration_s", 0.0) or 0.0)
             prefill_avg_power = prefill_metric.get("avg_power_w")
             decode_avg_power = decode_metric.get("avg_power_w")
-            prefill_energy = prefill_avg_power * prefill_phase_duration_s if prefill_avg_power is not None else None
-            decode_energy = decode_avg_power * decode_phase_duration_s if decode_avg_power is not None else None
+            prefill_energy = _energy_from_device_time_series(device_time_series_payload["prefill"])
+            decode_energy = _energy_from_device_time_series(device_time_series_payload["decode"])
             total_energy = None
             if prefill_energy is not None and decode_energy is not None:
                 total_energy = prefill_energy + decode_energy
@@ -1465,16 +1523,16 @@ def _run_sweep(args: argparse.Namespace) -> int:
             )
             prefill_last = float(result.prefill_sweep.tps_values[-1]) if result.prefill_sweep.tps_values else None
             decode_last = float(result.decode_sweep.tps_values[-1]) if result.decode_sweep.tps_values else None
+            prefill_tokens = _sweep_prefill_token_count(result, batch_size)
+            decode_tokens = _sweep_decode_token_count(
+                result,
+                decode_window=args.decode_window,
+                batch_size=batch_size,
+            )
             prefill_tpj = (
-                _safe_div(prefill_last, prefill_avg_power)
-                if prefill_last is not None and prefill_avg_power is not None
-                else None
+                _safe_div(float(prefill_tokens), prefill_energy) if prefill_tokens and prefill_energy else None
             )
-            decode_tpj = (
-                _safe_div(decode_last, decode_avg_power)
-                if decode_last is not None and decode_avg_power is not None
-                else None
-            )
+            decode_tpj = _safe_div(float(decode_tokens), decode_energy) if decode_tokens and decode_energy else None
             device_payload = {
                 "avg_power_w": avg_power,
                 "p99_power_w": p99_power,
@@ -1490,8 +1548,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 "total_energy_j": total_energy,
                 "prefill_tps_last": prefill_last,
                 "decode_tps_last": decode_last,
-                "prefill_tok_per_j_last": prefill_tpj,
-                "decode_tok_per_j_last": decode_tpj,
+                "prefill_tps_per_w_last": prefill_tpj,
+                "decode_tps_per_w_last": decode_tpj,
                 "prefill_j_per_tok_last": _safe_div(1.0, prefill_tpj) if prefill_tpj else None,
                 "decode_j_per_tok_last": _safe_div(1.0, decode_tpj) if decode_tpj else None,
                 "prefill_avg_power_w": prefill_metric.get("avg_power_w"),
@@ -1526,13 +1584,13 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 f"avg_mem_used={avg_memory_used_mb if avg_memory_used_mb is not None else 'n/a'}MB "
                 f"prefill_avg_power={prefill_avg_power if prefill_avg_power is not None else 'n/a'}W "
                 f"decode_avg_power={decode_avg_power if decode_avg_power is not None else 'n/a'}W "
-                f"prefill_tok_per_j(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
-                f"decode_tok_per_j(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
+                f"prefill_tps_per_w(last)={prefill_tpj if prefill_tpj is not None else 'n/a'} "
+                f"decode_tps_per_w(last)={decode_tpj if decode_tpj is not None else 'n/a'}"
             )
 
         payload: dict[str, Any] = {
             "model": label,
-            "batch_mode": args.batch_mode,
+            "batch_mode": batch_mode,
             "batch_size": batch_size,
             "benchmark": asdict(result),
             "device": device_payload,
@@ -1542,9 +1600,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         measurer.plot_and_save(result, save_path=png_path)
 
-        _release_pipeline(pipeline, args.device)
+        _release_pipeline(pipeline, target_args.device)
 
-    _rebuild_combined_outputs(results_dir)
+    _rebuild_combined_outputs(output_dir)
 
     return 0
 
@@ -1580,6 +1638,16 @@ def _mean_or_none(values: Sequence[float]) -> float | None:
     return sum(vals) / len(vals) if vals else None
 
 
+def _sweep_prefill_token_count(result: BenchmarkResult, batch_size: int) -> int:
+    """Return the number of prefill tokens covered by a full sweep trace."""
+    return sum(int(value) for value in result.prefill_sweep.x_values) * max(1, int(batch_size))
+
+
+def _sweep_decode_token_count(result: BenchmarkResult, *, decode_window: int, batch_size: int) -> int:
+    """Return the number of decode tokens covered by a full sweep trace."""
+    return int(decode_window) * len(result.decode_sweep.x_values) * max(1, int(batch_size))
+
+
 def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
     """Build an aggregate device payload from measured run dictionaries."""
     device_keys = (
@@ -1595,18 +1663,19 @@ def _measure_device_payload(runs: Sequence[dict[str, Any]]) -> dict[str, Any] | 
         "avg_memory_used_pct",
         "p99_memory_used_pct",
         "total_energy_j",
-        "prefill_tokens_per_j",
-        "decode_tokens_per_j",
+        "prefill_tps_per_w",
+        "decode_tps_per_w",
         "prefill_j_per_token",
         "decode_j_per_token",
     )
     payload: dict[str, Any] = {}
+    expected_runs = len(runs)
     for key in device_keys:
         vals = [float(run[key]) for run in runs if isinstance(run.get(key), (int, float))]
         if key.startswith("p99_") or key == "total_memory_mb":
             payload[key] = max(vals) if vals else None
         elif key == "total_energy_j":
-            payload[key] = sum(vals) if vals else None
+            payload[key] = sum(vals) if vals and len(vals) == expected_runs else None
         else:
             payload[key] = _mean_or_none(vals)
     payload["prefill_tps_last"] = runs[-1].get("prefill_tps") if runs else None
@@ -1641,8 +1710,8 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
                 "avg_temperature_c": device.get("avg_temperature_c"),
                 "avg_memory_used_mb": device.get("avg_memory_used_mb"),
                 "total_energy_j": device.get("total_energy_j"),
-                "prefill_tok_per_j_mean": device.get("prefill_tokens_per_j"),
-                "decode_tok_per_j_mean": device.get("decode_tokens_per_j"),
+                "prefill_tps_per_w_mean": device.get("prefill_tps_per_w"),
+                "decode_tps_per_w_mean": device.get("decode_tps_per_w"),
             }
         )
     return rows
@@ -1659,7 +1728,7 @@ def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
+def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Create combined measure bar charts."""
     if not rows:
         return
@@ -1669,17 +1738,17 @@ def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> N
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill Tokens Per Second", "Tokens Per Second"),
         (
-            "measure_prefill_tokens_per_j.png",
-            "prefill_tok_per_j_mean",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
+            "measure_prefill_tps_per_w.png",
+            "prefill_tps_per_w_mean",
+            "Prefill TPS/W",
+            "TPS/W",
         ),
         ("measure_decode_tps.png", "decode_tps_mean", "Decode Tokens Per Second", "Tokens Per Second"),
         (
-            "measure_decode_tokens_per_j.png",
-            "decode_tok_per_j_mean",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
+            "measure_decode_tps_per_w.png",
+            "decode_tps_per_w_mean",
+            "Decode TPS/W",
+            "TPS/W",
         ),
         ("measure_avg_power_w.png", "avg_power_w", "Power", "Power (Watts)"),
         ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature", "Temperature (Celsius)"),
@@ -1696,52 +1765,51 @@ def _plot_measure_charts(results_dir: Path, rows: Sequence[dict[str, Any]]) -> N
         ax.set_xlabel(xlabel)
         ax.grid(axis="x", alpha=0.3)
         fig.tight_layout()
-        fig.savefig(results_dir / filename, dpi=220)
+        fig.savefig(output_dir / filename, dpi=220)
         plt.close(fig)
 
 
-def _rebuild_measure_outputs(results_dir: str | Path) -> None:
+def _rebuild_measure_outputs(output_dir: str | Path) -> None:
     """Rebuild combined text-generation measure CSV, Markdown, and charts."""
-    out_dir = Path(results_dir)
+    output_dir = Path(output_dir)
     payloads: list[dict[str, Any]] = []
-    for path in sorted(out_dir.glob("*_measure.json")):
+    for path in sorted(output_dir.glob("*_measure.json")):
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
-        _write_text_generation_summary(out_dir, measure=True)
+        _write_text_generation_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
     import csv
 
-    with (out_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
+    with (output_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-    _write_measure_markdown(out_dir / "combined_measure.md", rows)
-    _plot_measure_charts(out_dir, rows)
-    _write_text_generation_summary(out_dir, measure=True)
+    _write_measure_markdown(output_dir / "combined_measure.md", rows)
+    _plot_measure_charts(output_dir, rows)
+    _write_text_generation_summary(output_dir, measure=True)
 
 
 def _collect_text_run_targets(
     args: argparse.Namespace,
-) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int]]]:
+) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]]]:
     """Resolve text-generation benchmark targets and core-mode expansion."""
     available = list_models(tasks="text-generation")
     available_model_ids = available.get("text-generation", [])
     if not available_model_ids:
         print("No text-generation models found.")
         return "", False, []
-    results_dir = str(
-        Path(args.results_dir).resolve()
-        if args.results_dir
+    output_dir = str(
+        Path(args.output_dir).resolve()
+        if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets: list[tuple[str, list[str | None], str, str, str | None]]
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1751,7 +1819,7 @@ def _collect_text_run_targets(
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(args.model)] if args.model else available_model_ids
+        model_ids = [str(item) for item in args.models] if args.models else available_model_ids
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
@@ -1760,10 +1828,13 @@ def _collect_text_run_targets(
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
     filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int]] = []
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
     for target in filtered_targets:
-        for core_mode in core_modes:
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1774,40 +1845,41 @@ def _collect_text_run_targets(
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
                 )
             )
-    return results_dir, disable_npu_specific_args, run_targets
+    return output_dir, disable_npu_specific_args, run_targets
 
 
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model text-generation fixed prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     if args.rebuild_charts:
-        _rebuild_measure_outputs(_resolve_text_generation_results_dir(args))
+        _rebuild_measure_outputs(_resolve_text_generation_output_dir(args))
         return 0
-    results_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
+    output_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
     if not run_targets:
         return 0
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _collect_host_pc_info(results_dir)
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size in tqdm(
+    _collect_host_pc_info(output_dir)
+    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
         if args.all and not args.mxq_dir and revision is None:
             print(f"Skipping {label} (missing revisions).")
             continue
-        json_path = Path(results_dir) / f"{base}_measure.json"
+        json_path = Path(output_dir) / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
             continue
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1816,7 +1888,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         f"Skipping {label} (pre-check VRAM insufficient): "
                         f"free={_format_gib(free_b)} required~={_format_gib(required)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:
@@ -1824,12 +1896,13 @@ def _run_measure(args: argparse.Namespace) -> int:
                 model_id,
                 tokenizer=args.tokenizer,
                 revision=revision,
-                device=args.device,
+                device=target_args.device,
                 device_map=args.device_map,
                 dtype=args.dtype,
                 trust_remote_code=args.trust_remote_code,
                 core_mode=core_mode,
                 mxq_path=mxq_path,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
             )
             measurer = TPSMeasurer(pipeline)
             resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
@@ -1874,6 +1947,12 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if tracker_prefill is not None and tracker_decode is not None:
                     prefill_metric = _extract_device_metric(tracker_prefill)
                     decode_metric = _extract_device_metric(tracker_decode)
+                    device_time_series = {
+                        "prefill": _extract_device_time_series(tracker_prefill),
+                        "decode": _extract_device_time_series(tracker_decode),
+                    }
+                    prefill_energy = _energy_from_device_time_series(device_time_series["prefill"])
+                    decode_energy = _energy_from_device_time_series(device_time_series["decode"])
                     row["avg_power_w"] = _weighted_two(
                         prefill_metric.get("avg_power_w"),
                         run.prefill_latency,
@@ -1901,42 +1980,39 @@ def _run_measure(args: argparse.Namespace) -> int:
                         run.decode_duration,
                     )
                     row["total_energy_j"] = (
-                        (float(row["avg_power_w"]) * run.total_time)
-                        if isinstance(row.get("avg_power_w"), (int, float))
+                        prefill_energy + decode_energy
+                        if prefill_energy is not None and decode_energy is not None
                         else None
                     )
-                    row["prefill_tokens_per_j"] = (
-                        _safe_div(run.prefill_tps, float(prefill_metric["avg_power_w"]))
-                        if isinstance(prefill_metric.get("avg_power_w"), (int, float))
+                    row["prefill_tps_per_w"] = (
+                        _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
+                        if prefill_energy is not None
                         else None
                     )
-                    row["decode_tokens_per_j"] = (
-                        _safe_div(run.decode_tps, float(decode_metric["avg_power_w"]))
-                        if isinstance(decode_metric.get("avg_power_w"), (int, float))
+                    row["decode_tps_per_w"] = (
+                        _safe_div(float(args.decode) * float(batch_size), decode_energy)
+                        if decode_energy is not None
                         else None
                     )
                     row["prefill_j_per_token"] = (
-                        _safe_div(1.0, float(row["prefill_tokens_per_j"]))
-                        if isinstance(row.get("prefill_tokens_per_j"), (int, float))
+                        _safe_div(1.0, float(row["prefill_tps_per_w"]))
+                        if isinstance(row.get("prefill_tps_per_w"), (int, float))
                         else None
                     )
                     row["decode_j_per_token"] = (
-                        _safe_div(1.0, float(row["decode_tokens_per_j"]))
-                        if isinstance(row.get("decode_tokens_per_j"), (int, float))
+                        _safe_div(1.0, float(row["decode_tps_per_w"]))
+                        if isinstance(row.get("decode_tps_per_w"), (int, float))
                         else None
                     )
                     device_time_series_runs.append(
-                        {
-                            "prefill": _extract_device_time_series(tracker_prefill),
-                            "decode": _extract_device_time_series(tracker_decode),
-                        }
+                        device_time_series
                     )
                 runs.append(row)
             payload = {
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "text-generation",
-                "batch_mode": args.batch_mode,
+                "batch_mode": batch_mode,
                 "batch_size": batch_size,
                 "prefill": args.prefill,
                 "decode": args.decode,
@@ -1965,8 +2041,8 @@ def _run_measure(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
-    _rebuild_measure_outputs(results_dir)
+            _release_pipeline(pipeline, target_args.device)
+    _rebuild_measure_outputs(output_dir)
     return 0
 
 

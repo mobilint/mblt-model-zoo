@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from benchmark.transformers.asr_metrics import SampleTiming
+from benchmark.transformers.asr_metrics import SampleTiming, add_device_efficiency_metrics
 
 
 def asr_pipeline_inputs(sample: Mapping[str, Any]) -> list[tuple[Any, dict[str, Any]]]:
@@ -120,6 +120,38 @@ def extract_generated_token_count(pipe: Any, output: Any, text: str) -> int:
     return len(text.split())
 
 
+def resolve_pipeline_num_beams(pipe: Any) -> int:
+    """Return the beam count that should be used for an ASR pipeline default.
+
+    Hugging Face's ASR pipeline installs its own default generation config with
+    ``num_beams=5``. For benchmarking, prefer the loaded model generation config
+    so omitted ``--num-beams`` values measure the model default instead of the
+    pipeline default. If no model value is available, fall back to greedy search.
+    """
+
+    model = getattr(pipe, "model", None)
+    model_generation_config = getattr(model, "generation_config", None)
+    model_num_beams = getattr(model_generation_config, "num_beams", None)
+    if model_num_beams is not None:
+        return int(model_num_beams)
+    return 1
+
+
+def configure_pipeline_num_beams_from_model(pipe: Any) -> Any:
+    """Align an ASR pipeline generation config beam count with the model default."""
+
+    generation_config = getattr(pipe, "generation_config", None)
+    if generation_config is not None:
+        generation_config.num_beams = resolve_pipeline_num_beams(pipe)
+    return pipe
+
+
+def _has_pipeline_generation_config(pipe: Any) -> bool:
+    """Return whether a pipeline exposes generation config defaults to generate calls."""
+
+    return getattr(pipe, "generation_config", None) is not None
+
+
 def build_asr_pipeline(
     target: Any,
     *,
@@ -199,12 +231,12 @@ def build_asr_pipeline(
     if dtype:
         kwargs["dtype"] = dtype
         try:
-            return hf_pipeline(**kwargs)
+            return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
         except TypeError:
             kwargs.pop("dtype", None)
             kwargs["torch_dtype"] = dtype
-            return hf_pipeline(**kwargs)
-    return hf_pipeline(**kwargs)
+            return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
+    return configure_pipeline_num_beams_from_model(hf_pipeline(**kwargs))
 
 
 def run_one_sample(
@@ -261,6 +293,8 @@ def run_one_sample(
                     **pipeline_call_kwargs_builder(attempt_kwargs),
                 )
                 effective_generate_kwargs = dict(attempt_kwargs)
+                if _has_pipeline_generation_config(pipe):
+                    effective_generate_kwargs.setdefault("num_beams", resolve_pipeline_num_beams(pipe))
                 break
             except TypeError as exc:
                 if retryable_error_checker(exc):
@@ -300,7 +334,7 @@ def run_one_sample(
 
 def write_combined_outputs(
     *,
-    out_dir: Path,
+    output_dir: Path,
     host_pc_info_filename: str,
     asr_metric_summary_cls: type,
     format_metrics_row_func: Any,
@@ -318,7 +352,7 @@ def write_combined_outputs(
     rows: list[dict[str, Any]] = []
     status_rows: list[list[Any]] = []
     summary_field_names = {field.name for field in dataclasses.fields(asr_metric_summary_cls)}
-    for path in sorted(out_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         if path.name == host_pc_info_filename:
             continue
         try:
@@ -326,7 +360,9 @@ def write_combined_outputs(
                 payload = json.load(file)
         except (OSError, json.JSONDecodeError):
             continue
-        if payload.get("benchmark_type") != "automatic-speech-recognition":
+        task = payload.get("task")
+        legacy_benchmark_type = payload.get("benchmark_type")
+        if task != "automatic-speech-recognition" and legacy_benchmark_type != "automatic-speech-recognition":
             continue
         if payload.get("status"):
             status_rows.append(
@@ -351,6 +387,7 @@ def write_combined_outputs(
             print(f"Warning: skipping {path.name} because ASR summary is invalid: {exc}")
             continue
         device_metric = payload.get("device") if isinstance(payload.get("device"), dict) else {}
+        device_metric = add_device_efficiency_metrics(asr, device_metric)
         payload_num_beams = payload.get("num_beams")
         row_num_beams = int(payload_num_beams) if isinstance(payload_num_beams, int) else None
         rows.append(
@@ -362,9 +399,9 @@ def write_combined_outputs(
             )
         )
 
-    combined_csv = out_dir / "combined.csv"
-    combined_md = out_dir / "combined.md"
-    status_md = out_dir / "combined_status.md"
+    combined_csv = output_dir / "combined.csv"
+    combined_md = output_dir / "combined.md"
+    status_md = output_dir / "combined_status.md"
     if rows:
         headers: list[str] = []
         seen_headers: set[str] = set()
@@ -392,6 +429,8 @@ def write_combined_outputs(
                     f"{float(row.get('throughput_samples_per_s', 0.0)):.4f}",
                     f"{float(row.get('rtf', 0.0)):.4f}",
                     f"{float(row.get('inverse_rtf', 0.0)):.4f}",
+                    "" if row.get("sec_per_j") is None else f"{float(row['sec_per_j']):.4f}",
+                    "" if row.get("j_per_sec") is None else f"{float(row['j_per_sec']):.6f}",
                     f"{float(row.get('decode_tokens_per_s', 0.0)):.4f}",
                 ]
             )
@@ -407,6 +446,8 @@ def write_combined_outputs(
                     "samples_per_s",
                     "RTF",
                     "inverse_RTF",
+                    "sec/J",
+                    "J/sec",
                     "decode_tokens_per_s",
                 ],
                 markdown_rows,
@@ -425,15 +466,15 @@ def write_combined_outputs(
     elif status_md.exists():
         status_md.unlink()
 
-    make_rtf_chart_func(out_dir, rows)
+    make_rtf_chart_func(output_dir, rows)
     write_summary_markdown_func(
-        out_dir / "summary.md",
+        output_dir / "summary.md",
         title="Automatic Speech Recognition Benchmark Summary",
-        host_info_path=out_dir / host_pc_info_filename,
+        host_info_path=output_dir / host_pc_info_filename,
         table_markdown_path=combined_md,
         plot_paths=existing_png_paths_func(
-            out_dir,
-            prefixes=("rtf", "wer", "cer"),
+            output_dir,
+            prefixes=("rtf", "wer", "cer", "sec_per_j", "j_per_sec"),
         ),
         plot_tables={},
     )
@@ -441,11 +482,11 @@ def write_combined_outputs(
 
 def make_rtf_chart(
     *,
-    out_dir: Path,
+    output_dir: Path,
     rows: Sequence[Mapping[str, Any]],
     plot_scalar_chart_func: Any,
 ) -> None:
-    """Render summary RTF/WER/CER charts from combined ASR rows."""
+    """Render summary ASR metric charts from combined ASR rows."""
 
     if not rows:
         return
@@ -462,13 +503,15 @@ def make_rtf_chart(
         folder_metrics[_chart_model_label(row)] = row
     metrics_by_folder.append(folder_metrics)
     models = sorted(folder_metrics.keys())
-    labels = [out_dir.name]
+    labels = [output_dir.name]
 
     def _selector(key: str, scale: float = 1.0):
         return lambda item: None if item.get(key) is None else scale * float(item[key])
 
     for filename, key, title, x_label, scale in (
         ("rtf.png", "rtf", "Real-Time Factor", "RTF", 1.0),
+        ("sec_per_j.png", "sec_per_j", "Seconds Per Joule", "Seconds Per Joule", 1.0),
+        ("j_per_sec.png", "j_per_sec", "Joules Per Audio Second", "Joules Per Audio Second", 1.0),
         ("wer.png", "wer", "Word Error Rate", "WER (%)", 100.0),
         ("cer.png", "cer", "Character Error Rate", "CER (%)", 100.0),
     ):
@@ -480,7 +523,7 @@ def make_rtf_chart(
                 scalar_selector=_selector(key, scale),
                 title=title,
                 x_label=x_label,
-                output_path=out_dir / filename,
+                output_path=output_dir / filename,
             )
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             print(f"Warning: failed to build {filename}: {exc}")

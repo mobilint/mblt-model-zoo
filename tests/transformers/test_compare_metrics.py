@@ -10,9 +10,12 @@ from benchmark.transformers.compare_metrics import (
     ASRCompareMetric,
     LLMCompareMetric,
     VLMCompareMetric,
+    build_compare_markdown,
+    build_compare_plot_tables,
     collect_metrics,
     common_model_ids,
     normalize_model_key,
+    payload_benchmark_type,
     render_charts,
 )
 
@@ -34,8 +37,8 @@ def test_llm_compare_metric_from_payload() -> None:
         },
         "device": {
             "avg_power_w": 11.0,
-            "prefill_tok_per_j_last": 1.5,
-            "decode_tok_per_j_last": 2.5,
+            "prefill_tps_per_w_last": 1.5,
+            "decode_tps_per_w_last": 2.5,
         },
     }
     metric = LLMCompareMetric.from_payload(payload)
@@ -44,7 +47,40 @@ def test_llm_compare_metric_from_payload() -> None:
     assert metric.decode_tps == {128: 30.0, 256: 40.0}
     assert metric.prefill_latency_ms == {128: 1200.0, 256: 2300.0}
     assert metric.avg_power_w == 11.0
-    assert metric.prefill_tokens_per_j == 1.5
+    assert metric.prefill_tps_per_w == 1.5
+
+
+def test_llm_compare_metric_from_measure_payload() -> None:
+    """Verify text-generation measure payloads can be compared."""
+
+    payload = {
+        "model": "repo/model-a",
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+        },
+        "device": {
+            "avg_power_w": 11.0,
+            "prefill_tps_per_w": 1.5,
+            "decode_tps_per_w": 2.5,
+        },
+    }
+
+    metric = LLMCompareMetric.from_payload(payload)
+
+    assert metric is not None
+    assert metric.prefill_tps == {128: 10.0}
+    assert metric.decode_tps == {32: 20.0}
+    assert metric.prefill_latency_ms == {128: 30.0}
+    assert metric.decode_duration_ms == {32: 40.0}
+    assert metric.avg_power_w == 11.0
+    assert metric.prefill_tps_per_w == 1.5
 
 
 def test_vlm_compare_metric_from_payload() -> None:
@@ -55,7 +91,7 @@ def test_vlm_compare_metric_from_payload() -> None:
                 "summary": {
                     "llm_prefill_tps": {"mean": 12.0},
                     "llm_decode_tps": {"mean": 34.0},
-                    "prefill_tok_per_j": {"mean": 0.9},
+                    "prefill_tps_per_w": {"mean": 0.9},
                 }
             },
             "vision_summary": {
@@ -69,10 +105,40 @@ def test_vlm_compare_metric_from_payload() -> None:
     assert metric is not None
     assert metric.llm_prefill_tps == 12.0
     assert metric.llm_decode_tps == 34.0
-    assert metric.llm_prefill_tok_per_j == 0.9
+    assert metric.llm_prefill_tps_per_w == 0.9
     assert metric.vision_encode_ms == 45.0
     assert metric.vision_fps == 22.0
     assert metric.avg_power_w == 55.0
+
+
+def test_vlm_compare_metric_from_measure_payload() -> None:
+    """Verify image-text-to-text measure payloads can be compared."""
+
+    payload = {
+        "model": "repo/vlm-a",
+        "benchmark_type": "measure",
+        "task": "image-text-to-text",
+        "summary": {
+            "vision_encode_ms": {"mean": 45.0},
+            "vision_fps": {"mean": 22.0},
+            "llm_prefill_tps": {"mean": 12.0},
+            "llm_decode_tps": {"mean": 34.0},
+            "llm_ttft_ms": {"mean": 56.0},
+            "llm_decode_duration_ms": {"mean": 78.0},
+        },
+        "device": {"avg_power_w": 55.0, "llm_prefill_tps_per_w": 0.9, "vision_img_per_j": 0.2},
+    }
+
+    metric = VLMCompareMetric.from_payload(payload)
+
+    assert metric is not None
+    assert metric.llm_prefill_tps == 12.0
+    assert metric.llm_decode_tps == 34.0
+    assert metric.llm_ttft_ms == 56.0
+    assert metric.vision_encode_ms == 45.0
+    assert metric.vision_fps == 22.0
+    assert metric.llm_prefill_tps_per_w == 0.9
+    assert metric.vision_img_per_j == 0.2
 
 
 def test_asr_compare_metric_from_payload() -> None:
@@ -90,7 +156,7 @@ def test_asr_compare_metric_from_payload() -> None:
             "decode_tokens_per_s": 77.0,
             "avg_tokens_per_sample": 10.0,
         },
-        "device": {"avg_power_w": 8.0},
+        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0, "sec_per_j": 3.0, "j_per_sec": 1 / 3},
     }
     metric = ASRCompareMetric.from_payload(payload)
     assert metric is not None
@@ -101,12 +167,25 @@ def test_asr_compare_metric_from_payload() -> None:
     assert metric.rtf == 0.5
     assert metric.decode_tokens_per_s == 77.0
     assert metric.avg_power_w == 8.0
+    assert metric.total_energy_j == 4.0
+    assert metric.sec_per_j == 3.0
+    assert metric.j_per_sec == 1 / 3
 
 
 def test_task_registry_contains_all_tasks() -> None:
     assert TASK_REGISTRY[LLMCompareMetric.TASK] is LLMCompareMetric
     assert TASK_REGISTRY[VLMCompareMetric.TASK] is VLMCompareMetric
     assert TASK_REGISTRY[ASRCompareMetric.TASK] is ASRCompareMetric
+
+
+def test_payload_benchmark_type_detects_normalized_and_legacy_payloads() -> None:
+    """Verify compare benchmark-type detection handles current and legacy schemas."""
+
+    assert payload_benchmark_type({"benchmark_type": "measure"}) == "measure"
+    assert payload_benchmark_type({"benchmark_type": "sweep"}) == "sweep"
+    assert payload_benchmark_type({"benchmark": {"prefill_sweep": {}, "decode_sweep": {}}}) == "sweep"
+    assert payload_benchmark_type({"benchmark": {"llm_results": {}, "vision_summary": {}}}) == "sweep"
+    assert payload_benchmark_type({"status": "failed"}) is None
 
 
 def test_collect_metrics_and_common_models(tmp_path: Path) -> None:
@@ -134,8 +213,8 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
     metric = LLMCompareMetric(
         prefill_tps={128: 10.0},
         decode_tps={128: 20.0},
-        prefill_tokens_per_j=1.1,
-        decode_tokens_per_j=2.2,
+        prefill_tps_per_w=1.1,
+        decode_tps_per_w=2.2,
         avg_power_w=3.3,
     )
     output_dir = tmp_path / "charts"
@@ -149,6 +228,31 @@ def test_render_charts_smoke(tmp_path: Path) -> None:
     )
     assert (output_dir / "prefill_tps.png").is_file()
     assert (output_dir / "avg_power_w.png").is_file()
+
+
+def test_build_compare_markdown_and_plot_tables() -> None:
+    metric_a = LLMCompareMetric(prefill_tps={128: 10.0}, decode_tps={128: 20.0}, avg_power_w=3.0)
+    metric_b = LLMCompareMetric(prefill_tps={128: 11.0}, decode_tps={128: 21.0}, avg_power_w=4.0)
+    metrics_by_folder = [{"model-a": metric_a}, {"model-a": metric_b}]
+
+    combined = build_compare_markdown(
+        metric_cls=LLMCompareMetric,
+        models=["model-a"],
+        labels=["linux", "windows"],
+        metrics_by_folder=metrics_by_folder,
+    )
+    plot_tables = build_compare_plot_tables(
+        metric_cls=LLMCompareMetric,
+        models=["model-a"],
+        labels=["linux", "windows"],
+        metrics_by_folder=metrics_by_folder,
+    )
+
+    assert "linux Prefill Tokens Per Second (128 tokens)" in combined
+    assert "windows Power (Power (Watts))" in combined
+    assert "prefill_tps.png" in plot_tables
+    assert "linux 128 tokens" in plot_tables["prefill_tps.png"]
+    assert "avg_power_w.png" in plot_tables
 
 
 def test_normalize_model_key_keeps_asr_beam_suffix() -> None:
@@ -168,11 +272,17 @@ def test_normalize_model_key_keeps_owner_name_by_default() -> None:
     assert normalize_model_key(Path("org-a__model-x.json"), "org-a/model-x") == "org-a/model-x"
 
 
+def test_normalize_model_key_strips_owner_when_requested() -> None:
+    assert normalize_model_key(Path("one.json"), "org-a/model-x", strip_owner=True) == "model-x"
+    assert normalize_model_key(Path("org-a__model-x.json"), "org-a/model-x", strip_owner=True) == "model-x"
+
+
 def test_collect_metrics_keeps_distinct_asr_beam_keys(tmp_path: Path, capsys) -> None:
     """Verify compare collection keeps beam-specific ASR results as distinct model keys."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small_beamsdefault",
         "asr": {
             "wer": 0.1,
@@ -222,12 +332,29 @@ def test_collect_metrics_keeps_same_basename_from_different_owners(tmp_path: Pat
     assert list(metrics.keys()) == ["org-a/model-x", "org-b/model-x"]
 
 
-def test_plot_compare_benchmark_results_module_help_smoke() -> None:
+def test_collect_metrics_strips_owner_when_requested(tmp_path: Path) -> None:
+    """Verify owner stripping is opt-in for model comparisons."""
+
+    payload = {
+        "model": "org-a/model-x",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+    }
+    (tmp_path / "one.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    metrics = collect_metrics(tmp_path, LLMCompareMetric, strip_owner=True)
+
+    assert list(metrics.keys()) == ["model-x"]
+
+
+def test_compare_benchmark_results_module_help_smoke() -> None:
     """Verify package/module execution path works for compare help output."""
 
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        [sys.executable, "-m", "benchmark.transformers.plot_compare_benchmark_results", "--help"],
+        [sys.executable, "-m", "benchmark.transformers.compare_benchmark_results", "--help"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -236,3 +363,176 @@ def test_plot_compare_benchmark_results_module_help_smoke() -> None:
 
     assert result.returncode == 0
     assert "Compare N benchmark result folders" in result.stdout
+
+
+def test_compare_benchmark_results_auto_detects_asr_task(tmp_path: Path) -> None:
+    """Verify compare CLI detects ASR payloads when --task is omitted."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "linux_asr"
+    folder_b = tmp_path / "windows_asr"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    payload = {
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
+        "model": "mobilint/whisper-small",
+        "asr": {
+            "wer": 0.1,
+            "cer": 0.02,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "mean_latency_s": 1.2,
+            "p50_latency_s": 1.0,
+            "p95_latency_s": 1.9,
+            "throughput_samples_per_s": 3.0,
+            "decode_tokens_per_s": 77.0,
+            "avg_tokens_per_sample": 10.0,
+        },
+    }
+    (folder_a / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_b / "mobilint__whisper-small_beams1.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_a / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Linux CPU"}}), encoding="utf-8")
+    (folder_b / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Windows CPU"}}), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Auto-detected task: automatic-speech-recognition" in result.stdout
+    assert "Common models across all folders: 1" in result.stdout
+    assert (output_dir / "wer.png").is_file()
+    assert (output_dir / "combined.md").is_file()
+    assert (output_dir / "host_pc_info.json").is_file()
+    assert (output_dir / "summary.md").is_file()
+    summary = (output_dir / "summary.md").read_text(encoding="utf-8")
+    assert "| Field | linux_asr | windows_asr |" in summary
+    assert "### Sources" in summary
+    assert "### CPU" in summary
+    assert "Linux CPU" in summary
+    assert "Windows CPU" in summary
+
+
+def test_compare_benchmark_results_compares_text_measure_payloads(tmp_path: Path) -> None:
+    """Verify compare CLI supports text-generation measure folders."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "linux_text_measure"
+    folder_b = tmp_path / "windows_text_measure"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    payload = {
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "model": "mobilint/model-a",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+        },
+        "device": {"avg_power_w": 8.0, "total_energy_j": 4.0},
+    }
+    (folder_a / "model-a_measure.json").write_text(json.dumps(payload), encoding="utf-8")
+    (folder_b / "model-a_measure.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Auto-detected benchmark_type: measure" in result.stdout
+    assert "Common models across all folders: 1" in result.stdout
+    assert (output_dir / "prefill_tps.png").is_file()
+    combined = (output_dir / "combined.md").read_text(encoding="utf-8")
+    assert "128 tokens" in combined
+    assert "32 tokens" in combined
+
+
+def test_compare_benchmark_results_rejects_mixed_measure_and_sweep(tmp_path: Path) -> None:
+    """Verify compare CLI rejects mixed benchmark types with a diagnostic."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    folder_a = tmp_path / "measure"
+    folder_b = tmp_path / "sweep"
+    output_dir = tmp_path / "charts"
+    folder_a.mkdir()
+    folder_b.mkdir()
+    measure_payload = {
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "model": "model-a",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {"prefill_tps": {"mean": 10.0}, "decode_tps": {"mean": 20.0}},
+    }
+    sweep_payload = {
+        "task": "text-generation",
+        "model": "model-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+    }
+    (folder_a / "model-a_measure.json").write_text(json.dumps(measure_payload), encoding="utf-8")
+    (folder_b / "model-a.json").write_text(json.dumps(sweep_payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "benchmark.transformers.compare_benchmark_results",
+            str(folder_a),
+            str(folder_b),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "mixed benchmark_type values found" in output
+    assert "measure and sweep results cannot be mixed" in output
+
+
+def test_transformer_default_compare_output_dir_uses_comparison(tmp_path: Path) -> None:
+    """Verify the default compare output root is named comparison."""
+
+    from benchmark.transformers.chart_utils import default_charts_dir
+
+    output_dir = default_charts_dir(tmp_path, [Path("linux_asr"), Path("windows_asr")])
+
+    assert output_dir == tmp_path / "results" / "comparison" / "linux_asr_windows_asr"

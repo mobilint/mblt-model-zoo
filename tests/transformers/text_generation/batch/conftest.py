@@ -10,6 +10,7 @@ from transformers import AutoTokenizer, pipeline
 from tests.npu_backend_options import (
     BaseNpuParams,
     build_base_npu_params,
+    option_value_was_provided,
     validate_single_only_core_mode,
 )
 from tests.transformers.text_generation.utils import BatchTextStreamer
@@ -32,13 +33,16 @@ def base_npu_params(
     request: pytest.FixtureRequest,
     embedding_weight: Optional[str],
 ) -> BaseNpuParams:
-    """Return base backend kwargs for batch suites, forcing single-core execution."""
+    """Return base backend kwargs for batch suites, forcing single-mode execution."""
     validate_single_only_core_mode(request.config, suite_name="Batch text-generation tests")
-    return build_base_npu_params(
+    params = build_base_npu_params(
         request.config,
         embedding_weight,
         core_mode_override="single",
     )
+    if not option_value_was_provided(request.config, "", "target_cores"):
+        params.base.pop("target_cores", None)
+    return params
 
 
 @pytest.fixture(scope="module")

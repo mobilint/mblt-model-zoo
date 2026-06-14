@@ -1,5 +1,7 @@
+import csv
 import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -8,8 +10,15 @@ _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[2] / "benchmark" 
 if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(_TRANSFORMERS_BENCHMARK_DIR))
 
+from benchmark.transformers import benchmark_automatic_speech_recognition_models as asr_bench  # noqa: E402
 from benchmark.transformers import benchmark_image_text_to_text_models as vlm_bench  # noqa: E402
 from benchmark.transformers import benchmark_text_generation_models as text_bench  # noqa: E402
+from mblt_model_zoo.cli import tps as tps_cli  # noqa: E402
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (  # noqa: E402
+    resolve_default_device,
+    resolve_default_device_backend,
+    resolve_device_tracker_interval_sec,
+)
 
 
 def test_text_benchmark_requires_subcommand() -> None:
@@ -141,6 +150,20 @@ def test_vlm_core_mode_none_does_not_add_kwargs() -> None:
     assert vlm_bench._apply_vlm_core_mode_model_kwargs({}, None) == {}
 
 
+def test_vlm_core_mode_can_omit_default_single_target_cores() -> None:
+    """Verify VLM batch benchmarks can keep single-mode target cores unset."""
+    model_kwargs = vlm_bench._apply_vlm_core_mode_model_kwargs(
+        {},
+        "single",
+        default_single_target_cores=None,
+    )
+
+    assert model_kwargs == {
+        "vision_core_mode": "single",
+        "text_core_mode": "single",
+    }
+
+
 def test_vlm_revision_preflight_skips_missing_revision(monkeypatch) -> None:
     """Verify VLM preflight rejects revisions that do not exist on the Hub."""
     monkeypatch.setattr(vlm_bench, "_revision_exists", lambda model_id, revision: False)
@@ -203,6 +226,38 @@ def test_benchmark_batch_flags(module, command) -> None:
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
 @pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_parser_accepts_npu_rail_metrics(module, command) -> None:
+    """Verify benchmark subcommand parsers expose the NPU rail metric option."""
+    args = module._build_arg_parser().parse_args([command, "--device-npu-rail-metrics", "all"])
+
+    assert args.device_npu_rail_metrics == "all"
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_parser_defaults_npu_rail_metrics(module, command) -> None:
+    """Verify benchmark subcommand parsers keep the default low-latency NPU rail."""
+    args = module._build_arg_parser().parse_args([command])
+
+    assert args.device_npu_rail_metrics == "npu"
+
+
+def test_asr_benchmark_parser_accepts_npu_rail_metrics() -> None:
+    """Verify the ASR benchmark parser exposes the shared NPU rail metric option."""
+    args = asr_bench._parse_args(["--device-npu-rail-metrics", "npu,ddr"])
+
+    assert args.device_npu_rail_metrics == ["npu", "ddr"]
+
+
+def test_asr_benchmark_parser_defaults_npu_rail_metrics() -> None:
+    """Verify the ASR benchmark parser keeps the default low-latency NPU rail."""
+    args = asr_bench._parse_args([])
+
+    assert args.device_npu_rail_metrics == "npu"
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
 def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
     """Verify batch LLM benchmarks default to the only supported single core mode."""
     args = module._build_arg_parser().parse_args([command, "--batch"])
@@ -210,6 +265,16 @@ def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
     module._resolve_runtime_defaults(args, [command, "--batch"])
 
     assert args.core_mode == "single"
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+def test_benchmark_batch_mode_disables_default_single_target_cores(module) -> None:
+    """Verify batch benchmark paths do not inject the implicit single target core."""
+    batch_args = module._build_arg_parser().parse_args(["measure", "--batch"])
+    non_batch_args = module._build_arg_parser().parse_args(["measure", "--non-batch"])
+
+    assert module._default_single_target_cores_for_batch_mode(batch_args) is None
+    assert module._default_single_target_cores_for_batch_mode(non_batch_args) == ("0:0",)
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
@@ -272,7 +337,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
         [
             "measure",
             "--batch",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
         ]
     )
@@ -290,6 +355,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
                 base="mobilint_vlm-a",
                 mxq_path=None,
                 max_batch_size=2,
+                batch_mode="batch",
             )
         ]
 
@@ -298,7 +364,7 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
     _, _, run_targets = vlm_bench._collect_vlm_run_targets(args)
 
     assert len(run_targets) == 1
-    assert run_targets[0][-1] == 2
+    assert run_targets[0][-2:] == (2, "batch")
 
 
 def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_path) -> None:
@@ -306,7 +372,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     args = vlm_bench._build_arg_parser().parse_args(
         [
             "measure",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
         ]
     )
@@ -335,7 +401,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1)]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1, "non_batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -355,12 +421,12 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
 
 
 def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_path) -> None:
-    """Verify VLM fixed measure scales vision latency and image count by batch size."""
+    """Verify VLM fixed measure derives energy and image efficiency from the power trace."""
     args = vlm_bench._build_arg_parser().parse_args(
         [
             "measure",
             "--batch",
-            "--results-dir",
+            "--output-dir",
             str(tmp_path),
             "--repeat",
             "1",
@@ -373,6 +439,14 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
 
         def stop(self) -> None:
             pass
+
+    phase_tracker_runs: list[tuple[_FakeTracker, _FakeTracker]] = []
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        trackers = (_FakeTracker(), _FakeTracker())
+        phase_tracker_runs.append(trackers)
+        return trackers
 
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline) -> None:
@@ -392,7 +466,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4)]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -403,17 +477,337 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
     monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
     monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", _fake_build_phase_trackers)
     monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
-    monkeypatch.setattr(vlm_bench, "_extract_device_time_series", lambda tracker: {})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 0.9, "value": 10.0}]},
+    )
     monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
     monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
 
     assert vlm_bench._run_measure(args) == 0
+    assert len(phase_tracker_runs) == 1
 
     payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
-    assert payload["device"]["total_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["vision_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_prefill_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_decode_energy_j"] == pytest.approx(9.0)
+    assert payload["device"]["llm_total_energy_j"] == pytest.approx(18.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(27.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(
+        payload["device"]["vision_energy_j"] + payload["device"]["llm_total_energy_j"]
+    )
     assert payload["device"]["vision_img_per_j"] == pytest.approx(4.0 / 9.0)
+
+
+def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_path) -> None:
+    """Verify VLM fixed measure TPS/W uses all repeated runs included in total energy."""
+    args = vlm_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--output-dir",
+            str(tmp_path),
+            "--repeat",
+            "2",
+            "--prefill",
+            "128",
+            "--decode",
+            "32",
+        ]
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    phase_tracker_runs: list[tuple[_FakeTracker, _FakeTracker]] = []
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        trackers = (_FakeTracker(), _FakeTracker())
+        phase_tracker_runs.append(trackers)
+        return trackers
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[20.0], time_values=[0.2]),
+                decode_sweep=vlm_bench.SweepData(x_values=[128], tps_values=[40.0], time_values=[0.3]),
+            )
+
+    monkeypatch.setattr(
+        vlm_bench,
+        "_collect_vlm_run_targets",
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+    )
+    monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(
+        vlm_bench,
+        "_vlm_revision_artifacts_available",
+        lambda model_id, revision, mxq_path: (True, None),
+    )
+    monkeypatch.setattr(vlm_bench, "_build_pipeline", lambda *args, **kwargs: object())
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", _fake_build_phase_trackers)
+    monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(vlm_bench, "_rebuild_measure_outputs", lambda results_dir: None)
+
+    assert vlm_bench._run_measure(args) == 0
+    assert len(phase_tracker_runs) == 2
+    assert phase_tracker_runs[0][0] is not phase_tracker_runs[1][0]
+    assert phase_tracker_runs[0][1] is not phase_tracker_runs[1][1]
+
+    payload = json.loads((tmp_path / "model-a_measure.json").read_text(encoding="utf-8"))
+    assert payload["device"]["vision_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_prefill_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_decode_energy_j"] == pytest.approx(20.0)
+    assert payload["device"]["llm_total_energy_j"] == pytest.approx(40.0)
+    assert payload["device"]["total_energy_j"] == pytest.approx(60.0)
+
+
+def test_vlm_sweep_token_helpers_use_whole_sweep_scope() -> None:
+    """Verify VLM sweep token helpers match whole-sweep trace energy scope."""
+    result = vlm_bench.BenchmarkResult(
+        prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+        decode_sweep=vlm_bench.SweepData(
+            x_values=[128, 256, 512],
+            tps_values=[30.0, 40.0, 50.0],
+            time_values=[0.3, 0.4, 0.5],
+        ),
+    )
+
+    assert vlm_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
+    assert vlm_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
+
+
+def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
+    """Verify VLM benchmark sweep derives phase efficiency from phase trace energy."""
+    args = Namespace(
+        llm_resolution=224,
+        image_resolutions=[224],
+        original_models=False,
+        mxq_dir=None,
+        prefill_chunk_size=None,
+        warmup=0,
+        repeat=1,
+        prompt="prompt",
+        batch_size=2,
+        prefill_range=(128, 256, 128),
+        cache_lengths=[128, 256, 512],
+        decode_window=32,
+        batch_mode="batch",
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+                decode_sweep=vlm_bench.SweepData(
+                    x_values=[128, 256, 512],
+                    tps_values=[30.0, 40.0, 50.0],
+                    time_values=[0.3, 0.4, 0.5],
+                ),
+            )
+
+    monkeypatch.setattr(vlm_bench, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+    monkeypatch.setattr(vlm_bench, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(vlm_bench, "_build_phase_trackers", lambda args, pipeline: (_FakeTracker(), _FakeTracker()))
+    monkeypatch.setattr(vlm_bench, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(vlm_bench, "_stop_tracker_safe", lambda tracker: None)
+    monkeypatch.setattr(vlm_bench, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        vlm_bench,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+
+    payload, rows = vlm_bench._run_model(args, "model-a", object())
+
+    llm_run = payload["benchmark"]["llm_results"]["runs"][0]
+    llm_summary = payload["benchmark"]["llm_results"]["summary"]
+    llm_rows = [row for row in rows if row["type"] == "llm"]
+    assert llm_run["vision_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_prefill_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["total_energy_j"] == pytest.approx(30.0)
+    assert llm_summary["llm_total_energy_j"]["mean"] == pytest.approx(20.0)
+    assert llm_summary["total_energy_j"]["mean"] == pytest.approx(30.0)
+    assert llm_run["prefill_tps_per_w"] == pytest.approx(((128 + 256) * 2) / 10.0)
+    assert llm_run["decode_tps_per_w"] == pytest.approx((32 * 3 * 2) / 10.0)
+    assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
+    assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
+    assert llm_summary["prefill_tps_per_w"]["mean"] == pytest.approx(llm_run["prefill_tps_per_w"])
+    assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(llm_run["decode_tps_per_w"])
+    assert [row["prefill_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["prefill_tps_per_w"])] * len(
+        llm_rows
+    )
+    assert [row["decode_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["decode_tps_per_w"])] * len(
+        llm_rows
+    )
+
+
+def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None:
+    """Verify TPS CLI VLM sweep writes phase efficiency to JSON and CSV rows."""
+    args = Namespace(
+        task="image-text-to-text",
+        model="model-a",
+        tokenizer=None,
+        device=None,
+        device_backend=None,
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        batch_size=2,
+        image_resolutions=[224],
+        llm_resolution=None,
+        warmup=0,
+        repeat=1,
+        prompt="prompt",
+        prefill_range=(128, 256, 128),
+        cache_lengths=[128, 256, 512],
+        decode_window=32,
+        prefill_chunk_size=None,
+        device_metrics=True,
+        json=str(tmp_path / "vlm.json"),
+        csv=str(tmp_path / "vlm.csv"),
+        plot=None,
+    )
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure_vision(self, *args, **kwargs):
+            return [(0.1, 10.0)]
+
+        def measure_llm_full(self, *args, **kwargs):
+            return vlm_bench.BenchmarkResult(
+                prefill_sweep=vlm_bench.SweepData(x_values=[128, 256], tps_values=[10.0, 20.0], time_values=[0.1, 0.2]),
+                decode_sweep=vlm_bench.SweepData(
+                    x_values=[128, 256, 512],
+                    tps_values=[30.0, 40.0, 50.0],
+                    time_values=[0.3, 0.4, 0.5],
+                ),
+            )
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: object())
+    monkeypatch.setattr(tps_cli, "_resolve_cli_batch_size", lambda args, pipeline: 2)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (_FakeTracker(), _FakeTracker()))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_stop_tracker_safe", lambda tracker: None)
+    monkeypatch.setattr(tps_cli, "_extract_device_metric", lambda tracker: {"avg_power_w": 10.0})
+    monkeypatch.setattr(
+        tps_cli,
+        "_extract_device_time_series",
+        lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
+    )
+    monkeypatch.setattr(
+        "mblt_model_zoo.hf_transformers.utils.benchmark_utils.VLMTPSMeasurer",
+        _FakeVLMTPSMeasurer,
+    )
+
+    assert tps_cli._run_vlm_sweep(args) == 0
+
+    payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
+    llm_run = payload["llm_results"]["runs"][0]
+    llm_summary = payload["llm_results"]["summary"]
+    rows = list(csv.DictReader(Path(args.csv).open(encoding="utf-8")))
+    llm_rows = [row for row in rows if row["type"] == "llm"]
+    prefill_tps_per_w = ((128 + 256) * 2) / 10.0
+    decode_tps_per_w = (32 * 3 * 2) / 10.0
+
+    assert llm_run["vision_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_prefill_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
+    assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
+    assert llm_run["total_energy_j"] == pytest.approx(30.0)
+    assert llm_summary["llm_prefill_energy_j"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["llm_decode_energy_j"]["mean"] == pytest.approx(10.0)
+    assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
+    assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
+    assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
+    assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
+    assert llm_summary["prefill_tps_per_w"]["mean"] == pytest.approx(prefill_tps_per_w)
+    assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(decode_tps_per_w)
+    assert [float(row["prefill_tps_per_w"]) for row in llm_rows] == [pytest.approx(prefill_tps_per_w)]
+    assert [float(row["decode_tps_per_w"]) for row in llm_rows] == [pytest.approx(decode_tps_per_w)]
+    assert [float(row["vision_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_prefill_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_decode_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["llm_total_energy_j"]) for row in llm_rows] == [pytest.approx(20.0)]
+    assert [float(row["total_energy_j"]) for row in llm_rows] == [pytest.approx(30.0)]
+
+
+def test_text_sweep_token_helpers_use_whole_sweep_scope() -> None:
+    """Verify text sweep token helpers match whole-sweep trace energy scope."""
+    result = text_bench.BenchmarkResult(
+        prefill_sweep=text_bench.SweepData(x_values=[128, 256], tps_values=[1.0, 2.0], time_values=[1.0, 1.0]),
+        decode_sweep=text_bench.SweepData(
+            x_values=[128, 256, 512],
+            tps_values=[3.0, 4.0, 5.0],
+            time_values=[1.0, 1.0, 1.0],
+        ),
+    )
+
+    assert text_bench._sweep_prefill_token_count(result, batch_size=2) == (128 + 256) * 2
+    assert text_bench._sweep_decode_token_count(result, decode_window=32, batch_size=2) == 32 * 3 * 2
 
 
 def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:
@@ -425,8 +819,10 @@ def test_text_benchmark_resolves_mobilint_backend_per_target() -> None:
     mobilint_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
     other_args = text_bench._args_for_target_device_backend(args, model_id="other/model-a")
 
+    assert mobilint_args.device == "cpu"
     assert mobilint_args.device_backend == "npu"
-    assert other_args.device_backend == "none"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
 
 
 def test_vlm_benchmark_resolves_mobilint_backend_per_target() -> None:
@@ -438,8 +834,91 @@ def test_vlm_benchmark_resolves_mobilint_backend_per_target() -> None:
     mobilint_args = vlm_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
     other_args = vlm_bench._args_for_target_device_backend(args, model_id="other/model-a")
 
+    assert mobilint_args.device == "cpu"
     assert mobilint_args.device_backend == "npu"
-    assert other_args.device_backend == "none"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
+
+
+def test_asr_benchmark_resolves_mobilint_backend_per_target() -> None:
+    """Verify ASR Mobilint targets use NPU metrics even when the initial command has no model."""
+    args = asr_bench._parse_args(["--all"])
+
+    asr_bench._resolve_runtime_defaults(args, ["--all"])
+
+    mobilint_args = asr_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+    other_args = asr_bench._args_for_target_device_backend(args, model_id="other/model-a")
+
+    assert mobilint_args.device == "cpu"
+    assert mobilint_args.device_backend == "npu"
+    assert other_args.device == "cuda"
+    assert other_args.device_backend == "gpu"
+
+
+@pytest.mark.parametrize(
+    ("model_id", "mxq_path", "mxq_dir", "expected_device", "expected_backend"),
+    [
+        ("mobilint/model-a", None, None, "cpu", "npu"),
+        ("other/model-a", None, None, "cuda", "gpu"),
+        ("other/model-a", "model.mxq", None, "cpu", "npu"),
+        ("other/model-a", None, "mxq", "cpu", "npu"),
+    ],
+)
+def test_benchmark_common_runtime_default_policy(
+    model_id: str,
+    mxq_path: str | None,
+    mxq_dir: str | None,
+    expected_device: str,
+    expected_backend: str,
+) -> None:
+    """Verify shared benchmark runtime defaults are target-aware."""
+    assert (
+        resolve_default_device(
+            device=None,
+            device_explicit=False,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            mxq_dir=mxq_dir,
+        )
+        == expected_device
+    )
+    assert (
+        resolve_default_device_backend(
+            device_backend="gpu",
+            device_backend_explicit=False,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            mxq_dir=mxq_dir,
+        )
+        == expected_backend
+    )
+
+
+def test_benchmark_common_runtime_default_policy_preserves_explicit_values() -> None:
+    """Verify explicit device/backend values are not overwritten by target policy."""
+    assert (
+        resolve_default_device(
+            device="cuda:1",
+            device_explicit=True,
+            model_id="mobilint/model-a",
+        )
+        == "cuda:1"
+    )
+    assert (
+        resolve_default_device_backend(
+            device_backend="gpu",
+            device_backend_explicit=True,
+            model_id="mobilint/model-a",
+        )
+        == "gpu"
+    )
+
+
+@pytest.mark.parametrize(("backend", "expected"), [("npu", 1.0), ("gpu", 1.0), ("cpu", 1.0)])
+def test_benchmark_common_tracker_interval_policy(backend: str, expected: float) -> None:
+    """Verify tracker sampling intervals are fixed across resolved backends."""
+
+    assert resolve_device_tracker_interval_sec(backend) == pytest.approx(expected)
 
 
 def test_benchmark_target_backend_preserves_explicit_backend() -> None:
@@ -450,6 +929,16 @@ def test_benchmark_target_backend_preserves_explicit_backend() -> None:
     target_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
 
     assert target_args.device_backend == "gpu"
+
+
+def test_benchmark_target_device_preserves_explicit_device() -> None:
+    """Verify explicit device choices still override target device policy."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--all", "--device", "cuda:1"])
+
+    text_bench._resolve_runtime_defaults(args, ["measure", "--all", "--device", "cuda:1"])
+    target_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+
+    assert target_args.device == "cuda:1"
 
 
 def test_text_measure_rebuild_outputs(tmp_path) -> None:
@@ -476,6 +965,37 @@ def test_text_measure_rebuild_outputs(tmp_path) -> None:
 
     assert (tmp_path / "combined_measure.csv").is_file()
     assert (tmp_path / "combined_measure.md").is_file()
+
+
+def test_text_measure_device_payload_requires_complete_energy_repeats() -> None:
+    """Verify measure aggregate energy is omitted when any repeat lacks trace-integrated energy."""
+
+    payload = text_bench._measure_device_payload(
+        [
+            {"avg_power_w": 4.0, "p99_power_w": 5.0, "total_energy_j": 2.0, "prefill_tps": 10.0},
+            {"avg_power_w": 6.0, "p99_power_w": 7.0, "total_energy_j": None, "prefill_tps": 20.0},
+        ]
+    )
+
+    assert payload is not None
+    assert payload["avg_power_w"] == pytest.approx(5.0)
+    assert payload["p99_power_w"] == pytest.approx(7.0)
+    assert payload["total_energy_j"] is None
+    assert payload["prefill_tps_last"] == pytest.approx(20.0)
+
+
+def test_text_measure_device_payload_sums_complete_energy_repeats() -> None:
+    """Verify measure aggregate energy is summed only when all repeats have energy."""
+
+    payload = text_bench._measure_device_payload(
+        [
+            {"avg_power_w": 4.0, "total_energy_j": 2.0},
+            {"avg_power_w": 6.0, "total_energy_j": 3.0},
+        ]
+    )
+
+    assert payload is not None
+    assert payload["total_energy_j"] == pytest.approx(5.0)
 
 
 def test_vlm_measure_rebuild_outputs(tmp_path) -> None:

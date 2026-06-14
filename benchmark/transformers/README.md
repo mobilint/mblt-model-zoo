@@ -32,9 +32,13 @@ inference and model downloads.
   - `global4`: Uses `target_clusters=[0]`.
   - `global8`: Uses `target_clusters=[0, 1]`.
   - `all`: Runs `single`, `global4`, and `global8` sequentially in benchmark scripts.
-- Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
-  `--device cpu` and `--device-backend npu` when those options are omitted. Explicit user values
-  always take precedence.
+- Runtime defaults are target-aware when `--device` and `--device-backend` are omitted.
+  - Mobilint targets, including `mobilint/...`, `--mxq-path`, and `--mxq-dir`, default to
+    `--device cpu` and `--device-backend npu`.
+  - Other Hugging Face targets default to `--device cuda` and `--device-backend gpu`.
+  - Benchmark scripts reapply this policy for each target model id, so a mixed target list can use
+    NPU tracking for Mobilint targets and GPU tracking for non-Mobilint targets in one run.
+  - Explicit user values always take precedence.
 - CLI defaults and benchmark-script defaults are aligned for shared TPS parameters.
   - `measure` defaults to `--prefill 128`, `--decode 32`, `--repeat 1`, and `--warmup 1`;
     VLM measure also defaults to `--image-resolution 224`.
@@ -57,13 +61,26 @@ inference and model downloads.
   - `--device-backend npu`: Uses the Mobilint NPU tracker.
   - `--device-backend gpu`: Uses the GPU tracker.
   - `--device-backend auto`: Selects a tracker based on the model and device.
+  - Tracker sampling intervals are fixed to `1.0s` for all resolved backends. The console device
+    status line prints the interval used for the resolved backend.
   - `--device-npu-id 0,1`: Restricts NPU tracking to selected logical NPU card ids.
-  - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids.
+  - `--device-npu-rail-metrics`: Selects NPU rail power metrics collected by `mblt-tracker`. The
+    default `npu` rail is the low-latency default. Use `all` to collect `npu`, `ddr`, `pmic`, and
+    `goldfinger`, or pass a comma-separated subset, for example `--device-npu-rail-metrics npu,ddr`.
+    Non-NPU rails can have a lower effective sampling rate because their values depend on the
+    firmware refresh cadence.
+  - `--device-gpu-id 0,1`: Restricts GPU tracking to selected GPU ids. This option has priority
+    over `--device` for tracker selection. If it is omitted, `--device cuda:<id>` is parsed and the
+    numeric id is forwarded to `GPUDeviceTracker(gpu_id=<id>)`; plain `--device cuda` leaves
+    `gpu_id=None` so the tracker uses its default GPU.
   - `--no-device-metrics`: Disables device metric collection.
   - Console summaries show aggregate scalar metrics such as average and p99 power, utilization,
     temperature, and memory. JSON outputs also include device metric time-series under fields such
     as `device_time_series`, `device_time_series_runs`, or phase-specific `prefill`/`decode`
     entries. CSV outputs keep aggregate columns only.
+  - Energy and energy-efficiency metrics are computed from mblt-tracker power traces using
+    trapezoidal integration. At least two valid power samples are required, so measurements shorter
+    than the tracker sampling interval may leave energy fields empty and print a warning.
 
 ## Quick CLI Usage
 
@@ -261,12 +278,12 @@ consumed before measurement. In other words, the loader fetches enough candidate
 - Per-target JSON files are written as `<target>_beams<beam>.json`, for example
   `openai__whisper-small_beamsdefault.json` or `openai__whisper-small_beams5.json`.
 - The same `--output-dir` can store multiple beam-search runs side by side.
-- If a per-target beam JSON already exists, the benchmark stops instead of overwriting it.
+- If a per-target beam JSON already exists, the benchmark overwrites it by default.
 - Use `--skip-existing` to keep existing beam results and continue with the remaining targets.
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id mobilint/whisper-small \
+  --model mobilint/whisper-small \
   --revision W8 \
   --num-samples 5 \
   --num-beams 1 \
@@ -278,7 +295,7 @@ For original Hugging Face models, omit Mobilint quantized revisions such as `W8`
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id openai/whisper-small \
+  --model openai/whisper-small \
   --num-samples 5 \
   --num-beams 5 \
   --device cpu
@@ -309,19 +326,22 @@ Original Hugging Face parent models can be benchmarked with `--original-models`:
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
   --original-models \
-  --model-id mobilint/whisper-small mobilint/whisper-medium \
+  --model mobilint/whisper-small mobilint/whisper-medium \
   --device cuda:0 \
   --dtype float16 \
   --device-backend gpu \
   --num-samples 5
 ```
 
+Migration note: the ASR benchmark now uses `--model` and `--all`. Older invocations that used
+`--model-id` or `--all-revisions` should be updated before running this script.
+
 You can also benchmark non-Whisper ASR models as long as they follow the Transformers ASR pipeline
 contract:
 
 ```bash
 python benchmark/transformers/benchmark_automatic_speech_recognition_models.py \
-  --model-id facebook/wav2vec2-base-960h \
+  --model facebook/wav2vec2-base-960h \
   --num-samples 5 \
   --num-beams 1 \
   --device cuda:0 \
@@ -470,8 +490,8 @@ read from the file name suffix.
 ### Benchmark Original HF Models for Comparison
 
 Use `--original-models` to resolve listed Mobilint model ids to their parent/base model ids on the
-Hugging Face Hub, then benchmark the unique parent ids. If `--device` is omitted, the script defaults
-to `cuda:0` and `--device-backend auto`.
+Hugging Face Hub, then benchmark the unique parent ids. If `--device` and `--device-backend` are
+omitted, resolved original Hugging Face targets use `--device cuda` and `--device-backend gpu`.
 
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py sweep \
@@ -564,41 +584,69 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
 
 ## Compare Result Folders
 
-`plot_compare_benchmark_results.py` compares multiple benchmark result folders and generates
-model-wise bar charts.
+`compare_benchmark_results.py` compares multiple benchmark result folders and generates
+model-wise bar charts, comparison tables, and a Markdown summary.
+
+When `--task` is omitted, the compare script auto-detects the task from JSON payload `task` fields
+and falls back to `text-generation` for older payloads without task metadata. If the input folders
+contain multiple task types, the script stops instead of guessing; pass `--task text-generation`,
+`--task image-text-to-text`, or `--task automatic-speech-recognition` explicitly for mixed result
+folders.
+
+The compare script also auto-detects whether the inputs contain `measure` or `sweep` payloads.
+`measure` results can be compared with other `measure` results, and `sweep` results can be compared
+with other `sweep` results. `measure` and `sweep` payloads are not comparable with each other; if the
+input folders contain both benchmark types, the script prints the detected file samples and exits
+with an error. Pass `--benchmark-type measure` or `--benchmark-type sweep` to select one type when a
+folder contains unrelated JSON files.
 
 ### Compare Text-Generation Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/text_generation \
   benchmark/transformers/results/RTX3090/text_generation \
-  --output-dir benchmark/transformers/results/charts/text_generation_compare \
-  --task text-generation
+  --output-dir benchmark/transformers/results/comparison/text_generation_compare \
+  --task text-generation \
+  --benchmark-type sweep
+```
+
+Use `--benchmark-type measure` to compare fixed-case text-generation measure outputs from two result
+folders:
+
+```bash
+python benchmark/transformers/compare_benchmark_results.py \
+  benchmark/transformers/results/MLA100/text_generation \
+  benchmark/transformers/results/RTX3090/text_generation \
+  --output-dir benchmark/transformers/results/comparison/text_generation_measure_compare \
+  --task text-generation \
+  --benchmark-type measure
 ```
 
 ### Compare VLM Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/image_text_to_text \
   benchmark/transformers/results/RTX3090/image_text_to_text \
-  --output-dir benchmark/transformers/results/charts/vlm_compare \
-  --task image-text-to-text
+  --output-dir benchmark/transformers/results/comparison/vlm_compare \
+  --task image-text-to-text \
+  --benchmark-type sweep
 ```
 
 ### Compare ASR Results
 
 ```bash
-python benchmark/transformers/plot_compare_benchmark_results.py \
+python benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/results/MLA100/asr \
   benchmark/transformers/results/RTX3090/asr \
-  --output-dir benchmark/transformers/results/charts/asr_compare \
-  --task automatic-speech-recognition
+  --output-dir benchmark/transformers/results/comparison/asr_compare \
+  --task automatic-speech-recognition \
+  --benchmark-type measure
 ```
 
-If `--output-dir` is omitted, charts are saved under `benchmark/transformers/results/charts/` using
-a directory name derived from the input folder names.
+If `--output-dir` is omitted, comparison outputs are saved under
+`benchmark/transformers/results/comparison/` using a directory name derived from the input folder names.
 
 ## Search Prefill Chunk Size
 
@@ -671,6 +719,8 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--mxq-path`: Single local `.mxq` file override.
 - `--mxq-dir`: Local `.mxq` directory for benchmark scripts.
 - `--device`: Transformers pipeline device, such as `cpu` or `cuda:0`.
+  When omitted, benchmark scripts use `cpu` for Mobilint/MXQ targets and `cuda` for other Hugging
+  Face targets.
 - `--device-map`: Transformers `device_map`, such as `auto`.
 - `--dtype`: Data type, such as `auto`, `float16`, or `bfloat16`.
 - `--trust-remote-code` / `--no-trust-remote-code`: Whether to trust HF remote code.
@@ -699,8 +749,15 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--target-clusters`: Explicit target clusters for the CLI, for example `"0;1"`.
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
-- `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`.
+  When omitted, benchmark scripts use `npu` for Mobilint/MXQ targets and `gpu` for other Hugging
+  Face targets. Tracker sampling uses `1.0s` for all backends.
+- `--device-gpu-id`: GPU tracker target id, such as `0` or `0,1`. If omitted, `cuda:<id>` in
+  `--device` is parsed for the GPU tracker; plain `cuda` leaves tracker GPU selection at its
+  default.
 - `--device-npu-id`: NPU tracker target logical card id, such as `0` or `0,1`.
+- `--device-npu-rail-metrics`: NPU rail metric selection for `mblt-tracker` 1.x. Accepted values are
+  `npu`, `ddr`, `pmic`, `goldfinger`, `all`, or a comma-separated subset such as `npu,ddr`. The
+  default is `npu`; `all` enables every supported rail.
 
 ### Result Management
 
@@ -708,7 +765,7 @@ python benchmark/transformers/update_prefill_chunk_size_configs.py \
 - `--csv`: CSV output path for CLI sweep rows.
 - `--plot`: PNG output path for CLI sweep plots.
 - `--no-plot`: Disable CLI sweep plot output.
-- `--results-dir`: Output directory for selected benchmark scripts.
+- `--output-dir`: Output directory for benchmark, comparison, and generated artifact scripts.
 - `--skip-existing`: Skip models that already have output files.
 - `--rebuild-charts`: Rebuild CSV, Markdown, and chart outputs from existing JSON or record files.
 
@@ -727,7 +784,7 @@ uv run python -m py_compile \
   benchmark/transformers/benchmark_text_generation_models.py \
   benchmark/transformers/benchmark_image_text_to_text_models.py \
   benchmark/transformers/search_prefill_chunk_size.py \
-  benchmark/transformers/plot_compare_benchmark_results.py \
+  benchmark/transformers/compare_benchmark_results.py \
   benchmark/transformers/update_prefill_chunk_size_configs.py \
   benchmark/transformers/chart_utils.py
 ```
@@ -740,7 +797,7 @@ uv run python benchmark/transformers/benchmark_image_text_to_text_models.py --he
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py measure --help
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py sweep --help
 uv run python benchmark/transformers/search_prefill_chunk_size.py --help
-uv run python benchmark/transformers/plot_compare_benchmark_results.py --help
+uv run python benchmark/transformers/compare_benchmark_results.py --help
 uv run python benchmark/transformers/update_prefill_chunk_size_configs.py --help
 uv run mblt-model-zoo tps measure --help
 uv run mblt-model-zoo tps sweep --help

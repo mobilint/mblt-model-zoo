@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, ClassVar, Mapping, Sequence
+
+try:
+    from benchmark.common.summary_utils import markdown_table
+except ModuleNotFoundError:
+    _summary_utils_path = Path(__file__).resolve().parents[1] / "common" / "summary_utils.py"
+    _summary_spec = importlib.util.spec_from_file_location("benchmark_common_summary_utils", _summary_utils_path)
+    if _summary_spec is None or _summary_spec.loader is None:
+        raise
+    _summary_mod = importlib.util.module_from_spec(_summary_spec)
+    _summary_spec.loader.exec_module(_summary_mod)
+    markdown_table = _summary_mod.markdown_table
 
 try:
     from benchmark.transformers.chart_utils import (
@@ -83,6 +95,7 @@ _SHARED_SCALAR_SPECS: tuple[ScalarChartSpec, ...] = (
     ScalarChartSpec("total_energy_j.png", "Total Energy", "Energy (Joules)", "total_energy_j"),
 )
 
+
 def _as_float(value: Any) -> float | None:
     """Return a float for numeric values."""
 
@@ -96,6 +109,31 @@ def _summary_mean(mapping: Mapping[str, Any], key: str) -> float | None:
     if not isinstance(value, Mapping):
         return None
     return _as_float(value.get("mean"))
+
+
+def _first_float(mapping: Mapping[str, Any], *keys: str) -> float | None:
+    """Return the first numeric value found for one of ``keys``."""
+
+    for key in keys:
+        value = _as_float(mapping.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def payload_benchmark_type(payload: Mapping[str, Any]) -> str | None:
+    """Return normalized benchmark type for compare-compatible payloads."""
+
+    benchmark_type = payload.get("benchmark_type")
+    if benchmark_type in {"measure", "sweep"}:
+        return str(benchmark_type)
+    benchmark = payload.get("benchmark", payload)
+    if isinstance(benchmark, Mapping):
+        if isinstance(benchmark.get("prefill_sweep"), Mapping) and isinstance(benchmark.get("decode_sweep"), Mapping):
+            return "sweep"
+        if isinstance(benchmark.get("llm_results"), Mapping) and isinstance(benchmark.get("vision_summary"), Mapping):
+            return "sweep"
+    return None
 
 
 def _strip_group_id(model_id: str) -> str:
@@ -114,19 +152,48 @@ def _restore_safe_model_id(value: str) -> str:
     return value
 
 
-def normalize_model_key(path: Path, loaded_model_id: str) -> str:
+def _model_name(model_id: str) -> str:
+    """Return the repository name without a leading Hugging Face owner id."""
+
+    restored = _restore_safe_model_id(model_id)
+    return restored.rsplit("/", 1)[1] if "/" in restored else restored
+
+
+def payload_task(payload: Mapping[str, Any]) -> str | None:
+    """Return the benchmark task from normalized and legacy payload schemas."""
+
+    task = payload.get("task")
+    if isinstance(task, str) and task:
+        return task
+
+    benchmark_type = payload.get("benchmark_type")
+    if isinstance(benchmark_type, str) and benchmark_type in TASK_REGISTRY:
+        return benchmark_type
+    return None
+
+
+def _compare_model_id(model_id: str, *, strip_owner: bool = False) -> str:
+    """Return a restored model id, optionally ignoring a leading owner id."""
+
+    restored = _restore_safe_model_id(model_id)
+    if strip_owner:
+        return _model_name(restored)
+    return restored
+
+
+def normalize_model_key(path: Path, loaded_model_id: str, *, strip_owner: bool = False) -> str:
     """Normalize a model id for cross-folder comparison."""
 
     stem = path.stem
     if "_beams" in stem:
         restored_stem = _restore_safe_model_id(stem)
         if loaded_model_id.endswith(stem) or loaded_model_id.endswith(restored_stem):
-            return _strip_group_id(loaded_model_id)
+            return _compare_model_id(loaded_model_id, strip_owner=strip_owner)
         beam_suffix = stem.rsplit("_beams", 1)[1]
-        return f"{_restore_safe_model_id(loaded_model_id)}_beams{beam_suffix}"
+        return f"{_compare_model_id(loaded_model_id, strip_owner=strip_owner)}_beams{beam_suffix}"
     if "__" in stem:
-        return _restore_safe_model_id(stem)
-    return _restore_safe_model_id(loaded_model_id)
+        return _compare_model_id(stem, strip_owner=strip_owner)
+    return _compare_model_id(loaded_model_id, strip_owner=strip_owner)
 
 
 @dataclass
@@ -137,8 +204,8 @@ class LLMCompareMetric(BaseCompareMetric):
     decode_tps: dict[int, float] = field(default_factory=dict)
     prefill_latency_ms: dict[int, float] = field(default_factory=dict)
     decode_duration_ms: dict[int, float] = field(default_factory=dict)
-    prefill_tokens_per_j: float | None = None
-    decode_tokens_per_j: float | None = None
+    prefill_tps_per_w: float | None = None
+    decode_tps_per_w: float | None = None
     prefill_j_per_token: float | None = None
     decode_j_per_token: float | None = None
 
@@ -149,22 +216,67 @@ class LLMCompareMetric(BaseCompareMetric):
     )
     SCALAR_SPECS: ClassVar[Sequence[ScalarChartSpec]] = (
         ScalarChartSpec(
-            "prefill_tokens_per_j.png",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
-            "prefill_tokens_per_j",
+            "prefill_tps_per_w.png",
+            "Prefill TPS/W",
+            "TPS/W",
+            "prefill_tps_per_w",
         ),
         ScalarChartSpec(
-            "decode_tokens_per_j.png",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
-            "decode_tokens_per_j",
+            "decode_tps_per_w.png",
+            "Decode TPS/W",
+            "TPS/W",
+            "decode_tps_per_w",
         ),
     )
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> LLMCompareMetric | None:
         """Parse one text-generation benchmark payload."""
+
+        device = payload.get("device", {})
+        if not isinstance(device, Mapping):
+            device = {}
+        if payload_benchmark_type(payload) == "measure":
+            summary = payload.get("summary", {})
+            if not isinstance(summary, Mapping):
+                return None
+            prefill = payload.get("prefill")
+            decode = payload.get("decode")
+            prefill_token = int(prefill) if isinstance(prefill, int) else None
+            decode_token = int(decode) if isinstance(decode, int) else None
+            prefill_tps = _summary_mean(summary, "prefill_tps")
+            decode_tps = _summary_mean(summary, "decode_tps")
+            prefill_latency_ms = _summary_mean(summary, "ttft_ms")
+            decode_duration_ms = _summary_mean(summary, "decode_duration_ms")
+            return cls(
+                prefill_tps={prefill_token: prefill_tps} if prefill_token is not None and prefill_tps is not None else {},
+                decode_tps={decode_token: decode_tps} if decode_token is not None and decode_tps is not None else {},
+                prefill_latency_ms=(
+                    {prefill_token: prefill_latency_ms}
+                    if prefill_token is not None and prefill_latency_ms is not None
+                    else {}
+                ),
+                decode_duration_ms=(
+                    {decode_token: decode_duration_ms}
+                    if decode_token is not None and decode_duration_ms is not None
+                    else {}
+                ),
+                prefill_tps_per_w=_first_float(device, "prefill_tps_per_w", "prefill_tps_per_w_last"),
+                decode_tps_per_w=_first_float(device, "decode_tps_per_w", "decode_tps_per_w_last"),
+                prefill_j_per_token=_first_float(device, "prefill_j_per_token", "prefill_j_per_tok_last"),
+                decode_j_per_token=_first_float(device, "decode_j_per_token", "decode_j_per_tok_last"),
+                avg_power_w=_as_float(device.get("avg_power_w")),
+                p99_power_w=_as_float(device.get("p99_power_w")),
+                total_energy_j=_as_float(device.get("total_energy_j")),
+                avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
+                p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+                avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+                p99_temperature_c=_as_float(device.get("p99_temperature_c")),
+                avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
+                p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
+                avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
+                p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+            )
 
         benchmark = payload.get("benchmark", payload)
         if not isinstance(benchmark, Mapping):
@@ -173,10 +285,6 @@ class LLMCompareMetric(BaseCompareMetric):
         decode = benchmark.get("decode_sweep", {})
         if not isinstance(prefill, Mapping) or not isinstance(decode, Mapping):
             return None
-        device = payload.get("device", {})
-        if not isinstance(device, Mapping):
-            device = {}
-
         def _token_map(phase: Mapping[str, Any], value_key: str, *, ms: bool = False) -> dict[int, float]:
             out: dict[int, float] = {}
             for token, value in zip(phase.get("x_values", []), phase.get(value_key, [])):
@@ -189,8 +297,8 @@ class LLMCompareMetric(BaseCompareMetric):
             decode_tps=_token_map(decode, "tps_values"),
             prefill_latency_ms=_token_map(prefill, "time_values", ms=True),
             decode_duration_ms=_token_map(decode, "time_values", ms=True),
-            prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
-            decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+            prefill_tps_per_w=_as_float(device.get("prefill_tps_per_w_last")),
+            decode_tps_per_w=_as_float(device.get("decode_tps_per_w_last")),
             prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
             decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
             avg_power_w=_as_float(device.get("avg_power_w")),
@@ -220,8 +328,12 @@ class VLMCompareMetric(BaseCompareMetric):
     vision_fps: float | None = None
     vision_img_per_j: float | None = None
     vision_j_per_img: float | None = None
-    llm_prefill_tok_per_j: float | None = None
-    llm_decode_tok_per_j: float | None = None
+    vision_energy_j: float | None = None
+    llm_prefill_energy_j: float | None = None
+    llm_decode_energy_j: float | None = None
+    llm_total_energy_j: float | None = None
+    llm_prefill_tps_per_w: float | None = None
+    llm_decode_tps_per_w: float | None = None
     llm_prefill_j_per_tok: float | None = None
     llm_decode_j_per_tok: float | None = None
 
@@ -229,26 +341,62 @@ class VLMCompareMetric(BaseCompareMetric):
     SCALAR_SPECS: ClassVar[Sequence[ScalarChartSpec]] = (
         ScalarChartSpec("llm_prefill_tps.png", "Prefill Tokens Per Second", "Tokens Per Second", "llm_prefill_tps"),
         ScalarChartSpec(
-            "llm_prefill_tokens_per_j.png",
-            "Prefill Tokens Per Joule",
-            "Tokens Per Joule",
-            "llm_prefill_tok_per_j",
+            "llm_prefill_tps_per_w.png",
+            "Prefill TPS/W",
+            "TPS/W",
+            "llm_prefill_tps_per_w",
         ),
         ScalarChartSpec("llm_decode_tps.png", "Decode Tokens Per Second", "Tokens Per Second", "llm_decode_tps"),
         ScalarChartSpec(
-            "llm_decode_tokens_per_j.png",
-            "Decode Tokens Per Joule",
-            "Tokens Per Joule",
-            "llm_decode_tok_per_j",
+            "llm_decode_tps_per_w.png",
+            "Decode TPS/W",
+            "TPS/W",
+            "llm_decode_tps_per_w",
         ),
         ScalarChartSpec("vision_fps.png", "Vision FPS", "Frames Per Second", "vision_fps"),
         ScalarChartSpec("vision_encode_ms.png", "Vision Encode ms", "Milliseconds", "vision_encode_ms"),
         ScalarChartSpec("vision_img_per_j.png", "Vision Images Per Joule", "Images Per Joule", "vision_img_per_j"),
+        ScalarChartSpec("vision_energy_j.png", "Vision Energy", "Energy (Joules)", "vision_energy_j"),
+        ScalarChartSpec("llm_total_energy_j.png", "LLM Total Energy", "Energy (Joules)", "llm_total_energy_j"),
     )
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> VLMCompareMetric | None:
         """Parse one image-text-to-text benchmark payload."""
+
+        device = payload.get("device", {})
+        if not isinstance(device, Mapping):
+            device = {}
+        if payload_benchmark_type(payload) == "measure":
+            summary = payload.get("summary", {})
+            if not isinstance(summary, Mapping):
+                return None
+            return cls(
+                llm_prefill_tps=_summary_mean(summary, "llm_prefill_tps"),
+                llm_decode_tps=_summary_mean(summary, "llm_decode_tps"),
+                llm_ttft_ms=_summary_mean(summary, "llm_ttft_ms"),
+                llm_decode_duration_ms=_summary_mean(summary, "llm_decode_duration_ms"),
+                vision_encode_ms=_summary_mean(summary, "vision_encode_ms"),
+                vision_fps=_summary_mean(summary, "vision_fps"),
+                vision_img_per_j=_as_float(device.get("vision_img_per_j")),
+                vision_energy_j=_as_float(device.get("vision_energy_j")),
+                llm_prefill_energy_j=_as_float(device.get("llm_prefill_energy_j")),
+                llm_decode_energy_j=_as_float(device.get("llm_decode_energy_j")),
+                llm_total_energy_j=_as_float(device.get("llm_total_energy_j")),
+                llm_prefill_tps_per_w=_as_float(device.get("llm_prefill_tps_per_w")),
+                llm_decode_tps_per_w=_as_float(device.get("llm_decode_tps_per_w")),
+                avg_power_w=_as_float(device.get("avg_power_w")),
+                p99_power_w=_as_float(device.get("p99_power_w")),
+                total_energy_j=_as_float(device.get("total_energy_j")),
+                avg_utilization_pct=_as_float(device.get("avg_utilization_pct")),
+                p99_utilization_pct=_as_float(device.get("p99_utilization_pct")),
+                avg_temperature_c=_as_float(device.get("avg_temperature_c")),
+                p99_temperature_c=_as_float(device.get("p99_temperature_c")),
+                avg_memory_used_mb=_as_float(device.get("avg_memory_used_mb")),
+                p99_memory_used_mb=_as_float(device.get("p99_memory_used_mb")),
+                avg_memory_used_pct=_as_float(device.get("avg_memory_used_pct")),
+                p99_memory_used_pct=_as_float(device.get("p99_memory_used_pct")),
+            )
 
         benchmark = payload.get("benchmark", {})
         if not isinstance(benchmark, Mapping):
@@ -256,11 +404,8 @@ class VLMCompareMetric(BaseCompareMetric):
         llm_results = benchmark.get("llm_results", {})
         llm_summary = llm_results.get("summary", {}) if isinstance(llm_results, Mapping) else {}
         vision_summary = benchmark.get("vision_summary", {})
-        device = payload.get("device", {})
         if not isinstance(llm_summary, Mapping) or not isinstance(vision_summary, Mapping):
             return None
-        if not isinstance(device, Mapping):
-            device = {}
         return cls(
             llm_prefill_tps=_summary_mean(llm_summary, "llm_prefill_tps"),
             llm_decode_tps=_summary_mean(llm_summary, "llm_decode_tps"),
@@ -271,8 +416,12 @@ class VLMCompareMetric(BaseCompareMetric):
             vision_fps=_summary_mean(vision_summary, "vision_fps"),
             vision_img_per_j=_summary_mean(vision_summary, "vision_img_per_j"),
             vision_j_per_img=_summary_mean(vision_summary, "vision_j_per_img"),
-            llm_prefill_tok_per_j=_summary_mean(llm_summary, "prefill_tok_per_j"),
-            llm_decode_tok_per_j=_summary_mean(llm_summary, "decode_tok_per_j"),
+            vision_energy_j=_as_float(device.get("vision_energy_j")),
+            llm_prefill_energy_j=_as_float(device.get("llm_prefill_energy_j")),
+            llm_decode_energy_j=_as_float(device.get("llm_decode_energy_j")),
+            llm_total_energy_j=_as_float(device.get("llm_total_energy_j")),
+            llm_prefill_tps_per_w=_summary_mean(llm_summary, "prefill_tps_per_w"),
+            llm_decode_tps_per_w=_summary_mean(llm_summary, "decode_tps_per_w"),
             llm_prefill_j_per_tok=_summary_mean(llm_summary, "prefill_j_per_tok"),
             llm_decode_j_per_tok=_summary_mean(llm_summary, "decode_j_per_tok"),
             avg_power_w=_as_float(device.get("avg_power_w")),
@@ -297,6 +446,8 @@ class ASRCompareMetric(BaseCompareMetric):
     cer: float | None = None
     rtf: float | None = None
     inverse_rtf: float | None = None
+    sec_per_j: float | None = None
+    j_per_sec: float | None = None
     mean_latency_s: float | None = None
     p50_latency_s: float | None = None
     p95_latency_s: float | None = None
@@ -322,6 +473,8 @@ class ASRCompareMetric(BaseCompareMetric):
         ScalarChartSpec("cer.png", "Character Error Rate", "CER (%)", "cer_pct"),
         ScalarChartSpec("rtf.png", "Real-Time Factor", "RTF", "rtf"),
         ScalarChartSpec("inverse_rtf.png", "Inverse Real-Time Factor", "x realtime", "inverse_rtf"),
+        ScalarChartSpec("sec_per_j.png", "Seconds Per Joule", "Seconds Per Joule", "sec_per_j"),
+        ScalarChartSpec("j_per_sec.png", "Joules Per Audio Second", "Joules Per Audio Second", "j_per_sec"),
         ScalarChartSpec("p95_latency_s.png", "P95 Latency", "Seconds", "p95_latency_s"),
         ScalarChartSpec(
             "throughput_samples_per_s.png",
@@ -352,6 +505,8 @@ class ASRCompareMetric(BaseCompareMetric):
             cer=_as_float(asr.get("cer")),
             rtf=_as_float(asr.get("rtf")),
             inverse_rtf=_as_float(asr.get("inverse_rtf")),
+            sec_per_j=_as_float(device.get("sec_per_j")),
+            j_per_sec=_as_float(device.get("j_per_sec")),
             mean_latency_s=_as_float(asr.get("mean_latency_s")),
             p50_latency_s=_as_float(asr.get("p50_latency_s")),
             p95_latency_s=_as_float(asr.get("p95_latency_s")),
@@ -379,7 +534,13 @@ TASK_REGISTRY: dict[str, type[BaseCompareMetric]] = {
 }
 
 
-def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[str, BaseCompareMetric]:
+def collect_metrics(
+    folder: Path,
+    metric_cls: type[BaseCompareMetric],
+    *,
+    benchmark_type: str | None = None,
+    strip_owner: bool = False,
+) -> dict[str, BaseCompareMetric]:
     """Collect normalized per-model metrics from one results folder."""
 
     normalized: dict[str, BaseCompareMetric] = {}
@@ -393,33 +554,51 @@ def collect_metrics(folder: Path, metric_cls: type[BaseCompareMetric]) -> dict[s
             continue
         if not isinstance(payload, Mapping):
             continue
-        benchmark_type = payload.get("benchmark_type")
-        if benchmark_type is not None:
-            if not isinstance(benchmark_type, str):
-                print(f"Warning: skipping {path.name} because benchmark_type is not a string.")
-                continue
-            if benchmark_type != metric_cls.TASK:
-                print(
-                    f"Warning: skipping {path.name} because benchmark_type '{benchmark_type}' "
-                    f"does not match requested task '{metric_cls.TASK}'."
-                )
-                continue
-        model_id = payload.get("model")
+        detected_benchmark_type = payload_benchmark_type(payload)
+        if benchmark_type is not None and detected_benchmark_type is not None and detected_benchmark_type != benchmark_type:
+            print(
+                f"Warning: skipping {path.name} because benchmark_type '{detected_benchmark_type}' "
+                f"does not match requested benchmark_type '{benchmark_type}'."
+            )
+            continue
+        detected_task = payload_task(payload)
+        if detected_task is None and payload.get("benchmark_type") == "measure" and "task" not in payload:
+            print(
+                f"Warning: {path.name} has benchmark_type='measure' but no task field; "
+                f"attempting to parse as '{metric_cls.TASK}' for legacy compatibility."
+            )
+        if detected_task is not None and detected_task != metric_cls.TASK:
+            print(
+                f"Warning: skipping {path.name} because task '{detected_task}' "
+                f"does not match requested task '{metric_cls.TASK}'."
+            )
+            continue
+        model_id = payload.get("model_id")
+        if not isinstance(model_id, str) or not model_id:
+            model_id = payload.get("model")
         if not isinstance(model_id, str) or not model_id:
             continue
         metric = metric_cls.from_payload(payload)
         if metric is None:
+            status = payload.get("status")
+            if isinstance(status, str) and status:
+                reason = payload.get("reason", "")
+                print(
+                    f"Warning: skipping status-only payload {path} "
+                    f"(status={status}, reason={reason})."
+                )
             continue
-        norm_key = normalize_model_key(path, model_id)
+        norm_key = normalize_model_key(path, model_id, strip_owner=strip_owner)
         if norm_key not in normalized:
             normalized[norm_key] = metric
             normalized_sources[norm_key] = path
             continue
 
         original_path = normalized_sources[norm_key]
+        strip_hint = " with --strip-owner" if strip_owner else ""
         print(
             "Warning: duplicate normalized model key "
-            f"'{norm_key}' in {path}; keeping {original_path.name} and skipping {path.name}."
+            f"'{norm_key}'{strip_hint}; keeping source '{original_path}' and skipping duplicate source '{path}'."
         )
     return normalized
 
@@ -467,6 +646,162 @@ def render_charts(
         )
 
 
+def build_compare_plot_tables(
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> dict[str, str]:
+    """Build plot-specific Markdown tables for benchmark comparison summaries."""
+
+    tables: dict[str, str] = {}
+    for spec in metric_cls.TOKEN_SPECS:
+        table = _token_compare_table(
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            attr=spec.attr,
+        )
+        if table:
+            tables[spec.filename] = table
+    for spec in [*metric_cls.SCALAR_SPECS, *metric_cls.shared_scalar_specs()]:
+        table = _scalar_compare_table(
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+            attr=spec.attr,
+            unit_header=spec.x_label,
+        )
+        if table:
+            tables[spec.filename] = table
+    return tables
+
+
+def write_compare_markdown(
+    path: Path | str,
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> None:
+    """Write a combined Markdown table for benchmark comparison metrics."""
+
+    Path(path).write_text(
+        build_compare_markdown(
+            metric_cls=metric_cls,
+            models=models,
+            labels=labels,
+            metrics_by_folder=metrics_by_folder,
+        ),
+        encoding="utf-8",
+    )
+
+
+def build_compare_markdown(
+    *,
+    metric_cls: type[BaseCompareMetric],
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+) -> str:
+    """Build one wide Markdown table containing all comparable task metrics."""
+
+    headers: list[str] = ["Model"]
+    value_getters: list[tuple[int, str, int | None]] = []
+
+    for spec in metric_cls.TOKEN_SPECS:
+        for token in _tokens_for_attr(models=models, metrics_by_folder=metrics_by_folder, attr=spec.attr):
+            for folder_idx, label in enumerate(labels):
+                headers.append(f"{label} {spec.title} ({token} tokens)")
+                value_getters.append((folder_idx, spec.attr, token))
+    for spec in [*metric_cls.SCALAR_SPECS, *metric_cls.shared_scalar_specs()]:
+        for folder_idx, label in enumerate(labels):
+            headers.append(f"{label} {spec.title} ({spec.x_label})")
+            value_getters.append((folder_idx, spec.attr, None))
+
+    rows: list[list[Any]] = []
+    for model in models:
+        row: list[Any] = [model]
+        for folder_idx, attr, token in value_getters:
+            metric = metrics_by_folder[folder_idx][model]
+            row.append(_metric_value(metric, attr, token=token))
+        rows.append(row)
+    return markdown_table(headers, rows) if rows else "No common benchmark results found.\n"
+
+
+def _token_compare_table(
+    *,
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+) -> str:
+    """Build a Markdown table for one token-keyed comparison plot."""
+
+    tokens = _tokens_for_attr(models=models, metrics_by_folder=metrics_by_folder, attr=attr)
+    if not tokens:
+        return ""
+    headers = ["Model", *(f"{label} {token} tokens" for token in tokens for label in labels)]
+    rows = [
+        [
+            model,
+            *(
+                _metric_value(metrics_by_folder[folder_idx][model], attr, token=token)
+                for token in tokens
+                for folder_idx in range(len(labels))
+            ),
+        ]
+        for model in models
+    ]
+    return markdown_table(headers, rows)
+
+
+def _scalar_compare_table(
+    *,
+    models: Sequence[str],
+    labels: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+    unit_header: str,
+) -> str:
+    """Build a Markdown table for one scalar comparison plot."""
+
+    headers = ["Model", *(f"{label} {unit_header}" for label in labels)]
+    rows = [
+        [model, *(_metric_value(metrics_by_folder[folder_idx][model], attr) for folder_idx in range(len(labels)))]
+        for model in models
+    ]
+    return markdown_table(headers, rows)
+
+
+def _tokens_for_attr(
+    *,
+    models: Sequence[str],
+    metrics_by_folder: Sequence[Mapping[str, BaseCompareMetric]],
+    attr: str,
+) -> list[int]:
+    """Return sorted token keys available for one metric attribute."""
+
+    tokens: set[int] = set()
+    for model in models:
+        for folder_metrics in metrics_by_folder:
+            values = getattr(folder_metrics[model], attr)
+            if isinstance(values, Mapping):
+                tokens.update(int(token) for token in values if isinstance(token, int))
+    return sorted(tokens)
+
+
+def _metric_value(metric: BaseCompareMetric, attr: str, *, token: int | None = None) -> Any:
+    """Return a scalar or token-keyed metric value."""
+
+    value = getattr(metric, attr)
+    if token is None:
+        return value
+    return value.get(token) if isinstance(value, Mapping) else None
+
+
 __all__ = [
     "ASRCompareMetric",
     "BaseCompareMetric",
@@ -477,8 +812,13 @@ __all__ = [
     "VLMCompareMetric",
     "collect_metrics",
     "common_model_ids",
+    "build_compare_markdown",
+    "build_compare_plot_tables",
     "default_charts_dir",
     "folder_labels",
     "normalize_model_key",
+    "payload_benchmark_type",
+    "payload_task",
     "render_charts",
+    "write_compare_markdown",
 ]

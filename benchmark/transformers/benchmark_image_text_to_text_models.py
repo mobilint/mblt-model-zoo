@@ -69,13 +69,16 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    build_phase_trackers as _build_phase_trackers,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    energy_from_device_time_series as _energy_from_device_time_series,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_metric as _extract_device_metric,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_time_series as _extract_device_time_series,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     parse_positive_int as _parse_positive_int,
@@ -95,6 +98,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe,
 )
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    weighted_two as _weighted_two,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
     SweepData,
@@ -107,27 +113,29 @@ _VLM_WARMUP_DECODE = 32
 
 try:
     from benchmark_text_generation_models import (
-        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
         _is_cuda_oom_error,
+        _iter_core_modes_for_target,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
+        _target_sweep_lengths,
     )
 except ImportError:
     from .benchmark_text_generation_models import (
-        _add_batch_selection_args,
         _cuda_memory_info,
         _estimate_model_weight_bytes,
         _filter_text_targets_by_batch_mode,
         _format_gib,
         _is_cuda_oom_error,
+        _iter_core_modes_for_target,
         _iter_targets_from_mxq_dir,
         _read_raw_config,
         _should_precheck_cuda,
+        _target_sweep_lengths,
     )
 
 
@@ -141,6 +149,7 @@ class VLMBenchmarkTarget:
     base: str
     mxq_path: str | None
     max_batch_size: int
+    batch_mode: str
 
 
 def _safe_filename(text: str) -> str:
@@ -149,6 +158,36 @@ def _safe_filename(text: str) -> str:
 
 def _mean(values: list[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
+
+
+def _sum_required_energies(*energies: float | None) -> float | None:
+    """Return total energy only when every required phase was measured."""
+    if any(energy is None for energy in energies):
+        return None
+    return sum(float(energy) for energy in energies if energy is not None)
+
+
+def _vlm_llm_run_payload(run: Any) -> dict[str, Any]:
+    """Return a serialized VLM LLM run with dynamic phase energy fields."""
+    payload = asdict(run)
+    for key in (
+        "llm_prefill_energy_j",
+        "llm_decode_energy_j",
+        "llm_total_energy_j",
+        "vision_energy_j",
+        "total_energy_j",
+        "prefill_tps_per_w",
+        "decode_tps_per_w",
+        "prefill_j_per_token",
+        "decode_j_per_token",
+        "total_tps_per_w",
+        "total_j_per_token",
+    ):
+        payload[key] = getattr(run, key, None)
+    payload["llm_prefill_energy_j"] = getattr(run, "llm_prefill_energy_j", getattr(run, "prefill_energy_j", None))
+    payload["llm_decode_energy_j"] = getattr(run, "llm_decode_energy_j", getattr(run, "decode_energy_j", None))
+    return payload
+
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -178,6 +217,16 @@ def _summary(values: Sequence[float]) -> dict[str, float]:
     }
 
 
+def _sweep_prefill_token_count(result: BenchmarkResult, batch_size: int) -> int:
+    """Return the number of prefill tokens covered by a VLM LLM sweep."""
+    return sum(int(value) for value in result.prefill_sweep.x_values) * max(1, int(batch_size))
+
+
+def _sweep_decode_token_count(result: BenchmarkResult, *, decode_window: int, batch_size: int) -> int:
+    """Return the number of decode tokens covered by a VLM LLM sweep."""
+    return int(decode_window) * len(result.decode_sweep.x_values) * max(1, int(batch_size))
+
+
 def _vlm_warmup_llm_kwargs() -> dict[str, Any]:
     """Return the lightweight VLM LLM warmup dimensions."""
     return {
@@ -193,6 +242,7 @@ def _build_pipeline(
     revision: str | None,
     mxq_path: str | None,
     core_mode: str | None,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
 ):
     kwargs: dict[str, Any] = {
         "task": "image-text-to-text",
@@ -208,7 +258,11 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = _apply_vlm_core_mode_model_kwargs(model_kwargs, core_mode)
+    model_kwargs = _apply_vlm_core_mode_model_kwargs(
+        model_kwargs,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
     if model_kwargs:
@@ -223,7 +277,12 @@ def _build_pipeline(
     return hf_pipeline(**kwargs)
 
 
-def _apply_vlm_core_mode_model_kwargs(model_kwargs: dict[str, Any], core_mode: str | None) -> dict[str, Any]:
+def _apply_vlm_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    core_mode: str | None,
+    *,
+    default_single_target_cores: Sequence[str] | None = ("0:0",),
+) -> dict[str, Any]:
     """Apply shared VLM NPU core-mode kwargs to both vision and text sub-configs.
 
     Image-text-to-text Mobilint models use composite configs with separate ``vision_config`` and
@@ -240,7 +299,11 @@ def _apply_vlm_core_mode_model_kwargs(model_kwargs: dict[str, Any], core_mode: s
         The updated model kwargs.
     """
     expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(expanded, core_mode)
+    _apply_core_mode_model_kwargs_common(
+        expanded,
+        core_mode,
+        default_single_target_cores=default_single_target_cores,
+    )
 
     for prefix in ("vision", "text"):
         for key, value in expanded.items():
@@ -420,7 +483,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             runs.append(run)
             if tracker is not None:
                 metric = _extract_device_metric(tracker)
-                device_time_series_runs.append(_extract_device_time_series(tracker))
+                device_time_series = _extract_device_time_series(tracker)
+                device_time_series_runs.append(device_time_series)
                 avg_power = metric.get("avg_power_w")
                 p99_power = metric.get("p99_power_w")
                 avg_util = metric.get("avg_utilization_pct")
@@ -433,10 +497,13 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 p99_mem_pct = metric.get("p99_memory_used_pct")
                 if avg_power is not None:
                     power_vals.append(float(avg_power))
-                    energy = float(avg_power) * float(run[0])
+                energy = _energy_from_device_time_series(device_time_series)
+                if energy is not None:
                     energy_vals.append(energy)
-                    j_per_img_vals.append(energy)
-                    tpj = _safe_div(1.0, energy)
+                    j_per_img = _safe_div(energy, float(args.batch_size))
+                    if j_per_img is not None:
+                        j_per_img_vals.append(j_per_img)
+                    tpj = _safe_div(float(args.batch_size), energy)
                     if tpj is not None:
                         img_per_j_vals.append(tpj)
                 if p99_power is not None:
@@ -522,8 +589,8 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "avg_memory_used_pct": mem_pct_vals[idx - 1] if idx - 1 < len(mem_pct_vals) else None,
                     "p99_memory_used_pct": p99_mem_pct_vals[idx - 1] if idx - 1 < len(p99_mem_pct_vals) else None,
                     "total_energy_j": energy_vals[idx - 1] if idx - 1 < len(energy_vals) else None,
-                    "prefill_tok_per_j": None,
-                    "decode_tok_per_j": None,
+                    "prefill_tps_per_w": None,
+                    "decode_tps_per_w": None,
                     "prefill_j_per_tok": None,
                     "decode_j_per_tok": None,
                     "vision_img_per_j": img_per_j_vals[idx - 1] if idx - 1 < len(img_per_j_vals) else None,
@@ -542,19 +609,21 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_memory_used_mb: list[float] = []
     llm_avg_memory_used_pct: list[float] = []
     llm_p99_memory_used_pct: list[float] = []
+    llm_prefill_energy_j: list[float] = []
+    llm_decode_energy_j: list[float] = []
     llm_total_energy_j: list[float] = []
-    llm_prefill_tok_per_j: list[float] = []
-    llm_decode_tok_per_j: list[float] = []
+    vlm_total_energy_j: list[float] = []
+    llm_prefill_tps_per_w: list[float] = []
+    llm_decode_tps_per_w: list[float] = []
     llm_prefill_j_per_tok: list[float] = []
     llm_decode_j_per_tok: list[float] = []
-    llm_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+    llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for repeat_idx in tqdm(
         range(args.repeat),
         desc=f"{label} llm@{llm_resolution} runs",
         leave=False,
     ):
-        if tracker is not None:
-            tracker.start()
+        llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
@@ -566,36 +635,116 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 batch_size=args.batch_size,
                 show_progress=True,
                 progress_prefix=f"{label} llm@{llm_resolution} run {repeat_idx + 1}/{args.repeat}",
+                on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
+                on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
+                on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
+                on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
             )
         finally:
-            _stop_tracker_safe(tracker)
-        if tracker is not None:
-            metric = _extract_device_metric(tracker)
-            llm_device_time_series_runs.append(_extract_device_time_series(tracker))
-            run.avg_power_w = metric.get("avg_power_w")
-            run.p99_power_w = metric.get("p99_power_w")
-            run.avg_utilization_pct = metric.get("avg_utilization_pct")
-            run.p99_utilization_pct = metric.get("p99_utilization_pct")
-            run.avg_temperature_c = metric.get("avg_temperature_c")
-            run.p99_temperature_c = metric.get("p99_temperature_c")
-            run.avg_memory_used_mb = metric.get("avg_memory_used_mb")
-            run.p99_memory_used_mb = metric.get("p99_memory_used_mb")
-            run.avg_memory_used_pct = metric.get("avg_memory_used_pct")
-            run.p99_memory_used_pct = metric.get("p99_memory_used_pct")
-            if run.avg_power_w is not None:
-                total_time = float(run.prefill_phase_duration_s or 0.0) + float(run.decode_phase_duration_s or 0.0)
-                e = float(run.avg_power_w) * total_time
-                run.total_energy_j = e
-                decode_last_tps = float(run.decode_sweep.tps_values[-1]) if run.decode_sweep.tps_values else 0.0
-                prefill_last_tps = float(run.prefill_sweep.tps_values[-1]) if run.prefill_sweep.tps_values else 0.0
-                t1 = _safe_div(prefill_last_tps, float(run.avg_power_w))
-                t2 = _safe_div(decode_last_tps, float(run.avg_power_w))
-                j1 = _safe_div(1.0, t1) if t1 not in (None, 0) else None
-                j2 = _safe_div(1.0, t2) if t2 not in (None, 0) else None
-                run.prefill_tokens_per_j = t1
-                run.decode_tokens_per_j = t2
-                run.prefill_j_per_token = j1
-                run.decode_j_per_token = j2
+            _stop_tracker_safe(llm_tracker_prefill)
+            _stop_tracker_safe(llm_tracker_decode)
+        if llm_tracker_prefill is not None and llm_tracker_decode is not None:
+            prefill_metric = _extract_device_metric(llm_tracker_prefill)
+            decode_metric = _extract_device_metric(llm_tracker_decode)
+            prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+            decode_time_series = _extract_device_time_series(llm_tracker_decode)
+            llm_device_time_series_runs.append({"prefill": prefill_time_series, "decode": decode_time_series})
+            prefill_duration = float(getattr(run, "prefill_phase_duration_s", 0.0) or 0.0)
+            decode_duration = float(getattr(run, "decode_phase_duration_s", 0.0) or 0.0)
+            run.avg_power_w = _weighted_two(
+                prefill_metric.get("avg_power_w"),
+                prefill_duration,
+                decode_metric.get("avg_power_w"),
+                decode_duration,
+            )
+            run.p99_power_w = max(
+                [v for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w")) if v is not None],
+                default=None,
+            )
+            run.avg_utilization_pct = _weighted_two(
+                prefill_metric.get("avg_utilization_pct"),
+                prefill_duration,
+                decode_metric.get("avg_utilization_pct"),
+                decode_duration,
+            )
+            run.p99_utilization_pct = max(
+                [
+                    v
+                    for v in (prefill_metric.get("p99_utilization_pct"), decode_metric.get("p99_utilization_pct"))
+                    if v is not None
+                ],
+                default=None,
+            )
+            run.avg_temperature_c = _weighted_two(
+                prefill_metric.get("avg_temperature_c"),
+                prefill_duration,
+                decode_metric.get("avg_temperature_c"),
+                decode_duration,
+            )
+            run.p99_temperature_c = max(
+                [
+                    v
+                    for v in (prefill_metric.get("p99_temperature_c"), decode_metric.get("p99_temperature_c"))
+                    if v is not None
+                ],
+                default=None,
+            )
+            run.avg_memory_used_mb = _weighted_two(
+                prefill_metric.get("avg_memory_used_mb"),
+                prefill_duration,
+                decode_metric.get("avg_memory_used_mb"),
+                decode_duration,
+            )
+            run.p99_memory_used_mb = max(
+                [
+                    v
+                    for v in (prefill_metric.get("p99_memory_used_mb"), decode_metric.get("p99_memory_used_mb"))
+                    if v is not None
+                ],
+                default=None,
+            )
+            run.avg_memory_used_pct = _weighted_two(
+                prefill_metric.get("avg_memory_used_pct"),
+                prefill_duration,
+                decode_metric.get("avg_memory_used_pct"),
+                decode_duration,
+            )
+            run.p99_memory_used_pct = max(
+                [
+                    v
+                    for v in (prefill_metric.get("p99_memory_used_pct"), decode_metric.get("p99_memory_used_pct"))
+                    if v is not None
+                ],
+                default=None,
+            )
+            prefill_energy = _energy_from_device_time_series(prefill_time_series)
+            decode_energy = _energy_from_device_time_series(decode_time_series)
+            total_energy = _sum_required_energies(prefill_energy, decode_energy)
+            run.llm_prefill_energy_j = prefill_energy
+            run.llm_decode_energy_j = decode_energy
+            run.llm_total_energy_j = total_energy
+            run.total_energy_j = total_energy
+            if prefill_energy is not None:
+                llm_prefill_energy_j.append(prefill_energy)
+            if decode_energy is not None:
+                llm_decode_energy_j.append(decode_energy)
+            if total_energy is not None:
+                llm_total_energy_j.append(total_energy)
+                prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
+                decode_tokens = _sweep_decode_token_count(
+                    run,
+                    decode_window=args.decode_window,
+                    batch_size=args.batch_size,
+                )
+                total_tokens = prefill_tokens + decode_tokens
+                run.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
+                run.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
+                run.prefill_j_per_token = (
+                    _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+                )
+                run.decode_j_per_token = _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
+                run.total_tps_per_w = _safe_div(float(total_tokens), total_energy)
+                run.total_j_per_token = _safe_div(total_energy, float(total_tokens)) if total_tokens > 0 else None
         llm_runs.append(run)
     llm_prefill = [float(r.prefill_sweep.tps_values[-1]) for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]
@@ -642,12 +791,34 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_p99_memory_used_mb = [float(r.p99_memory_used_mb) for r in llm_runs if r.p99_memory_used_mb is not None]
     llm_avg_memory_used_pct = [float(r.avg_memory_used_pct) for r in llm_runs if r.avg_memory_used_pct is not None]
     llm_p99_memory_used_pct = [float(r.p99_memory_used_pct) for r in llm_runs if r.p99_memory_used_pct is not None]
-    llm_total_energy_j = [float(r.total_energy_j) for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
-    llm_prefill_tok_per_j = [
-        float(r.prefill_tokens_per_j) for r in llm_runs if getattr(r, "prefill_tokens_per_j", None) is not None
+    reference_vision_energy_j = None
+    for row in vision_results:
+        if row.get("image_resolution") != llm_resolution:
+            continue
+        value = row.get("summary", {}).get("total_energy_j", {}).get("mean")
+        if isinstance(value, (int, float)):
+            reference_vision_energy_j = float(value)
+        break
+    for run in llm_runs:
+        llm_only_energy = getattr(run, "llm_total_energy_j", getattr(run, "total_energy_j", None))
+        run.llm_total_energy_j = llm_only_energy
+        run.vision_energy_j = reference_vision_energy_j
+        run.total_energy_j = _sum_required_energies(reference_vision_energy_j, llm_only_energy)
+    llm_prefill_energy_j = [
+        float(r.llm_prefill_energy_j) for r in llm_runs if getattr(r, "llm_prefill_energy_j", None) is not None
     ]
-    llm_decode_tok_per_j = [
-        float(r.decode_tokens_per_j) for r in llm_runs if getattr(r, "decode_tokens_per_j", None) is not None
+    llm_decode_energy_j = [
+        float(r.llm_decode_energy_j) for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None
+    ]
+    llm_total_energy_j = [
+        float(r.llm_total_energy_j) for r in llm_runs if getattr(r, "llm_total_energy_j", None) is not None
+    ]
+    vlm_total_energy_j = [float(r.total_energy_j) for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
+    llm_prefill_tps_per_w = [
+        float(r.prefill_tps_per_w) for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
+    ]
+    llm_decode_tps_per_w = [
+        float(r.decode_tps_per_w) for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None
     ]
     llm_prefill_j_per_tok = [
         float(r.prefill_j_per_token) for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None
@@ -690,9 +861,13 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_memory_used_mb": r.p99_memory_used_mb,
                     "avg_memory_used_pct": r.avg_memory_used_pct,
                     "p99_memory_used_pct": r.p99_memory_used_pct,
+                    "vision_energy_j": getattr(r, "vision_energy_j", None),
+                    "llm_prefill_energy_j": getattr(r, "llm_prefill_energy_j", None),
+                    "llm_decode_energy_j": getattr(r, "llm_decode_energy_j", None),
+                    "llm_total_energy_j": getattr(r, "llm_total_energy_j", None),
                     "total_energy_j": getattr(r, "total_energy_j", None),
-                    "prefill_tok_per_j": getattr(r, "prefill_tokens_per_j", None),
-                    "decode_tok_per_j": getattr(r, "decode_tokens_per_j", None),
+                    "prefill_tps_per_w": getattr(r, "prefill_tps_per_w", None),
+                    "decode_tps_per_w": getattr(r, "decode_tps_per_w", None),
                     "prefill_j_per_tok": getattr(r, "prefill_j_per_token", None),
                     "decode_j_per_tok": getattr(r, "decode_j_per_token", None),
                     "vision_img_per_j": None,
@@ -730,7 +905,7 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                 "vision_j_per_img": _summary(all_vision_j_per_img),
             },
             "llm_results": {
-                "runs": [asdict(r) for r in llm_runs],
+                "runs": [_vlm_llm_run_payload(r) for r in llm_runs],
                 "device_time_series_runs": llm_device_time_series_runs,
                 "summary": {
                     "llm_prefill_tps": _summary(llm_prefill),
@@ -750,9 +925,15 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
                     "p99_memory_used_mb": _summary(llm_p99_memory_used_mb),
                     "avg_memory_used_pct": _summary(llm_avg_memory_used_pct),
                     "p99_memory_used_pct": _summary(llm_p99_memory_used_pct),
-                    "total_energy_j": _summary(llm_total_energy_j),
-                    "prefill_tok_per_j": _summary(llm_prefill_tok_per_j),
-                    "decode_tok_per_j": _summary(llm_decode_tok_per_j),
+                    "llm_prefill_energy_j": _summary(llm_prefill_energy_j),
+                    "llm_decode_energy_j": _summary(llm_decode_energy_j),
+                    "llm_total_energy_j": _summary(llm_total_energy_j),
+                    "vision_energy_j": _summary(
+                        [reference_vision_energy_j] if reference_vision_energy_j is not None else []
+                    ),
+                    "total_energy_j": _summary(vlm_total_energy_j),
+                    "prefill_tps_per_w": _summary(llm_prefill_tps_per_w),
+                    "decode_tps_per_w": _summary(llm_decode_tps_per_w),
                     "prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
                     "decode_j_per_tok": _summary(llm_decode_j_per_tok),
                 },
@@ -769,11 +950,15 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             "p99_memory_used_mb": max(llm_p99_memory_used_mb) if llm_p99_memory_used_mb else None,
             "avg_memory_used_pct": _mean(llm_avg_memory_used_pct),
             "p99_memory_used_pct": max(llm_p99_memory_used_pct) if llm_p99_memory_used_pct else None,
-            "total_energy_j": _mean(llm_total_energy_j),
+            "vision_energy_j": reference_vision_energy_j,
+            "llm_prefill_energy_j": _mean(llm_prefill_energy_j) if llm_prefill_energy_j else None,
+            "llm_decode_energy_j": _mean(llm_decode_energy_j) if llm_decode_energy_j else None,
+            "llm_total_energy_j": _mean(llm_total_energy_j) if llm_total_energy_j else None,
+            "total_energy_j": _mean(vlm_total_energy_j) if vlm_total_energy_j else None,
             "prefill_tps_last": llm_prefill[-1] if llm_prefill else None,
             "decode_tps_last": llm_decode[-1] if llm_decode else None,
-            "prefill_tok_per_j_last": llm_prefill_tok_per_j[-1] if llm_prefill_tok_per_j else None,
-            "decode_tok_per_j_last": llm_decode_tok_per_j[-1] if llm_decode_tok_per_j else None,
+            "prefill_tps_per_w_last": llm_prefill_tps_per_w[-1] if llm_prefill_tps_per_w else None,
+            "decode_tps_per_w_last": llm_decode_tps_per_w[-1] if llm_decode_tps_per_w else None,
             "prefill_j_per_tok_last": llm_prefill_j_per_tok[-1] if llm_prefill_j_per_tok else None,
             "decode_j_per_tok_last": llm_decode_j_per_tok[-1] if llm_decode_j_per_tok else None,
             "vision_avg_power_w": _mean(all_vision_avg_power_w),
@@ -823,9 +1008,9 @@ def _benchmark_result_from_vlm_run(payload: Mapping[str, Any]) -> BenchmarkResul
         avg_memory_used_pct=payload.get("avg_memory_used_pct"),
         p99_memory_used_pct=payload.get("p99_memory_used_pct"),
         total_energy_j=payload.get("total_energy_j"),
-        prefill_tokens_per_j=payload.get("prefill_tokens_per_j"),
+        prefill_tps_per_w=payload.get("prefill_tps_per_w"),
         prefill_j_per_token=payload.get("prefill_j_per_token"),
-        decode_tokens_per_j=payload.get("decode_tokens_per_j"),
+        decode_tps_per_w=payload.get("decode_tps_per_w"),
         decode_j_per_token=payload.get("decode_j_per_token"),
     )
 
@@ -898,8 +1083,8 @@ def _vlm_metrics_from_result(payload: Mapping[str, Any], result: BenchmarkResult
             result.decode_sweep,
             [value * 1000.0 for value in result.decode_sweep.time_values],
         ),
-        prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
-        decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+        prefill_tps_per_w=_as_float(device.get("prefill_tps_per_w_last")),
+        decode_tps_per_w=_as_float(device.get("decode_tps_per_w_last")),
         prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
         decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
         avg_power_w=_as_float(device.get("avg_power_w")),
@@ -920,12 +1105,12 @@ def _as_float(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def _rebuild_combined(results_dir: Path) -> None:
+def _rebuild_combined(output_dir: Path) -> None:
     llm_rows: list[dict[str, Any]] = []
     device_rows: list[dict[str, Any]] = []
     vision_rows: list[dict[str, Any]] = []
     metrics_by_model: dict[str, ModelMetrics] = {}
-    for path in sorted(results_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -962,14 +1147,14 @@ def _rebuild_combined(results_dir: Path) -> None:
                     "vision_j_per_img_mean": s.get("vision_j_per_img", {}).get("mean"),
                 }
             )
-    BenchmarkResult.write_combined_csv(str(results_dir / "combined.csv"), llm_rows)
-    BenchmarkResult.write_combined_csv(str(results_dir / "combined_llm.csv"), llm_rows)
-    _write_csv(results_dir / "combined_vision.csv", vision_rows)
-    _write_csv(results_dir / "combined_device.csv", device_rows)
+    BenchmarkResult.write_combined_csv(str(output_dir / "combined.csv"), llm_rows)
+    BenchmarkResult.write_combined_csv(str(output_dir / "combined_llm.csv"), llm_rows)
+    _write_csv(output_dir / "combined_vision.csv", vision_rows)
+    _write_csv(output_dir / "combined_device.csv", device_rows)
     if not llm_rows:
-        _write_vlm_summary(results_dir)
+        _write_vlm_summary(output_dir)
         return
-    _write_token_combined_markdown(results_dir / "combined.md", llm_rows, device_rows)
+    _write_token_combined_markdown(output_dir / "combined.md", llm_rows, device_rows)
     if metrics_by_model:
         models = sorted(metrics_by_model.keys())
         labels = ["benchmark"]
@@ -981,7 +1166,7 @@ def _rebuild_combined(results_dir: Path) -> None:
             token_selector=lambda metric: metric.prefill_tps,
             title="Prefill Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=results_dir / "llm_prefill_tps.png",
+            output_path=output_dir / "llm_prefill_tps.png",
         )
         plot_token_chart(
             models=models,
@@ -990,20 +1175,20 @@ def _rebuild_combined(results_dir: Path) -> None:
             token_selector=lambda metric: metric.decode_tps,
             title="Decode Tokens Per Second",
             x_label="Tokens Per Second",
-            output_path=results_dir / "llm_decode_tps.png",
+            output_path=output_dir / "llm_decode_tps.png",
         )
         scalar_specs = [
             (
-                "llm_prefill_tokens_per_j.png",
-                "Prefill Tokens Per Joule",
-                "Tokens Per Joule",
-                lambda m: m.prefill_tokens_per_j,
+                "llm_prefill_tps_per_w.png",
+                "Prefill TPS/W",
+                "TPS/W",
+                lambda m: m.prefill_tps_per_w,
             ),
             (
-                "llm_decode_tokens_per_j.png",
-                "Decode Tokens Per Joule",
-                "Tokens Per Joule",
-                lambda m: m.decode_tokens_per_j,
+                "llm_decode_tps_per_w.png",
+                "Decode TPS/W",
+                "TPS/W",
+                lambda m: m.decode_tps_per_w,
             ),
             ("avg_power_w.png", "Power", "Power (Watts)", lambda m: m.avg_power_w),
             ("avg_temperature_c.png", "Temperature", "Temperature (Celsius)", lambda m: m.avg_temperature_c),
@@ -1024,24 +1209,24 @@ def _rebuild_combined(results_dir: Path) -> None:
                 scalar_selector=selector,
                 title=title,
                 x_label=x_label,
-                output_path=results_dir / filename,
+                output_path=output_dir / filename,
             )
-    _write_vlm_summary(results_dir)
+    _write_vlm_summary(output_dir)
 
 
-def _write_vlm_summary(results_dir: Path, *, measure: bool = False) -> None:
+def _write_vlm_summary(output_dir: Path, *, measure: bool = False) -> None:
     """Write an image-text-to-text benchmark summary Markdown with host info, plots, and table."""
     table_name = "combined_measure.md" if measure else "combined.md"
     summary_name = "summary_measure.md" if measure else "summary.md"
     title = "Image Text-to-Text Measure Benchmark Summary" if measure else "Image Text-to-Text Benchmark Summary"
     prefixes = ("measure_",) if measure else None
-    plot_tables = _build_vlm_plot_tables(results_dir, measure=measure)
+    plot_tables = _build_vlm_plot_tables(output_dir, measure=measure)
     _write_summary_markdown(
-        results_dir / summary_name,
+        output_dir / summary_name,
         title=title,
-        host_info_path=results_dir / _HOST_PC_INFO_FILENAME,
-        table_markdown_path=results_dir / table_name,
-        plot_paths=_existing_png_paths(results_dir, prefixes=prefixes),
+        host_info_path=output_dir / _HOST_PC_INFO_FILENAME,
+        table_markdown_path=output_dir / table_name,
+        plot_paths=_existing_png_paths(output_dir, prefixes=prefixes),
         plot_tables=plot_tables,
     )
 
@@ -1083,9 +1268,24 @@ def _plot_model(payload: dict[str, Any], output_path: Path) -> None:
 def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by image-text-to-text benchmark subcommands."""
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    _add_batch_selection_args(parser)
     _add_device_tracking_args(parser)
-    parser.add_argument("--model", default=None, help="single model id to benchmark (optional)")
+    batch_group = parser.add_mutually_exclusive_group()
+    batch_group.add_argument(
+        "--batch",
+        dest="batch_mode",
+        action="store_const",
+        const="batch",
+        default="non_batch",
+        help="benchmark only batch-capable model targets",
+    )
+    batch_group.add_argument(
+        "--non-batch",
+        dest="batch_mode",
+        action="store_const",
+        const="non_batch",
+        help="benchmark only non-batch model targets (default)",
+    )
+    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only (skip main)")
@@ -1132,7 +1332,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--skip-existing", action="store_true", help="skip models with existing outputs")
     parser.add_argument("--rebuild-charts", action="store_true", help="skip benchmark run and rebuild combined outputs")
     parser.add_argument(
-        "--results-dir",
+        "--output-dir",
         default=None,
         help="output directory (default: benchmark/transformers/results/image_text_to_text)",
     )
@@ -1203,13 +1403,13 @@ def _flag_present(raw_argv: list[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
 
 
-def _resolve_batch_core_mode(args: argparse.Namespace, *, core_mode_explicit: bool) -> None:
-    """Apply the single-core constraint for batch LLM benchmarks."""
-    if args.batch_mode != "batch":
-        return
-    if core_mode_explicit and args.core_mode != "single":
-        raise SystemExit("--batch only supports --core-mode single for batch LLM benchmarks.")
-    args.core_mode = "single"
+def _default_single_target_cores_for_batch_mode(batch_mode: str) -> Sequence[str] | None:
+    """Return the default single-mode target cores for one resolved target batch mode."""
+    if isinstance(batch_mode, argparse.Namespace):
+        batch_mode = str(getattr(batch_mode, "batch_mode", "non_batch"))
+    if batch_mode == "batch":
+        return None
+    return ("0:0",)
 
 
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> None:
@@ -1217,13 +1417,20 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
     core_mode_explicit = _flag_present(raw_argv, "--core-mode")
+    first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
+    if args.batch_mode == "batch":
+        if core_mode_explicit and args.core_mode != "single":
+            raise SystemExit("batch benchmark only supports --core-mode single")
+        args.core_mode = "single"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
@@ -1233,17 +1440,17 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     args.device_backend = _resolve_default_device_backend_common(
         device_backend=args.device_backend,
         device_backend_explicit=device_backend_explicit,
-        model_id=args.model,
+        model_id=first_model_id,
         mxq_path=args.mxq_path,
         mxq_dir=args.mxq_dir,
         original_models=args.original_models,
     )
     if not device_backend_explicit:
-        if args.model or args.mxq_path or args.mxq_dir:
+        if first_model_id or args.mxq_path or args.mxq_dir:
             print(f"Auto-set --device-backend={args.device_backend} (based on target/device policy)")
         else:
             print("Auto-set --device-backend per target (based on target/device policy)")
-    _resolve_batch_core_mode(args, core_mode_explicit=core_mode_explicit)
+    args._raw_argv = list(raw_argv)
 
 
 def _args_for_target_device_backend(
@@ -1257,6 +1464,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -1276,18 +1484,17 @@ def _run_sweep(args: argparse.Namespace) -> int:
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
         print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.rebuild_charts:
-        _rebuild_combined(results_dir)
+        _rebuild_combined(output_dir)
         return 0
 
-    _collect_host_pc_info(results_dir)
+    _collect_host_pc_info(output_dir)
 
     available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
     if not available_model_ids:
@@ -1298,7 +1505,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.model or args.original_models or args.all or args.revision:
+        if args.models or args.original_models or args.all or args.revision:
             print(
                 "Note: --mxq-dir is set, so --model/--original-models/--all/--revision are ignored "
                 "(revision and mxq_path are taken from filename)."
@@ -1309,8 +1516,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        if args.model:
-            model_ids = [str(args.model)]
+        if args.models:
+            model_ids = [str(item) for item in args.models]
         else:
             model_ids = available_model_ids
         if args.original_models:
@@ -1331,6 +1538,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             base=target.base,
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
+            batch_mode=target.batch_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
@@ -1338,10 +1546,20 @@ def _run_sweep(args: argparse.Namespace) -> int:
             task="image-text-to-text",
         )
     ]
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    run_targets: list[
+        tuple[str, str | None, str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+    ] = []
     for target in targets:
-        for core_mode in core_modes:
+        target_prefill_range, target_cache_lengths = _target_sweep_lengths(
+            args,
+            getattr(args, "_raw_argv", []),
+            target.batch_mode,
+        )
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1352,20 +1570,34 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
+                    target_prefill_range,
+                    target_cache_lengths,
                 )
             )
 
-    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
+    for (
+        model_id,
+        revision,
+        label,
+        base,
+        target_mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        prefill_range,
+        cache_lengths,
+    ) in tqdm(
         run_targets,
         desc="Benchmarking VLM models",
         unit="model-mode",
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
-        json_path = results_dir / f"{base}.json"
-        csv_path = results_dir / f"{base}.csv"
-        png_path = results_dir / f"{base}.png"
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
+        json_path = output_dir / f"{base}.json"
+        csv_path = output_dir / f"{base}.csv"
+        png_path = output_dir / f"{base}.png"
         if args.skip_existing and json_path.is_file() and csv_path.is_file() and png_path.is_file():
             print(f"Skipping {label} (results exist).")
             continue
@@ -1373,9 +1605,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if not artifacts_available:
             print(f"Skipping {label} ({skip_reason}).")
             continue
-        if _should_precheck_cuda(args):
+        if _should_precheck_cuda(target_args):
             estimated = _estimate_model_weight_bytes(model_id, revision)
-            mem_info = _cuda_memory_info(args.device)
+            mem_info = _cuda_memory_info(target_args.device)
             if estimated is not None and mem_info is not None:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
@@ -1385,12 +1617,22 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         f"free={_format_gib(free_b)} required~={_format_gib(required)} "
                         f"estimated_weights={_format_gib(estimated)}"
                     )
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
+            pipeline = _build_pipeline(
+                target_args,
+                model_id,
+                revision,
+                target_mxq_path,
+                core_mode,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+            )
             target_args.batch_size = batch_size
+            target_args.batch_mode = batch_mode
+            target_args.prefill_range = prefill_range
+            target_args.cache_lengths = cache_lengths
             payload, rows = _run_model(target_args, label, pipeline)
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
@@ -1402,27 +1644,27 @@ def _run_sweep(args: argparse.Namespace) -> int:
             else:
                 print(f"Skipping {label} (benchmark failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
+            _release_pipeline(pipeline, target_args.device)
 
-    _rebuild_combined(results_dir)
+    _rebuild_combined(output_dir)
     return 0
 
 
 def _collect_vlm_run_targets(
     args: argparse.Namespace,
-) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int]]]:
+) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int, str]]]:
     """Resolve image-text-to-text benchmark targets and core-mode expansion."""
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     available_model_ids: list[str] | None = None
-    if args.mxq_dir or not args.model:
+    if args.mxq_dir or not args.models:
         available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
         if not available_model_ids:
             print("No image-text-to-text models found.")
-            return results_dir, False, []
+            return output_dir, False, []
     raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = []
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
@@ -1434,13 +1676,12 @@ def _collect_vlm_run_targets(
         ):
             raw_targets.append((model_id, rev_candidates, label, base, target_mxq_path))
     else:
-        model_ids = [str(args.model)] if args.model else (available_model_ids or [])
+        model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
         if args.original_models:
             model_ids = _resolve_original_model_ids(model_ids)
         for model_id, revision, label, base in _iter_targets(model_ids, args.revision, args.all):
             raw_targets.append((model_id, [revision], label, base, args.mxq_path))
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    _resolve_batch_core_mode(args, core_mode_explicit=bool(getattr(args, "_core_mode_explicit", False)))
     targets = [
         VLMBenchmarkTarget(
             model_id=target.model_id,
@@ -1449,6 +1690,7 @@ def _collect_vlm_run_targets(
             base=target.base,
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
+            batch_mode=target.batch_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
@@ -1456,10 +1698,13 @@ def _collect_vlm_run_targets(
             task="image-text-to-text",
         )
     ]
-    core_modes = [None] if disable_npu_specific_args else _iter_core_modes_common(args.core_mode)
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int]] = []
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int, str]] = []
     for target in targets:
-        for core_mode in core_modes:
+        for core_mode in _iter_core_modes_for_target(
+            args,
+            target.batch_mode,
+            disable_npu_specific_args=disable_npu_specific_args,
+        ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
                 (
@@ -1470,9 +1715,10 @@ def _collect_vlm_run_targets(
                     target.mxq_path,
                     core_mode,
                     target.max_batch_size,
+                    target.batch_mode,
                 )
             )
-    return results_dir, disable_npu_specific_args, run_targets
+    return output_dir, disable_npu_specific_args, run_targets
 
 
 def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1500,9 +1746,13 @@ def _collect_measure_rows(payloads: list[dict[str, Any]]) -> list[dict[str, Any]
                 "avg_temperature_c": device.get("avg_temperature_c"),
                 "avg_utilization_pct": device.get("avg_utilization_pct"),
                 "avg_memory_used_mb": device.get("avg_memory_used_mb"),
+                "vision_energy_j": device.get("vision_energy_j"),
+                "llm_prefill_energy_j": device.get("llm_prefill_energy_j"),
+                "llm_decode_energy_j": device.get("llm_decode_energy_j"),
+                "llm_total_energy_j": device.get("llm_total_energy_j"),
                 "total_energy_j": device.get("total_energy_j"),
-                "llm_prefill_tok_per_j_mean": device.get("llm_prefill_tok_per_j"),
-                "llm_decode_tok_per_j_mean": device.get("llm_decode_tok_per_j"),
+                "llm_prefill_tps_per_w_mean": device.get("llm_prefill_tps_per_w"),
+                "llm_decode_tps_per_w_mean": device.get("llm_decode_tps_per_w"),
                 "vision_img_per_j_mean": device.get("vision_img_per_j"),
             }
         )
@@ -1557,20 +1807,20 @@ def _scalar_plot_table(rows: Sequence[Mapping[str, Any]], *, value_key: str, uni
     return _scalar_plot_table_common(rows, value_key=value_key, unit_header=unit_header)
 
 
-def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[str, str]:
+def _build_vlm_plot_tables(output_dir: Path, *, measure: bool = False) -> dict[str, str]:
     """Build plot-specific Markdown tables for VLM summaries."""
-    rows = _read_csv_rows(results_dir / ("combined_measure.csv" if measure else "combined_device.csv"))
+    rows = _read_csv_rows(output_dir / ("combined_measure.csv" if measure else "combined_device.csv"))
     prefix = "measure_" if measure else ""
     if not measure:
-        metrics_by_model = _collect_vlm_combined_metrics(results_dir)
+        metrics_by_model = _collect_vlm_combined_metrics(output_dir)
         models = sorted(metrics_by_model.keys())
         tables = {
             "llm_prefill_tps.png": _token_sweep_plot_table_common(models, metrics_by_model, value_key="prefill_tps"),
             "llm_decode_tps.png": _token_sweep_plot_table_common(models, metrics_by_model, value_key="decode_tps"),
         }
         scalar_specs = [
-            ("llm_prefill_tokens_per_j.png", "prefill_tokens_per_j", "tokens/J"),
-            ("llm_decode_tokens_per_j.png", "decode_tokens_per_j", "tokens/J"),
+            ("llm_prefill_tps_per_w.png", "prefill_tps_per_w", "TPS/W"),
+            ("llm_decode_tps_per_w.png", "decode_tps_per_w", "TPS/W"),
             ("avg_power_w.png", "avg_power_w", "W"),
             ("avg_temperature_c.png", "avg_temperature_c", "°C"),
             ("avg_utilization_pct.png", "avg_utilization_pct", "%"),
@@ -1584,13 +1834,17 @@ def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[
 
     specs = [
         (f"{prefix}llm_prefill_tps.png", "llm_prefill_tps_mean", "tokens/s"),
-        (f"{prefix}llm_prefill_tokens_per_j.png", "llm_prefill_tok_per_j_mean", "tokens/J"),
+        (f"{prefix}llm_prefill_tps_per_w.png", "llm_prefill_tps_per_w_mean", "TPS/W"),
         (f"{prefix}llm_decode_tps.png", "llm_decode_tps_mean", "tokens/s"),
-        (f"{prefix}llm_decode_tokens_per_j.png", "llm_decode_tok_per_j_mean", "tokens/J"),
+        (f"{prefix}llm_decode_tps_per_w.png", "llm_decode_tps_per_w_mean", "TPS/W"),
         (f"{prefix}avg_power_w.png", "avg_power_w", "W"),
         (f"{prefix}avg_temperature_c.png", "avg_temperature_c", "°C"),
         (f"{prefix}avg_utilization_pct.png", "avg_utilization_pct", "%"),
         (f"{prefix}avg_memory_used_mb.png", "avg_memory_used_mb", "MB"),
+        (f"{prefix}vision_energy_j.png", "vision_energy_j", "J"),
+        (f"{prefix}llm_prefill_energy_j.png", "llm_prefill_energy_j", "J"),
+        (f"{prefix}llm_decode_energy_j.png", "llm_decode_energy_j", "J"),
+        (f"{prefix}llm_total_energy_j.png", "llm_total_energy_j", "J"),
         (f"{prefix}total_energy_j.png", "total_energy_j", "J"),
     ]
     if not rows:
@@ -1602,10 +1856,10 @@ def _build_vlm_plot_tables(results_dir: Path, *, measure: bool = False) -> dict[
     }
 
 
-def _collect_vlm_combined_metrics(results_dir: Path) -> dict[str, ModelMetrics]:
+def _collect_vlm_combined_metrics(output_dir: Path) -> dict[str, ModelMetrics]:
     """Collect VLM token-sweep metrics from JSON result files."""
     metrics: dict[str, ModelMetrics] = {}
-    for path in sorted(results_dir.glob("*.json")):
+    for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -1629,41 +1883,45 @@ def _collect_vlm_combined_metrics(results_dir: Path) -> dict[str, ModelMetrics]:
     return metrics
 
 
-def _rebuild_measure_outputs(results_dir: Path) -> None:
+def _rebuild_measure_outputs(output_dir: Path) -> None:
     """Rebuild VLM measure combined outputs."""
     payloads: list[dict[str, Any]] = []
-    for path in sorted(results_dir.glob("*_measure.json")):
+    for path in sorted(output_dir.glob("*_measure.json")):
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
     if not payloads:
         print("No measure JSON results found. Nothing to aggregate.")
-        _write_vlm_summary(results_dir, measure=True)
+        _write_vlm_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
-    _write_csv(results_dir / "combined_measure.csv", rows)
-    _write_measure_markdown(results_dir / "combined_measure.md", rows)
+    _write_csv(output_dir / "combined_measure.csv", rows)
+    _write_measure_markdown(output_dir / "combined_measure.md", rows)
     models = [str(row["model"]) for row in rows]
     chart_specs = [
         ("measure_llm_prefill_tps.png", "llm_prefill_tps_mean", "Tokens Per Second", "Prefill Tokens Per Second"),
         (
-            "measure_llm_prefill_tokens_per_j.png",
-            "llm_prefill_tok_per_j_mean",
-            "Tokens Per Joule",
-            "Prefill Tokens Per Joule",
+            "measure_llm_prefill_tps_per_w.png",
+            "llm_prefill_tps_per_w_mean",
+            "TPS/W",
+            "Prefill TPS/W",
         ),
         ("measure_llm_decode_tps.png", "llm_decode_tps_mean", "Tokens Per Second", "Decode Tokens Per Second"),
         (
-            "measure_llm_decode_tokens_per_j.png",
-            "llm_decode_tok_per_j_mean",
-            "Tokens Per Joule",
-            "Decode Tokens Per Joule",
+            "measure_llm_decode_tps_per_w.png",
+            "llm_decode_tps_per_w_mean",
+            "TPS/W",
+            "Decode TPS/W",
         ),
         ("measure_avg_power_w.png", "avg_power_w", "Power (Watts)", "Power"),
         ("measure_avg_temperature_c.png", "avg_temperature_c", "Temperature (Celsius)", "Temperature"),
         ("measure_avg_utilization_pct.png", "avg_utilization_pct", "Utilization (Percent)", "Utilization"),
         ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used (Megabytes)", "Memory Used Megabytes"),
+        ("measure_vision_energy_j.png", "vision_energy_j", "Energy (Joules)", "Vision Energy"),
+        ("measure_llm_prefill_energy_j.png", "llm_prefill_energy_j", "Energy (Joules)", "LLM Prefill Energy"),
+        ("measure_llm_decode_energy_j.png", "llm_decode_energy_j", "Energy (Joules)", "LLM Decode Energy"),
+        ("measure_llm_total_energy_j.png", "llm_total_energy_j", "Energy (Joules)", "LLM Total Energy"),
         ("measure_total_energy_j.png", "total_energy_j", "Energy (Joules)", "Total Energy"),
     ]
     for filename, key, x_label, title in chart_specs:
@@ -1672,39 +1930,40 @@ def _rebuild_measure_outputs(results_dir: Path) -> None:
             values=[float(row.get(key) or 0.0) for row in rows],
             x_label=x_label,
             title=title,
-            output_path=results_dir / filename,
+            output_path=output_dir / filename,
         )
-    _write_vlm_summary(results_dir, measure=True)
+    _write_vlm_summary(output_dir, measure=True)
 
 
-def _resolve_vlm_results_dir(args: argparse.Namespace) -> Path:
-    """Resolve and create the image-text-to-text benchmark results directory."""
+def _resolve_vlm_output_dir(args: argparse.Namespace) -> Path:
+    """Resolve and create the image-text-to-text benchmark output directory."""
     script_dir = Path(__file__).resolve().parent
-    results_dir = (
-        Path(args.results_dir).resolve() if args.results_dir else script_dir / "results" / "image_text_to_text"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     )
-    results_dir.mkdir(parents=True, exist_ok=True)
-    return results_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def _run_measure(args: argparse.Namespace) -> int:
     """Run multi-model image-text-to-text fixed image/prefill/decode benchmarks."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     if args.rebuild_charts:
-        _rebuild_measure_outputs(_resolve_vlm_results_dir(args))
+        _rebuild_measure_outputs(_resolve_vlm_output_dir(args))
         return 0
-    results_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
+    output_dir, disable_npu_specific_args, run_targets = _collect_vlm_run_targets(args)
     if not run_targets:
         return 0
-    _collect_host_pc_info(results_dir)
-    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size in tqdm(
+    _collect_host_pc_info(output_dir)
+    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
         target_args.batch_size = batch_size
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
-        json_path = results_dir / f"{base}_measure.json"
+        target_args.batch_mode = batch_mode
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
+        json_path = output_dir / f"{base}_measure.json"
         if args.skip_existing and json_path.is_file():
             print(f"Skipping {label} (measure result exists).")
             continue
@@ -1714,7 +1973,14 @@ def _run_measure(args: argparse.Namespace) -> int:
             continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(args, model_id, revision, target_mxq_path, core_mode)
+            pipeline = _build_pipeline(
+                target_args,
+                model_id,
+                revision,
+                target_mxq_path,
+                core_mode,
+                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+            )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
             _print_device_status(target_args, tracker)
@@ -1739,15 +2005,20 @@ def _run_measure(args: argparse.Namespace) -> int:
                 )
             vision_runs: list[dict[str, float]] = []
             llm_runs: list[dict[str, Any]] = []
-            device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+            device_time_series_runs: list[dict[str, Any]] = []
             avg_power_w: list[float] = []
             avg_temperature_c: list[float] = []
             avg_utilization_pct: list[float] = []
             avg_memory_used_mb: list[float] = []
-            total_energy_j: list[float] = []
-            llm_prefill_tok_per_j: list[float] = []
-            llm_decode_tok_per_j: list[float] = []
+            vision_energy_j: list[float] = []
+            llm_prefill_energy_j: list[float] = []
+            llm_decode_energy_j: list[float] = []
+            llm_total_energy_j: list[float] = []
+            vlm_total_energy_j: list[float] = []
+            llm_prefill_tps_per_w: list[float] = []
+            llm_decode_tps_per_w: list[float] = []
             for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                current_vision_energy: float | None = None
                 if tracker is not None:
                     tracker.start()
                 try:
@@ -1758,24 +2029,13 @@ def _run_measure(args: argparse.Namespace) -> int:
                         batch_size=batch_size,
                         show_progress=False,
                     )[0]
-                    llm_result = measurer.measure_llm_full(
-                        image_resolution=args.image_resolution,
-                        prompt=args.prompt,
-                        prefill_range=(args.prefill, args.prefill, args.prefill),
-                        cache_lengths=[args.prefill],
-                        decode_window=args.decode,
-                        prefill_chunk_size=resolved_prefill_chunk_size,
-                        batch_size=batch_size,
-                        show_progress=True,
-                        progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
-                    )
                 finally:
                     _stop_tracker_safe(tracker)
-                vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
-                llm_runs.append(asdict(llm_result))
+
+                vision_device_time_series: dict[str, list[dict[str, float]]] = {}
                 if tracker is not None:
                     metric = _extract_device_metric(tracker)
-                    device_time_series_runs.append(_extract_device_time_series(tracker))
+                    vision_device_time_series = _extract_device_time_series(tracker)
                     power = metric.get("avg_power_w")
                     temperature = metric.get("avg_temperature_c")
                     utilization = metric.get("avg_utilization_pct")
@@ -1787,11 +2047,102 @@ def _run_measure(args: argparse.Namespace) -> int:
                     if memory_used is not None:
                         avg_memory_used_mb.append(float(memory_used))
                     if power is not None:
-                        vision_batch_latency = vision_latency_per_image * batch_size
-                        total_time = vision_batch_latency + float(llm_result.prefill_phase_duration_s or 0.0)
-                        total_time += float(llm_result.decode_phase_duration_s or 0.0)
                         avg_power_w.append(float(power))
-                        total_energy_j.append(float(power) * total_time)
+                    energy = _energy_from_device_time_series(vision_device_time_series)
+                    if energy is not None:
+                        current_vision_energy = energy
+                        vision_energy_j.append(energy)
+
+                llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
+                try:
+                    llm_result = measurer.measure_llm_full(
+                        image_resolution=args.image_resolution,
+                        prompt=args.prompt,
+                        prefill_range=(args.prefill, args.prefill, args.prefill),
+                        cache_lengths=[args.prefill],
+                        decode_window=args.decode,
+                        prefill_chunk_size=resolved_prefill_chunk_size,
+                        batch_size=batch_size,
+                        show_progress=True,
+                        progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                        on_prefill_start=(
+                            (lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None
+                        ),
+                        on_prefill_end=(
+                            (lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None
+                        ),
+                        on_decode_start=(
+                            (lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None
+                        ),
+                        on_decode_end=(
+                            (lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None
+                        ),
+                    )
+                finally:
+                    _stop_tracker_safe(llm_tracker_prefill)
+                    _stop_tracker_safe(llm_tracker_decode)
+
+                llm_device_time_series: dict[str, dict[str, list[dict[str, float]]]] = {}
+                if llm_tracker_prefill is not None and llm_tracker_decode is not None:
+                    prefill_metric = _extract_device_metric(llm_tracker_prefill)
+                    decode_metric = _extract_device_metric(llm_tracker_decode)
+                    prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+                    decode_time_series = _extract_device_time_series(llm_tracker_decode)
+                    llm_device_time_series = {"prefill": prefill_time_series, "decode": decode_time_series}
+                    prefill_duration = float(getattr(llm_result, "prefill_phase_duration_s", 0.0) or 0.0)
+                    decode_duration = float(getattr(llm_result, "decode_phase_duration_s", 0.0) or 0.0)
+                    llm_result.avg_power_w = _weighted_two(
+                        prefill_metric.get("avg_power_w"),
+                        prefill_duration,
+                        decode_metric.get("avg_power_w"),
+                        decode_duration,
+                    )
+                    prefill_energy = _energy_from_device_time_series(prefill_time_series)
+                    decode_energy = _energy_from_device_time_series(decode_time_series)
+                    llm_energy = _sum_required_energies(prefill_energy, decode_energy)
+                    llm_result.llm_prefill_energy_j = prefill_energy
+                    llm_result.llm_decode_energy_j = decode_energy
+                    llm_result.llm_total_energy_j = llm_energy
+                    true_total_energy = _sum_required_energies(
+                        current_vision_energy,
+                        llm_energy,
+                    )
+                    llm_result.total_energy_j = true_total_energy
+                    if prefill_energy is not None:
+                        llm_prefill_energy_j.append(prefill_energy)
+                    if decode_energy is not None:
+                        llm_decode_energy_j.append(decode_energy)
+                    if llm_energy is not None:
+                        llm_total_energy_j.append(llm_energy)
+                        prefill_tokens = _sweep_prefill_token_count(llm_result, batch_size)
+                        decode_tokens = _sweep_decode_token_count(
+                            llm_result,
+                            decode_window=args.decode,
+                            batch_size=batch_size,
+                        )
+                        total_tokens = prefill_tokens + decode_tokens
+                        llm_result.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
+                        llm_result.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
+                        llm_result.prefill_j_per_token = (
+                            _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+                        )
+                        llm_result.decode_j_per_token = (
+                            _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
+                        )
+                        llm_result.total_tps_per_w = _safe_div(float(total_tokens), llm_energy)
+                        llm_result.total_j_per_token = (
+                            _safe_div(llm_energy, float(total_tokens)) if total_tokens > 0 else None
+                        )
+                        if llm_result.prefill_tps_per_w is not None:
+                            llm_prefill_tps_per_w.append(float(llm_result.prefill_tps_per_w))
+                        if llm_result.decode_tps_per_w is not None:
+                            llm_decode_tps_per_w.append(float(llm_result.decode_tps_per_w))
+                    if true_total_energy is not None:
+                        vlm_total_energy_j.append(true_total_energy)
+
+                vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
+                llm_runs.append(_vlm_llm_run_payload(llm_result))
+                device_time_series_runs.append({"vision": vision_device_time_series, "llm": llm_device_time_series})
             llm_prefill = [
                 float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
             ]
@@ -1809,14 +2160,22 @@ def _run_measure(args: argparse.Namespace) -> int:
                 if r["decode_sweep"]["time_values"]
             ]
             avg_power = _mean(avg_power_w)
-            if avg_power > 0.0:
-                llm_prefill_tok_per_j = [value / avg_power for value in llm_prefill]
-                llm_decode_tok_per_j = [value / avg_power for value in llm_decode]
+            expected_runs = int(args.repeat)
+
+            def _sum_complete(energies: Sequence[float]) -> float | None:
+                """Return a repeat-total only when every measured repeat produced this energy."""
+                return sum(float(energy) for energy in energies) if len(energies) == expected_runs else None
+
+            vision_energy = _sum_complete(vision_energy_j)
+            llm_prefill_energy = _sum_complete(llm_prefill_energy_j)
+            llm_decode_energy = _sum_complete(llm_decode_energy_j)
+            llm_total_energy = _sum_complete(llm_total_energy_j)
+            total_energy = _sum_required_energies(vision_energy, llm_total_energy)
             payload = {
                 "model": label,
                 "benchmark_type": "measure",
                 "task": "image-text-to-text",
-                "batch_mode": args.batch_mode,
+                "batch_mode": batch_mode,
                 "batch_size": batch_size,
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
@@ -1839,14 +2198,18 @@ def _run_measure(args: argparse.Namespace) -> int:
                     "avg_temperature_c": _mean(avg_temperature_c),
                     "avg_utilization_pct": _mean(avg_utilization_pct),
                     "avg_memory_used_mb": _mean(avg_memory_used_mb),
-                    "total_energy_j": sum(total_energy_j) if total_energy_j else None,
-                    "llm_prefill_tok_per_j": _mean(llm_prefill_tok_per_j),
-                    "llm_decode_tok_per_j": _mean(llm_decode_tok_per_j),
-                    "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, sum(total_energy_j))
-                    if total_energy_j
+                    "vision_energy_j": vision_energy,
+                    "llm_prefill_energy_j": llm_prefill_energy,
+                    "llm_decode_energy_j": llm_decode_energy,
+                    "llm_total_energy_j": llm_total_energy,
+                    "total_energy_j": total_energy if len(vlm_total_energy_j) == expected_runs else None,
+                    "llm_prefill_tps_per_w": _mean(llm_prefill_tps_per_w) if llm_prefill_tps_per_w else None,
+                    "llm_decode_tps_per_w": _mean(llm_decode_tps_per_w) if llm_decode_tps_per_w else None,
+                    "vision_img_per_j": _safe_div(len(vision_runs) * batch_size, vision_energy)
+                    if vision_energy is not None
                     else None,
                 }
-                if avg_power_w or total_energy_j
+                if avg_power_w or llm_total_energy_j or vision_energy_j
                 else None,
                 "device_time_series_runs": device_time_series_runs,
             }
@@ -1855,8 +2218,8 @@ def _run_measure(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"Skipping {label} (measure failed): {e}")
         finally:
-            _release_pipeline(pipeline, args.device)
-    _rebuild_measure_outputs(results_dir)
+            _release_pipeline(pipeline, target_args.device)
+    _rebuild_measure_outputs(output_dir)
     return 0
 
 

@@ -27,7 +27,7 @@ def test_asr_benchmark_parser_defaults() -> None:
     assert args.num_samples == 50
     assert args.full_split is False
     assert args.num_beams is None
-    assert args.max_new_tokens == 444
+    assert args.max_new_tokens is None
     assert args.warmup == 2
     assert args.dry_run is False
 
@@ -126,12 +126,11 @@ def test_optional_generate_kwargs_only_enable_whisper_hints() -> None:
 
 
 def test_resolve_generate_kwargs_omits_num_beams_when_unspecified() -> None:
-    """Verify default beam settings defer to the model by omitting num_beams."""
+    """Verify default generation settings defer to the model where possible."""
 
     args = asr_bench._parse_args([])
 
     assert asr_bench._resolve_generate_kwargs(args) == {
-        "max_new_tokens": 444,
         "return_timestamps": False,
     }
 
@@ -143,10 +142,60 @@ def test_resolve_generate_kwargs_includes_beam_settings_when_specified() -> None
 
     assert asr_bench._resolve_generate_kwargs(args) == {
         "num_beams": 4,
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "early_stopping": True,
     }
+
+
+def test_resolve_generate_kwargs_includes_explicit_max_new_tokens() -> None:
+    """Verify explicit max-new-tokens settings are forwarded into generate kwargs."""
+
+    args = asr_bench._parse_args(["--max-new-tokens", "123"])
+
+    assert asr_bench._resolve_generate_kwargs(args) == {
+        "return_timestamps": False,
+        "max_new_tokens": 123,
+    }
+
+
+def test_configure_pipeline_num_beams_prefers_model_generation_config() -> None:
+    """Verify ASR pipeline default beams are aligned to the loaded model config."""
+
+    model_generation_config = type("ModelGenerationConfigStub", (), {"num_beams": 1})()
+    pipeline_generation_config = type("PipelineGenerationConfigStub", (), {"num_beams": 5})()
+    pipe = type(
+        "PipelineStub",
+        (),
+        {
+            "model": type("ModelStub", (), {"generation_config": model_generation_config})(),
+            "generation_config": pipeline_generation_config,
+        },
+    )()
+
+    configured = asr_bench._configure_pipeline_num_beams_from_model(pipe)
+
+    assert configured is pipe
+    assert pipeline_generation_config.num_beams == 1
+
+
+def test_configure_pipeline_num_beams_falls_back_to_greedy() -> None:
+    """Verify ASR pipeline default beams fall back to greedy when the model omits the value."""
+
+    model_generation_config = type("ModelGenerationConfigStub", (), {"num_beams": None})()
+    pipeline_generation_config = type("PipelineGenerationConfigStub", (), {"num_beams": 5})()
+    pipe = type(
+        "PipelineStub",
+        (),
+        {
+            "model": type("ModelStub", (), {"generation_config": model_generation_config})(),
+            "generation_config": pipeline_generation_config,
+        },
+    )()
+
+    configured = asr_bench._configure_pipeline_num_beams_from_model(pipe)
+
+    assert configured is pipe
+    assert pipeline_generation_config.num_beams == 1
 
 
 def test_should_skip_whisper_long_form_sample_only_for_whisper_over_30s() -> None:
@@ -199,7 +248,7 @@ def test_measure_target_skips_whisper_long_form_samples() -> None:
         args,
         pipe,
         [short_sample, long_sample],
-        {"max_new_tokens": 444, "return_timestamps": False},
+        {"return_timestamps": False},
     )
 
     assert len(timings) == 1
@@ -237,12 +286,56 @@ def test_measure_target_keeps_requested_count_after_whisper_skip() -> None:
         args,
         pipe,
         [sample("measure-1", 5), sample("skip-long", 31), sample("measure-2", 4), sample("unused", 3)],
-        {"max_new_tokens": 444, "return_timestamps": False},
+        {"return_timestamps": False},
         max_measured_samples=2,
     )
 
     assert [timing.sample_id for timing in timings] == ["measure-1", "measure-2"]
     assert pipe.calls == 2
+
+
+def test_measure_target_adds_trace_integrated_energy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ASR target measurement populates total energy from power traces."""
+
+    class DummyPipe:
+        tokenizer = None
+
+        def __call__(self, pipeline_input, **kwargs):  # type: ignore[no-untyped-def]
+            return {"text": "hello world"}
+
+    class _FakeTracker:
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": 3.0}
+
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, 2.0), (2.0, 4.0)]
+
+    args = asr_bench._parse_args(["--device-backend", "npu"])
+    sample = {
+        "id": "sample-1",
+        "audio": {"array": np.zeros(16000 * 4, dtype=np.float32), "sampling_rate": 16000},
+        "reference": "hello world",
+    }
+    monkeypatch.setattr(asr_bench, "_build_device_tracker_common", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(asr_bench, "_print_device_status_common", lambda args, tracker: None)
+
+    timings, device_metric, device_trace = asr_bench._measure_target(
+        "facebook/wav2vec2-base-960h",
+        args,
+        DummyPipe(),
+        [sample],
+        {"return_timestamps": False},
+    )
+
+    assert len(timings) == 1
+    assert device_trace["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 4.0}]
+    assert device_metric["total_energy_j"] == pytest.approx(6.0)
 
 
 def test_warmup_skips_whisper_long_form_samples() -> None:
@@ -306,14 +399,18 @@ def test_result_json_path_includes_beam_suffix() -> None:
     )
 
 
-def test_handle_existing_result_fails_without_skip_existing(tmp_path: Path) -> None:
-    """Verify ASR runs fail fast instead of silently overwriting existing beam outputs."""
+def test_handle_existing_result_overwrites_without_skip_existing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify ASR runs overwrite existing outputs unless skip-existing is enabled."""
 
     path = tmp_path / "openai__whisper-small_beamsdefault.json"
     path.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="Result already exists"):
-        asr_bench._handle_existing_result(path, skip_existing=False)
+    assert asr_bench._handle_existing_result(path, skip_existing=False) is False
+    captured = capsys.readouterr()
+    assert "Overwriting existing result" in captured.out
 
 
 def test_handle_existing_result_skips_with_skip_existing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -327,10 +424,10 @@ def test_handle_existing_result_skips_with_skip_existing(tmp_path: Path, capsys:
     assert "Skipping existing result" in captured.out
 
 
-def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify explicit --model-id avoids eager default list resolution."""
+def test_build_run_targets_with_explicit_models_skips_default_model_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify explicit --model avoids eager default list resolution and accepts multiple models."""
 
-    args = asr_bench._parse_args(["--model-id", "openai/whisper-small"])
+    args = asr_bench._parse_args(["--model", "openai/whisper-small", "facebook/wav2vec2-base-960h"])
 
     def fail_list_default_asr_models():
         raise AssertionError("_list_default_asr_models should not be called")
@@ -339,8 +436,10 @@ def test_build_run_targets_with_explicit_model_ids_skips_default_model_listing(m
 
     targets = asr_bench._build_run_targets(args)
 
-    assert len(targets) == 1
-    assert targets[0][0].model_id == "openai/whisper-small"
+    assert [target.model_id for target, *_rest in targets] == [
+        "openai/whisper-small",
+        "facebook/wav2vec2-base-960h",
+    ]
 
 
 def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -831,7 +930,6 @@ def test_run_one_sample_retries_without_whisper_only_kwargs() -> None:
     assert result.hypothesis == "test output"
     assert result.effective_generate_kwargs == {
         "num_beams": 4,
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "early_stopping": True,
     }
@@ -869,7 +967,6 @@ def test_run_one_sample_preserves_qwen3_asr_num_beams() -> None:
     assert pipe.calls == [
         {
             "num_beams": 4,
-            "max_new_tokens": 444,
             "return_timestamps": False,
             "early_stopping": True,
         }
@@ -971,7 +1068,8 @@ def test_write_combined_outputs_writes_aggregate_files(tmp_path: Path, monkeypat
     """Verify ASR combined outputs are generated from beam-specific result JSON files."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "num_beams": 5,
         "asr": {
@@ -1040,7 +1138,7 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
         num_beams=4,
         reference="hello",
         hypothesis="hello",
-        effective_generate_kwargs={"num_beams": 4, "max_new_tokens": 444},
+        effective_generate_kwargs={"num_beams": 4},
     )
     out_path = tmp_path / "openai__whisper-small_beams4.json"
 
@@ -1060,14 +1158,13 @@ def test_write_target_json_records_schema_and_generate_kwargs(tmp_path: Path) ->
     payload = asr_bench.json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == asr_bench._ASR_BENCHMARK_SCHEMA_VERSION
     assert payload["generate_kwargs"] == {
-        "max_new_tokens": 444,
         "return_timestamps": False,
         "num_beams": 4,
         "early_stopping": True,
         "task": "transcribe",
         "language": "en",
     }
-    assert payload["effective_generate_kwargs"] == {"num_beams": 4, "max_new_tokens": 444}
+    assert payload["effective_generate_kwargs"] == {"num_beams": 4}
 
 
 def test_write_target_json_reports_effective_num_beams_after_fallback(tmp_path: Path) -> None:
@@ -1197,7 +1294,8 @@ def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypat
     """Verify combined rows read each JSON payload's num_beams value."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "num_beams": 7,
         "asr": {
@@ -1228,6 +1326,55 @@ def test_write_combined_outputs_uses_payload_num_beams(tmp_path: Path, monkeypat
     asr_bench._write_combined_outputs(tmp_path)
 
     assert captured_rows[0]["num_beams"] == 7
+
+
+def test_write_combined_outputs_adds_asr_efficiency_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify ASR combined outputs derive sec/J and J/sec from device metrics."""
+
+    payload = {
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
+        "model": "openai/whisper-small",
+        "num_beams": 1,
+        "asr": {
+            "num_samples": 1,
+            "total_audio_s": 12.0,
+            "total_generate_s": 6.0,
+            "wer": 0.1,
+            "cer": 0.02,
+            "mean_latency_s": 6.0,
+            "p50_latency_s": 6.0,
+            "p95_latency_s": 6.0,
+            "throughput_samples_per_s": 1.0 / 6.0,
+            "rtf": 0.5,
+            "inverse_rtf": 2.0,
+            "decode_tokens_per_s": 10.0,
+            "avg_tokens_per_sample": 60.0,
+        },
+        "device": {"total_energy_j": 3.0, "avg_power_w": 10.0},
+    }
+    (tmp_path / "whisper-small_beams1.json").write_text(asr_bench.json.dumps(payload), encoding="utf-8")
+    captured_rows: list[dict[str, object]] = []
+
+    def fake_chart(out_dir, rows):  # type: ignore[no-untyped-def]
+        captured_rows.extend(list(rows))
+
+    monkeypatch.setattr(asr_bench, "_make_rtf_chart", fake_chart)
+    monkeypatch.setattr(asr_bench, "_write_summary_markdown", lambda *args, **kwargs: None)
+
+    asr_bench._write_combined_outputs(tmp_path)
+
+    assert captured_rows[0]["sec_per_j"] == 4.0
+    assert captured_rows[0]["j_per_sec"] == 0.25
+    combined_md = (tmp_path / "combined.md").read_text(encoding="utf-8")
+    assert "sec/J" in combined_md
+    assert "J/sec" in combined_md
+    csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
+    assert "sec_per_j" in csv_text
+    assert "j_per_sec" in csv_text
 
 
 def test_main_passes_language_to_summarize_timings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1386,6 +1533,24 @@ def test_run_one_sample_native_qwen_without_language_param_keeps_backward_compat
 
     assert result.hypothesis == "native output"
     assert pipe.calls == [([0.0, 0.0, 0.0, 0.0], 16000)]
+
+
+def test_resolve_native_qwen3_asr_language_maps_cli_codes() -> None:
+    """Verify CLI language tags are mapped to native Qwen3-ASR language names."""
+
+    assert asr_bench._resolve_native_qwen3_asr_language("en") == "English"
+    assert asr_bench._resolve_native_qwen3_asr_language("ko") == "Korean"
+    assert asr_bench._resolve_native_qwen3_asr_language("English") == "English"
+    assert asr_bench._resolve_native_qwen3_asr_language(None) is None
+
+
+def test_native_language_for_qwen3_asr_uses_native_language_name() -> None:
+    """Verify Qwen3-ASR native runs receive upstream-supported language names."""
+
+    args = asr_bench._parse_args(["--language", "en"])
+
+    assert asr_bench._native_language_for_target(args, "Qwen/Qwen3-ASR-1.7B") == "English"
+    assert asr_bench._native_language_for_target(args, "openai/whisper-small") == "en"
 
 
 def test_run_one_sample_uses_native_qwen_processor_tokenizer_for_token_count() -> None:
@@ -1883,9 +2048,17 @@ def test_load_librispeech_supports_predecoded_array_payload(monkeypatch: pytest.
         (),
         {"Audio": AudioStub, "load_dataset": staticmethod(fake_load_dataset)},
     )()
-    soundfile_stub = type("SoundfileStub", (), {"read": staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("soundfile.read should not be used for pre-decoded payloads")
-    ))})()
+    soundfile_stub = type(
+        "SoundfileStub",
+        (),
+        {
+            "read": staticmethod(
+                lambda *args, **kwargs: (_ for _ in ()).throw(
+                    AssertionError("soundfile.read should not be used for pre-decoded payloads")
+                )
+            )
+        },
+    )()
     monkeypatch.setitem(sys.modules, "datasets", datasets_stub)
     monkeypatch.setitem(sys.modules, "soundfile", soundfile_stub)
 
@@ -1914,9 +2087,7 @@ def test_main_reloads_full_split_stream_per_target(tmp_path: Path, monkeypatch: 
 
     def fake_loader(parsed_args):  # type: ignore[no-untyped-def]
         load_calls.append(parsed_args.num_samples)
-        return iter([
-            {"id": "sample-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "hello"}
-        ])
+        return iter([{"id": "sample-1", "audio": {"array": [0.0, 0.0], "sampling_rate": 16000}, "reference": "hello"}])
 
     monkeypatch.setattr(asr_bench, "_parse_args", lambda argv=None: args)
     monkeypatch.setattr(asr_bench, "_resolve_runtime_defaults", lambda parsed_args, raw_argv: None)
@@ -2095,7 +2266,8 @@ def test_write_combined_outputs_skips_status_only_payloads(tmp_path: Path, monke
     """Verify status-only ASR payloads are summarized but do not become metric rows."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "status": "no_samples",
         "reason": "No measured samples remained after warmup/skip filtering.",
@@ -2150,7 +2322,8 @@ def test_write_combined_outputs_uses_output_dir_name_for_chart_label(
     """Verify ASR chart labels continue to use the output directory name."""
 
     payload = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "openai/whisper-small",
         "asr": {
             "num_samples": 1,
@@ -2226,14 +2399,16 @@ def test_write_combined_outputs_unions_row_headers_for_device_metrics(
         "avg_tokens_per_sample": 5.0,
     }
     payload_a = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "model-a",
         "num_beams": None,
         "asr": dict(base_asr),
         "device": {"avg_power_w": 1.0},
     }
     payload_b = {
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": "model-b",
         "num_beams": 4,
         "asr": dict(base_asr, wer=0.2),
@@ -2250,5 +2425,7 @@ def test_write_combined_outputs_unions_row_headers_for_device_metrics(
     csv_text = (tmp_path / "combined.csv").read_text(encoding="utf-8")
     assert "avg_power_w" in csv_text
     assert "total_energy_j" in csv_text
+    assert "sec_per_j" in csv_text
+    assert "j_per_sec" in csv_text
     assert "model-a" in csv_text
     assert "model-b" in csv_text

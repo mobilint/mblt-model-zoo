@@ -14,11 +14,93 @@ from typing import Any, Mapping
 import torch
 
 
+_QWEN3_ASR_LANGUAGE_ALIASES = {
+    "ar": "Arabic",
+    "arabic": "Arabic",
+    "cantones": "Cantonese",
+    "cantonese": "Cantonese",
+    "chinese": "Chinese",
+    "cs": "Czech",
+    "cz": "Czech",
+    "czech": "Czech",
+    "da": "Danish",
+    "danish": "Danish",
+    "de": "German",
+    "deutsch": "German",
+    "dutch": "Dutch",
+    "el": "Greek",
+    "en": "English",
+    "eng": "English",
+    "english": "English",
+    "es": "Spanish",
+    "fa": "Persian",
+    "fi": "Finnish",
+    "fil": "Filipino",
+    "filipino": "Filipino",
+    "finnish": "Finnish",
+    "fr": "French",
+    "french": "French",
+    "german": "German",
+    "greek": "Greek",
+    "hi": "Hindi",
+    "hindi": "Hindi",
+    "hu": "Hungarian",
+    "hungarian": "Hungarian",
+    "id": "Indonesian",
+    "indonesian": "Indonesian",
+    "it": "Italian",
+    "italian": "Italian",
+    "ja": "Japanese",
+    "japanese": "Japanese",
+    "ko": "Korean",
+    "kor": "Korean",
+    "korean": "Korean",
+    "macedonian": "Macedonian",
+    "malay": "Malay",
+    "mk": "Macedonian",
+    "ms": "Malay",
+    "nl": "Dutch",
+    "persian": "Persian",
+    "pl": "Polish",
+    "polish": "Polish",
+    "portuguese": "Portuguese",
+    "pt": "Portuguese",
+    "ro": "Romanian",
+    "romanian": "Romanian",
+    "ru": "Russian",
+    "russian": "Russian",
+    "spanish": "Spanish",
+    "sv": "Swedish",
+    "swedish": "Swedish",
+    "th": "Thai",
+    "thai": "Thai",
+    "tr": "Turkish",
+    "turkish": "Turkish",
+    "vi": "Vietnamese",
+    "vietnamese": "Vietnamese",
+    "yue": "Cantonese",
+    "zh": "Chinese",
+    "zh-cn": "Chinese",
+}
+
+
 def is_qwen3_asr_model(model_id: str) -> bool:
     """Return whether the model id refers to a Qwen3-ASR checkpoint."""
 
     normalized = model_id.lower()
     return "qwen3-asr" in normalized or "qwen3_asr" in normalized
+
+
+def resolve_native_qwen3_asr_language(language: str | None) -> str | None:
+    """Return the native Qwen3-ASR language name for a CLI language hint."""
+
+    if language is None:
+        return None
+    text = str(language).strip()
+    if not text:
+        return None
+    normalized = text.casefold().replace("_", "-")
+    return _QWEN3_ASR_LANGUAGE_ALIASES.get(normalized, text)
 
 
 def ensure_qwen3_asr_backend_registered() -> None:

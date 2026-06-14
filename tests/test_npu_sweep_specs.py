@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from tests import conftest, npu_backend_options
+from tests.transformers.text_generation.batch import conftest as batch_text_conftest
 
 
 @dataclass
@@ -33,6 +34,7 @@ class _FakeConfig:
 def _make_config(
     *,
     shared_core_mode: str = "all",
+    shared_target_cores: str | None = None,
     encoder_core_mode: str | None = None,
     decoder_core_mode: str | None = None,
     vision_core_mode: str | None = None,
@@ -47,7 +49,7 @@ def _make_config(
             "--mxq-path": None,
             "--dev-no": None,
             "--core-mode": shared_core_mode,
-            "--target-cores": None,
+            "--target-cores": shared_target_cores,
             "--target-clusters": None,
             "--base-mxq-path": None,
             "--base-dev-no": None,
@@ -265,7 +267,7 @@ def test_default_eagle3_specs_use_single_core_without_full_matrix():
 
     specs = conftest.build_eagle3_specs(config)
 
-    assert specs == [conftest.Eagle3NpuSweepSpec(core_mode="single")]
+    assert specs == [conftest.Eagle3NpuSweepSpec(core_mode="global4")]
 
 
 def test_shared_eagle3_all_stays_synchronized():
@@ -346,6 +348,33 @@ def test_build_base_npu_params_can_force_single_mode():
         "dev_no": 2,
         "core_mode": "single",
         "target_cores": ["0:0"],
+    }
+
+
+def test_batch_text_base_npu_params_omit_implicit_single_target_cores():
+    """Verify batch text fixtures keep single-mode target cores unset by default."""
+    config = _make_config(shared_core_mode="all", explicit_args=("--core-mode=all",))
+    request = SimpleNamespace(config=config)
+
+    params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
+
+    assert params.base == {"core_mode": "single"}
+
+
+def test_batch_text_base_npu_params_preserve_explicit_target_cores():
+    """Verify batch text fixtures preserve user-provided target cores."""
+    config = _make_config(
+        shared_core_mode="all",
+        shared_target_cores="0:1;0:2",
+        explicit_args=("--core-mode=all", "--target-cores=0:1;0:2"),
+    )
+    request = SimpleNamespace(config=config)
+
+    params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
+
+    assert params.base == {
+        "core_mode": "single",
+        "target_cores": ["0:1", "0:2"],
     }
 
 

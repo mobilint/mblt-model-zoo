@@ -14,9 +14,6 @@ import numpy as np
 
 try:
     from benchmark.common.chart_utils import (
-        default_charts_dir as _default_charts_dir_common,
-    )
-    from benchmark.common.chart_utils import (
         plot_grouped_scalar_barh,
     )
     from benchmark.common.chart_utils import (
@@ -35,7 +32,6 @@ except ModuleNotFoundError:
         raise
     _common_mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_common_mod)
-    _default_charts_dir_common = _common_mod.default_charts_dir
     plot_grouped_scalar_barh = _common_mod.plot_grouped_scalar_barh
     _sanitize_text_common = _common_mod.sanitize_text
     _source_labels_common = _common_mod.source_labels
@@ -48,8 +44,8 @@ class ModelMetrics:
     decode_tps: dict[int, float]
     prefill_latency_ms: dict[int, float]
     decode_duration_ms: dict[int, float]
-    prefill_tokens_per_j: Optional[float]
-    decode_tokens_per_j: Optional[float]
+    prefill_tps_per_w: Optional[float]
+    decode_tps_per_w: Optional[float]
     prefill_j_per_token: Optional[float]
     decode_j_per_token: Optional[float]
     avg_power_w: Optional[float]
@@ -73,7 +69,7 @@ def folder_prefix(folders: list[Path]) -> str:
 
 
 def default_charts_dir(script_dir: Path, folders: list[Path]) -> Path:
-    return _default_charts_dir_common(script_dir, folders, use_stem=False)
+    return script_dir / "results" / "comparison" / folder_prefix(folders)
 
 
 def folder_labels(folders: list[Path]) -> list[str]:
@@ -141,8 +137,8 @@ def load_model_metrics(path: Path) -> Optional[tuple[str, ModelMetrics]]:
         decode_tps=decode_tps_map,
         prefill_latency_ms=prefill_latency_map,
         decode_duration_ms=decode_duration_map,
-        prefill_tokens_per_j=_as_float(device.get("prefill_tok_per_j_last")),
-        decode_tokens_per_j=_as_float(device.get("decode_tok_per_j_last")),
+        prefill_tps_per_w=_as_float(device.get("prefill_tps_per_w_last")),
+        decode_tps_per_w=_as_float(device.get("decode_tps_per_w_last")),
         prefill_j_per_token=_as_float(device.get("prefill_j_per_tok_last")),
         decode_j_per_token=_as_float(device.get("decode_j_per_tok_last")),
         avg_power_w=_as_float(device.get("avg_power_w")),

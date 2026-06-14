@@ -316,26 +316,41 @@ def _resolve_image_features_tensor(image_features) -> torch.Tensor:
             return tensors[0]
         return torch.cat(tensors, dim=0)
 
+    def _resolve_nested_features(features: object) -> torch.Tensor | None:
+        if isinstance(features, torch.Tensor):
+            return features
+
+        pooler_output = getattr(features, "pooler_output", None)
+        if isinstance(pooler_output, torch.Tensor):
+            return pooler_output
+        if isinstance(pooler_output, (list, tuple)):
+            tensor = _resolve_tensor_sequence(pooler_output)
+            if tensor is not None:
+                return tensor
+            return _resolve_nested_features(pooler_output)
+
+        if isinstance(features, (list, tuple)):
+            tensor = _resolve_tensor_sequence(features)
+            if tensor is not None:
+                return tensor
+            for feature in features:
+                tensor = _resolve_nested_features(feature)
+                if tensor is not None:
+                    return tensor
+        return None
+
     pooler_output = getattr(image_features, "pooler_output", None)
     if isinstance(pooler_output, torch.Tensor):
         return pooler_output
     if isinstance(pooler_output, (list, tuple)):
-        tensor = _resolve_tensor_sequence(pooler_output)
+        tensor = _resolve_nested_features(pooler_output)
         if tensor is not None:
             return tensor
 
     if isinstance(image_features, (list, tuple)):
-        tensor = _resolve_tensor_sequence(image_features)
+        tensor = _resolve_nested_features(image_features)
         if tensor is not None:
             return tensor
-        for feature in image_features:
-            pooler_output = getattr(feature, "pooler_output", None)
-            if isinstance(pooler_output, torch.Tensor):
-                return pooler_output
-            if isinstance(pooler_output, (list, tuple)):
-                tensor = _resolve_tensor_sequence(pooler_output)
-                if tensor is not None:
-                    return tensor
 
     raise TypeError(f"Could not resolve image feature tensor from {type(image_features).__name__}.")
 
@@ -444,11 +459,11 @@ class SingleMeasurement:
     decode_avg_memory_used_pct: Optional[float] = None
     decode_p99_memory_used_pct: Optional[float] = None
     total_energy_j: Optional[float] = None
-    prefill_tokens_per_j: Optional[float] = None
+    prefill_tps_per_w: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
-    decode_tokens_per_j: Optional[float] = None
+    decode_tps_per_w: Optional[float] = None
     decode_j_per_token: Optional[float] = None
-    total_tokens_per_j: Optional[float] = None
+    total_tps_per_w: Optional[float] = None
     total_j_per_token: Optional[float] = None
     acceptance_steps: Optional[int] = None
     acceptance_tokens_sum: Optional[int] = None
@@ -510,11 +525,15 @@ class BenchmarkResult:
     p99_memory_used_mb: Optional[float] = None
     avg_memory_used_pct: Optional[float] = None
     p99_memory_used_pct: Optional[float] = None
+    prefill_energy_j: Optional[float] = None
+    decode_energy_j: Optional[float] = None
     total_energy_j: Optional[float] = None
-    prefill_tokens_per_j: Optional[float] = None
+    prefill_tps_per_w: Optional[float] = None
     prefill_j_per_token: Optional[float] = None
-    decode_tokens_per_j: Optional[float] = None
+    decode_tps_per_w: Optional[float] = None
     decode_j_per_token: Optional[float] = None
+    total_tps_per_w: Optional[float] = None
+    total_j_per_token: Optional[float] = None
 
     @staticmethod
     def iter_rows(model_id: str, result: "BenchmarkResult") -> Iterable[dict[str, Union[float, int, str, None]]]:
@@ -2089,6 +2108,10 @@ class VLMTPSMeasurer:
         show_progress: bool = False,
         progress_prefix: str = "",
         batch_size: int = 1,
+        on_prefill_start: Optional[Callable[[], None]] = None,
+        on_prefill_end: Optional[Callable[[], None]] = None,
+        on_decode_start: Optional[Callable[[], None]] = None,
+        on_decode_end: Optional[Callable[[], None]] = None,
     ) -> BenchmarkResult:
         full_result = BenchmarkResult()
         batch_size = _validate_batch_size(batch_size)
@@ -2103,34 +2126,40 @@ class VLMTPSMeasurer:
             prefill_iter = tqdm(prefill_iter, desc=f"{prefix}vlm llm prefill sweep", leave=False)
 
         t_prefill_start = time.perf_counter()
+        if on_prefill_start is not None:
+            on_prefill_start()
         min_total_len_seen: int | None = None
-        for p_len in prefill_iter:
-            inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
-                inputs=base_inputs,
-                image_features=image_features,
-                total_prefill_len=p_len,
-            )
-            min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
-            if inputs_embeds is None:
-                if show_progress:
-                    tqdm.write(
-                        f"{prefix}skip prefill target={p_len}: "
-                        f"minimum multimodal prefix length is {min_total_len}"
-                    )
-                continue
-            res = self._measure_llm_once(
-                inputs_embeds=inputs_embeds,
-                num_decode=1,
-                prefill_chunk_size=prefill_chunk_size,
-                show_progress=show_progress,
-                progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
-            )
-            full_result.prefill_sweep.x_values.append(p_len)
-            full_result.prefill_sweep.tps_values.append(res.prefill_tps)
-            full_result.prefill_sweep.time_values.append(res.prefill_latency)
-            full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
-            full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
-        t_prefill_end = time.perf_counter()
+        try:
+            for p_len in prefill_iter:
+                inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                    inputs=base_inputs,
+                    image_features=image_features,
+                    total_prefill_len=p_len,
+                )
+                min_total_len_seen = min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+                if inputs_embeds is None:
+                    if show_progress:
+                        tqdm.write(
+                            f"{prefix}skip prefill target={p_len}: "
+                            f"minimum multimodal prefix length is {min_total_len}"
+                        )
+                    continue
+                res = self._measure_llm_once(
+                    inputs_embeds=inputs_embeds,
+                    num_decode=1,
+                    prefill_chunk_size=prefill_chunk_size,
+                    show_progress=show_progress,
+                    progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
+                )
+                full_result.prefill_sweep.x_values.append(p_len)
+                full_result.prefill_sweep.tps_values.append(res.prefill_tps)
+                full_result.prefill_sweep.time_values.append(res.prefill_latency)
+                full_result.prefill_sweep.avg_total_token_latency_values.append(res.avg_total_prefill_token_latency)
+                full_result.prefill_sweep.avg_npu_token_latency_values.append(res.avg_npu_prefill_token_latency)
+        finally:
+            t_prefill_end = time.perf_counter()
+            if on_prefill_end is not None:
+                on_prefill_end()
         full_result.prefill_phase_duration_s = max(0.0, t_prefill_end - t_prefill_start)
 
         decode_iter = resolved_cache_lengths
@@ -2138,47 +2167,53 @@ class VLMTPSMeasurer:
             decode_iter = tqdm(decode_iter, desc=f"{prefix}vlm llm decode sweep", leave=False)
 
         t_decode_start = time.perf_counter()
+        if on_decode_start is not None:
+            on_decode_start()
         use_fake_decode_prefill = _supports_fake_decode_prefill(self._get_language_model())
-        for cache_len in decode_iter:
-            progress_desc = f"{prefix}vlm llm decode generate (cache={cache_len}, window={decode_window})"
-            if use_fake_decode_prefill:
-                res = self._measure_llm_decode_with_fake_prefill(
-                    cache_len=cache_len,
-                    num_decode=decode_window,
-                    batch_size=batch_size,
-                    show_progress=show_progress,
-                    progress_desc=progress_desc,
-                )
-            else:
-                inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
-                    inputs=base_inputs,
-                    image_features=image_features,
-                    total_prefill_len=cache_len,
-                )
-                min_total_len_seen = (
-                    min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
-                )
-                if inputs_embeds is None:
-                    if show_progress:
-                        tqdm.write(
-                            f"{prefix}skip cache length={cache_len}: "
-                            f"minimum multimodal prefix length is {min_total_len}"
-                        )
-                    continue
-                res = self._measure_llm_once(
-                    inputs_embeds=inputs_embeds,
-                    num_decode=decode_window,
-                    prefill_chunk_size=prefill_chunk_size,
-                    show_progress=show_progress,
-                    progress_desc=progress_desc,
-                )
-            full_result.decode_sweep.x_values.append(cache_len)
-            full_result.decode_sweep.tps_values.append(res.decode_tps)
-            full_result.decode_sweep.time_values.append(res.decode_duration)
-            full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
-            full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
-            full_result.decode_prefill_modes.append(res.decode_prefill_mode)
-        t_decode_end = time.perf_counter()
+        try:
+            for cache_len in decode_iter:
+                progress_desc = f"{prefix}vlm llm decode generate (cache={cache_len}, window={decode_window})"
+                if use_fake_decode_prefill:
+                    res = self._measure_llm_decode_with_fake_prefill(
+                        cache_len=cache_len,
+                        num_decode=decode_window,
+                        batch_size=batch_size,
+                        show_progress=show_progress,
+                        progress_desc=progress_desc,
+                    )
+                else:
+                    inputs_embeds, min_total_len = self._build_inputs_embeds_from_base(
+                        inputs=base_inputs,
+                        image_features=image_features,
+                        total_prefill_len=cache_len,
+                    )
+                    min_total_len_seen = (
+                        min_total_len if min_total_len_seen is None else min(min_total_len_seen, min_total_len)
+                    )
+                    if inputs_embeds is None:
+                        if show_progress:
+                            tqdm.write(
+                                f"{prefix}skip cache length={cache_len}: "
+                                f"minimum multimodal prefix length is {min_total_len}"
+                            )
+                        continue
+                    res = self._measure_llm_once(
+                        inputs_embeds=inputs_embeds,
+                        num_decode=decode_window,
+                        prefill_chunk_size=prefill_chunk_size,
+                        show_progress=show_progress,
+                        progress_desc=progress_desc,
+                    )
+                full_result.decode_sweep.x_values.append(cache_len)
+                full_result.decode_sweep.tps_values.append(res.decode_tps)
+                full_result.decode_sweep.time_values.append(res.decode_duration)
+                full_result.decode_sweep.avg_total_token_latency_values.append(res.avg_total_decode_token_latency)
+                full_result.decode_sweep.avg_npu_token_latency_values.append(res.avg_npu_decode_token_latency)
+                full_result.decode_prefill_modes.append(res.decode_prefill_mode)
+        finally:
+            t_decode_end = time.perf_counter()
+            if on_decode_end is not None:
+                on_decode_end()
         full_result.decode_phase_duration_s = max(0.0, t_decode_end - t_decode_start)
 
         if (

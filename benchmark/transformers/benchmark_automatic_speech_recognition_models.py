@@ -39,6 +39,7 @@ from benchmark.common.summary_utils import write_summary_markdown as _write_summ
 from benchmark.transformers.asr_metrics import (
     ASRMetricSummary,
     SampleTiming,
+    add_device_efficiency_metrics,
     format_metrics_row,
     summarize_timings,
     summary_to_dict,
@@ -47,6 +48,9 @@ from benchmark.transformers.asr_output_utils import make_rtf_chart as _make_rtf_
 from benchmark.transformers.asr_output_utils import write_combined_outputs as _write_combined_outputs_shared
 from benchmark.transformers.asr_pipeline_utils import asr_pipeline_inputs as _asr_pipeline_inputs_shared
 from benchmark.transformers.asr_pipeline_utils import build_asr_pipeline as _build_asr_pipeline_shared
+from benchmark.transformers.asr_pipeline_utils import (  # noqa: F401
+    configure_pipeline_num_beams_from_model as _configure_pipeline_num_beams_from_model,
+)
 from benchmark.transformers.asr_pipeline_utils import (
     extract_generated_token_count as _extract_generated_token_count_shared,
 )
@@ -68,6 +72,7 @@ from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
 from benchmark.transformers.asr_qwen_utils import is_qwen3_asr_model as _is_qwen3_asr_model
 from benchmark.transformers.asr_qwen_utils import move_native_qwen3_asr_to_device as _move_native_qwen3_asr_to_device
 from benchmark.transformers.asr_qwen_utils import quiet_apscheduler_info_logs as _quiet_apscheduler_info_logs
+from benchmark.transformers.asr_qwen_utils import resolve_native_qwen3_asr_language as _resolve_native_qwen3_asr_language
 from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
     resolve_native_qwen3_asr_pad_token_id as _resolve_native_qwen3_asr_pad_token_id,
 )
@@ -90,6 +95,9 @@ from benchmark.transformers.benchmark_target_utils import (
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
 from mblt_model_zoo.hf_transformers.utils import list_models
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_trace_energy_to_device_metric as _add_trace_energy_to_device_metric_common,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
 )
@@ -322,9 +330,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=("Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models.")
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    parser.add_argument("--model-id", dest="model_ids", nargs="*", default=None, help="model id list to benchmark")
+    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark")
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
-    parser.add_argument("--all-revisions", action="store_true", help="benchmark W8 and W4V8 revisions only")
+    parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")
     parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
     parser.add_argument(
@@ -367,7 +375,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="beam value to benchmark; omit to use model default",
     )
-    parser.add_argument("--max-new-tokens", type=_parse_positive_int, default=444, help="maximum generated token count")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=_parse_positive_int,
+        default=None,
+        help="maximum generated token count; omit to use the model/pipeline generation config default",
+    )
     parser.add_argument(
         "--warmup",
         type=int,
@@ -378,12 +391,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-existing",
         action="store_true",
-        help="skip target/beam outputs that already exist instead of failing",
+        help="skip target/beam outputs that already exist instead of overwriting them",
+    )
+    parser.add_argument(
+        "--rebuild-charts",
+        action="store_true",
+        help="skip benchmarking and rebuild combined outputs from existing JSON files",
     )
     parser.add_argument(
         "--output-dir",
         default=str(Path(__file__).resolve().parent / "results" / "automatic_speech_recognition"),
-        help="results directory",
+        help="output directory",
     )
     parser.add_argument(
         "--save-samples",
@@ -418,9 +436,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str]) -> None:
     device_explicit = _flag_present(raw_argv, "--device")
     device_backend_explicit = _flag_present(raw_argv, "--device-backend")
+    args._device_explicit = device_explicit
+    args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
-    first_model_id = None if args.mxq_dir else ((args.model_ids or [None])[0])
+    first_model_id = None if args.mxq_dir else ((args.models or [None])[0])
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -456,6 +476,7 @@ def _args_for_target_device_backend(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
+        resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
     )
 
@@ -541,9 +562,10 @@ def _load_measurement_candidate_samples(args: argparse.Namespace) -> Iterable[di
 
 def _resolve_generate_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
-        "max_new_tokens": int(args.max_new_tokens),
         "return_timestamps": False,
     }
+    if args.max_new_tokens is not None:
+        kwargs["max_new_tokens"] = int(args.max_new_tokens)
     if args.num_beams is not None:
         kwargs["num_beams"] = int(args.num_beams)
     if args.num_beams is not None and int(args.num_beams) > 1:
@@ -558,6 +580,14 @@ def _generate_kwargs_for_target(args: argparse.Namespace, model_id: str) -> dict
         **_resolve_generate_kwargs(args),
         **_optional_generate_kwargs_for_model(args, model_id),
     }
+
+
+def _native_language_for_target(args: argparse.Namespace, model_id: str) -> str | None:
+    """Return the language hint expected by a target's native ASR API."""
+
+    if _is_qwen3_asr_model(model_id):
+        return _resolve_native_qwen3_asr_language(args.language)
+    return args.language
 
 
 def _sample_preview(
@@ -581,10 +611,10 @@ def _beam_tag(num_beams: int | None) -> str:
     return "default" if num_beams is None else str(int(num_beams))
 
 
-def _result_json_path(out_dir: Path, mode_base: str, num_beams: int | None) -> Path:
+def _result_json_path(output_dir: Path, mode_base: str, num_beams: int | None) -> Path:
     """Return the per-target JSON path for one beam configuration."""
 
-    return out_dir / f"{mode_base}_beams{_beam_tag(num_beams)}.json"
+    return output_dir / f"{mode_base}_beams{_beam_tag(num_beams)}.json"
 
 
 def _handle_existing_result(path: Path, *, skip_existing: bool) -> bool:
@@ -595,10 +625,8 @@ def _handle_existing_result(path: Path, *, skip_existing: bool) -> bool:
     if skip_existing:
         print(f"Skipping existing result: {path.name}")
         return True
-    raise SystemExit(
-        f"Result already exists: {path}. Reuse --skip-existing to keep the current file or choose a different "
-        "--output-dir."
-    )
+    print(f"Overwriting existing result: {path.name}")
+    return False
 
 
 def _consume_warmup_samples(
@@ -658,7 +686,8 @@ def _build_no_samples_payload(
 
     return {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": label,
         "model_id": target.model_id,
         "label": label,
@@ -772,20 +801,25 @@ def _measure_target(
     try:
         if tracker is not None:
             tracker.start()
-        for sample in tqdm(samples, desc="ASR samples", leave=False, unit="sample"):
-            if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
-                break
-            if _should_skip_whisper_long_form_sample(model_id, sample):
-                print(
-                    "Skipping sample (>30s Whisper limit): "
-                    f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
-                )
-                continue
-            timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
+        total = int(max_measured_samples) if max_measured_samples is not None else None
+        with tqdm(total=total, desc="ASR samples", leave=False, unit="sample") as progress_bar:
+            for sample in samples:
+                if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
+                    break
+                if _should_skip_whisper_long_form_sample(model_id, sample):
+                    print(
+                        "Skipping sample (>30s Whisper limit): "
+                        f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
+                    )
+                    continue
+                timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
+                progress_bar.update(1)
     finally:
         _stop_tracker_safe_common(tracker)
     device_metric = _extract_device_metric_common(tracker) if tracker is not None else {}
     device_trace = _extract_device_time_series_common(tracker) if tracker is not None else {}
+    if tracker is not None:
+        device_metric = _add_trace_energy_to_device_metric_common(device_metric, device_trace)
     return timings, device_metric, device_trace
 
 
@@ -803,9 +837,12 @@ def _write_target_json(
     sample_timings: Sequence[SampleTiming],
 ) -> None:
     reported_num_beams = _reported_num_beams(sample_timings)
+    asr_summary = summary_to_dict(summary)
+    augmented_device_metric = add_device_efficiency_metrics(asr_summary, device_metric)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
-        "benchmark_type": "automatic-speech-recognition",
+        "benchmark_type": "measure",
+        "task": "automatic-speech-recognition",
         "model": label,
         "model_id": target.model_id,
         "label": label,
@@ -821,8 +858,8 @@ def _write_target_json(
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
         "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
-        "asr": summary_to_dict(summary),
-        "device": dict(device_metric),
+        "asr": asr_summary,
+        "device": augmented_device_metric,
         "device_trace": dict(device_trace),
     }
     effective_generate_kwargs = [item.effective_generate_kwargs for item in sample_timings]
@@ -835,9 +872,9 @@ def _write_target_json(
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
-def _write_combined_outputs(out_dir: Path) -> None:
+def _write_combined_outputs(output_dir: Path) -> None:
     _write_combined_outputs_shared(
-        out_dir=out_dir,
+        output_dir=output_dir,
         host_pc_info_filename=_HOST_PC_INFO_FILENAME,
         asr_metric_summary_cls=ASRMetricSummary,
         format_metrics_row_func=format_metrics_row,
@@ -848,14 +885,14 @@ def _write_combined_outputs(out_dir: Path) -> None:
     )
 
 
-def _make_rtf_chart(out_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
-    _make_rtf_chart_shared(out_dir=out_dir, rows=rows, plot_scalar_chart_func=plot_scalar_chart)
+def _make_rtf_chart(output_dir: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    _make_rtf_chart_shared(output_dir=output_dir, rows=rows, plot_scalar_chart_func=plot_scalar_chart)
 
 
-def _resolve_results_dir(args: argparse.Namespace) -> Path:
-    out_dir = Path(args.output_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+def _resolve_output_dir(args: argparse.Namespace) -> Path:
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarget, str | None, str, str]]:
@@ -865,16 +902,16 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
-        if args.model_ids or args.original_models or args.all_revisions or args.revision or args.mxq_path:
+        if args.models or args.original_models or args.all or args.revision or args.mxq_path:
             print(
-                "Note: --mxq-dir is set, so --model-id/--original-models/"
-                "--all-revisions/--revision/--mxq-path are ignored."
+                "Note: --mxq-dir is set, so --model/--original-models/"
+                "--all/--revision/--mxq-path are ignored."
             )
         targets = _iter_asr_targets_from_mxq_dir(mxq_dir, available_model_ids)
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(item) for item in args.model_ids] if args.model_ids else _list_default_asr_models()
+        model_ids = [str(item) for item in args.models] if args.models else _list_default_asr_models()
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)
@@ -886,7 +923,7 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
             _iter_asr_targets(
                 model_ids,
                 revision=args.revision,
-                all_revisions=args.all_revisions,
+                all_revisions=args.all,
                 is_original=args.original_models,
             )
         )
@@ -920,8 +957,12 @@ def main(argv: list[str] | None = None) -> int:
     args._core_mode_explicit = _flag_present(raw_argv, "--core-mode")
     _resolve_runtime_defaults(args, raw_argv)
     os.environ.setdefault("MPLBACKEND", "Agg")
-    out_dir = _resolve_results_dir(args)
-    _collect_host_pc_info(out_dir)
+    output_dir = _resolve_output_dir(args)
+    if args.rebuild_charts:
+        print("Rebuilding combined ASR outputs from existing JSON files only...")
+        _write_combined_outputs(output_dir)
+        return 0
+    _collect_host_pc_info(output_dir)
     run_targets = _build_run_targets(args)
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
@@ -946,22 +987,22 @@ def main(argv: list[str] | None = None) -> int:
     ):
         generate_kwargs = {**base_generate_kwargs, **_optional_generate_kwargs_for_model(args, target.model_id)}
         target_args = _args_for_target_device_backend(args, model_id=target.model_id, mxq_path=target.mxq_path)
-        if _is_cuda_device(args.device):
-            _clear_cuda_memory(args.device)
+        if _is_cuda_device(target_args.device):
+            _clear_cuda_memory(target_args.device)
         revision = (
             target.revision_candidates[0]
             if target.mxq_path
             else _select_revision(target.model_id, target.revision_candidates)
         )
-        if args.all_revisions and not args.mxq_dir and revision is None:
+        if args.all and not args.mxq_dir and revision is None:
             print(f"Skipping {mode_label} (missing revisions).")
             continue
         beam_tag = _beam_tag(args.num_beams)
-        json_path = _result_json_path(out_dir, mode_base, args.num_beams)
+        json_path = _result_json_path(output_dir, mode_base, args.num_beams)
         print(f"=== {mode_label} ===")
         print(
             f"Run config: revision={revision or 'main'} num_beams={beam_tag} core_mode={core_mode or 'default'} "
-            f"device={args.device} device_backend={target_args.device_backend} "
+            f"device={target_args.device} device_backend={target_args.device_backend} "
             f"samples={('full-split' if args.num_samples is None else int(args.num_samples))}"
         )
         if _handle_existing_result(json_path, skip_existing=args.skip_existing):
@@ -975,7 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipe = _build_asr_pipeline(
                     target,
                     revision=revision,
-                    device=args.device,
+                    device=target_args.device,
                     device_map=args.device_map,
                     dtype=args.dtype,
                     trust_remote_code=args.trust_remote_code,
@@ -985,17 +1026,18 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:
                 if _is_cuda_oom_error(exc):
                     print(f"Skipping (CUDA OOM while loading model): {exc}")
-                    _clear_cuda_memory(args.device)
+                    _clear_cuda_memory(target_args.device)
                     continue
                 _print_exception("Skipping (failed to load model)", exc, debug_errors=args.debug_errors)
                 continue
+            native_language = _native_language_for_target(args, target.model_id)
             measure_samples = _consume_warmup_samples(
                 target.model_id,
                 pipe,
                 iter(current_samples),
                 generate_kwargs,
                 args.warmup,
-                native_language=args.language,
+                native_language=native_language,
             )
             timings, device_metric, device_trace = _measure_target(
                 target.model_id,
@@ -1003,7 +1045,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipe,
                 measure_samples,
                 generate_kwargs,
-                native_language=args.language,
+                native_language=native_language,
                 max_measured_samples=args.num_samples,
             )
             if not timings:
@@ -1020,14 +1062,14 @@ def main(argv: list[str] | None = None) -> int:
                         reason=reason,
                     ),
                 )
-                _release_pipeline(pipe, args.device)
+                _release_pipeline(pipe, target_args.device)
                 continue
             summary = summarize_timings(timings, language=args.language)
             _write_target_json(
                 json_path,
                 target=target,
                 label=mode_label,
-                args=args,
+                args=target_args,
                 revision=revision,
                 core_mode=core_mode,
                 summary=summary,
@@ -1042,14 +1084,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             if _is_cuda_oom_error(exc):
                 print(f"Skipping (CUDA OOM during benchmark): {exc}")
-                _release_pipeline(pipe, args.device)
+                _release_pipeline(pipe, target_args.device)
                 continue
             _print_exception("Skipping (benchmark failed)", exc, debug_errors=args.debug_errors)
-            _release_pipeline(pipe, args.device)
+            _release_pipeline(pipe, target_args.device)
             continue
-        _release_pipeline(pipe, args.device)
+        _release_pipeline(pipe, target_args.device)
 
-    _write_combined_outputs(out_dir)
+    _write_combined_outputs(output_dir)
     return 0
 
 

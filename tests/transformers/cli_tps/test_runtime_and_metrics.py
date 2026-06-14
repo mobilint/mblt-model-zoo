@@ -2,8 +2,8 @@ import argparse
 import importlib
 import inspect
 import json
+import sys
 import types
-import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -16,8 +16,11 @@ from mblt_model_zoo.hf_transformers.models.blip.modeling_blip_text import Mobili
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import MobilintQwen2VLForConditionalGeneration
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     DEVICE_METRIC_KEYS,
+    build_device_tracker,
     extract_device_metric,
     extract_device_time_series,
+    integrate_power_trace_j,
+    parse_npu_rail_metrics,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
@@ -432,14 +435,64 @@ def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
         prefill_metric={"avg_power_w": 2.0},
         decode_metric={"avg_power_w": 4.0},
         batch_size=3,
+        prefill_time_series={"power_w": [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 2.0}]},
+        decode_time_series={"power_w": [{"timestamp_s": 0.0, "value": 4.0}, {"timestamp_s": 1.0, "value": 4.0}]},
     )
 
-    assert measurement.prefill_tokens_per_j == pytest.approx(3.0)
+    assert measurement.prefill_tps_per_w == pytest.approx(3.0)
     assert measurement.prefill_j_per_token == pytest.approx(1.0 / 3.0)
-    assert measurement.decode_tokens_per_j == pytest.approx(1.5)
+    assert measurement.decode_tps_per_w == pytest.approx(1.5)
     assert measurement.decode_j_per_token == pytest.approx(2.0 / 3.0)
-    assert measurement.total_tokens_per_j == pytest.approx(2.25)
+    assert measurement.total_tps_per_w == pytest.approx(2.25)
     assert measurement.total_j_per_token == pytest.approx(4.0 / 9.0)
+
+
+def test_enrich_single_run_device_computes_energy_metrics_without_avg_power():
+    """Trace-integrated energy metrics should not require scalar average power values."""
+    measurement = SingleMeasurement(
+        num_prefill=4,
+        num_decode=2,
+        prefill_latency=2.0,
+        prefill_tps=8.0,
+        decode_duration=1.0,
+        decode_tps=8.0,
+        total_time=3.0,
+        avg_total_prefill_token_latency=0.25,
+        avg_npu_prefill_token_latency=None,
+        avg_total_decode_token_latency=0.25,
+        avg_npu_decode_token_latency=None,
+    )
+
+    tps_cli._enrich_single_run_device(
+        run=measurement,
+        prefill_metric={},
+        decode_metric={},
+        batch_size=2,
+        prefill_time_series={"power_w": [{"timestamp_s": 0.0, "value": 2.0}, {"timestamp_s": 2.0, "value": 2.0}]},
+        decode_time_series={"power_w": [{"timestamp_s": 0.0, "value": 4.0}, {"timestamp_s": 1.0, "value": 4.0}]},
+    )
+
+    assert measurement.avg_power_w is None
+    assert measurement.total_energy_j == pytest.approx(8.0)
+    assert measurement.prefill_tps_per_w == pytest.approx(2.0)
+    assert measurement.decode_tps_per_w == pytest.approx(1.0)
+    assert measurement.total_tps_per_w == pytest.approx(1.5)
+
+
+def test_integrate_power_trace_j_uses_trapezoidal_rule():
+    """Power traces should be integrated from time-series samples, not average power fallbacks."""
+    trace = [
+        {"timestamp_s": 2.0, "value": 4.0},
+        {"timestamp_s": 0.0, "value": 2.0},
+        {"timestamp_s": 1.0, "value": 6.0},
+    ]
+
+    assert integrate_power_trace_j(trace) == pytest.approx(9.0)
+
+
+def test_integrate_power_trace_j_requires_two_valid_points():
+    """A single trace sample cannot produce a reliable energy integration."""
+    assert integrate_power_trace_j([{"timestamp_s": 0.0, "value": 2.0}]) is None
 
 
 def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
@@ -622,6 +675,160 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
     assert full_calls == [3]
 
 
+def test_run_text_sweep_repeat_aggregates_trace_energy_scope(monkeypatch, tmp_path):
+    """Verify text sweep repeat energy and TPS/W use the repeated sweep scope."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    tracker_pairs: list[tuple[str, str]] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=2)))
+
+    class _FakeTracker:
+        def __init__(self, name: str, power_w: float) -> None:
+            self.name = name
+            self.power_w = power_w
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {"avg_power_w": self.power_w, "p99_power_w": self.power_w}
+
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, self.power_w), (1.0, self.power_w)]
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=1.0,
+                decode_duration=1.0,
+                decode_tps=1.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+        def measure_full(self, **kwargs) -> BenchmarkResult:
+            if kwargs.get("on_prefill_start") is not None:
+                kwargs["on_prefill_start"]()
+                kwargs["on_prefill_end"]()
+                kwargs["on_decode_start"]()
+                kwargs["on_decode_end"]()
+            result = BenchmarkResult()
+            result.prefill_sweep.x_values.extend([8, 16])
+            result.prefill_sweep.tps_values.extend([8.0, 16.0])
+            result.prefill_sweep.time_values.extend([1.0, 1.0])
+            result.prefill_sweep.avg_total_token_latency_values.extend([0.125, 0.0625])
+            result.prefill_sweep.avg_npu_token_latency_values.extend([None, None])
+            result.decode_sweep.x_values.extend([4, 8])
+            result.decode_sweep.tps_values.extend([4.0, 8.0])
+            result.decode_sweep.time_values.extend([1.0, 1.0])
+            result.decode_sweep.avg_total_token_latency_values.extend([0.5, 0.5])
+            result.decode_sweep.avg_npu_token_latency_values.extend([None, None])
+            return result
+
+        def plot_and_save(self, result, save_path) -> None:
+            del result, save_path
+
+    tracker_specs = iter(
+        [
+            ("status-prefill", 0.0, "status-decode", 0.0),
+            ("run1-prefill", 2.0, "run1-decode", 3.0),
+            ("run2-prefill", 4.0, "run2-decode", 6.0),
+        ]
+    )
+
+    def _fake_build_phase_trackers(args, pipeline):
+        del args, pipeline
+        prefill_name, prefill_power, decode_name, decode_power = next(tracker_specs)
+        tracker_pairs.append((prefill_name, decode_name))
+        return _FakeTracker(prefill_name, prefill_power), _FakeTracker(decode_name, decode_power)
+
+    json_path = tmp_path / "sweep.json"
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", _fake_build_phase_trackers)
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    args = argparse.Namespace(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=0,
+        repeat=2,
+        prefill_range=(8, 16, 8),
+        cache_lengths=[4, 8],
+        decode_window=2,
+        prefill_chunk_size=None,
+        trace=None,
+        device_metrics=True,
+        json=str(json_path),
+        csv=None,
+        plot=None,
+        device_backend="npu",
+    )
+
+    assert tps_cli._run_text_sweep(args) == 0
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    aggregate = payload["aggregate"]
+    runs = payload["runs"]
+
+    assert tracker_pairs == [
+        ("status-prefill", "status-decode"),
+        ("run1-prefill", "run1-decode"),
+        ("run2-prefill", "run2-decode"),
+    ]
+    assert [run["prefill_energy_j"] for run in runs] == [pytest.approx(2.0), pytest.approx(4.0)]
+    assert [run["decode_energy_j"] for run in runs] == [pytest.approx(3.0), pytest.approx(6.0)]
+    assert [run["total_energy_j"] for run in runs] == [pytest.approx(5.0), pytest.approx(10.0)]
+    assert runs[0]["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2) / 2.0)
+    assert runs[0]["decode_tps_per_w"] == pytest.approx((2 * 2 * 2) / 3.0)
+
+    assert aggregate["prefill_energy_j"] == pytest.approx(6.0)
+    assert aggregate["decode_energy_j"] == pytest.approx(9.0)
+    assert aggregate["total_energy_j"] == pytest.approx(15.0)
+    assert aggregate["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2 * 2) / 6.0)
+    assert aggregate["decode_tps_per_w"] == pytest.approx((2 * 2 * 2 * 2) / 9.0)
+    assert aggregate["total_tps_per_w"] == pytest.approx((((8 + 16) * 2 * 2) + (2 * 2 * 2 * 2)) / 15.0)
+    assert len(payload["device_time_series_runs"]) == 2
+
+
 def test_run_vlm_sweep_writes_plot(monkeypatch, tmp_path):
     """Verify VLM sweeps honor the shared --plot output path."""
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
@@ -721,7 +928,7 @@ def test_run_vlm_sweep_ignores_tracker_stop_errors(monkeypatch):
         def get_metric(self) -> dict[str, float]:
             return {}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return []
 
     class _FakeVLMTPSMeasurer:
@@ -1125,8 +1332,8 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
         def get_metric(self) -> dict[str, float]:
             return {"avg_power_w": 2.0, "p99_power_w": 3.0}
 
-        def get_trace(self) -> list[tuple[float, float]]:
-            return [(0.0, 2.0)]
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
+            return [(0.0, 2.0), (1.0, 2.0)]
 
     class _FakeTPSMeasurer:
         def __init__(self, pipeline_arg) -> None:
@@ -1206,7 +1413,10 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
     assert events[:4] == ["prefill:start", "prefill:stop", "decode:start", "decode:stop"]
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["batch_size"] == 2
-    assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [{"timestamp_s": 0.0, "value": 2.0}]
+    assert payload["device_time_series_runs"][0]["prefill"]["power_w"] == [
+        {"timestamp_s": 0.0, "value": 2.0},
+        {"timestamp_s": 1.0, "value": 2.0},
+    ]
 
 
 def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
@@ -1371,12 +1581,15 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
     assert payload["summary"]["total_ms"]["mean"] == pytest.approx(6000.0)
 
 
-def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_path):
+def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, tmp_path):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
     pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=4)))
 
     class _FakeTracker:
+        def __init__(self, power_trace: list[tuple[float, float]]) -> None:
+            self._power_trace = power_trace
+
         def start(self) -> None:
             pass
 
@@ -1386,8 +1599,8 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
         def get_metric(self) -> dict[str, float]:
             return {"avg_power_w": 2.0}
 
-        def get_trace(self) -> list[tuple[float, float]]:
-            return []
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
+            return self._power_trace
 
     class _FakeVLMTPSMeasurer:
         def __init__(self, pipeline_arg) -> None:
@@ -1412,7 +1625,12 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
 
     json_path = tmp_path / "vlm_measure_energy.json"
     monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
-    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker())
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: _FakeTracker([(0.0, 2.0), (1.0, 2.0)]))
+    monkeypatch.setattr(
+        tps_cli,
+        "_build_phase_trackers",
+        lambda args, pipeline: (_FakeTracker([(0.0, 2.0), (2.0, 2.0)]), _FakeTracker([(0.0, 2.0), (3.0, 2.0)])),
+    )
     monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
     monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
 
@@ -1459,7 +1677,15 @@ def test_run_vlm_measure_uses_batch_latency_for_total_energy(monkeypatch, tmp_pa
 
     assert tps_cli._run_vlm_measure(args) == 0
     payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["device_runs"][0]["vision_energy_j"] == pytest.approx(2.0)
+    assert payload["device_runs"][0]["llm_prefill_energy_j"] == pytest.approx(4.0)
+    assert payload["device_runs"][0]["llm_decode_energy_j"] == pytest.approx(6.0)
+    assert payload["device_runs"][0]["llm_total_energy_j"] == pytest.approx(10.0)
     assert payload["device_runs"][0]["total_energy_j"] == pytest.approx(12.0)
+    assert payload["summary"]["vision_energy_j"]["mean"] == pytest.approx(2.0)
+    assert payload["summary"]["llm_prefill_energy_j"]["mean"] == pytest.approx(4.0)
+    assert payload["summary"]["llm_decode_energy_j"]["mean"] == pytest.approx(6.0)
+    assert payload["summary"]["llm_total_energy_j"]["mean"] == pytest.approx(10.0)
     assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
 
 
@@ -1478,7 +1704,7 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
         def get_metric(self) -> dict[str, float]:
             return {}
 
-        def get_trace(self) -> list[tuple[float, float]]:
+        def get_total_power_trace(self) -> list[tuple[float, float]]:
             return []
 
     class _FakeVLMTPSMeasurer:
@@ -1627,6 +1853,13 @@ def test_resolve_image_features_tensor_uses_tuple_tensor():
     image_features = torch.zeros(2, 4)
 
     assert _resolve_image_features_tensor((image_features, None)) is image_features
+
+
+def test_resolve_image_features_tensor_uses_nested_qwen3_vl_tuple():
+    image_features = torch.zeros(2, 4)
+    deepstack_features = [torch.ones(2, 4), torch.full((2, 4), 2.0), torch.full((2, 4), 3.0)]
+
+    assert _resolve_image_features_tensor(((image_features,), deepstack_features)) is image_features
 
 
 def test_resolve_image_features_tensor_requires_tensor():
@@ -1998,6 +2231,27 @@ def test_cli_aggregate_sweep_results_tolerates_missing_latency_values():
     assert result.prefill_sweep.avg_npu_token_latency_values == [None]
 
 
+def test_cli_attach_tps_per_w_uses_whole_sweep_token_scope():
+    """Verify sweep TPS/W uses the same whole-phase scope as trace energy."""
+    result = BenchmarkResult(
+        prefill_sweep=SweepData(x_values=[8, 16], tps_values=[10.0, 20.0], time_values=[0.8, 0.8]),
+        decode_sweep=SweepData(x_values=[32, 64], tps_values=[30.0, 40.0], time_values=[0.2, 0.2]),
+    )
+
+    tps_cli._attach_tps_per_w(
+        result,
+        prefill_energy=12.0,
+        decode_energy=8.0,
+        total_energy=20.0,
+        batch_size=2,
+        decode_window=4,
+    )
+
+    assert result.prefill_tps_per_w == pytest.approx(((8 + 16) * 2) / 12.0)
+    assert result.decode_tps_per_w == pytest.approx((4 * 2 * 2) / 8.0)
+    assert result.total_tps_per_w == pytest.approx((((8 + 16) * 2) + (4 * 2 * 2)) / 20.0)
+
+
 def test_extract_device_metric_normalizes_tracker_023_shape():
     class _FakeTracker:
         def get_metric(self):
@@ -2026,31 +2280,22 @@ def test_extract_device_metric_normalizes_tracker_023_shape():
     assert all(value is None or isinstance(value, float) for value in metric.values())
 
 
-def test_extract_device_time_series_normalizes_tracker_023_traces():
+def test_extract_device_time_series_uses_tracker_100_memory_trace_methods():
     class _FakeTracker:
-        _mem_used_trace = [(1.0, 512), ("bad", 768), (2.0, "bad")]
-        _mem_used_pct_trace = [(1.0, 25.0)]
-
-        def get_trace(self):
+        def get_total_power_trace(self):
             return [(1, 10.5), (2.0, 11)]
 
-        def get_util_trace(self):
+        def get_total_utilization_trace(self):
             return [(1.0, 70.0)]
 
-        def get_temp_trace(self):
+        def get_temperature_trace(self):
             return [(1.0, 55.0), [2.0, 56.0]]
 
-        def get_npu_power_trace(self):
-            return [(1.0, 8.0)]
+        def get_memory_used_trace(self):
+            return [(1.0, 512), ("bad", 768), (2.0, "bad")]
 
-        def get_ddr_power_trace(self):
-            return [(1.0, 1.5)]
-
-        def get_pmic_power_trace(self):
-            return [(1.0, 0.5)]
-
-        def get_goldfinger_power_trace(self):
-            return [(1.0, 12.0)]
+        def get_memory_used_pct_trace(self):
+            return [(1.0, 25.0)]
 
     series = extract_device_time_series(_FakeTracker())
 
@@ -2058,9 +2303,142 @@ def test_extract_device_time_series_normalizes_tracker_023_traces():
         {"timestamp_s": 1.0, "value": 10.5},
         {"timestamp_s": 2.0, "value": 11.0},
     ]
+    assert series["utilization_pct"] == [{"timestamp_s": 1.0, "value": 70.0}]
     assert series["temperature_c"] == [{"timestamp_s": 1.0, "value": 55.0}]
     assert series["memory_used_mb"] == [{"timestamp_s": 1.0, "value": 512.0}]
-    assert series["goldfinger_power_w"] == [{"timestamp_s": 1.0, "value": 12.0}]
+    assert series["memory_used_pct"] == [{"timestamp_s": 1.0, "value": 25.0}]
+    assert series["npu_power_w"] == []
+    assert series["goldfinger_power_w"] == []
+
+
+def test_parse_npu_rail_metrics_accepts_default_and_all():
+    assert parse_npu_rail_metrics(None) == "npu"
+    assert parse_npu_rail_metrics("") == "npu"
+    assert parse_npu_rail_metrics(" all ") == "all"
+
+
+def test_parse_npu_rail_metrics_accepts_comma_separated_rails():
+    assert parse_npu_rail_metrics("npu,ddr,NPU") == ["npu", "ddr"]
+
+
+def test_parse_npu_rail_metrics_rejects_unknown_rail():
+    with pytest.raises(argparse.ArgumentTypeError, match="unknown NPU rail metric"):
+        parse_npu_rail_metrics("cpu")
+
+
+def test_build_device_tracker_forwards_npu_rail_metrics(monkeypatch: pytest.MonkeyPatch):
+    created: dict[str, object] = {}
+
+    class _FakeNPUDeviceTracker:
+        def __init__(self, **kwargs) -> None:
+            created.update(kwargs)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {}
+
+    fake_module = types.SimpleNamespace(NPUDeviceTracker=_FakeNPUDeviceTracker)
+    monkeypatch.setitem(sys.modules, "mblt_tracker", fake_module)
+    args = argparse.Namespace(
+        device_metrics=True,
+        device_backend="npu",
+        device_npu_id=[0],
+        device_npu_rail_metrics="all",
+        device="cpu",
+        device_gpu_id=None,
+    )
+    pipeline = SimpleNamespace(model=SimpleNamespace(npu_backend=object()))
+
+    tracker = build_device_tracker(args, pipeline)
+
+    assert isinstance(tracker, _FakeNPUDeviceTracker)
+    assert created == {"interval": 1.0, "npu_id": 0, "rail_metrics": "all"}
+
+
+def test_build_device_tracker_uses_gpu_interval_and_device_id(monkeypatch):
+    """Verify GPU tracking uses the common interval and parses cuda device ids."""
+    created = {}
+
+    class _FakeGPUDeviceTracker:
+        def __init__(self, **kwargs) -> None:
+            created.update(kwargs)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def get_metric(self) -> dict[str, float]:
+            return {}
+
+    fake_module = types.SimpleNamespace(GPUDeviceTracker=_FakeGPUDeviceTracker)
+    monkeypatch.setitem(sys.modules, "mblt_tracker", fake_module)
+    args = argparse.Namespace(
+        device_metrics=True,
+        device_backend="gpu",
+        device_npu_id=None,
+        device_npu_rail_metrics="npu",
+        device="cuda:1",
+        device_gpu_id=None,
+    )
+    pipeline = SimpleNamespace(model=SimpleNamespace())
+
+    tracker = build_device_tracker(args, pipeline)
+
+    assert isinstance(tracker, _FakeGPUDeviceTracker)
+    assert created == {"interval": 1.0, "gpu_id": 1}
+
+
+def test_extract_device_time_series_uses_tracker_100_trace_methods():
+    class _FakeTracker:
+        def get_total_power_trace(self):
+            return [(1.0, 100.0)]
+
+        def get_total_utilization_trace(self):
+            return [(2.0, 80.0)]
+
+        def get_temperature_trace(self):
+            return [(3.0, 50.0)]
+
+        def get_npu_rail_power_trace(self):
+            return [(4.0, 10.0)]
+
+        def get_npu_power_trace(self):
+            raise AssertionError("legacy NPU rail alias must not be used")
+
+        def get_ddr_rail_power_trace(self):
+            return [(5.0, 2.0)]
+
+        def get_ddr_power_trace(self):
+            raise AssertionError("legacy DDR rail alias must not be used")
+
+        def get_pmic_rail_power_trace(self):
+            return [(6.0, 3.0)]
+
+        def get_pmic_power_trace(self):
+            raise AssertionError("legacy PMIC rail alias must not be used")
+
+        def get_goldfinger_rail_power_trace(self):
+            return [(7.0, 4.0)]
+
+        def get_goldfinger_power_trace(self):
+            raise AssertionError("legacy goldfinger rail alias must not be used")
+
+    series = extract_device_time_series(_FakeTracker())
+
+    assert series["power_w"] == [{"timestamp_s": 1.0, "value": 100.0}]
+    assert series["utilization_pct"] == [{"timestamp_s": 2.0, "value": 80.0}]
+    assert series["temperature_c"] == [{"timestamp_s": 3.0, "value": 50.0}]
+    assert series["npu_power_w"] == [{"timestamp_s": 4.0, "value": 10.0}]
+    assert series["ddr_power_w"] == [{"timestamp_s": 5.0, "value": 2.0}]
+    assert series["pmic_power_w"] == [{"timestamp_s": 6.0, "value": 3.0}]
+    assert series["goldfinger_power_w"] == [{"timestamp_s": 7.0, "value": 4.0}]
 
 
 def test_cli_tps_device_npu_id_parsing():
@@ -2077,6 +2455,36 @@ def test_cli_tps_device_npu_id_parsing():
     )
 
     assert args.device_npu_id == [0, 1]
+
+
+def test_cli_tps_device_npu_rail_metrics_parsing():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--device-npu-rail-metrics",
+            "npu,ddr",
+        ]
+    )
+
+    assert args.device_npu_rail_metrics == ["npu", "ddr"]
+
+
+def test_cli_tps_device_npu_rail_metrics_default():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ]
+    )
+
+    assert args.device_npu_rail_metrics == "npu"
 
 
 def test_cli_tps_device_npu_id_rejects_negative_values():

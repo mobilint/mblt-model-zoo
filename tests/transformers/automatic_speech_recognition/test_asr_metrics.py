@@ -2,7 +2,13 @@ import builtins
 
 import pytest
 
-from benchmark.transformers.asr_metrics import SampleTiming, compute_wer_cer, normalize_transcript, summarize_timings
+from benchmark.transformers.asr_metrics import (
+    SampleTiming,
+    add_device_efficiency_metrics,
+    compute_wer_cer,
+    normalize_transcript,
+    summarize_timings,
+)
 
 
 def test_normalize_transcript_basic() -> None:
@@ -116,3 +122,27 @@ def test_summarize_timings_respects_language_normalization() -> None:
     assert english_summary.cer == 0.0
     assert korean_summary.wer > 0.0
     assert korean_summary.cer > 0.0
+
+
+def test_add_device_efficiency_metrics_computes_asr_power_metrics() -> None:
+    """Verify ASR energy-efficiency metrics are derived from audio and energy."""
+
+    metrics = add_device_efficiency_metrics(
+        {"total_audio_s": 12.0, "rtf": 0.5},
+        {"total_energy_j": 3.0, "avg_power_w": 10.0},
+    )
+
+    assert metrics["sec_per_j"] == 4.0
+    assert metrics["j_per_sec"] == 0.25
+
+
+def test_add_device_efficiency_metrics_handles_missing_device_values() -> None:
+    """Verify ASR energy-efficiency metrics stay empty without usable power or energy inputs."""
+
+    metrics = add_device_efficiency_metrics(
+        {"total_audio_s": 12.0, "rtf": 0.5},
+        {"total_energy_j": 0.0, "avg_power_w": None},
+    )
+
+    assert metrics["sec_per_j"] is None
+    assert metrics["j_per_sec"] is None
