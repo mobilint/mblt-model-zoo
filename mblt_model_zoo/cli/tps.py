@@ -1031,7 +1031,11 @@ def _vlm_measure_run_payload(run: Any) -> dict[str, Any]:
     llm_payload = dict(payload.get("llm", {}))
     llm = getattr(run, "llm", None)
     if llm is not None:
-        llm_payload["llm_prefill_energy_j"] = getattr(llm, "llm_prefill_energy_j", getattr(llm, "prefill_energy_j", None))
+        llm_payload["llm_prefill_energy_j"] = getattr(
+            llm,
+            "llm_prefill_energy_j",
+            getattr(llm, "prefill_energy_j", None),
+        )
         llm_payload["llm_decode_energy_j"] = getattr(llm, "llm_decode_energy_j", getattr(llm, "decode_energy_j", None))
         llm_payload["llm_total_energy_j"] = getattr(llm, "llm_total_energy_j", getattr(llm, "total_energy_j", None))
     payload["llm"] = llm_payload
@@ -1090,8 +1094,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
-    _print_device_status(args, tracker_prefill)
+    status_tracker, _ = _build_phase_trackers(args, pipeline)
+    _print_device_status(args, status_tracker)
 
     measure_input_ids, measure_num_prefill, selected_prompt_text = _resolve_text_measure_inputs(args, pipeline)
     if measure_input_ids is not None:
@@ -1124,6 +1128,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     for i in tqdm(range(args.repeat), desc="measure runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
+        tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             run = measurer.measure(
                 num_prefill=measure_num_prefill,
@@ -1465,7 +1470,6 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
-    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker)
 
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
@@ -1488,6 +1492,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         finally:
             _stop_tracker_safe(tracker)
         llm_result = None
+        llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             llm_result = measurer.measure_llm_full(
                 image_resolution=args.image_resolution,
@@ -1689,8 +1694,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
     measurer = TPSMeasurer(pipeline)
-    tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
-    _print_device_status(args, tracker_prefill)
+    status_tracker, _ = _build_phase_trackers(args, pipeline)
+    _print_device_status(args, status_tracker)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=_SWEEP_WARMUP_PREFILL,
@@ -1739,6 +1744,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     for i in tqdm(range(args.repeat), desc="sweep runs", leave=False):
         prefill_metric: dict[str, Optional[float]] = {}
         decode_metric: dict[str, Optional[float]] = {}
+        tracker_prefill, tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             runs.append(
                 measurer.measure_full(
@@ -2169,7 +2175,6 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
-    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
     _print_device_status(args, tracker)
 
     resolution_payloads = []
@@ -2382,6 +2387,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     llm_runs = []
     llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
+        llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
         try:
             run = measurer.measure_llm_full(
                 image_resolution=llm_resolution,
@@ -2474,7 +2480,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     ]
     reference_vision_energy_values = vision_energy_by_resolution.get(llm_resolution, [])
     reference_vision_energy_j = (
-        sum(reference_vision_energy_values) / len(reference_vision_energy_values) if reference_vision_energy_values else None
+        sum(reference_vision_energy_values) / len(reference_vision_energy_values)
+        if reference_vision_energy_values
+        else None
     )
     llm_only_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
     for run in llm_runs:
@@ -2487,7 +2495,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     llm_prefill_energy_j = [
         r.llm_prefill_energy_j for r in llm_runs if getattr(r, "llm_prefill_energy_j", None) is not None
     ]
-    llm_decode_energy_j = [r.llm_decode_energy_j for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None]
+    llm_decode_energy_j = [
+        r.llm_decode_energy_j for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None
+    ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
     llm_prefill_tps_per_w = [
         r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
