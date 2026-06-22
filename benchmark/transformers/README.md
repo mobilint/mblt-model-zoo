@@ -668,6 +668,13 @@ python benchmark/transformers/search_prefill_chunk_size.py \
 
 If `--mxq-dir` is omitted, the script searches public `mobilint/` text-generation models for `W4V8`
 and `W8` revisions. Default output directory: `benchmark/transformers/results/prefill_chunk_search/`.
+Use `--model` to limit the search to one or more model ids:
+
+```bash
+python benchmark/transformers/search_prefill_chunk_size.py \
+  --model mobilint/Qwen2.5-1.5B-Instruct \
+  --core-modes global8
+```
 
 - `records/*.json`: Detailed search records per model/core-mode.
 - `all_measurements.csv`: All measured rows.

@@ -672,7 +672,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "if omitted, benchmark public mobilint text-generation models for W4V8/W8 revisions"
         ),
     )
-    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
+    parser.add_argument(
+        "--model",
+        dest="models",
+        nargs="*",
+        default=None,
+        help="one or more model ids to benchmark (optional)",
+    )
     parser.add_argument(
         "--core-modes",
         type=_parse_core_modes,
@@ -759,7 +765,15 @@ def main(argv: list[str] | None = None) -> int:
         print("No text-generation models found.")
         return 0
 
-    selected_model_ids = [str(item) for item in args.models] if args.models else [str(item) for item in available]
+    available_model_ids = [str(item) for item in available]
+    selected_model_ids = [str(item) for item in args.models] if args.models else available_model_ids
+    if args.models:
+        unknown_model_ids = sorted(set(selected_model_ids).difference(available_model_ids))
+        if unknown_model_ids:
+            print(
+                "[warn] --model target(s) not found in text-generation model list: "
+                + ", ".join(unknown_model_ids)
+            )
 
     skipped_mxq_files: list[dict[str, str]] = []
     skipped_model_revisions: list[dict[str, Any]] = []
