@@ -673,6 +673,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--model",
+        dest="models",
+        nargs="+",
+        default=None,
+        help="one or more model ids to benchmark (optional)",
+    )
+    parser.add_argument(
         "--core-modes",
         type=_parse_core_modes,
         default=_parse_core_modes("single,global4,global8"),
@@ -758,13 +765,23 @@ def main(argv: list[str] | None = None) -> int:
         print("No text-generation models found.")
         return 0
 
+    available_model_ids = [str(item) for item in available]
+    selected_model_ids = [str(item) for item in args.models] if args.models else available_model_ids
+    if args.models:
+        unknown_model_ids = sorted(set(selected_model_ids).difference(available_model_ids))
+        if unknown_model_ids:
+            print(
+                "[warn] --model target(s) not found in text-generation model list: "
+                + ", ".join(unknown_model_ids)
+            )
+
     skipped_mxq_files: list[dict[str, str]] = []
     skipped_model_revisions: list[dict[str, Any]] = []
     targets: list[dict[str, Any]] = []
     if mxq_dir is not None:
         targets, skipped_mxq_files = _discover_targets_from_mxq_dir(
             mxq_dir=mxq_dir,
-            available_model_ids=[str(x) for x in available],
+            available_model_ids=selected_model_ids,
         )
         if not targets:
             print("No valid mxq targets found.")
@@ -779,7 +796,7 @@ def main(argv: list[str] | None = None) -> int:
             _write_json(output_dir / "summary.json", summary_payload)
             return 0
     else:
-        targets, skipped_model_revisions = _discover_targets_from_available_models([str(x) for x in available])
+        targets, skipped_model_revisions = _discover_targets_from_available_models(selected_model_ids)
         if not targets:
             print("No valid public Mobilint text-generation model revisions found for W4V8/W8.")
             summary_payload = {
