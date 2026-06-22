@@ -675,7 +675,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         dest="models",
-        nargs="*",
+        nargs="+",
         default=None,
         help="one or more model ids to benchmark (optional)",
     )

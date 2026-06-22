@@ -330,7 +330,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=("Benchmark Hugging Face Transformers automatic-speech-recognition pipeline-compatible models.")
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
-    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark")
+    parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark")
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")

@@ -913,7 +913,7 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         const=_BATCH_MODE_NON_BATCH,
         help="benchmark only non-batch model targets (default)",
     )
-    parser.add_argument("--model", dest="models", nargs="*", default=None, help="model id list to benchmark (optional)")
+    parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
     parser.add_argument("--revision", default=None, help="model revision (e.g., W8)")
     parser.add_argument("--mxq-path", default=None, help="override mxq_path for pipeline loading")
