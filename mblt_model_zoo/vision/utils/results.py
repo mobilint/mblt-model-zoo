@@ -5,6 +5,7 @@ Results processing and plotting.
 from __future__ import annotations
 
 import os
+from typing import cast
 
 import cv2
 import numpy as np
@@ -18,9 +19,10 @@ from .datasets import (
     get_coco_label,
     get_coco_limb_palette,
     get_coco_pose_skeleton,
+    get_dotav1_label,
     get_imagenet_label,
 )
-from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks
+from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks, scale_rboxes, xywhr2xyxyxyxy
 from .types import ListTensorLike, TensorLike
 
 LW = 2  # line width
@@ -62,6 +64,7 @@ class Results:
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
         self.boxes: torch.Tensor | None = None
+        self.rboxes: torch.Tensor | None = None
         self.kpts: torch.Tensor | None = None
         self.set_output(output)
 
@@ -105,7 +108,7 @@ class Results:
             if isinstance(output, list):
                 raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
             self.acc = output
-        elif self.task.lower() == "object_detection" or self.task.lower() == "pose_estimation":
+        elif self.task.lower() in {"object_detection", "pose_estimation", "obb"}:
             if not isinstance(output, list):
                 raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0]
@@ -150,6 +153,8 @@ class Results:
             return self._plot_instance_segmentation(source_path, save_path, **kwargs)
         elif self.task.lower() == "pose_estimation":
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
+        elif self.task.lower() == "obb":
+            return self._plot_obb(source_path, save_path, **kwargs)
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
 
@@ -214,15 +219,20 @@ class Results:
             f"Got unexpected shape for object detection box_cls={box_cls.shape}."
         )
         img = self._read_image(source_path)
+        img1_shape = cast(tuple[int, int], self.pre_cfg["LetterBox"]["img_size"])
+        img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.labels = box_cls[:, 5].to(torch.int64)
         self.scores = box_cls[:, 4]
         self.boxes = scale_boxes(
-            self.pre_cfg["LetterBox"]["img_size"],
+            img1_shape,
             box_cls[:, :4],
-            img.shape[:2],
+            img0_shape,
         )
+        boxes = self.boxes
+        scores = self.scores
+        labels = self.labels
         contours = {i: [] for i in list(range(get_coco_class_num()))}
-        for box, score, label in zip(self.boxes, self.scores, self.labels):
+        for box, score, label in zip(boxes, scores, labels):
             label_idx = int(label.item())
             img = cv2.putText(
                 img,
@@ -268,8 +278,9 @@ class Results:
         assert self.boxes is not None, "No boxes output found."
         assert self.labels is not None, "No labels output found."
         mask = self._mask_tensor()
+        img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         masks = (
-            crop_mask(scale_masks(mask, img.shape[:2]), self.boxes)
+            crop_mask(scale_masks(mask, img0_shape), self.boxes)
             .gt_(0.0)
             .permute(1, 2, 0)
             .to(torch.float32)
@@ -298,10 +309,11 @@ class Results:
     ) -> np.ndarray:
         img = self._plot_object_detection(source_path, None, **kwargs)
         box_cls = self._box_cls_tensor()
+        img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.kpts = scale_coords(
             self.pre_cfg["LetterBox"]["img_size"],
             box_cls[:, 6:].reshape(-1, 17, 3),
-            img.shape[:2],
+            img0_shape,
         )
         kpts = self.kpts
         if kpts is None:
@@ -334,6 +346,54 @@ class Results:
                     thickness=int(np.ceil(LW / 2)),
                     lineType=cv2.LINE_AA,
                 )
+        if save_path is not None:
+            cv2.imwrite(save_path, img)
+        return img
+
+    def _plot_obb(
+        self,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        """Plots oriented bounding boxes on an image.
+
+        Args:
+            source_path: Path or image object.
+            save_path: Optional path to save the plotted image.
+            **kwargs: Additional plotting arguments.
+
+        Returns:
+            The plotted BGR image.
+        """
+        del kwargs
+        box_cls = self._box_cls_tensor()
+        assert box_cls.shape[1] == 7, f"Got unexpected shape for OBB box_cls={box_cls.shape}."
+        img = self._read_image(source_path)
+        img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
+        self.labels = box_cls[:, 5].to(torch.int64)
+        self.scores = box_cls[:, 4]
+        self.rboxes = scale_rboxes(
+            self.pre_cfg["LetterBox"]["img_size"],
+            torch.cat([box_cls[:, :4], box_cls[:, 6:7]], dim=-1),
+            img0_shape,
+        )
+        polygons = xywhr2xyxyxyxy(self.rboxes).to(torch.int32).cpu().numpy()
+        for polygon, score, label in zip(polygons, self.scores, self.labels):
+            label_idx = int(label.item())
+            color = get_coco_det_palette(label_idx)
+            text_anchor = polygon.min(axis=0)
+            img = cv2.putText(
+                img,
+                f"{get_dotav1_label(label_idx)} {int(100 * score)}%",
+                (int(text_anchor[0]), int(text_anchor[1]) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.drawContours(img, [polygon.reshape(-1, 1, 2)], -1, color, LW)
         if save_path is not None:
             cv2.imwrite(save_path, img)
         return img

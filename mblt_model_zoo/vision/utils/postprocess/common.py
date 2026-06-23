@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable
 from typing import Any, TypeAlias, overload
 
+import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ..datasets import get_coco_inv
+from ..datasets import get_coco_inv, get_dotav1_label
 
 RatioPad: TypeAlias = tuple[tuple[float, float], tuple[float, float]]
 
@@ -117,6 +120,185 @@ def dist2bbox(distance: torch.Tensor, anchor_points: torch.Tensor, xywh: bool = 
         return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
 
 
+def dist2rbox(distance: torch.Tensor, angle: torch.Tensor, anchor_points: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """Decode rotated boxes from anchor-relative distances and angles.
+
+    Args:
+        distance: Distance tensor in ``ltrb`` format.
+        angle: Rotation angle tensor in radians.
+        anchor_points: Anchor center points.
+        dim: Dimension along which box channels are split.
+
+    Returns:
+        Rotated boxes in ``cx, cy, w, h`` format.
+    """
+    lt, rb = distance.split(2, dim=dim)
+    cos_value = torch.cos(angle)
+    sin_value = torch.sin(angle)
+    xf, yf = ((rb - lt) / 2).split(1, dim=dim)
+    x = xf * cos_value - yf * sin_value
+    y = xf * sin_value + yf * cos_value
+    xy = torch.cat([x, y], dim=dim) + anchor_points
+    return torch.cat([xy, lt + rb], dim=dim)
+
+
+@overload
+def xywhr2xyxyxyxy(x: np.ndarray) -> np.ndarray:
+    """Converts numpy OBBs from ``xywhr`` to polygon corners."""
+
+
+@overload
+def xywhr2xyxyxyxy(x: torch.Tensor) -> torch.Tensor:
+    """Converts torch OBBs from ``xywhr`` to polygon corners."""
+
+
+def xywhr2xyxyxyxy(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+    """Converts oriented boxes from ``cx, cy, w, h, angle`` to four corner points.
+
+    Args:
+        x: Oriented boxes with shape ``(..., 5)`` and angle in radians.
+
+    Returns:
+        Corner points with shape ``(..., 4, 2)``.
+    """
+    if isinstance(x, torch.Tensor):
+        ctr = x[..., :2]
+        w, h, angle = (x[..., i : i + 1] for i in range(2, 5))
+        cos_value = torch.cos(angle)
+        sin_value = torch.sin(angle)
+        vec1 = torch.cat([w / 2 * cos_value, w / 2 * sin_value], dim=-1)
+        vec2 = torch.cat([-h / 2 * sin_value, h / 2 * cos_value], dim=-1)
+        return torch.stack([ctr + vec1 + vec2, ctr + vec1 - vec2, ctr - vec1 - vec2, ctr - vec1 + vec2], dim=-2)
+
+    if isinstance(x, np.ndarray):
+        ctr = x[..., :2]
+        w, h, angle = (x[..., i : i + 1] for i in range(2, 5))
+        cos_value = np.cos(angle)
+        sin_value = np.sin(angle)
+        vec1 = np.concatenate([w / 2 * cos_value, w / 2 * sin_value], axis=-1)
+        vec2 = np.concatenate([-h / 2 * sin_value, h / 2 * cos_value], axis=-1)
+        return np.stack([ctr + vec1 + vec2, ctr + vec1 - vec2, ctr - vec1 - vec2, ctr - vec1 + vec2], axis=-2)
+
+    raise ValueError("x should be np.ndarray or torch.Tensor")
+
+
+def xyxyxyxy2xywhr(points: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+    """Converts OBB corner points to regularized ``xywhr`` boxes.
+
+    Args:
+        points: Corner points with shape ``(..., 4, 2)``.
+
+    Returns:
+        Rotated boxes in ``cx, cy, w, h, angle`` format.
+    """
+    is_torch = isinstance(points, torch.Tensor)
+    points_np = points.detach().cpu().numpy() if is_torch else np.asarray(points)
+    flat_points = points_np.reshape(-1, 4, 2).astype(np.float32)
+    rboxes = []
+    for pts in flat_points:
+        (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
+        theta = angle / 180 * np.pi
+        if w < h:
+            w, h = h, w
+            theta += np.pi / 2
+        while theta >= 3 * np.pi / 4:
+            theta -= np.pi
+        while theta < -np.pi / 4:
+            theta += np.pi
+        rboxes.append([cx, cy, w, h, theta])
+    result_np = np.asarray(rboxes, dtype=points_np.dtype).reshape(*points_np.shape[:-2], 5)
+    if is_torch:
+        return torch.tensor(result_np, device=points.device, dtype=points.dtype)
+    return result_np
+
+
+def regularize_rboxes(rboxes: torch.Tensor) -> torch.Tensor:
+    """Regularize rotated boxes to the angle range ``[0, pi / 2)``.
+
+    Args:
+        rboxes: Rotated boxes in ``xywhr`` format.
+
+    Returns:
+        Regularized rotated boxes.
+    """
+    x, y, w, h, angle = rboxes.unbind(dim=-1)
+    swap = angle % math.pi >= math.pi / 2
+    regularized_w = torch.where(swap, h, w)
+    regularized_h = torch.where(swap, w, h)
+    regularized_angle = angle % (math.pi / 2)
+    return torch.stack([x, y, regularized_w, regularized_h, regularized_angle], dim=-1)
+
+
+def _get_covariance_matrix(boxes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return Gaussian covariance components for probabilistic OBB IoU."""
+    gbbs = torch.cat((boxes[:, 2:4].pow(2) / 12, boxes[:, 4:]), dim=-1)
+    a, b, c = gbbs.split(1, dim=-1)
+    cos_value = c.cos()
+    sin_value = c.sin()
+    cos2 = cos_value.pow(2)
+    sin2 = sin_value.pow(2)
+    return a * cos2 + b * sin2, a * sin2 + b * cos2, (a - b) * cos_value * sin_value
+
+
+def batch_probiou(obb1: torch.Tensor | np.ndarray, obb2: torch.Tensor | np.ndarray, eps: float = 1e-7) -> torch.Tensor:
+    """Calculate pairwise probabilistic IoU for oriented boxes.
+
+    Args:
+        obb1: First set of OBBs in ``xywhr`` format with shape ``(N, 5)``.
+        obb2: Second set of OBBs in ``xywhr`` format with shape ``(M, 5)``.
+        eps: Small value used for numerical stability.
+
+    Returns:
+        Pairwise OBB similarities with shape ``(N, M)``.
+    """
+    obb1 = torch.from_numpy(obb1) if isinstance(obb1, np.ndarray) else obb1
+    obb2 = torch.from_numpy(obb2) if isinstance(obb2, np.ndarray) else obb2
+    obb2 = obb2.to(device=obb1.device, dtype=obb1.dtype)
+
+    x1, y1 = obb1[..., :2].split(1, dim=-1)
+    x2, y2 = (x.squeeze(-1)[None] for x in obb2[..., :2].split(1, dim=-1))
+    a1, b1, c1 = _get_covariance_matrix(obb1)
+    a2, b2, c2 = (x.squeeze(-1)[None] for x in _get_covariance_matrix(obb2))
+
+    denominator = (a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps
+    t1 = (((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / denominator) * 0.25
+    t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / denominator) * 0.5
+    t3 = (
+        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
+        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
+        + eps
+    ).log() * 0.5
+    bd = (t1 + t2 + t3).clamp(eps, 100.0)
+    hd = (1.0 - (-bd).exp() + eps).sqrt()
+    return 1 - hd
+
+
+def rotated_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    iou_threshold: float,
+    iou_func: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = batch_probiou,
+) -> torch.Tensor:
+    """Apply fast rotated NMS using an upper-triangular pairwise IoU matrix.
+
+    Args:
+        boxes: OBBs in ``xywhr`` format.
+        scores: Confidence scores.
+        iou_threshold: IoU threshold for suppression.
+        iou_func: Pairwise IoU function.
+
+    Returns:
+        Kept indices into the original inputs.
+    """
+    if boxes.numel() == 0:
+        return torch.empty((0,), dtype=torch.int64, device=boxes.device)
+    sorted_idx = torch.argsort(scores, descending=True)
+    sorted_boxes = boxes[sorted_idx]
+    ious = iou_func(sorted_boxes, sorted_boxes).triu_(diagonal=1)
+    keep = torch.nonzero((ious >= iou_threshold).sum(0) <= 0).squeeze_(-1)
+    return sorted_idx[keep]
+
+
 # --- Detection Utilities ---
 def non_max_suppression(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float, max_output: int) -> list[int]:
     """
@@ -213,6 +395,42 @@ def dual_topk(
     output[:, 5:6] = labels
     if n_extra > 0:
         output[:, 6:] = selected[box_index, score_end:]
+    return output
+
+
+def yolo_multilabel_candidates(
+    detections: torch.Tensor,
+    nc: int,
+    n_extra: int,
+    conf_thres: float,
+) -> torch.Tensor:
+    """Expand YOLO rows into one detection per class score above threshold.
+
+    Args:
+        detections: Row-major detections with columns ``box, class scores, extra``.
+        nc: Number of classes.
+        n_extra: Number of extra channels after class scores.
+        conf_thres: Confidence threshold.
+
+    Returns:
+        Canonical detection rows with columns ``box, score, class, extra``.
+    """
+    if detections.numel() == 0:
+        return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=detections.device)
+
+    boxes = detections[:, :4]
+    scores = detections[:, 4 : 4 + nc]
+    extra = detections[:, 4 + nc :]
+    box_index, class_index = torch.where(scores > conf_thres)
+    if box_index.numel() == 0:
+        return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=detections.device)
+
+    output = torch.empty((box_index.numel(), 6 + n_extra), dtype=detections.dtype, device=detections.device)
+    output[:, :4] = boxes[box_index]
+    output[:, 4] = scores[box_index, class_index]
+    output[:, 5] = class_index.to(detections.dtype)
+    if n_extra > 0:
+        output[:, 6:] = extra[box_index]
     return output
 
 
@@ -337,6 +555,34 @@ def scale_coords(
         coords[..., 1] -= pad[1]  # y padding
     coords[..., :2] /= gain
     return clip_coords(coords, img0_shape)
+
+
+def scale_rboxes(
+    img1_shape: tuple[int, int],
+    rboxes: torch.Tensor,
+    img0_shape: tuple[int, int],
+    ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    padding: bool = True,
+) -> torch.Tensor:
+    """Rescale rotated boxes from model input size to an original image size.
+
+    Args:
+        img1_shape: Processed image shape.
+        rboxes: Rotated boxes in ``xywhr`` format.
+        img0_shape: Original image shape.
+        ratio_pad: Optional precomputed resize ratio and padding.
+        padding: Whether YOLO-style letterbox padding was applied.
+
+    Returns:
+        Rescaled rotated boxes in ``xywhr`` format.
+    """
+    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    scaled = rboxes.clone()
+    if padding:
+        scaled[..., 0] -= pad[0]
+        scaled[..., 1] -= pad[1]
+    scaled[..., :4] /= gain
+    return scaled
 
 
 def compute_ratio_pad(
@@ -794,6 +1040,66 @@ def nmsout2eval_pose(
     return labels_list, boxes_list, scores_list, [x.tolist() for x in extra]
 
 
+def nmsout2eval_obb(
+    nms_outs: list[torch.Tensor] | torch.Tensor,
+    img1_shape: tuple[int, int],
+    img0_shapes: tuple[int, int] | list[tuple[int, int]],
+    ratio_pads: RatioPad | list[RatioPad | None] | None = None,
+    include_xywhr: bool = False,
+) -> tuple[Any, ...]:
+    """Converts OBB NMS output to DOTAv1 evaluation format.
+
+    Args:
+        nms_outs: Detections with rows ``cx, cy, w, h, score, cls, angle``.
+        img1_shape: Processed image shape.
+        img0_shapes: Original image shape or shapes.
+        ratio_pads: Optional letterbox metadata.
+        include_xywhr: Whether to include scaled ``xywhr`` boxes in the return value.
+
+    Returns:
+        DOTAv1 labels, polygons, scores, and optionally scaled ``xywhr`` boxes.
+    """
+    actual_img0_shapes = [img0_shapes] if isinstance(img0_shapes, tuple) else img0_shapes
+    if ratio_pads is None:
+        actual_ratio_pads: list[RatioPad | None] = [None] * len(actual_img0_shapes)
+    elif isinstance(ratio_pads, tuple):
+        actual_ratio_pads = [ratio_pads]
+    else:
+        actual_ratio_pads = list(ratio_pads)
+    actual_nms_outs = [nms_outs] if not isinstance(nms_outs, list) else nms_outs
+
+    labels_list: list[list[str]] = []
+    polygons_list: list[list[list[float]]] = []
+    scores_list: list[list[float]] = []
+    xywhr_list: list[list[list[float]]] = []
+    for nms_out, img0_shape, ratio_pad in zip(actual_nms_outs, actual_img0_shapes, actual_ratio_pads):
+        if nms_out.numel() == 0:
+            labels_list.append([])
+            polygons_list.append([])
+            scores_list.append([])
+            xywhr_list.append([])
+            continue
+
+        rboxes = torch.cat([nms_out[:, :4], nms_out[:, 6:7]], dim=-1)
+        rboxes = scale_rboxes(img1_shape, rboxes, img0_shape, ratio_pad=ratio_pad)
+        polygons = xywhr2xyxyxyxy(rboxes).reshape(-1, 8)
+        polygons = scale_coords(img0_shape, polygons.reshape(-1, 4, 2), img0_shape).reshape(-1, 8)
+
+        labels = [get_dotav1_label(int(label)) for label in nms_out[:, 5].tolist()]
+        scores = [round(float(score), 5) for score in nms_out[:, 4].tolist()]
+        polygons_tolist = [[round(float(value), 3) for value in polygon] for polygon in polygons.tolist()]
+        xywhr_tolist = [[round(float(value), 3) for value in rbox] for rbox in rboxes.tolist()]
+
+        labels_list.append(labels)
+        polygons_list.append(polygons_tolist)
+        scores_list.append(scores)
+        xywhr_list.append(xywhr_tolist)
+
+    if include_xywhr:
+        return labels_list, polygons_list, scores_list, xywhr_list
+    return labels_list, polygons_list, scores_list
+
+
 class YOLOSegPostMixin:
     """Mixin class for YOLO segmentation postprocessing."""
 
@@ -838,3 +1144,29 @@ class YOLOPosePostMixin:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
         return nmsout2eval_pose(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+
+
+class YOLOOBBPostMixin:
+    """Mixin class for YOLO oriented-bounding-box postprocessing."""
+
+    def nmsout2eval(
+        self,
+        nms_out: Any,
+        img1_shape: tuple[int, int],
+        img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
+        include_xywhr: bool = False,
+    ) -> tuple[Any, ...]:
+        """Converts OBB detections to DOTAv1 labels, polygons, and scores.
+
+        Args:
+            nms_out: NMS output with rows ``cx, cy, w, h, score, cls, angle``.
+            img1_shape: Resized image shape.
+            img0_shape: Original image shape or shapes.
+            ratio_pad: Optional letterbox metadata.
+            include_xywhr: Whether to include scaled rotated boxes.
+
+        Returns:
+            DOTAv1 labels, polygons, scores, and optionally scaled ``xywhr`` boxes.
+        """
+        return nmsout2eval_obb(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad, include_xywhr=include_xywhr)

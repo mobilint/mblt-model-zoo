@@ -12,6 +12,7 @@ TASKS = [
     "image_classification",
     "object_detection",
     "instance_segmentation",
+    "oriented_bounding_boxes",
     "pose_estimation",
     "face_detection",
 ]

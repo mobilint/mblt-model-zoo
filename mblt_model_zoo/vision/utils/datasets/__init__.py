@@ -15,9 +15,11 @@ from .coco import (
 )
 from .dataloader import (
     CustomCocodata,
+    CustomDOTAv1,
     CustomImageFolder,
     CustomWiderface,
     get_coco_loader,
+    get_dota_loader,
     get_imagenet_loader,
     get_widerface_loader,
 )
@@ -41,9 +43,11 @@ __all__: list[str] = [
     "get_dotav1_class_num",
     "get_dotav1_label",
     "CustomCocodata",
+    "CustomDOTAv1",
     "CustomImageFolder",
     "CustomWiderface",
     "get_coco_loader",
+    "get_dota_loader",
     "get_imagenet_loader",
     "get_widerface_loader",
     "get_imagenet_label",

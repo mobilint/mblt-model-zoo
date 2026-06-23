@@ -8,11 +8,12 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
+    YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
 )
-from .yolo_dflfree_post import YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
+from .yolo_dflfree_post import YOLODFLFreeOBBPost, YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
 from .yolo_nmsfree_post import YOLONMSFreePost
 
 
@@ -88,6 +89,18 @@ def build_postprocess(
                 **kwargs,
             )
         return YOLOAnchorlessPosePost(
+            pre_cfg,
+            post_cfg,
+            **kwargs,
+        )
+    if task_lower == "obb":
+        if post_cfg.get("dflfree", False):
+            return YOLODFLFreeOBBPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        return YOLOAnchorlessOBBPost(
             pre_cfg,
             post_cfg,
             **kwargs,

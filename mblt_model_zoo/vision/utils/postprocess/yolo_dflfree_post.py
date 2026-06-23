@@ -5,7 +5,16 @@ from typing import Any, cast
 import torch
 
 from .base import YOLOPostBase
-from .common import YOLOPosePostMixin, YOLOSegPostMixin, dist2bbox, dual_topk
+from .common import (
+    YOLOOBBPostMixin,
+    YOLOPosePostMixin,
+    YOLOSegPostMixin,
+    dist2bbox,
+    dist2rbox,
+    dual_topk,
+    rotated_nms,
+    yolo_multilabel_candidates,
+)
 
 
 class YOLODFLFreePost(YOLOPostBase):
@@ -414,3 +423,175 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
                 for image in decoded
             ]
         )
+
+
+class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreePost):
+    """Postprocessing for DFL-free YOLO OBB models."""
+
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+        """Preprocess OBB inputs into row-major detections.
+
+        Args:
+            x: Raw model outputs.
+
+        Returns:
+            A tuple of detections and no prototype output.
+        """
+        if len(x) in {1, 3}:
+            converted = cast(torch.Tensor, self.conversion(x))
+            return self.filter_conversion(converted), None
+        rearranged = self.rearrange(x)
+        if not isinstance(rearranged, torch.Tensor):
+            raise TypeError("rearrange should return a tensor for DFL-free OBB postprocessing.")
+        return self.decode(rearranged), None
+
+    def conversion(self, x: list[torch.Tensor]) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Convert DFL-free OBB outputs to a single tensor.
+
+        Args:
+            x: Input tensors.
+
+        Returns:
+            Converted tensor with last dimension ``4 + nc + 1``.
+        """
+        if len(x) == 1:
+            return x[0]
+        x = sorted(x, key=lambda x: x.size(), reverse=True)
+        return torch.cat(x, dim=-1).squeeze(1)
+
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
+        """Rearrange split raw DFL-free OBB heads.
+
+        Args:
+            x: Raw model output tensors.
+
+        Returns:
+            Concatenated tensor in ``(batch, channels, anchors)`` format.
+        """
+        y_det = []
+        y_cls = []
+        y_angle = []
+        for xi in x:
+            if xi.ndim == 3:
+                xi = xi[None]
+            elif xi.ndim != 4:
+                raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
+            if xi.shape[-1] == 4:
+                y_det.append(xi.permute(0, 3, 1, 2))
+            elif xi.shape[-1] == self.nc:
+                y_cls.append(xi.permute(0, 3, 1, 2))
+            elif xi.shape[-1] == self.n_extra:
+                y_angle.append(xi.permute(0, 3, 1, 2))
+            else:
+                raise ValueError(f"Wrong shape of input: {xi.shape}")
+        y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
+        y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+        y_angle = sorted(y_angle, key=lambda x: x.numel(), reverse=True)
+        if not (len(y_det) == len(y_cls) == len(y_angle)):
+            raise ValueError("OBB output arguments are not in a proper form.")
+        return torch.cat(
+            [
+                torch.cat((yi_det, yi_cls, yi_angle), dim=1).flatten(2)
+                for yi_det, yi_cls, yi_angle in zip(y_det, y_cls, y_angle)
+            ],
+            dim=-1,
+        )
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every OBB anchor for export-style output."""
+        box, scores, angle = torch.split(x, [4, self.nc, self.n_extra], dim=1)
+        anchors = self.anchors_as_tensor().unsqueeze(0)
+        stride = self.stride_as_tensor().unsqueeze(0)
+        rbox = dist2rbox(box, angle, anchors, dim=1) * stride
+        return torch.cat([rbox, scores.sigmoid(), angle], dim=1).transpose(1, 2)
+
+    def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
+        """Processes raw DFL-free OBB results for one image.
+
+        Args:
+            box_cls: Raw detections for one image.
+
+        Returns:
+            Raw OBB rows ``cx, cy, w, h, class scores, angle`` before NMS.
+        """
+        ic = torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0) > self.inv_conf_thres
+        box_cls = box_cls[:, ic]
+        if box_cls.numel() == 0:
+            return torch.zeros((0, 4 + self.nc + self.n_extra), dtype=torch.float32, device=self.device)
+        anchors = self.anchors_as_tensor()
+        stride = self.stride_as_tensor()
+        box, scores, angle = torch.split(box_cls[None], [4, self.nc, self.n_extra], dim=1)
+        rbox = dist2rbox(box, angle, anchors[:, ic], dim=1) * stride[:, ic]
+        return torch.cat([rbox, scores.sigmoid(), angle], dim=1).squeeze(0).transpose(0, 1)
+
+    def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
+        """Filters converted DFL-free OBB outputs.
+
+        Args:
+            x: Converted output tensor.
+
+        Returns:
+            Per-image canonical OBB detection rows before rotated NMS.
+        """
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[0] == 1:
+                x = x.squeeze(0)
+            elif x.shape[1] == 1:
+                x = x.squeeze(1)
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D converted tensor, got shape {tuple(x.shape)}.")
+        expected_dim = 4 + self.nc + self.n_extra
+        if x.shape[-1] == expected_dim:
+            normalized = x
+        elif x.shape[1] == expected_dim:
+            normalized = x.transpose(1, 2)
+        else:
+            raise ValueError(f"Unsupported converted tensor shape {tuple(x.shape)}.")
+        outputs = []
+        for xi in normalized:
+            keep = xi[:, 4 : 4 + self.nc].amax(dim=1) > self.conf_thres
+            if torch.any(keep):
+                outputs.append(xi[keep])
+            else:
+                outputs.append(torch.zeros((0, expected_dim), dtype=xi.dtype, device=xi.device))
+        return outputs
+
+    def nms(
+        self,
+        x: torch.Tensor | list[torch.Tensor],
+        max_det: int = 300,
+        max_nms: int = 30000,
+        max_wh: int = 7680,
+    ) -> list[torch.Tensor]:
+        """Apply rotated NMS to DFL-free OBB detections.
+
+        Args:
+            x: Decoded detections.
+            max_det: Maximum detections to keep.
+            max_nms: Maximum candidates to consider.
+            max_wh: Class offset size.
+
+        Returns:
+            Per-image OBB detections after rotated NMS.
+        """
+        detections = x if isinstance(x, list) else list(x)
+        output = []
+        for xi in detections:
+            if xi.numel() == 0:
+                output.append(torch.zeros((0, 7), dtype=torch.float32, device=self.device))
+                continue
+            if xi.shape[1] == 4 + self.nc + self.n_extra:
+                xi = yolo_multilabel_candidates(xi, self.nc, self.n_extra, self.conf_thres)
+            elif xi.shape[1] == 6 + self.n_extra:
+                xi = xi[xi[:, 4] > self.conf_thres]
+            else:
+                raise ValueError(f"Unsupported OBB detection shape {tuple(xi.shape)}.")
+            if xi.numel() == 0:
+                output.append(torch.zeros((0, 7), dtype=torch.float32, device=self.device))
+                continue
+            xi = xi[torch.argsort(xi[:, 4], descending=True)[:max_nms]]
+            c = xi[:, 5:6] * max_wh
+            boxes = torch.cat([xi[:, :2] + c, xi[:, 2:4], xi[:, 6:7]], dim=-1)
+            keep = rotated_nms(boxes, xi[:, 4], self.iou_thres)[:max_det]
+            output.append(xi[keep])
+        return output

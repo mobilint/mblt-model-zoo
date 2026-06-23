@@ -11,6 +11,7 @@ from . import face_detection as face_detection
 from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
 from . import object_detection as object_detection
+from . import oriented_bounding_boxes as oriented_bounding_boxes
 from . import pose_estimation as pose_estimation
 from ._api import list_models as list_models
 from ._api import list_tasks as list_tasks
@@ -21,6 +22,7 @@ _TASK_MODULES = (
     image_classification,
     instance_segmentation,
     object_detection,
+    oriented_bounding_boxes,
     pose_estimation,
 )
 
@@ -39,6 +41,7 @@ __all__: list[str] = [
     "image_classification",
     "instance_segmentation",
     "object_detection",
+    "oriented_bounding_boxes",
     "pose_estimation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)
 

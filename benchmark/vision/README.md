@@ -255,7 +255,20 @@ This keeps only the validation split and organizes the dataset into the followin
 
 ### Run the DOTAv1 Benchmark
 
-Pending
+You can run the DOTAv1 benchmark with the following command:
+
+```bash
+python benchmark/vision/benchmark_dota.py \
+  --model-cls YOLOv8s-obb \
+  --framework onnx \
+  --batch-size 1 \
+  --data-path ~/.mblt_model_zoo/datasets/dotav1 \
+  --conf-thres 0.01 \
+  --iou-thres 0.7
+```
+
+The benchmark reports local rotated `mAP test 50` and `mAP test 50-95`, and writes DOTA Task1
+prediction text files under `benchmark/vision/results/dota`.
 
 ## Compare Vision Benchmark Results
 
