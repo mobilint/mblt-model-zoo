@@ -49,22 +49,7 @@ class CompatMBLTEngine(MBLT_Engine):
         raise NotImplementedError
 
 
-CompatMBLTEngineClass: TypeAlias = Callable[
-    [
-        str | None,
-        str,
-        CoreMode,
-        str,
-        int,
-        Sequence[str] | None,
-        Sequence[int] | None,
-        str | None,
-        str | None,
-        str | None,
-        str | None,
-    ],
-    CompatMBLTEngine,
-]
+CompatMBLTEngineClass: TypeAlias = type[CompatMBLTEngine]
 
 
 def _normalize_name(value: str) -> str:

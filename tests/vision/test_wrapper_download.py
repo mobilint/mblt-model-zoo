@@ -743,6 +743,101 @@ def test_final_onnx_segmentation_normalizes_detections_and_proto() -> None:
     assert result[0][1].shape == (1, 640, 640)
 
 
+def test_final_onnx_pose_normalizes_detections() -> None:
+    """Use final pose detections directly without sending them through decode."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [640, 640],
+        }
+    }
+    post_cfg = {
+        "task": "pose_estimation",
+        "nl": 3,
+        "n_extra": 51,
+        "reg_max": 16,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    final_output = torch.zeros((1, 2, 57), dtype=torch.float32)
+    final_output[0, 0, :6] = torch.tensor([10.0, 20.0, 30.0, 40.0, 0.90, 0.0])
+    final_output[0, 1, :6] = torch.tensor([11.0, 21.0, 31.0, 41.0, 0.40, 0.0])
+
+    result = postprocessor(final_output)
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 57)
+    assert torch.equal(result[0], final_output[0, :1])
+
+
+@pytest.mark.parametrize(
+    ("task", "post_cfg_extra", "converted_dim"),
+    [
+        ("object_detection", {}, 7),
+        ("pose_estimation", {"n_extra": 51}, 56),
+    ],
+)
+def test_non_e2e_single_converted_outputs_follow_task_shape(
+    task: str,
+    post_cfg_extra: dict[str, int],
+    converted_dim: int,
+) -> None:
+    """Route non-e2e single converted detection and pose outputs by task shape."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": task,
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 3 if task == "object_detection" else 1,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+        "e2e": False,
+        **post_cfg_extra,
+    }
+    postprocessor = build_postprocess(pre_cfg, post_cfg)
+    converted = torch.zeros((1, 2, converted_dim), dtype=torch.float32)
+
+    result = postprocessor(converted)
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, converted_dim, 2)
+
+
+def test_non_e2e_segmentation_uses_converted_detections_and_proto() -> None:
+    """Route non-e2e segmentation converted detections with prototype masks."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 3,
+        "n_extra": 32,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+        "e2e": False,
+    }
+    postprocessor = build_postprocess(pre_cfg, post_cfg)
+    detections = torch.zeros((1, 2, 39), dtype=torch.float32)
+    proto = torch.zeros((1, 16, 16, 32), dtype=torch.float32)
+
+    result = postprocessor([detections, proto])
+
+    assert isinstance(result, list)
+    assert result[0].shape == (1, 39, 2)
+    assert result[1].shape == (1, 32, 16, 16)
+
+
 def test_raw_mxq_like_outputs_are_not_final_detections() -> None:
     """Do not treat split MXQ-style head tensors as already-decoded detections."""
 
@@ -804,6 +899,114 @@ def _make_dflfree_obb_mxq_heads() -> ListTensorLike:
         angle = np.zeros((1, 1, size, size), dtype=np.float32)
         outputs.extend([det, cls, angle])
     return outputs
+
+
+def _make_converted_obb_rows() -> torch.Tensor:
+    """Build synthetic converted OBB rows in canonical row-major format."""
+
+    output = torch.zeros((1, 3, 20), dtype=torch.float32)
+    output[0, :, :4] = torch.tensor(
+        [
+            [12.0, 12.0, 6.0, 4.0],
+            [32.0, 24.0, 8.0, 6.0],
+            [48.0, 48.0, 10.0, 8.0],
+        ],
+        dtype=torch.float32,
+    )
+    output[0, 0, 4] = 0.95
+    output[0, 1, 5] = 0.90
+    output[0, 2, 6] = 0.85
+    output[0, :, -1] = torch.tensor([0.0, 0.1, -0.2], dtype=torch.float32)
+    return output
+
+
+def _make_converted_obb_parts() -> ListTensorLike:
+    """Build shuffled converted MXQ OBB parts for decode-true outputs."""
+
+    rows = _make_converted_obb_rows()
+    boxes = rows[:, :, :4].unsqueeze(1)
+    scores = rows[:, :, 4:-1].unsqueeze(1)
+    angle = rows[:, :, -1:].unsqueeze(1)
+    return [angle, boxes, scores]
+
+
+def _make_split_converted_obb_parts(class_first: bool) -> ListTensorLike:
+    """Build decode-true MXQ OBB parts split into box subchannels."""
+
+    rows = _make_converted_obb_rows()
+    scores = rows[:, :, 4:-1].transpose(1, 2)
+    angle = rows[:, :, -1:].transpose(1, 2)
+    xy = rows[:, :, :2].transpose(1, 2)
+    width = rows[:, :, 2:3].transpose(1, 2)
+    height = rows[:, :, 3:4].transpose(1, 2)
+    if class_first:
+        return [scores, angle, xy, width, height]
+    return [angle, scores, xy, width, height]
+
+
+@pytest.mark.parametrize("dflfree", [False, True])
+def test_obb_accepts_single_converted_output(dflfree: bool) -> None:
+    """Accept ONNX-style converted OBB tensors before rotated NMS."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "obb",
+        "nl": 3,
+        "nc": 15,
+        "n_extra": 1,
+        "conf_thres": 0.8,
+        "iou_thres": 0.7,
+    }
+    if dflfree:
+        post_cfg["dflfree"] = True
+    else:
+        post_cfg["reg_max"] = 16
+
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    result = postprocessor(_make_converted_obb_rows().transpose(1, 2))
+
+    assert len(result) == 1
+    assert result[0].shape == (3, 7)
+    assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0, 2.0]))
+
+
+@pytest.mark.parametrize("dflfree", [False, True])
+@pytest.mark.parametrize("class_first", [False, True])
+def test_obb_accepts_decode_true_converted_mxq_parts(dflfree: bool, class_first: bool) -> None:
+    """Accept converted MXQ OBB box, class, and angle outputs before rotated NMS."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "obb",
+        "nl": 3,
+        "nc": 15,
+        "n_extra": 1,
+        "conf_thres": 0.8,
+        "iou_thres": 0.7,
+    }
+    if dflfree:
+        post_cfg["dflfree"] = True
+    else:
+        post_cfg["reg_max"] = 16
+
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    result = postprocessor(_make_converted_obb_parts())
+    split_result = postprocessor(_make_split_converted_obb_parts(class_first))
+
+    assert len(result) == 1
+    assert result[0].shape == (3, 7)
+    assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0, 2.0]))
+    assert len(split_result) == 1
+    assert split_result[0].shape == (3, 7)
+    assert torch.equal(split_result[0][:, 5], torch.tensor([0.0, 1.0, 2.0]))
 
 
 def test_anchorless_obb_accepts_channel_first_mxq_heads_and_plots_airport(tmp_path: Path) -> None:

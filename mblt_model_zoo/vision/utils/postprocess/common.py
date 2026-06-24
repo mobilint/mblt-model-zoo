@@ -434,6 +434,126 @@ def yolo_multilabel_candidates(
     return output
 
 
+def normalize_converted_obb_part(x: torch.Tensor, channel_count: int) -> torch.Tensor:
+    """Normalize a converted OBB output part to ``(batch, anchors, channels)``.
+
+    Args:
+        x: Converted output part from a model runtime.
+        channel_count: Expected feature-channel count for this part.
+
+    Returns:
+        The normalized row-major tensor.
+    """
+    while x.ndim > 3:
+        singleton_dims = [idx for idx, size in enumerate(x.shape) if idx != 0 and size == 1]
+        if not singleton_dims:
+            raise ValueError(f"Expected converted OBB part with up to 3 non-batch dimensions, got {tuple(x.shape)}.")
+        x = x.squeeze(singleton_dims[0])
+    if x.ndim == 2:
+        x = x.unsqueeze(0)
+    if x.ndim != 3:
+        raise ValueError(f"Expected 2D or 3D converted OBB part, got shape {tuple(x.shape)}.")
+    if x.shape[-1] == channel_count:
+        return x
+    if x.shape[1] == channel_count:
+        return x.transpose(1, 2)
+    raise ValueError(f"Could not find channel count {channel_count} in converted OBB part with shape {tuple(x.shape)}.")
+
+
+def concat_converted_obb_outputs(x: list[torch.Tensor], nc: int, n_extra: int) -> torch.Tensor:
+    """Concatenate converted OBB box, class, and angle outputs in canonical order.
+
+    Args:
+        x: Converted OBB runtime outputs.
+        nc: Number of OBB classes.
+        n_extra: Number of extra OBB channels.
+
+    Returns:
+        Detections in ``cx, cy, w, h, class scores..., angle`` format.
+    """
+    if len(x) == 1:
+        return x[0]
+    if len(x) != 3:
+        raise ValueError(f"Expected 1 or 3 converted OBB outputs, got {len(x)}.")
+
+    expected_parts = {"box": 4, "scores": nc, "angle": n_extra}
+    parts: dict[str, torch.Tensor] = {}
+    for xi in x:
+        matches: list[tuple[str, torch.Tensor]] = []
+        for name, channel_count in expected_parts.items():
+            try:
+                matches.append((name, normalize_converted_obb_part(xi, channel_count)))
+            except ValueError:
+                continue
+        if len(matches) != 1:
+            match_names = ", ".join(name for name, _ in matches) or "none"
+            raise ValueError(
+                f"Could not uniquely classify converted OBB output {tuple(xi.shape)}; matches: {match_names}."
+            )
+        name, normalized = matches[0]
+        if name in parts:
+            raise ValueError(f"Duplicate converted OBB {name} output.")
+        parts[name] = normalized
+
+    missing = [name for name in expected_parts if name not in parts]
+    if missing:
+        raise ValueError(f"Missing converted OBB outputs: {', '.join(missing)}.")
+    return torch.cat([parts["box"], parts["scores"], parts["angle"]], dim=-1)
+
+
+def decode_split_converted_obb_outputs(
+    x: list[torch.Tensor],
+    nc: int,
+    n_extra: int,
+    anchors: torch.Tensor,
+    stride: torch.Tensor,
+) -> torch.Tensor:
+    """Decode MXQ decode-true OBB outputs split into score, angle, and coordinate tensors.
+
+    Args:
+        x: Five converted runtime outputs: class scores, rotation angle, and
+            coordinate tensors containing decoded ``wh`` and pre-rotated center offsets.
+        nc: Number of OBB classes.
+        n_extra: Number of extra OBB channels.
+        anchors: Anchor points in ``(2, anchors)`` format.
+        stride: Stride tensor in ``(1, anchors)`` format.
+
+    Returns:
+        Detections in ``cx, cy, w, h, class scores..., angle`` format.
+    """
+    if n_extra != 1:
+        raise ValueError(f"Expected one OBB angle channel, got n_extra={n_extra}.")
+    if len(x) != 5:
+        raise ValueError(f"Expected five split converted OBB outputs, got {len(x)}.")
+
+    try:
+        scores = normalize_converted_obb_part(x[0], nc)
+        angle = normalize_converted_obb_part(x[1], n_extra)
+    except ValueError:
+        scores = normalize_converted_obb_part(x[1], nc)
+        angle = normalize_converted_obb_part(x[0], n_extra)
+    wh = normalize_converted_obb_part(x[2], 2)
+    x_offset = normalize_converted_obb_part(x[3], 1)
+    y_offset = normalize_converted_obb_part(x[4], 1)
+    cos_value = torch.cos(angle)
+    sin_value = torch.sin(angle)
+    center_offset = torch.cat(
+        [
+            x_offset * cos_value - y_offset * sin_value,
+            x_offset * sin_value + y_offset * cos_value,
+        ],
+        dim=-1,
+    )
+    anchors_t = anchors.transpose(0, 1).unsqueeze(0).to(device=wh.device, dtype=wh.dtype)
+    stride_t = stride.transpose(0, 1).unsqueeze(0).to(device=wh.device, dtype=wh.dtype)
+    if anchors_t.shape[1] < wh.shape[1]:
+        raise ValueError(f"Got {wh.shape[1]} OBB coordinate rows but only {anchors_t.shape[1]} anchors.")
+    anchors_t = anchors_t[:, : wh.shape[1]]
+    stride_t = stride_t[:, : wh.shape[1]]
+    box = torch.cat([anchors_t + center_offset, wh], dim=-1) * stride_t
+    return torch.cat([box, scores, angle], dim=-1)
+
+
 # --- Scaling & Clipping Utilities ---
 @overload
 def scale_boxes(

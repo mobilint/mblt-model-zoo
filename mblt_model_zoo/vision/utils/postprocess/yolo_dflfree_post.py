@@ -9,6 +9,8 @@ from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
+    concat_converted_obb_outputs,
+    decode_split_converted_obb_outputs,
     dist2bbox,
     dist2rbox,
     dual_topk,
@@ -437,7 +439,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreePost):
         Returns:
             A tuple of detections and no prototype output.
         """
-        if len(x) in {1, 3}:
+        if len(x) in {1, 3, 5}:
             converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
         rearranged = self.rearrange(x)
@@ -454,10 +456,15 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreePost):
         Returns:
             Converted tensor with last dimension ``4 + nc + 1``.
         """
-        if len(x) == 1:
-            return x[0]
-        x = sorted(x, key=lambda x: x.size(), reverse=True)
-        return torch.cat(x, dim=-1).squeeze(1)
+        if len(x) == 5:
+            return decode_split_converted_obb_outputs(
+                x,
+                self.nc,
+                self.n_extra,
+                self.anchors_as_tensor(),
+                self.stride_as_tensor(),
+            )
+        return concat_converted_obb_outputs(x, self.nc, self.n_extra)
 
     def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Rearrange split raw DFL-free OBB heads.

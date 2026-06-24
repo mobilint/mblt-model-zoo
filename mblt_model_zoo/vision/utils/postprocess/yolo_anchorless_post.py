@@ -11,6 +11,8 @@ from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
+    concat_converted_obb_outputs,
+    decode_split_converted_obb_outputs,
     dist2bbox,
     dist2rbox,
     non_max_suppression,
@@ -292,6 +294,35 @@ class YOLOAnchorlessPost(YOLOPostBase):
 class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
     """Postprocessing for YOLO segmentation models without anchors."""
 
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return the export-style output tensor for anchorless YOLO segmentation models.
+
+        Args:
+            x: Checked raw model outputs.
+
+        Returns:
+            A detection tensor, or detections paired with prototype masks.
+        """
+        if len(x) == 2:
+            converted, proto_outs = self.conversion(x)
+            return [self._converted_to_batch_output(converted), self._proto_to_nchw(proto_outs)]
+        return super().non_e2e(x)
+
+    def _proto_to_nchw(self, proto: torch.Tensor) -> torch.Tensor:
+        """Convert prototype tensors to ``(B, C, H, W)`` if needed.
+
+        Args:
+            proto: Prototype tensor from a model runtime.
+
+        Returns:
+            Prototype tensor in channel-first batch layout.
+        """
+        if proto.ndim == 4 and proto.shape[1] == self.n_extra:
+            return proto
+        if proto.ndim == 4 and proto.shape[-1] == self.n_extra:
+            return proto.permute(0, 3, 1, 2)
+        raise ValueError(f"Unsupported proto tensor shape {tuple(proto.shape)} for non-e2e output.")
+
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
@@ -456,6 +487,38 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessPost):
     def _angle_from_raw(self, angle: torch.Tensor) -> torch.Tensor:
         """Decode YOLOv8/YOLO11 raw angle logits to radians."""
         return (angle.sigmoid() - 0.25) * torch.pi
+
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+        """Preprocess OBB inputs into row-major detections.
+
+        Args:
+            x: Raw model outputs.
+
+        Returns:
+            A tuple of detections and no prototype output.
+        """
+        if len(x) in {1, 3, 5}:
+            return self.filter_conversion(self.conversion(x)), None
+        return self.decode(self.rearrange(x)), None
+
+    def conversion(self, x: list[torch.Tensor]) -> torch.Tensor:
+        """Convert exported OBB outputs to one canonical tensor.
+
+        Args:
+            x: Converted OBB runtime outputs.
+
+        Returns:
+            Detections in ``cx, cy, w, h, class scores..., angle`` format.
+        """
+        if len(x) == 5:
+            return decode_split_converted_obb_outputs(
+                x,
+                self.nc,
+                self.n_extra,
+                self.anchors_as_tensor(),
+                self.stride_as_tensor(),
+            )
+        return concat_converted_obb_outputs(x, self.nc, self.n_extra)
 
     def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Rearrange raw OBB heads into ``(batch, channels, anchors)`` format.
