@@ -5,6 +5,7 @@ Results processing and plotting.
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from typing import cast
 
 import cv2
@@ -105,15 +106,15 @@ class Results:
         self.box_cls = None
         self.mask = None
         if self.task.lower() == "image_classification":
-            if isinstance(output, list):
+            if isinstance(output, Sequence):
                 raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
             self.acc = output
         elif self.task.lower() in {"object_detection", "pose_estimation", "obb"}:
-            if not isinstance(output, list):
+            if not isinstance(output, Sequence):
                 raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0]
         elif self.task.lower() == "instance_segmentation":
-            if not isinstance(output, list) or not isinstance(output[0], list):
+            if not isinstance(output, Sequence) or not isinstance(output[0], Sequence):
                 raise TypeError(f"Expected nested list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0][0]
             self.mask = output[0][1]

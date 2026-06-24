@@ -16,6 +16,7 @@ from mblt_model_zoo.vision.utils.datasets import CustomCocodata
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
 from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
 from mblt_model_zoo.vision.utils.postprocess.common import crop_mask, nmsout2eval, scale_coords, scale_masks
+from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
@@ -768,6 +769,107 @@ def test_raw_mxq_like_outputs_are_not_final_detections() -> None:
 
     assert detections is None
     assert proto is None
+
+
+def _make_anchorless_obb_mxq_heads() -> ListTensorLike:
+    """Build synthetic channel-first MXQ OBB heads for anchorless models."""
+
+    outputs: list[np.ndarray] = []
+    scale_specs = ((8, 0, 0, 0), (4, 0, 0, 1), (2, 0, 0, 2))
+    for size, y_idx, x_idx, cls_idx in scale_specs:
+        det = np.full((1, 64, size, size), -10.0, dtype=np.float32)
+        for side in range(4):
+            det[0, side * 16 + 2, y_idx, x_idx] = 10.0
+
+        cls = np.full((1, 15, size, size), -10.0, dtype=np.float32)
+        cls[0, cls_idx, y_idx, x_idx] = 10.0
+
+        angle = np.zeros((1, 1, size, size), dtype=np.float32)
+        outputs.extend([det, cls, angle])
+    return outputs
+
+
+def _make_dflfree_obb_mxq_heads() -> ListTensorLike:
+    """Build synthetic channel-first MXQ OBB heads for DFL-free models."""
+
+    outputs: list[np.ndarray] = []
+    scale_specs = ((8, 0, 0, 0), (4, 0, 0, 1), (2, 0, 0, 2))
+    for size, y_idx, x_idx, cls_idx in scale_specs:
+        det = np.zeros((1, 4, size, size), dtype=np.float32)
+        det[0, :, y_idx, x_idx] = np.array([2.0, 2.0, 2.0, 2.0], dtype=np.float32)
+
+        cls = np.full((1, 15, size, size), -10.0, dtype=np.float32)
+        cls[0, cls_idx, y_idx, x_idx] = 10.0
+
+        angle = np.zeros((1, 1, size, size), dtype=np.float32)
+        outputs.extend([det, cls, angle])
+    return outputs
+
+
+def test_anchorless_obb_accepts_channel_first_mxq_heads_and_plots_airport(tmp_path: Path) -> None:
+    """Accept channel-first MXQ OBB heads for YOLOv8/YOLO11-style models."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "obb",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 15,
+        "n_extra": 1,
+        "conf_thres": 0.8,
+        "iou_thres": 0.7,
+    }
+    image_path = Path(__file__).parent / "rc" / "airport.jpg"
+    save_path = tmp_path / "anchorless_obb_airport.jpg"
+
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    result = postprocessor(_make_anchorless_obb_mxq_heads())
+
+    assert len(result) == 1
+    assert result[0].shape[1] == 7
+    assert result[0].shape[0] >= 1
+
+    plotted = Results(pre_cfg, post_cfg, result).plot(str(image_path), save_path=str(save_path))
+
+    assert plotted is not None
+    assert save_path.is_file()
+
+
+def test_dflfree_obb_accepts_channel_first_mxq_heads_and_plots_airport(tmp_path: Path) -> None:
+    """Accept channel-first MXQ OBB heads for YOLO26-style models."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "obb",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 15,
+        "n_extra": 1,
+        "conf_thres": 0.8,
+        "iou_thres": 0.7,
+    }
+    image_path = Path(__file__).parent / "rc" / "airport.jpg"
+    save_path = tmp_path / "dflfree_obb_airport.jpg"
+
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    result = postprocessor(_make_dflfree_obb_mxq_heads())
+
+    assert len(result) == 1
+    assert result[0].shape[1] == 7
+    assert result[0].shape[0] >= 1
+
+    plotted = Results(pre_cfg, post_cfg, result).plot(str(image_path), save_path=str(save_path))
+
+    assert plotted is not None
+    assert save_path.is_file()
 
 
 def test_anchor_segmentation_ignores_auxiliary_onnx_heads() -> None:

@@ -468,22 +468,73 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreePost):
         Returns:
             Concatenated tensor in ``(batch, channels, anchors)`` format.
         """
-        y_det = []
-        y_cls = []
-        y_angle = []
+        target_count = len(x) // 3
+        y_det: list[torch.Tensor] = []
+        y_cls: list[torch.Tensor] = []
+        y_angle: list[torch.Tensor] = []
+        ambiguous: list[tuple[torch.Tensor, list[int]]] = []
         for xi in x:
             if xi.ndim == 3:
-                xi = xi[None]
-            elif xi.ndim != 4:
-                raise NotImplementedError(f"Got unsupported ndim for input: {xi.ndim}.")
-            if xi.shape[-1] == 4:
-                y_det.append(xi.permute(0, 3, 1, 2))
-            elif xi.shape[-1] == self.nc:
-                y_cls.append(xi.permute(0, 3, 1, 2))
-            elif xi.shape[-1] == self.n_extra:
-                y_angle.append(xi.permute(0, 3, 1, 2))
+                xi = xi.unsqueeze(0)
+            elif xi.ndim > 4:
+                while xi.ndim > 4 and 1 in xi.shape:
+                    xi = xi.squeeze(next(idx for idx, size in enumerate(xi.shape) if size == 1))
+                if xi.ndim == 3:
+                    xi = xi.unsqueeze(0)
+            if xi.ndim != 4:
+                raise ValueError(f"Expected 3D or 4D OBB head, got shape {tuple(xi.shape)}.")
+
+            candidates: list[tuple[int, torch.Tensor]] = []
+            if xi.shape[1] in {4, self.nc, self.n_extra}:
+                candidates.append((int(xi.shape[1]), xi))
+            if xi.shape[-1] in {4, self.nc, self.n_extra}:
+                candidates.append((int(xi.shape[-1]), xi.permute(0, 3, 1, 2)))
+
+            deduped: list[tuple[int, torch.Tensor]] = []
+            seen_channels: set[int] = set()
+            for channel_count, candidate in candidates:
+                if channel_count not in seen_channels:
+                    seen_channels.add(channel_count)
+                    deduped.append((channel_count, candidate))
+
+            if len(candidates) == 2 and len(deduped) == 1:
+                channel_count, _ = deduped[0]
+                normalized = xi.permute(0, 3, 1, 2)
+                if channel_count == 4:
+                    y_det.append(normalized)
+                elif channel_count == self.nc:
+                    y_cls.append(normalized)
+                elif channel_count == self.n_extra:
+                    y_angle.append(normalized)
+                else:
+                    raise ValueError(f"Wrong shape of input: {xi.shape}")
+            elif len(deduped) == 1:
+                channel_count, normalized = deduped[0]
+                if channel_count == 4:
+                    y_det.append(normalized)
+                elif channel_count == self.nc:
+                    y_cls.append(normalized)
+                elif channel_count == self.n_extra:
+                    y_angle.append(normalized)
+                else:
+                    raise ValueError(f"Wrong shape of input: {xi.shape}")
+            elif len(deduped) > 1:
+                ambiguous.append((xi, [channel_count for channel_count, _ in deduped]))
             else:
                 raise ValueError(f"Wrong shape of input: {xi.shape}")
+
+        for xi, channel_options in ambiguous:
+            if 4 in channel_options and len(y_det) < target_count:
+                y_det.append(xi if xi.shape[1] == 4 else xi.permute(0, 3, 1, 2))
+                continue
+            if self.nc in channel_options and len(y_cls) < target_count:
+                y_cls.append(xi if xi.shape[1] == self.nc else xi.permute(0, 3, 1, 2))
+                continue
+            if self.n_extra in channel_options and len(y_angle) < target_count:
+                y_angle.append(xi if xi.shape[1] == self.n_extra else xi.permute(0, 3, 1, 2))
+                continue
+            raise ValueError(f"Wrong shape of input: {xi.shape}")
+
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
         y_angle = sorted(y_angle, key=lambda x: x.numel(), reverse=True)

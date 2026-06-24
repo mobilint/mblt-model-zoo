@@ -4,6 +4,8 @@ Classification postprocessing.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
@@ -39,7 +41,7 @@ class ClsPost(PostBase):
         Returns:
             torch.Tensor: Softmax probabilities of shape (N, C).
         """
-        if isinstance(x, list):
+        if isinstance(x, Sequence):
             assert len(x) == 1, "assume that classification model only returns pre-softmax tensor"
             x = x[0]
         if isinstance(x, np.ndarray):
