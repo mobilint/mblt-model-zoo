@@ -36,7 +36,7 @@ Start with the smallest set of files that anchor the task:
 - `mblt_model_zoo/hf_transformers`: Custom model, config, and proxy integrations for Transformers
 - `mblt_model_zoo/MeloTTS`: MeloTTS runtime, API, CLI glue, and text normalization utilities
 - `mblt_model_zoo/cli`: Installed CLI entry points. `mblt-model-zoo` is defined in
-  `pyproject.toml`
+  `pyproject.toml`, and `mblt-melotts-download` is also exposed for MeloTTS setup
 - `tests`: Pytest suites grouped by feature area
 - `benchmark`: Dataset organization and benchmark scripts
 
@@ -57,8 +57,15 @@ When editing these files:
   pattern.
 - Preserve public constructor arguments such as `local_path`, `model_type`, `infer_mode`, and
   `product`.
+- Legacy compatibility wrappers still accept `product`, but the current YAML-backed registry
+  ignores it. Use explicit `model_cls`, `model_type`, or `model_path` values when a task needs a
+  non-default artifact.
 - Be careful with changes that affect `list_models()` discovery. Exported classes must remain
   subclasses of `MBLT_Engine`.
+- Keep `mblt_model_zoo/vision/__init__.py` lazy top-level compatibility exports aligned with task
+  package `__all__` lists. The current package still supports imports such as
+  `from mblt_model_zoo.vision import ResNet50`, even though `MBLT_Engine` and task subpackages are
+  the preferred surfaces for new code.
 
 ### Shared Vision Pipeline Work
 

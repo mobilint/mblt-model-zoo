@@ -73,9 +73,12 @@ because they are the most consistently structured.
   imports such as `from mblt_model_zoo.vision import ResNet50`. For new docs and examples, prefer
   `MBLT_Engine` or task-subpackage imports unless the change is specifically about backward
   compatibility.
+- Legacy compatibility wrappers still accept `product`, but the YAML-backed registry ignores it.
+  If a change needs non-default artifacts, route that selection through explicit `model_cls`,
+  `model_type`, or `model_path` values instead.
 - When adding or renaming exported vision models, update the relevant `__init__.py` files so
   `mblt_model_zoo.vision.list_models()` continues to discover them, and keep
-  `mblt_model_zoo.vision.__init__` compatibility exports in sync.
+  `mblt_model_zoo.vision.__init__` lazy compatibility exports in sync.
 
 ### Tests and Benchmarks
 
