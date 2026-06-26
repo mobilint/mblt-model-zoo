@@ -141,7 +141,13 @@ def _dataset_ready(task: str, data_path: str) -> bool:
     if task == "pose_estimation":
         return (root / "val2017").is_dir() and (root / "person_keypoints_val2017.json").is_file()
     if task == "face_detection":
-        return (root / "images").is_dir() and (root / "wider_face_val_bbx_gt.txt").is_file()
+        required_files = (
+            "wider_face_val.mat",
+            "wider_easy_val.mat",
+            "wider_medium_val.mat",
+            "wider_hard_val.mat",
+        )
+        return (root / "images").is_dir() and all((root / file_name).is_file() for file_name in required_files)
     if task == "obb":
         return (root / "images" / "val").is_dir() and (root / "labels" / "val").is_dir()
     return False
@@ -204,7 +210,7 @@ def _run_validation(args: argparse.Namespace) -> float:
 
     try:
         from mblt_model_zoo.vision import MBLT_Engine
-        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet
+        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
         from mblt_model_zoo.vision.wrapper import normalize_core_mode
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
@@ -258,10 +264,21 @@ def _run_validation(args: argparse.Namespace) -> float:
             return dota_result.map5095
 
         if task == "face_detection":
-            raise SystemExit(
-                "Validation for face detection models is not available yet. "
-                "WiderFace evaluation is still pending in the current codebase."
+            widerface_result = eval_widerface(
+                model=model,
+                data_path=data_path,
+                batch_size=args.batch_size,
+                conf_thres=args.conf_thres,
+                iou_thres=args.iou_thres,
             )
+            print(
+                "Validation score "
+                f"(Easy AP): {widerface_result.easy_ap:.5f}, "
+                f"(Medium AP): {widerface_result.medium_ap:.5f}, "
+                f"(Hard AP): {widerface_result.hard_ap:.5f}, "
+                f"(Mean AP): {widerface_result.mean_ap:.5f}"
+            )
+            return widerface_result.mean_ap
 
         raise SystemExit(f"Unsupported vision task for validation: {task}")
     finally:

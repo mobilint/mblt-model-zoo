@@ -39,7 +39,7 @@ def build_postprocess(
     task_lower = post_cfg["task"].lower()
     if task_lower == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
-    if task_lower == "object_detection":
+    if task_lower in {"object_detection", "face_detection"}:
         if post_cfg.get("anchors", False):
             return YOLOAnchorPost(
                 pre_cfg,

@@ -415,22 +415,31 @@ def get_widerface_loader(
 
     def loader(
         batch: list[Any],
-    ) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], tuple[str, ...]]:
+    ) -> tuple[np.ndarray, np.ndarray, list[Any | None], tuple[str, ...], tuple[str, ...]]:
         """Collate function for WiderFace DataLoader."""
         batch = list(filter(lambda x: x is not None, batch))
         images, target_classes, fnames = zip(*batch)
         processed_images = []
         heights = []
         widths = []
+        ratio_pads = []
         for img in images:
             height, width = img.shape[:2]
-            processed_images.append(preprocess_fn(img))
+            processed = preprocess_fn(img)
+            if isinstance(processed, tuple):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
             heights.append(height)
             widths.append(width)
 
         return (
             np.stack(processed_images, axis=0),
             np.stack((heights, widths), axis=1),
+            ratio_pads,
             target_classes,
             fnames,
         )

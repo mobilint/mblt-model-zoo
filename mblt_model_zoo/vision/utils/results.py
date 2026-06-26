@@ -31,7 +31,6 @@ RADIUS = 5  # circle radius
 ALPHA = 0.3  # alpha for overlay
 
 
-# for drawing bounding box
 class Results:
     """
     Class for handling and plotting model inference results.
@@ -109,7 +108,7 @@ class Results:
             if isinstance(output, Sequence):
                 raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
             self.acc = output
-        elif self.task.lower() in {"object_detection", "pose_estimation", "obb"}:
+        elif self.task.lower() in {"object_detection", "face_detection", "pose_estimation", "obb"}:
             if not isinstance(output, Sequence):
                 raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
             self.box_cls = output[0]
@@ -148,7 +147,7 @@ class Results:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
         if self.task.lower() == "image_classification":
             return self._plot_image_classification(source_path, save_path, **kwargs)
-        elif self.task.lower() == "object_detection":
+        elif self.task.lower() in {"object_detection", "face_detection"}:
             return self._plot_object_detection(source_path, save_path, **kwargs)
         elif self.task.lower() == "instance_segmentation":
             return self._plot_instance_segmentation(source_path, save_path, **kwargs)
@@ -232,16 +231,18 @@ class Results:
         boxes = self.boxes
         scores = self.scores
         labels = self.labels
-        contours = {i: [] for i in list(range(get_coco_class_num()))}
+        contour_count = get_coco_class_num() if self.task.lower() == "object_detection" else 1
+        contours = {i: [] for i in range(contour_count)}
         for box, score, label in zip(boxes, scores, labels):
             label_idx = int(label.item())
+            palette = self._get_detection_palette(label_idx)
             img = cv2.putText(
                 img,
-                f"{get_coco_label(label_idx)} {int(100 * score)}%",
+                f"{self._get_detection_label(label_idx)} {int(100 * score)}%",
                 (int(box[0]), int(box[1]) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                get_coco_det_palette(label_idx),
+                palette,
                 1,
                 cv2.LINE_AA,
             )
@@ -261,7 +262,7 @@ class Results:
                     img,
                     contour,
                     -1,
-                    get_coco_det_palette(label),
+                    self._get_detection_palette(label),
                     LW,
                 )
         if save_path is not None:
@@ -406,6 +407,20 @@ class Results:
         if isinstance(self.box_cls, np.ndarray):
             return torch.from_numpy(self.box_cls)
         return self.box_cls
+
+    def _get_detection_label(self, label_idx: int) -> str:
+        """Return the display label for detection-style tasks."""
+        if self.task.lower() == "face_detection":
+            if label_idx != 0:
+                raise ValueError(f"Unexpected face_detection class index: {label_idx}.")
+            return "face"
+        return get_coco_label(label_idx)
+
+    def _get_detection_palette(self, label_idx: int) -> tuple[int, int, int]:
+        """Return the display color for detection-style tasks."""
+        if self.task.lower() == "face_detection":
+            return get_coco_det_palette(0)
+        return get_coco_det_palette(label_idx)
 
     def _mask_tensor(self) -> torch.Tensor:
         """Returns segmentation mask output as a torch tensor."""

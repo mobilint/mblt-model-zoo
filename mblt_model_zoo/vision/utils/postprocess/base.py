@@ -57,6 +57,7 @@ class YOLOPostBase(PostBase):
         "instance_segmentation": 80,
         "pose_estimation": 1,
         "obb": 15,
+        "face_detection": 1,
     }
 
     def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs) -> None:
