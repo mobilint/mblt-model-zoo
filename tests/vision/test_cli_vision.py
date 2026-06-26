@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import _match_predictions, evaluate_dota_predictions
@@ -124,6 +125,78 @@ def test_cli_predict_accepts_face_model_name() -> None:
     args = parser.parse_args(["predict", "--source", "./face.jpg", "--model", "yolo11m-face"])
 
     assert args.model == "yolo11m-face"
+
+
+def test_cli_predict_applies_face_detection_thresholds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Forward predict thresholds to the face-detection postprocessor."""
+
+    source_path = tmp_path / "face.jpg"
+    source_path.write_bytes(b"fake")
+    calls: dict[str, object] = {}
+
+    class _FakeResult:
+        def plot(self, source_path: str, save_path: str, **kwargs: object) -> None:
+            calls["plot"] = {
+                "source_path": source_path,
+                "save_path": save_path,
+                "kwargs": kwargs,
+            }
+
+    class _FakeEngine:
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "face_detection"}
+
+        def set_postprocess_thresholds(self, conf_thres: float | None = None, iou_thres: float | None = None) -> None:
+            calls["thresholds"] = (conf_thres, iou_thres)
+
+        def preprocess(self, source: str) -> str:
+            calls["preprocess"] = source
+            return "preprocessed"
+
+        def __call__(self, input_img: str) -> str:
+            calls["forward"] = input_img
+            return "raw-output"
+
+        def postprocess(self, output: str, **kwargs: object) -> _FakeResult:
+            calls["postprocess"] = {"output": output, "kwargs": kwargs}
+            return _FakeResult()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    import mblt_model_zoo.cli._vision as vision_cli_module
+
+    monkeypatch.setattr(vision_cli_module, "require_source_file", lambda source: None)
+    monkeypatch.setattr(
+        vision_cli_module,
+        "resolve_output_path",
+        lambda output, command, source, model: str(tmp_path / "out.jpg"),
+    )
+    monkeypatch.setattr("mblt_model_zoo.vision.MBLT_Engine", _FakeEngine)
+
+    args = Namespace(
+        source=str(source_path),
+        model="yolo11m-face",
+        output="",
+        framework="onnx",
+        model_path="/models/ONNX/face_detection/yolo11m-face.onnx",
+        mxq_path="",
+        onnx_path="",
+        model_type="DEFAULT",
+        core_mode="global8",
+        dev_no=0,
+        target_cores=None,
+        target_clusters=None,
+        topk=5,
+        conf_thres=0.25,
+        iou_thres=0.6,
+    )
+
+    run_vision_inference(args, command="predict")
+
+    assert calls["thresholds"] == (0.25, 0.6)
+    assert calls["disposed"] is True
 
 
 def test_cli_val_preserves_framework_specific_model_paths() -> None:
