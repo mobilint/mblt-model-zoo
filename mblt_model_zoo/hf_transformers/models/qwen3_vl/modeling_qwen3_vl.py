@@ -77,6 +77,12 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     config: MobilintQwen3VLVisionConfig
     input_modalities = ("image", "video")
 
+    @classmethod
+    def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
+        """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
+        kwargs["_internal_call"] = True
+        return super()._from_config(config, **kwargs)
+
     @property
     def dtype(self) -> torch.dtype:
         """Expose the MXQ vision input dtype expected by upstream Qwen3-VL helpers."""
@@ -275,6 +281,12 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen3VLPreTrainedModel):
     config: MobilintQwen3VLTextConfig
     input_modalities = ("text",)
+
+    @classmethod
+    def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
+        """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
+        kwargs["_internal_call"] = True
+        return super()._from_config(config, **kwargs)
 
     def __init__(self, config: MobilintQwen3VLTextConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
@@ -568,5 +580,7 @@ class MobilintQwen3VLForConditionalGeneration(
         return super().forward(*args, **kwargs)
 
 
+AutoModel.register(MobilintQwen3VLVisionConfig, MobilintQwen3VLVisionModel)
+AutoModel.register(MobilintQwen3VLTextConfig, MobilintQwen3VLTextModel)
 AutoModel.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
