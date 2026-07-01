@@ -128,9 +128,16 @@ class MobilintConfigMixin(PretrainedConfig):
         super()._remove_keys_not_serialized(d)
 
     def to_dict(self):
-        output = super().to_dict()
-        if hasattr(self, "npu_backend"):
-            output.update(self.npu_backend.to_dict(prefix=""))
+        npu_backend = getattr(self, "npu_backend", None)
+        if npu_backend is not None:
+            del self.npu_backend
+        try:
+            output = super().to_dict()
+        finally:
+            if npu_backend is not None:
+                self.npu_backend = npu_backend
+        if npu_backend is not None:
+            output.update(npu_backend.to_dict(prefix=""))
         return output
 
 
