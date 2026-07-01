@@ -568,5 +568,6 @@ class MobilintQwen3VLForConditionalGeneration(
         return super().forward(*args, **kwargs)
 
 
+AutoModel.register(MobilintQwen3VLVisionConfig, MobilintQwen3VLVisionModel)
 AutoModel.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
