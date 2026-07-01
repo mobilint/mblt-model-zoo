@@ -127,7 +127,19 @@ class MobilintConfigMixin(PretrainedConfig):
 
         super()._remove_keys_not_serialized(d)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the config and flatten Mobilint NPU backend fields into the top level.
+
+        The ``npu_backend`` attribute is temporarily detached before delegating to the upstream
+        :meth:`PretrainedConfig.to_dict` implementation so it is neither serialized as a nested
+        object nor picked up by upstream diff/equality helpers. It is reattached in a ``finally``
+        block, and its unprefixed field mapping is merged into the returned dictionary so callers
+        see the individual NPU parameters (``mxq_path``, ``dev_no``, etc.) at the top level.
+
+        Returns:
+            A dictionary representation of the config with the Mobilint NPU backend fields
+            merged in at the top level (no ``npu_backend`` key).
+        """
         npu_backend = getattr(self, "npu_backend", None)
         if npu_backend is not None:
             del self.npu_backend

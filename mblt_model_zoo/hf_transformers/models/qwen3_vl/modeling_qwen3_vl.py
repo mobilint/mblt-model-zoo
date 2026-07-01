@@ -78,7 +78,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     input_modalities = ("image", "video")
 
     @classmethod
-    def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any):
+    def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
         kwargs["_internal_call"] = True
         return super()._from_config(config, **kwargs)
@@ -283,7 +283,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     input_modalities = ("text",)
 
     @classmethod
-    def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any):
+    def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
         kwargs["_internal_call"] = True
         return super()._from_config(config, **kwargs)
