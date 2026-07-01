@@ -336,6 +336,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         cache_position: Optional[torch.LongTensor] = None,
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
@@ -367,6 +368,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             count_npu_time=count_npu_time,
             deepstack_visual_embeds=deepstack_visual_embeds,
             visual_pos_masks=visual_pos_masks,
+            logits_to_keep=logits_to_keep,
         )
 
         return BaseModelOutputWithPast(
@@ -383,8 +385,14 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
+        logits_to_keep: Union[int, torch.Tensor] = 1,
     ) -> torch.Tensor:
-        """Run the dual-input MXQ decoder.
+        """Run the dual-input MXQ decoder with HF-style ``logits_to_keep``.
+
+        ``logits_to_keep`` follows the ``transformers`` semantics: ``1``
+        (default) returns only the last-token logits; ``0`` returns every
+        position; ``>1`` returns the last N positions; a ``torch.Tensor``
+        selects specific positions.
 
         Args:
             inputs_embeds: Token embeddings of shape `(batch, seq_len, hidden)`.
@@ -394,9 +402,11 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position: Cache position range.
             prefill_chunk_size: Optional chunk size.
             count_npu_time: Whether to accumulate NPU time.
+            logits_to_keep: HF-style position selector; see the shared
+                :meth:`MobilintModelMixin.llm_forward` for details.
 
         Returns:
-            Decoder logits for the most recent token positions.
+            Decoder logits for the requested token positions.
         """
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}")
@@ -414,19 +424,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             past_key_values.set_deepstack_tensor(deepstack_tensor)
 
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
+        seq_len = int(inputs_np.shape[1])
 
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
-        num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_prefill_chunk_size))
 
         mxq_model = self.get_mxq_model()
         self.npu_time = 0.0 if count_npu_time else None
-        logits_ndarray = None
 
-        for chunk_idx in range(num_chunks):
-            start_index = chunk_idx * resolved_prefill_chunk_size
-            end_index = min(start_index + resolved_prefill_chunk_size, inputs_np.shape[1])
+        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
+
+        def _do_infer(start_index: int, end_index: int) -> np.ndarray:
             cache_size = past_key_values.get_seq_length() if past_key_values is not None else 0
-
             inputs_chunk = inputs_np[:, start_index:end_index, :]
             if past_key_values is None:
                 deepstack_chunk = deepstack_tensor[:, start_index:end_index, :].to(dtype=torch.float32).cpu().numpy()
@@ -443,20 +452,61 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
                 t1 = time.perf_counter()
                 result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                assert self.npu_time is not None
                 self.npu_time += time.perf_counter() - t1
             else:
                 result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
 
             if result is None:
                 raise RuntimeError("Text MXQ inference returned None.")
-            logits_ndarray = result[0]
-
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
+            return result[0]
 
-        if logits_ndarray is None:
-            raise RuntimeError("Text MXQ inference did not produce logits.")
+        # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
+        # additionally collects every chunk's output so the concatenation
+        # covers the full input.
+        if is_default_keep or supports_all:
+            num_chunks = int(np.ceil(seq_len / resolved_prefill_chunk_size))
+            per_chunk_logits: list[np.ndarray] = []
+            logits_ndarray: Optional[np.ndarray] = None
+            for chunk_idx in range(num_chunks):
+                start_index = chunk_idx * resolved_prefill_chunk_size
+                end_index = min(start_index + resolved_prefill_chunk_size, seq_len)
+                logits_ndarray = _do_infer(start_index, end_index)
+                if supports_all:
+                    per_chunk_logits.append(logits_ndarray)
 
+            if supports_all:
+                logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
+                positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+                token_axis = logits_ndarray.ndim - 2
+                logits_ndarray = np.take(logits_ndarray, positions_to_keep, axis=token_axis)
+
+            if logits_ndarray is None:
+                raise RuntimeError("Text MXQ inference did not produce logits.")
+            return torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+
+        # Path 3: fallback. Interleave normal chunks (advancing only the KV
+        # cache) with size-1 infer calls at each kept position.
+        positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+        per_position_logits: dict[int, np.ndarray] = {}
+        cursor = 0
+        for p in positions_to_keep:
+            while cursor < p:
+                end_index = min(cursor + resolved_prefill_chunk_size, p)
+                _do_infer(cursor, end_index)
+                cursor = end_index
+            per_position_logits[p] = _do_infer(cursor, cursor + 1)
+            cursor += 1
+        while cursor < seq_len:
+            end_index = min(cursor + resolved_prefill_chunk_size, seq_len)
+            _do_infer(cursor, end_index)
+            cursor = end_index
+
+        logits_ndarray = np.concatenate(
+            [per_position_logits[p] for p in positions_to_keep], axis=-2
+        )
         return torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
 
     def _build_deepstack_tensor(
@@ -566,18 +616,59 @@ class MobilintQwen3VLForConditionalGeneration(
     @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.forward, "count_npu_time")
     def forward(
         self,
-        *args: object,
+        *args: Any,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
-        """Forward to upstream while injecting Mobilint decoder timing collection.
+        """Route ``logits_to_keep`` to the Mobilint text decoder.
 
-        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
-        generation helpers still see Qwen3-VL's real inputs such as ``mm_token_type_ids`` and
-        ``logits_to_keep``.
+        Upstream ``Qwen3VLForConditionalGeneration.forward`` extracts ``logits_to_keep``
+        as a named argument and performs its own final slice on the text model output,
+        which bypasses the Mobilint decoder's position selection. To keep that decoder
+        in charge of picking positions, we pop ``logits_to_keep`` here and thread it
+        into ``self.model`` via kwargs (upstream ``Qwen3VLModel.forward`` forwards its
+        own ``**kwargs`` to the text model). All other arguments follow the upstream
+        signature by way of ``@with_mobilint_generation_signature``, so upstream
+        additions such as ``mm_token_type_ids`` continue to pass through unchanged.
         """
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        upstream_params = [
+            name
+            for name, parameter in inspect.signature(
+                Qwen3VLForConditionalGeneration.forward
+            ).parameters.items()
+            if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
+        ]
+        for name, value in zip(upstream_params, args):
+            kwargs[name] = value
+
+        labels = kwargs.pop("labels", None)
+        logits_to_keep = kwargs.pop("logits_to_keep", 0)
+
+        outputs = self.model(
+            logits_to_keep=logits_to_keep,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+
+        # The Mobilint text decoder already returns logits sliced to the requested
+        # positions and ``self.lm_head`` is ``nn.Identity``, so skip the upstream
+        # ``hidden_states[:, slice_indices, :]`` step.
+        logits = cast(torch.FloatTensor, self.lm_head(outputs[0]))
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(
+                logits=logits, labels=labels, vocab_size=self.config.text_config.vocab_size
+            )
+
+        return Qwen3VLCausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            rope_deltas=outputs.rope_deltas,
+        )
 
 
 AutoModel.register(MobilintQwen3VLVisionConfig, MobilintQwen3VLVisionModel)

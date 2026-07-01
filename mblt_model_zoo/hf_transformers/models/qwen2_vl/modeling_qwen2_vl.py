@@ -1,6 +1,6 @@
 import inspect
 from functools import lru_cache
-from typing import Union, cast
+from typing import Any, Union, cast
 
 import torch
 import torch.nn as nn
@@ -327,18 +327,59 @@ class MobilintQwen2VLForConditionalGeneration(
     @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.forward, "count_npu_time")
     def forward(
         self,
-        *args: object,
+        *args: Any,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> Union[tuple, Qwen2VLCausalLMOutputWithPast]:
-        """Forward to upstream while injecting Mobilint decoder timing collection.
+        """Route ``logits_to_keep`` to the Mobilint text decoder.
 
-        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
-        generation helpers still see Qwen2-VL's real inputs such as ``position_ids`` and
-        ``logits_to_keep``.
+        Upstream ``Qwen2VLForConditionalGeneration.forward`` extracts ``logits_to_keep``
+        as a named argument and performs its own final slice on the text model output,
+        which bypasses the Mobilint decoder's position selection. To keep that decoder
+        in charge of picking positions, we pop ``logits_to_keep`` here and thread it
+        into ``self.model`` via kwargs (upstream ``Qwen2VLModel.forward`` forwards its
+        own ``**kwargs`` to the text model). All other arguments follow the upstream
+        signature by way of ``@with_mobilint_generation_signature``, so upstream
+        additions such as ``position_ids`` continue to pass through unchanged.
         """
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        upstream_params = [
+            name
+            for name, parameter in inspect.signature(
+                Qwen2VLForConditionalGeneration.forward
+            ).parameters.items()
+            if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
+        ]
+        for name, value in zip(upstream_params, args):
+            kwargs[name] = value
+
+        labels = kwargs.pop("labels", None)
+        logits_to_keep = kwargs.pop("logits_to_keep", 0)
+
+        outputs = self.model(
+            logits_to_keep=logits_to_keep,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+
+        # The Mobilint text decoder already returns logits sliced to the requested
+        # positions and ``self.lm_head`` is ``nn.Identity``, so skip the upstream
+        # ``hidden_states[:, slice_indices, :]`` step.
+        logits = cast(torch.FloatTensor, self.lm_head(outputs.last_hidden_state))
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(
+                logits=logits, labels=labels, vocab_size=self.config.text_config.vocab_size
+            )
+
+        return Qwen2VLCausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            rope_deltas=outputs.rope_deltas,
+        )
 
 
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)
