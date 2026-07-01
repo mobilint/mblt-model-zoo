@@ -207,6 +207,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         output_hidden_states: Union[bool, None] = None,
         return_dict: Union[bool, None] = None,
         cache_position: Union[torch.LongTensor, None] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[tuple, BaseModelOutputWithPast]:
@@ -248,6 +249,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
+            logits_to_keep=logits_to_keep,
         )
 
         if not return_dict:

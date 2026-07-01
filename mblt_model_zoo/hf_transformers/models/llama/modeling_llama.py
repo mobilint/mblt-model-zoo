@@ -41,9 +41,6 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
-        if logits_to_keep > 1:
-            logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
-
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
@@ -71,6 +68,7 @@ class MobilintLlamaForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             prefill_chunk_size,
             count_npu_time=count_npu_time,
             attention_mask=effective_attention_mask,
+            logits_to_keep=logits_to_keep,
         )
 
         loss = None

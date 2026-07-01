@@ -313,6 +313,7 @@ class MobilintQwen3ASRTextModel(
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
@@ -365,6 +366,7 @@ class MobilintQwen3ASRTextModel(
                 prefill_chunk_size=prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 attention_mask=None,
+                logits_to_keep=logits_to_keep,
             )
 
         return BaseModelOutputWithPast(

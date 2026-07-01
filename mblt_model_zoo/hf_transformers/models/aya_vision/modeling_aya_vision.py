@@ -93,9 +93,6 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, AyaVisionCausalLMOutputWithPast]:
-        if logits_to_keep > 1:
-            logger.warning("logits_to_keep larger than 1 is not supported: %d" % logits_to_keep)
-        
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
@@ -129,6 +126,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             inputs_embeds=inputs_embeds,
             use_cache=kwargs.pop('use_cache', None),
             cache_position=cache_position,
+            logits_to_keep=logits_to_keep,
             image_sizes=image_sizes,
             prefill_chunk_size=prefill_chunk_size,
             count_npu_time=count_npu_time,
