@@ -145,6 +145,62 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         timing[f"{phase}_time"] = float(timing.get(f"{phase}_time", 0.0)) + float(elapsed)
         timing[f"{phase}_calls"] = int(timing.get(f"{phase}_calls", 0)) + 1
 
+    def _mxq_supports_all_logits(self) -> bool:
+        """Return True when the compiled MXQ emits logits for every input token.
+
+        Some MXQ builds compile the LM head with a dynamic token axis, so a
+        single ``mxq_model.infer`` call returns per-position logits instead
+        of only the last-token logit. We probe this by inspecting the first
+        entry of :py:meth:`qbruntime.Model.get_model_output_shape`: token
+        axis is the second-to-last dimension (matching both
+        ``(batch, seq_len, vocab)`` and ``(batch, 1, seq_len, vocab)``
+        layouts we see in practice), and a value of ``-1`` marks it as
+        dynamic. The result is cached on the instance because the shape is
+        fixed for the lifetime of the loaded model.
+        """
+        cached = getattr(self, "_mxq_all_logits_cached", None)
+        if cached is not None:
+            return cached
+        supports = False
+        try:
+            output_shapes = self.npu_backend.mxq_model.get_model_output_shape()
+            if output_shapes:
+                first_shape = tuple(output_shapes[0])
+                if len(first_shape) >= 2 and int(first_shape[-2]) == -1:
+                    supports = True
+        except Exception:  # noqa: BLE001 - defensively fall back to slow path
+            supports = False
+        self._mxq_all_logits_cached = supports
+        return supports
+
+    @staticmethod
+    def _normalize_logits_to_keep(logits_to_keep: Union[int, torch.Tensor], seq_len: int) -> list[int]:
+        """Translate HF-style ``logits_to_keep`` into an ordered position list.
+
+        * ``int == 0``: keep every position.
+        * ``int > 0``: keep the last N positions (clamped to ``seq_len``).
+        * ``torch.Tensor``: treat as position indices (negatives wrap,
+          out-of-range values are dropped, duplicates collapsed).
+
+        The returned list is sorted ascending so callers can walk the
+        sequence left-to-right when they need to interleave prefill and
+        per-position infer calls.
+        """
+        if isinstance(logits_to_keep, torch.Tensor):
+            indices = logits_to_keep.detach().to("cpu").flatten().tolist()
+            normalized: list[int] = []
+            for raw_index in indices:
+                idx = int(raw_index)
+                if idx < 0:
+                    idx = seq_len + idx
+                if 0 <= idx < seq_len:
+                    normalized.append(idx)
+            return sorted(set(normalized))
+        n = int(logits_to_keep)
+        if n <= 0 or n >= seq_len:
+            return list(range(seq_len))
+        return list(range(seq_len - n, seq_len))
+
     def mxq_forward(
         self,
         input: torch.Tensor,
@@ -166,7 +222,29 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         attention_mask: Optional[torch.Tensor] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 1,
     ):
+        """Chunked MXQ prefill / decode with HF-style ``logits_to_keep``.
+
+        ``logits_to_keep`` follows the ``transformers`` semantics: ``1``
+        (default) returns only the last-token logits; ``0`` returns every
+        position; ``>1`` returns the last N positions; a ``torch.Tensor``
+        selects specific positions.
+
+        Three execution paths cover the interaction between the request and
+        the compiled MXQ:
+
+        1. ``logits_to_keep == 1``: unchanged fast path; the caller's
+           ``prefill_chunk_size`` is used as-is.
+        2. MXQ has a dynamic token axis (see
+           :meth:`_mxq_supports_all_logits`): keep the caller's chunk size
+           and concatenate per-chunk outputs, then slice to the requested
+           positions.
+        3. Otherwise (last-only MXQ + non-default request): a fallback that
+           prefills the non-kept prefix with normal chunks (throwing away
+           logits, only advancing the KV cache) and runs a size-1 infer at
+           each kept position to capture its logits.
+        """
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
 
@@ -178,42 +256,91 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 past_key_values,
                 resolved_prefill_chunk_size,
                 count_npu_time=count_npu_time,
+                logits_to_keep=logits_to_keep,
             )
 
         inputs_embeds_numpy = inputs_embeds.type(torch.float32).cpu().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
-        num_of_chunks = math.ceil(inputs_embeds_numpy.shape[2] / resolved_prefill_chunk_size)
-        assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
-
+        seq_len = inputs_embeds_numpy.shape[2]
         mxq_model = self.npu_backend.mxq_model
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
         timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
-        for i in range(num_of_chunks):
-            start_index = i * resolved_prefill_chunk_size
-            end_index = min(start_index + resolved_prefill_chunk_size, inputs_embeds_numpy.shape[2])
-            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
+        def _do_infer(start: int, end: int) -> np.ndarray:
+            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+            chunk = inputs_embeds_numpy[:, :, start:end, :]
             if count_npu_time:
                 t0 = time.perf_counter()
-                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
+                result = mxq_model.infer([chunk], None, cache_size)
                 elapsed = time.perf_counter() - t0
+                assert self.npu_time is not None
                 self.npu_time += elapsed
                 self._record_npu_timing(timing_phase, elapsed)
             else:
-                result = mxq_model.infer([inputs_embeds_numpy[:, :, start_index:end_index, :]], None, cache_size)
-
+                result = mxq_model.infer([chunk], None, cache_size)
             assert result is not None, "mxq infer result is None!"
-            logits_ndarray = result[0]
-
             if past_key_values is not None:
-                past_key_values.update_cache_position(cache_position[start_index:end_index])
+                past_key_values.update_cache_position(cache_position[start:end])
+            return result[0]
 
-        logits = torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device).squeeze(0)
+        # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
+        # additionally collects every chunk's output so the concatenation
+        # covers the full input.
+        if is_default_keep or supports_all:
+            num_of_chunks = math.ceil(seq_len / resolved_prefill_chunk_size)
+            assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
-        return logits
+            per_chunk_logits: list[np.ndarray] = []
+            logits_ndarray: Optional[np.ndarray] = None
+            for i in range(num_of_chunks):
+                start_index = i * resolved_prefill_chunk_size
+                end_index = min(start_index + resolved_prefill_chunk_size, seq_len)
+                logits_ndarray = _do_infer(start_index, end_index)
+                if supports_all:
+                    per_chunk_logits.append(logits_ndarray)
+
+            if supports_all:
+                logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
+                positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+                token_axis = logits_ndarray.ndim - 2
+                logits_ndarray = np.take(logits_ndarray, positions_to_keep, axis=token_axis)
+
+            assert logits_ndarray is not None
+            return torch.tensor(
+                logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device
+            ).squeeze(0)
+
+        # Path 3: fallback. Interleave normal chunks (for positions the
+        # caller does not care about) with size-1 infer calls (one per kept
+        # position). The KV cache advances monotonically through every
+        # position of the input, so subsequent decode steps see the same
+        # cache state as the other two paths would leave behind.
+        positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+        per_position_logits: dict[int, np.ndarray] = {}
+        cursor = 0
+        for p in positions_to_keep:
+            while cursor < p:
+                end_index = min(cursor + resolved_prefill_chunk_size, p)
+                _do_infer(cursor, end_index)
+                cursor = end_index
+            per_position_logits[p] = _do_infer(cursor, cursor + 1)
+            cursor += 1
+        while cursor < seq_len:
+            end_index = min(cursor + resolved_prefill_chunk_size, seq_len)
+            _do_infer(cursor, end_index)
+            cursor = end_index
+
+        logits_ndarray = np.concatenate(
+            [per_position_logits[p] for p in positions_to_keep], axis=-2
+        )
+        return torch.tensor(
+            logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device
+        ).squeeze(0)
 
     def resolve_batched_attention_mask(
         self,
@@ -239,6 +366,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         prefill_chunk_size: int = 0,
         count_npu_time: bool = False,
+        logits_to_keep: Union[int, torch.Tensor] = 1,
     ):
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
@@ -276,179 +404,408 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         assert prefill_chunk_size > 0, (
             "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
         )
-        num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
 
-        logits_dict: dict[int, torch.Tensor] = {}
+        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
-        for i in range(num_of_chunks):
-            start_index = i * prefill_chunk_size
-
-            sequence_lengths_chunks: list[int] = []
-            cache_sizes_chunks: list[int] = []
-            cache_ids: list[int] = []
-            prefill_masks: list[bool] = []
-            inputs_embeds_chunks: list[torch.Tensor] = []
-            seen_tokens: dict[int, int] = {}
-
+        keep_positions_by_item: dict[int, list[int]] = {}
+        if not is_default_keep:
             for j in range(batch_size):
-                end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
-                if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
-                    sequence_lengths_chunks.append(end_index - start_index)
-                    cache_sizes_chunks.append(past_key_values.get_seq_length(j) if past_key_values is not None else 0)
-                    cache_ids.append(j)
-                    prefill_masks.append(end_index < inputs_embeds_masked[j].shape[0])
-                    inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
-                    seen_tokens[j] = end_index - start_index
+                keep_positions_by_item[j] = self._normalize_logits_to_keep(logits_to_keep, sequence_lengths[j])
 
-            if len(inputs_embeds_chunks) == 0:
-                continue
-
-            inputs_embeds_concat = torch.concat(inputs_embeds_chunks, dim=0).unsqueeze(0)
-            inputs_embeds_numpy: np.ndarray = inputs_embeds_concat.type(torch.float32).cpu().numpy()
-
-            if inputs_embeds_numpy.ndim == 3:
-                inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
-
-            batch_params = [
+        def _run_batch_infer(
+            cache_ids_l: list[int],
+            sequence_lengths_chunks_l: list[int],
+            cache_sizes_chunks_l: list[int],
+            inputs_embeds_chunks_l: list[torch.Tensor],
+        ) -> np.ndarray:
+            inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
+            inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
+            if inputs_embeds_numpy_l.ndim == 3:
+                inputs_embeds_numpy_l = np.expand_dims(inputs_embeds_numpy_l, 1)
+            batch_params_l = [
                 qbruntime.BatchParam(
-                    sequence_length=sequence_lengths_chunks[k],
-                    cache_size=cache_sizes_chunks[k],
-                    cache_id=cache_ids[k],
+                    sequence_length=sequence_lengths_chunks_l[k],
+                    cache_size=cache_sizes_chunks_l[k],
+                    cache_id=cache_ids_l[k],
                 )
-                for k in range(len(cache_ids))
+                for k in range(len(cache_ids_l))
             ]
-
-            if debug_enabled:
-                batch_seq_sum = sum(param.sequence_length for param in batch_params)
-                logger.debug(
-                    (
-                        "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s "
-                        "cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d"
-                    ),
-                    i + 1,
-                    num_of_chunks,
-                    start_index,
-                    len(cache_ids),
-                    cache_ids,
-                    sequence_lengths_chunks,
-                    cache_sizes_chunks,
-                    prefill_masks,
-                    tuple(inputs_embeds_numpy.shape),
-                    batch_seq_sum,
-                )
-
-                logger.debug(
-                    "[BATCH-LLM][CHUNK %d/%d][BATCH_PARAMS] %s",
-                    i + 1,
-                    num_of_chunks,
-                    [
-                        {
-                            "sequence_length": sequence_lengths_chunks[k],
-                            "cache_size": cache_sizes_chunks[k],
-                            "cache_id": cache_ids[k],
-                        }
-                        for k in range(len(cache_ids))
-                    ],
-                )
-
-                first_input_chunk = inputs_embeds_chunks[0]
-                input_batch_same = all(
-                    chunk.shape == first_input_chunk.shape and torch.equal(chunk, first_input_chunk)
-                    for chunk in inputs_embeds_chunks[1:]
-                )
-                logger.debug(
-                    "[BATCH-LLM][CHUNK %d/%d] input_batch_same=%s",
-                    i + 1,
-                    num_of_chunks,
-                    input_batch_same,
-                )
-
             if count_npu_time:
                 t0 = time.perf_counter()
-                result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
+                result_l = mxq_model.infer([inputs_embeds_numpy_l], None, 0, batch_params_l)
                 assert self.npu_time is not None
                 elapsed = time.perf_counter() - t0
                 self.npu_time += elapsed
                 phase: Literal["prefill", "decode"] = (
                     "prefill"
-                    if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks)
+                    if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks_l)
                     else "decode"
                 )
                 self._record_npu_timing(phase, elapsed)
             else:
-                result = mxq_model.infer([inputs_embeds_numpy], None, 0, batch_params)
-            assert result is not None, "mxq infer result is None!"
+                result_l = mxq_model.infer([inputs_embeds_numpy_l], None, 0, batch_params_l)
+            assert result_l is not None, "mxq infer result is None!"
+            return result_l[0]
 
+        # ------------------------------------------------------------------
+        # Path 1: default fast path (logits_to_keep == 1). Preserved
+        # verbatim including the existing debug instrumentation so cache
+        # contract regressions stay visible.
+        # ------------------------------------------------------------------
+        if is_default_keep:
+            num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
+            logits_dict: dict[int, torch.Tensor] = {}
+
+            for i in range(num_of_chunks):
+                start_index = i * prefill_chunk_size
+
+                sequence_lengths_chunks: list[int] = []
+                cache_sizes_chunks: list[int] = []
+                cache_ids: list[int] = []
+                prefill_masks: list[bool] = []
+                inputs_embeds_chunks: list[torch.Tensor] = []
+                seen_tokens: dict[int, int] = {}
+
+                for j in range(batch_size):
+                    end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
+                    if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
+                        sequence_lengths_chunks.append(end_index - start_index)
+                        cache_sizes_chunks.append(
+                            past_key_values.get_seq_length(j) if past_key_values is not None else 0
+                        )
+                        cache_ids.append(j)
+                        prefill_masks.append(end_index < inputs_embeds_masked[j].shape[0])
+                        inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
+                        seen_tokens[j] = end_index - start_index
+
+                if len(inputs_embeds_chunks) == 0:
+                    continue
+
+                if debug_enabled:
+                    inputs_embeds_concat_dbg = torch.concat(inputs_embeds_chunks, dim=0).unsqueeze(0)
+                    inputs_embeds_numpy_dbg = inputs_embeds_concat_dbg.type(torch.float32).cpu().numpy()
+                    if inputs_embeds_numpy_dbg.ndim == 3:
+                        inputs_embeds_numpy_dbg = np.expand_dims(inputs_embeds_numpy_dbg, 1)
+                    batch_seq_sum = sum(sequence_lengths_chunks)
+                    logger.debug(
+                        (
+                            "[BATCH-LLM][CHUNK %d/%d] start=%d active=%d ids=%s seq_chunks=%s "
+                            "cache_sizes=%s prefill=%s input_shape=%s batch_seq_sum=%d"
+                        ),
+                        i + 1,
+                        num_of_chunks,
+                        start_index,
+                        len(cache_ids),
+                        cache_ids,
+                        sequence_lengths_chunks,
+                        cache_sizes_chunks,
+                        prefill_masks,
+                        tuple(inputs_embeds_numpy_dbg.shape),
+                        batch_seq_sum,
+                    )
+                    logger.debug(
+                        "[BATCH-LLM][CHUNK %d/%d][BATCH_PARAMS] %s",
+                        i + 1,
+                        num_of_chunks,
+                        [
+                            {
+                                "sequence_length": sequence_lengths_chunks[k],
+                                "cache_size": cache_sizes_chunks[k],
+                                "cache_id": cache_ids[k],
+                            }
+                            for k in range(len(cache_ids))
+                        ],
+                    )
+                    first_input_chunk = inputs_embeds_chunks[0]
+                    input_batch_same = all(
+                        chunk.shape == first_input_chunk.shape and torch.equal(chunk, first_input_chunk)
+                        for chunk in inputs_embeds_chunks[1:]
+                    )
+                    logger.debug(
+                        "[BATCH-LLM][CHUNK %d/%d] input_batch_same=%s",
+                        i + 1,
+                        num_of_chunks,
+                        input_batch_same,
+                    )
+
+                raw_output = _run_batch_infer(
+                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                )
+                logits_chunks = cast(
+                    torch.FloatTensor,
+                    torch.tensor(raw_output, dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
+                        [len(cache_ids), 1, -1]
+                    ),
+                )
+
+                if debug_enabled:
+                    first_logits = logits_chunks[0]
+                    result_batch_same = all(torch.equal(chunk, first_logits) for chunk in logits_chunks[1:])
+                    next_tokens = logits_chunks[:, -1, :].argmax(dim=-1).tolist()
+                    logger.debug(
+                        "[BATCH-LLM][CHUNK %d/%d] result_batch_same=%s next_tokens=%s",
+                        i + 1,
+                        num_of_chunks,
+                        result_batch_same,
+                        next_tokens,
+                    )
+                    if not result_batch_same and len(cache_ids) > 1:
+                        logits_vectors = logits_chunks[:, -1, :]
+                        cosine_similarity = torch.nn.functional.cosine_similarity(
+                            logits_vectors.unsqueeze(1),
+                            logits_vectors.unsqueeze(0),
+                            dim=-1,
+                        )
+                        max_abs_diff = torch.abs(
+                            logits_vectors.unsqueeze(1) - logits_vectors.unsqueeze(0)
+                        ).amax(dim=-1)
+                        cosine_rows = [
+                            " ".join(
+                                f"{float(cosine_similarity[row, col]):7.3f}"
+                                for col in range(cosine_similarity.shape[1])
+                            )
+                            for row in range(cosine_similarity.shape[0])
+                        ]
+                        max_abs_diff_rows = [
+                            " ".join(
+                                f"{float(max_abs_diff[row, col]):7.3f}" for col in range(max_abs_diff.shape[1])
+                            )
+                            for row in range(max_abs_diff.shape[0])
+                        ]
+                        logger.debug(
+                            "[BATCH-LLM][CHUNK %d/%d][COSINE_SIM]\ncache_ids=%s\n%s\n[MAX_ABS_DIFF]\n%s",
+                            i + 1,
+                            num_of_chunks,
+                            cache_ids,
+                            "\n".join(cosine_rows),
+                            "\n".join(max_abs_diff_rows),
+                        )
+                    logger.debug(
+                        "[BATCH-LLM][CHUNK %d/%d] infer_output_shape=%s",
+                        i + 1,
+                        num_of_chunks,
+                        tuple(logits_chunks.shape),
+                    )
+
+                for j, prefill_mask in enumerate(prefill_masks):
+                    if prefill_mask is False:
+                        cache_id = cache_ids[j]
+                        logits_dict[cache_id] = logits_chunks[j, :, :].clone()
+
+                if past_key_values is not None:
+                    past_key_values.update_seen_tokens(seen_tokens)
+
+            if debug_enabled:
+                missing_ids = [cache_id for cache_id in range(batch_size) if cache_id not in logits_dict]
+                logger.debug(
+                    "[BATCH-LLM][END] logits_dict_keys=%s missing_ids=%s",
+                    sorted(list(logits_dict.keys())),
+                    missing_ids,
+                )
+
+            logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
+            stacked = cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
+            if debug_enabled:
+                logger.debug("[BATCH-LLM][END] output_shape=%s", tuple(stacked.shape))
+            return stacked
+
+        # ------------------------------------------------------------------
+        # Path 2: dynamic-output MXQ. The compiled model already produces
+        # per-position logits, so we keep the caller's chunk size and split
+        # each chunk's flat output by per-item offsets. Per-item logits are
+        # concatenated, sliced by that item's kept positions, right-padded
+        # to the longest kept sequence, and stacked.
+        # ------------------------------------------------------------------
+        if supports_all:
+            num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
+            all_logits_by_item: dict[int, list[np.ndarray]] = {j: [] for j in range(batch_size)}
+
+            for i in range(num_of_chunks):
+                start_index = i * prefill_chunk_size
+
+                sequence_lengths_chunks = []
+                cache_sizes_chunks = []
+                cache_ids = []
+                inputs_embeds_chunks = []
+                seen_tokens = {}
+
+                for j in range(batch_size):
+                    end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
+                    if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
+                        sequence_lengths_chunks.append(end_index - start_index)
+                        cache_sizes_chunks.append(
+                            past_key_values.get_seq_length(j) if past_key_values is not None else 0
+                        )
+                        cache_ids.append(j)
+                        inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
+                        seen_tokens[j] = end_index - start_index
+
+                if len(inputs_embeds_chunks) == 0:
+                    continue
+
+                raw_output = _run_batch_infer(
+                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                )
+
+                total_tokens = sum(sequence_lengths_chunks)
+                flat_output = np.asarray(raw_output).reshape(total_tokens, -1)
+                offset = 0
+                for k, cache_id in enumerate(cache_ids):
+                    len_k = sequence_lengths_chunks[k]
+                    all_logits_by_item[cache_id].append(flat_output[offset : offset + len_k, :].copy())
+                    offset += len_k
+
+                if debug_enabled:
+                    logger.debug(
+                        "[BATCH-LLM][DYNAMIC CHUNK %d/%d] start=%d ids=%s seq_chunks=%s flat_output_shape=%s",
+                        i + 1,
+                        num_of_chunks,
+                        start_index,
+                        cache_ids,
+                        sequence_lengths_chunks,
+                        tuple(flat_output.shape),
+                    )
+
+                if past_key_values is not None:
+                    past_key_values.update_seen_tokens(seen_tokens)
+
+            per_item_sliced: list[torch.Tensor] = []
+            vocab_size = 0
+            for j in range(batch_size):
+                item_all = np.concatenate(all_logits_by_item[j], axis=0)
+                positions_j = keep_positions_by_item[j]
+                sliced = item_all[positions_j, :] if positions_j else item_all[0:0, :]
+                vocab_size = max(vocab_size, sliced.shape[-1])
+                per_item_sliced.append(
+                    torch.tensor(sliced, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+                )
+
+            max_keep_len = max((item.shape[0] for item in per_item_sliced), default=0)
+            padded: list[torch.Tensor] = []
+            for item in per_item_sliced:
+                if item.shape[0] < max_keep_len:
+                    pad = torch.zeros(
+                        (max_keep_len - item.shape[0], vocab_size),
+                        dtype=item.dtype,
+                        device=item.device,
+                    )
+                    item = torch.cat([item, pad], dim=0)
+                padded.append(item)
+            stacked = cast(torch.FloatTensor, torch.stack(padded, dim=0))
+            if debug_enabled:
+                logger.debug("[BATCH-LLM][END] output_shape=%s", tuple(stacked.shape))
+            return stacked
+
+        # ------------------------------------------------------------------
+        # Path 3: fallback for last-only MXQ with a non-default request.
+        # We advance a shared cursor across the batch; the chunk size uses
+        # the caller's ``prefill_chunk_size`` until we reach the earliest
+        # kept position across items, then drops to 1 so each kept
+        # position is captured with its own infer call. Because items
+        # share the same iteration structure we key on the shared cursor
+        # and only record logits for items whose kept-set contains it.
+        # ------------------------------------------------------------------
+        keep_sets: dict[int, set[int]] = {j: set(keep_positions_by_item[j]) for j in range(batch_size)}
+        min_keep_start = max_sequence_length
+        for j in range(batch_size):
+            positions_j = keep_positions_by_item[j]
+            if positions_j:
+                min_keep_start = min(min_keep_start, positions_j[0])
+
+        per_item_kept_logits: dict[int, dict[int, torch.Tensor]] = {j: {} for j in range(batch_size)}
+        cursor = 0
+        while cursor < max_sequence_length:
+            if cursor < min_keep_start:
+                chunk = min(prefill_chunk_size, min_keep_start - cursor)
+            else:
+                chunk = 1
+
+            sequence_lengths_chunks = []
+            cache_sizes_chunks = []
+            cache_ids = []
+            inputs_embeds_chunks = []
+            seen_tokens = {}
+
+            for j in range(batch_size):
+                end_j = min(cursor + chunk, sequence_lengths[j])
+                if cursor < sequence_lengths[j] and end_j <= sequence_lengths[j]:
+                    sequence_lengths_chunks.append(end_j - cursor)
+                    cache_sizes_chunks.append(
+                        past_key_values.get_seq_length(j) if past_key_values is not None else 0
+                    )
+                    cache_ids.append(j)
+                    inputs_embeds_chunks.append(inputs_embeds_masked[j][cursor:end_j, :])
+                    seen_tokens[j] = end_j - cursor
+
+            if not inputs_embeds_chunks:
+                cursor += chunk
+                continue
+
+            raw_output = _run_batch_infer(
+                cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+            )
             logits_chunks = cast(
                 torch.FloatTensor,
-                torch.tensor(result[0], dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
+                torch.tensor(raw_output, dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
                     [len(cache_ids), 1, -1]
                 ),
             )
 
             if debug_enabled:
-                first_logits = logits_chunks[0]
-                result_batch_same = all(torch.equal(chunk, first_logits) for chunk in logits_chunks[1:])
-                next_tokens = logits_chunks[:, -1, :].argmax(dim=-1).tolist()
                 logger.debug(
-                    "[BATCH-LLM][CHUNK %d/%d] result_batch_same=%s next_tokens=%s",
-                    i + 1,
-                    num_of_chunks,
-                    result_batch_same,
-                    next_tokens,
-                )
-                if not result_batch_same and len(cache_ids) > 1:
-                    logits_vectors = logits_chunks[:, -1, :]
-                    cosine_similarity = torch.nn.functional.cosine_similarity(
-                        logits_vectors.unsqueeze(1),
-                        logits_vectors.unsqueeze(0),
-                        dim=-1,
-                    )
-                    max_abs_diff = torch.abs(logits_vectors.unsqueeze(1) - logits_vectors.unsqueeze(0)).amax(dim=-1)
-                    cosine_rows = [
-                        " ".join(
-                            f"{float(cosine_similarity[row, col]):7.3f}" for col in range(cosine_similarity.shape[1])
-                        )
-                        for row in range(cosine_similarity.shape[0])
-                    ]
-                    max_abs_diff_rows = [
-                        " ".join(f"{float(max_abs_diff[row, col]):7.3f}" for col in range(max_abs_diff.shape[1]))
-                        for row in range(max_abs_diff.shape[0])
-                    ]
-                    logger.debug(
-                        "[BATCH-LLM][CHUNK %d/%d][COSINE_SIM]\ncache_ids=%s\n%s\n[MAX_ABS_DIFF]\n%s",
-                        i + 1,
-                        num_of_chunks,
-                        cache_ids,
-                        "\n".join(cosine_rows),
-                        "\n".join(max_abs_diff_rows),
-                    )
-
-                logger.debug(
-                    "[BATCH-LLM][CHUNK %d/%d] infer_output_shape=%s",
-                    i + 1,
-                    num_of_chunks,
-                    tuple(logits_chunks.shape),
+                    "[BATCH-LLM][FALLBACK] cursor=%d chunk=%d ids=%s seq_chunks=%s cache_sizes=%s",
+                    cursor,
+                    chunk,
+                    cache_ids,
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
                 )
 
-            for j, prefill_mask in enumerate(prefill_masks):
-                if prefill_mask is False:
-                    cache_id = cache_ids[j]
-                    logits_dict[cache_id] = logits_chunks[j, :, :].clone()
+            if chunk == 1:
+                for k, cache_id in enumerate(cache_ids):
+                    if cursor in keep_sets[cache_id]:
+                        per_item_kept_logits[cache_id][cursor] = logits_chunks[k, :, :].clone()
 
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
 
-        if debug_enabled:
-            missing_ids = [cache_id for cache_id in range(batch_size) if cache_id not in logits_dict]
-            logger.debug(
-                "[BATCH-LLM][END] logits_dict_keys=%s missing_ids=%s",
-                sorted(list(logits_dict.keys())),
-                missing_ids,
-            )
+            cursor += chunk
 
-        logits_list = [logits_dict[cache_id] for cache_id in range(batch_size)]
-        return cast(torch.FloatTensor, torch.stack(logits_list, dim=0))
+        per_item_final: list[torch.Tensor] = []
+        vocab_size = 0
+        for j in range(batch_size):
+            positions_j = keep_positions_by_item[j]
+            if positions_j:
+                item_logits = torch.cat(
+                    [per_item_kept_logits[j][p] for p in positions_j], dim=0
+                )
+                vocab_size = max(vocab_size, item_logits.shape[-1])
+            else:
+                item_logits = torch.empty(
+                    (0, 0), dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                )
+            per_item_final.append(item_logits)
+
+        max_keep_len = max((item.shape[0] for item in per_item_final), default=0)
+        padded_final: list[torch.Tensor] = []
+        for item in per_item_final:
+            if item.shape[0] < max_keep_len:
+                pad_rows = max_keep_len - item.shape[0]
+                pad_cols = vocab_size if item.numel() == 0 else item.shape[-1]
+                if item.numel() == 0:
+                    item = torch.zeros(
+                        (0, pad_cols), dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                    )
+                pad = torch.zeros(
+                    (pad_rows, pad_cols), dtype=item.dtype, device=item.device
+                )
+                item = torch.cat([item, pad], dim=0)
+            padded_final.append(item)
+        stacked = cast(torch.FloatTensor, torch.stack(padded_final, dim=0))
+        if debug_enabled:
+            logger.debug("[BATCH-LLM][END] output_shape=%s", tuple(stacked.shape))
+        return stacked
 
     @staticmethod
     def _validate_batch_cache(past_key_values: Optional[MobilintCache], batch_size: int) -> None:
