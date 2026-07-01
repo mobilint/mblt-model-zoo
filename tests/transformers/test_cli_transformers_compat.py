@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -15,6 +17,18 @@ from mblt_model_zoo.cli import transformers_compat
 cli_main_module = importlib.import_module("mblt_model_zoo.cli.main")
 
 
+def _fake_import_modules(modules: dict[str, ModuleType]) -> Callable[[str], ModuleType]:
+    """Return a fake import function that only resolves explicitly allowed modules."""
+
+    def _fake_import_module(module_name: str) -> ModuleType:
+        try:
+            return modules[module_name]
+        except KeyError as e:
+            raise AssertionError(f"unexpected module import: {module_name}") from e
+
+    return _fake_import_module
+
+
 def test_main_delegates_transformers_cli_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """Return the delegated exit code for upstream Transformers commands."""
     monkeypatch.setattr(cli_main_module, "is_transformers_cli_command", lambda argv: True)
@@ -24,7 +38,7 @@ def test_main_delegates_transformers_cli_command(monkeypatch: pytest.MonkeyPatch
         "build_parser",
         lambda: pytest.fail("build_parser should not be called for delegated Transformers commands"),
     )
-    monkeypatch.setattr("sys.argv", ["mblt-model-zoo", "chat", "--help"])
+    monkeypatch.setattr(sys, "argv", ["mblt-model-zoo", "chat", "--help"])
 
     assert cli_main_module.main() == 7
 
@@ -168,6 +182,8 @@ def test_register_mobilint_models_imports_hyphenated_model_types_using_package_n
 
     def _fake_import_module(module_name: str) -> ModuleType:
         calls.append(module_name)
+        if module_name != "mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3":
+            raise AssertionError(f"unexpected module import: {module_name}")
         return fake_module
 
     monkeypatch.setattr(importlib, "import_module", _fake_import_module)
@@ -233,7 +249,7 @@ def test_install_transformers_serve_registration_hook_wraps_loader_once(
     monkeypatch.setattr(
         transformers_compat.importlib,
         "import_module",
-        lambda module_name: fake_serve_module,
+        _fake_import_modules({"transformers.cli.serve": fake_serve_module}),
     )
 
     transformers_compat._install_transformers_serve_registration_hook()
@@ -291,7 +307,7 @@ def test_install_transformers_serve_registration_hook_respects_serve_trust_remot
     monkeypatch.setattr(
         transformers_compat.importlib,
         "import_module",
-        lambda module_name: fake_serve_module,
+        _fake_import_modules({"transformers.cli.serve": fake_serve_module}),
     )
 
     transformers_compat._install_transformers_serve_registration_hook()
@@ -425,7 +441,7 @@ def test_install_transformers_serve_registration_hook_registers_separate_serve_t
     monkeypatch.setattr(
         transformers_compat.importlib,
         "import_module",
-        lambda module_name: fake_serve_module,
+        _fake_import_modules({"transformers.commands.serving": fake_serve_module}),
     )
 
     transformers_compat._install_transformers_serve_registration_hook()
@@ -487,14 +503,16 @@ def test_install_transformers_serve_registration_hook_wraps_v55_model_manager(
         lambda module_name: module_name in {"transformers.cli.serve", "transformers.cli.serving.model_manager"},
     )
 
-    def _fake_import_module(module_name: str) -> ModuleType:
-        if module_name == "transformers.cli.serve":
-            return fake_serve_module
-        if module_name == "transformers.cli.serving.model_manager":
-            return fake_model_manager_module
-        raise AssertionError(f"unexpected module import: {module_name}")
-
-    monkeypatch.setattr(transformers_compat.importlib, "import_module", _fake_import_module)
+    monkeypatch.setattr(
+        transformers_compat.importlib,
+        "import_module",
+        _fake_import_modules(
+            {
+                "transformers.cli.serve": fake_serve_module,
+                "transformers.cli.serving.model_manager": fake_model_manager_module,
+            }
+        ),
+    )
 
     transformers_compat._install_transformers_serve_registration_hook()
     manager = _FakeModelManager()
@@ -638,12 +656,12 @@ def test_dispatch_transformers_cli_prefers_v5_entrypoint_and_restores_argv(
     monkeypatch.setattr(
         transformers_compat.importlib,
         "import_module",
-        lambda module_name: fake_cli_module,
+        _fake_import_modules({"transformers.cli.transformers": fake_cli_module}),
     )
-    monkeypatch.setattr("sys.argv", ["python", "-m", "pytest"])
+    monkeypatch.setattr(sys, "argv", ["python", "-m", "pytest"])
 
     exit_code = transformers_compat.dispatch_transformers_cli(["mblt-model-zoo", "chat", "--help"])
 
     assert exit_code == 3
     assert seen_argv == ["mblt-model-zoo", "chat", "--help"]
-    assert __import__("sys").argv == ["python", "-m", "pytest"]
+    assert sys.argv == ["python", "-m", "pytest"]
