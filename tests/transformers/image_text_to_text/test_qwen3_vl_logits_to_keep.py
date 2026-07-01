@@ -195,6 +195,34 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         # No ``.squeeze(0)`` on this path: shape is (1, kept_len, vocab).
         assert logits.shape == (1, len(indices), mxq.vocab_size)
 
+    def test_fallback_empty_tensor_returns_empty_logits(self) -> None:
+        """An empty ``logits_to_keep`` tensor must not raise on np.concatenate."""
+        mxq = _StaticLastOnlyMxq(vocab_size=5)
+        _model, logits = self._run(
+            mxq,
+            seq_len=6,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=4,
+        )
+        # KV prefix still walks the whole sequence in normal-sized chunks.
+        chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
+        assert chunk_seqs == [4, 2]
+        # Batch dim preserved (no ``.squeeze(0)`` on this path).
+        assert logits.shape == (1, 0, 0)
+
+    def test_fallback_all_out_of_range_indices_returns_empty_logits(self) -> None:
+        """All-out-of-range ``logits_to_keep`` must not raise on np.concatenate."""
+        mxq = _StaticLastOnlyMxq(vocab_size=5)
+        _model, logits = self._run(
+            mxq,
+            seq_len=6,
+            logits_to_keep=torch.tensor([100, -100]),
+            prefill_chunk_size=4,
+        )
+        chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
+        assert chunk_seqs == [4, 2]
+        assert logits.shape == (1, 0, 0)
+
     def test_deepstack_chunk_shape_matches_input_chunk(self) -> None:
         mxq = _StaticLastOnlyMxq(vocab_size=5)
         model = _BareQwen3VLTextModel(mxq, hidden_size=3)

@@ -344,6 +344,58 @@ class TestLlmForwardSingle:
         # only a subset yields logits.
         assert cache.get_seq_length() == seq_len
 
+    def test_fallback_empty_tensor_returns_empty_logits(self) -> None:
+        """An empty ``logits_to_keep`` tensor must not raise on np.concatenate."""
+        mxq = _StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        _model, logits = self._run(
+            mxq,
+            seq_len=6,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=4,
+        )
+        # No kept positions → no size-1 infer calls, but the KV prefix loop
+        # still walks the whole sequence in normal-sized chunks.
+        chunk_seqs = [c["shape"][2] for c in mxq.calls]
+        assert chunk_seqs == [4, 2]
+        assert logits.shape == (0, 0)
+
+    def test_fallback_all_out_of_range_indices_returns_empty_logits(self) -> None:
+        """All-out-of-range ``logits_to_keep`` must not raise on np.concatenate."""
+        mxq = _StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        _model, logits = self._run(
+            mxq,
+            seq_len=6,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([100, -100]),
+            prefill_chunk_size=4,
+        )
+        chunk_seqs = [c["shape"][2] for c in mxq.calls]
+        assert chunk_seqs == [4, 2]
+        assert logits.shape == (0, 0)
+
+    def test_fallback_empty_tensor_still_advances_kv_cache(self) -> None:
+        from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
+
+        mxq = _StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        model = _make_model(mxq)
+        cache = MobilintCache(mxq)
+        seq_len = 6
+        inputs_embeds = torch.zeros(1, seq_len, 3)
+        cache_position = torch.arange(seq_len)
+
+        model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=cache_position,
+            prefill_chunk_size=4,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+        )
+        # Even with no kept positions, the KV cache must be fully advanced so
+        # subsequent decode steps observe the same cache state as the other
+        # branches would leave behind.
+        assert cache.get_seq_length() == seq_len
+
 
 # ---------------------------------------------------------------------------
 # Batched _llm_forward_batch paths

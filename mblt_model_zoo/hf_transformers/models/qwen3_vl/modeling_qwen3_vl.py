@@ -504,6 +504,17 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             _do_infer(cursor, end_index)
             cursor = end_index
 
+        if not positions_to_keep:
+            # Empty selection (empty tensor or all indices out-of-range): the
+            # KV cache has already been advanced through the entire input by
+            # the trailing loop above. Return a (batch, 0, 0) placeholder
+            # rather than calling np.concatenate on an empty list.
+            return torch.zeros(
+                (int(inputs_embeds.shape[0]), 0, 0),
+                dtype=inputs_embeds.dtype,
+                device=inputs_embeds.device,
+            )
+
         logits_ndarray = np.concatenate(
             [per_position_logits[p] for p in positions_to_keep], axis=-2
         )
