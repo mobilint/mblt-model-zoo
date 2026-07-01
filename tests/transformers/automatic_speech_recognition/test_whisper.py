@@ -36,7 +36,7 @@ def test_whisper(pipe):
 
         output = pipe(
             sample,
-            language="en",
+            generate_kwargs={"language": "en"},
         )
 
         print("Result: %s" % output["text"])
