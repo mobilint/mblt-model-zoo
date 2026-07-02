@@ -199,10 +199,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     and int(first_shape[_MXQ_TOKEN_AXIS_INDEX]) == _MXQ_DYNAMIC_AXIS_SENTINEL
                 ):
                     supports = True
-        except (AttributeError, RuntimeError):
+        except (AttributeError, qbruntime.QbRuntimeError):
             # AttributeError: backend or ``get_model_output_shape`` missing.
-            # RuntimeError: backend refused the probe (``qbruntime.QbRuntimeError``
-            # is a ``RuntimeError`` subclass). Any other exception is a real bug
+            # QbRuntimeError: backend refused the probe. Only backend-specific
+            # probe failures are swallowed; any other exception is a real bug
             # and should propagate.
             supports = False
         self._mxq_all_logits_cached = supports

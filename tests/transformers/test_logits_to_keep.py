@@ -136,9 +136,11 @@ class TestMxqSupportsAllLogits:
         assert model._mxq_supports_all_logits() is False
 
     def test_raising_backend_falls_back_to_false(self) -> None:
+        import qbruntime
+
         class _ExplodingMxq(StaticLastOnlyMxq):
             def get_model_output_shape(self):  # noqa: D401
-                raise RuntimeError("no shape for you")
+                raise qbruntime.QbRuntimeError("no shape for you")
 
         model = make_model(_ExplodingMxq())
         assert model._mxq_supports_all_logits() is False
