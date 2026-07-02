@@ -316,6 +316,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         rejected with :class:`ValueError`: silently mapping them to
         keep-all is a footgun (the caller probably meant ``torch.tensor``
         negative-wrap indexing), and HF itself does not accept them.
+
+        Performance: tensor inputs are always materialized to CPU via
+        ``.detach().to("cpu").flatten().tolist()`` because the downstream
+        wrap/validate and path-3 cursor arithmetic operate on a Python
+        ``list[int]``. For typical selectors (a handful to a few dozen
+        positions) this transfer is negligible. In workloads that repeatedly
+        call this helper with a very large GPU-resident selector tensor —
+        e.g. perplexity evaluation with thousands of kept positions — the
+        per-call device-to-host copy can become a hot spot; in that case
+        callers should either move the selector to CPU once up front or,
+        when the selection is contiguous, pass an int form (``0`` for
+        keep-all or ``N`` for the last ``N``) which skips the copy entirely.
         """
         if isinstance(logits_to_keep, torch.Tensor):
             raw = logits_to_keep.detach().to("cpu").flatten().tolist()
