@@ -15,6 +15,7 @@ Both the single-item and batched paths are exercised via fake MXQ backends.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import numpy as np
@@ -779,3 +780,135 @@ class TestBatchedEmptySelection:
         assert logits.shape == (2, 3, mxq.vocab_size)
         # Item 0 is entirely padding → all -inf.
         assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+
+
+# ---------------------------------------------------------------------------
+# One-shot slow-path warning on last-only MXQ + non-default logits_to_keep
+# ---------------------------------------------------------------------------
+
+
+class TestLastOnlySlowPathWarning:
+    """Path 3 fires a WARNING once per instance so manual .forward() callers
+    see the per-token infer cost without having to read source."""
+
+    _LOGGER_NAME = "mblt_model_zoo.hf_transformers.utils.modeling_utils"
+
+    @staticmethod
+    def _slow_path_warnings(records: list[logging.LogRecord]) -> list[logging.LogRecord]:
+        return [
+            r
+            for r in records
+            if r.levelno == logging.WARNING and "logits_to_keep" in r.getMessage()
+        ]
+
+    def _run_single(
+        self,
+        model,
+        *,
+        seq_len: int,
+        logits_to_keep,
+        hidden_size: int = 3,
+        prefill_chunk_size: int = 4,
+    ) -> None:
+        inputs_embeds = torch.arange(seq_len * hidden_size, dtype=torch.float32).reshape(
+            1, seq_len, hidden_size
+        )
+        cache_position = torch.arange(seq_len)
+        model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=prefill_chunk_size,
+            logits_to_keep=logits_to_keep,
+        )
+
+    def _run_batched(
+        self,
+        model,
+        *,
+        attention_mask: torch.Tensor,
+        logits_to_keep,
+        hidden_size: int = 4,
+        prefill_chunk_size: int = 4,
+    ) -> None:
+        batch, seq_len = attention_mask.shape
+        inputs_embeds = torch.arange(batch * seq_len * hidden_size, dtype=torch.float32).reshape(
+            batch, seq_len, hidden_size
+        )
+        cache_position = torch.arange(seq_len)
+        model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=prefill_chunk_size,
+            attention_mask=attention_mask,
+            logits_to_keep=logits_to_keep,
+        )
+
+    def test_warns_once_on_first_path3_entry_single_input(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            self._run_single(model, seq_len=6, logits_to_keep=0)
+            after_first = len(self._slow_path_warnings(caplog.records))
+            self._run_single(model, seq_len=6, logits_to_keep=0)
+            after_second = len(self._slow_path_warnings(caplog.records))
+
+        assert after_first == 1
+        assert after_second == 1
+        message = self._slow_path_warnings(caplog.records)[0].getMessage()
+        assert "logits_to_keep" in message
+
+    def test_warns_once_on_first_path3_entry_batched(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4), max_batch_size=4)
+        attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long)
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            self._run_batched(
+                model, attention_mask=attention_mask, logits_to_keep=torch.tensor([2, 3])
+            )
+            after_first = len(self._slow_path_warnings(caplog.records))
+            self._run_batched(
+                model, attention_mask=attention_mask, logits_to_keep=torch.tensor([2, 3])
+            )
+            after_second = len(self._slow_path_warnings(caplog.records))
+
+        assert after_first == 1
+        assert after_second == 1
+        assert "logits_to_keep" in self._slow_path_warnings(caplog.records)[0].getMessage()
+
+    def test_no_warning_on_fast_path(self, caplog: pytest.LogCaptureFixture) -> None:
+        single_model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        batched_model = make_model(
+            StaticLastOnlyMxq(vocab_size=5, max_width=4), max_batch_size=4
+        )
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            self._run_single(single_model, seq_len=6, logits_to_keep=1)
+            self._run_batched(batched_model, attention_mask=attention_mask, logits_to_keep=1)
+
+        assert self._slow_path_warnings(caplog.records) == []
+
+    def test_no_warning_on_dynamic_axis(self, caplog: pytest.LogCaptureFixture) -> None:
+        single_model = make_model(DynamicAxisMxq(vocab_size=5, max_width=4))
+        batched_model = make_model(
+            DynamicAxisMxq(vocab_size=5, max_width=4), max_batch_size=4
+        )
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            self._run_single(single_model, seq_len=6, logits_to_keep=0)
+            self._run_batched(batched_model, attention_mask=attention_mask, logits_to_keep=0)
+
+        assert self._slow_path_warnings(caplog.records) == []
+
+    def test_warning_is_per_instance(self, caplog: pytest.LogCaptureFixture) -> None:
+        model_a = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        model_b = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            self._run_single(model_a, seq_len=6, logits_to_keep=0)
+            self._run_single(model_b, seq_len=6, logits_to_keep=0)
+
+        # One warning per instance — the flag lives on the model, not the class.
+        assert len(self._slow_path_warnings(caplog.records)) == 2

@@ -149,6 +149,29 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         timing[f"{phase}_time"] = float(timing.get(f"{phase}_time", 0.0)) + float(elapsed)
         timing[f"{phase}_calls"] = int(timing.get(f"{phase}_calls", 0)) + 1
 
+    def _warn_last_only_slow_path_once(self) -> None:
+        """Emit a one-shot WARNING when a call enters the last-only MXQ Path 3.
+
+        Path 3 runs one MXQ infer per kept position, so a manual
+        ``.forward()`` with the default ``logits_to_keep=0`` on a
+        last-only compiled model is dramatically slower than the
+        HF-generate case (which sets ``logits_to_keep=1``). Docstrings
+        alone don't surface this; a stderr warning does. Fires at most
+        once per instance so long training / eval loops don't spam.
+        """
+        if getattr(self, "_mxq_last_only_slow_path_warned", False):
+            return
+        logger.warning(
+            "Non-default `logits_to_keep` on a last-only MXQ build triggers a "
+            "fallback that runs one MXQ infer per kept position and is "
+            "dramatically slower than the default on long prefills. Pass "
+            "`logits_to_keep=1` for last-token workloads; HF `.generate()` "
+            "already sets this automatically, so this warning does not "
+            "indicate a bug in generation. This message fires once per "
+            "model instance."
+        )
+        self._mxq_last_only_slow_path_warned = True
+
     def _mxq_supports_all_logits(self) -> bool:
         """Return True when the compiled MXQ emits logits for every input token.
 
@@ -334,6 +357,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # ``walk_positions`` is sorted-unique so the cursor can advance
         # monotonically; ``output_positions`` preserves caller order and
         # duplicates so the final tensor matches HF fancy-indexing.
+        self._warn_last_only_slow_path_once()
         walk_positions = self._walk_positions_for_logits_to_keep(logits_to_keep, seq_len)
         output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
         per_position_logits: dict[int, np.ndarray] = {}
@@ -397,7 +421,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         ``.generate()`` are safe because HF sets ``logits_to_keep=1``
         automatically; callers doing manual ``.forward()`` for perplexity
         eval / logit collection should know this cost is inherent to
-        last-only compiled models.
+        last-only compiled models. A runtime WARNING fires once per model
+        instance on the first Path 3 entry to surface the cost.
         """
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
@@ -490,7 +515,9 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         dramatically slower than ``logits_to_keep=1``. ``.generate()``
         avoids this because HF sets ``logits_to_keep=1`` automatically;
         manual ``.forward()`` callers doing perplexity eval / logit
-        collection incur this cost inherently on last-only builds.
+        collection incur this cost inherently on last-only builds. A
+        runtime WARNING fires once per model instance on the first Path
+        3 entry to surface the cost.
         """
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
@@ -866,6 +893,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # position in O(1); duplicates and caller order are restored from
         # ``output_positions_by_item`` when the final tensor is assembled.
         # ------------------------------------------------------------------
+        self._warn_last_only_slow_path_once()
         pointer_by_item: dict[int, int] = {j: 0 for j in range(batch_size)}
         per_item_kept_logits: dict[int, dict[int, torch.Tensor]] = {j: {} for j in range(batch_size)}
         cursor = 0
