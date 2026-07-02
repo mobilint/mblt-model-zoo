@@ -829,6 +829,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     past_key_values.update_seen_tokens(seen_tokens)
 
             mxq_vocab_size = int(mxq_model.get_model_output_shape()[0][-1])
+            assert mxq_vocab_size > 0, (
+                "MXQ vocab dim must be static (>0); got %d (mblt_model_zoo assumes the LM head vocab axis is compiled statically even when the token axis is dynamic)"
+                % mxq_vocab_size
+            )
             per_item_sliced: list[torch.Tensor] = []
             vocab_size = 0
             for j in range(batch_size):
