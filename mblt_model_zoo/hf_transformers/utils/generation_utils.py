@@ -101,13 +101,15 @@ def llm_eagle3_forward(
 def upstream_positional_params(func: Callable) -> tuple[str, ...]:
     """Return the non-``self`` positional parameter names of ``func``.
 
-    ``**kwargs`` (``VAR_KEYWORD``) parameters are excluded. Cached per callable so
-    ``inspect.signature`` is not re-parsed on every wrapper call in the generation loop.
+    ``*args`` (``VAR_POSITIONAL``) and ``**kwargs`` (``VAR_KEYWORD``) parameters are
+    excluded. Cached per callable so ``inspect.signature`` is not re-parsed on every
+    wrapper call in the generation loop.
     """
     return tuple(
         name
         for name, parameter in inspect.signature(func).parameters.items()
-        if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
+        if name != "self"
+        and parameter.kind not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
     )
 
 
