@@ -186,32 +186,68 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         return supports
 
     @staticmethod
-    def _normalize_logits_to_keep(logits_to_keep: Union[int, torch.Tensor], seq_len: int) -> list[int]:
-        """Translate HF-style ``logits_to_keep`` into an ordered position list.
+    def _wrap_and_validate_indices(indices: list[int], seq_len: int) -> list[int]:
+        """Apply HF-style negative-wrap and range-check to a list of position indices.
 
-        * ``int == 0``: keep every position.
-        * ``int > 0``: keep the last N positions (clamped to ``seq_len``).
-        * ``torch.Tensor``: treat as position indices (negatives wrap,
-          out-of-range values are dropped, duplicates collapsed).
+        HF's ``hidden_states[:, tensor, :]`` fancy-indexing wraps negatives
+        (``-1 -> seq_len-1``) and raises on out-of-range values. We mirror
+        that: silently dropping out-of-range indices is a footgun because
+        the caller cannot tell whether their intent was satisfied.
+        """
+        wrapped: list[int] = []
+        for raw_index in indices:
+            idx = int(raw_index)
+            if idx < 0:
+                idx = seq_len + idx
+            if not 0 <= idx < seq_len:
+                raise IndexError(
+                    f"logits_to_keep index {int(raw_index)} out of range for seq_len={seq_len}"
+                )
+            wrapped.append(idx)
+        return wrapped
 
-        The returned list is sorted ascending so callers can walk the
-        sequence left-to-right when they need to interleave prefill and
-        per-position infer calls.
+    @classmethod
+    def _output_positions_for_logits_to_keep(
+        cls,
+        logits_to_keep: Union[int, torch.Tensor],
+        seq_len: int,
+    ) -> list[int]:
+        """Position indices to place in the final logits output, in HF order.
+
+        Mirrors HF's ``hidden_states[:, logits_to_keep, :]`` semantics for
+        tensor inputs: caller-supplied order is preserved and duplicates
+        are kept (a repeated index picks the same position twice).
+
+        Integer semantics: ``0`` (or any non-positive int) keeps every
+        position; ``n > 0`` keeps the last ``n`` positions (clamped to
+        ``seq_len``). Negative ints fall back to keep-all for backward
+        compatibility with the initial implementation in commit d92a353;
+        callers that need per-position selection should pass a tensor.
         """
         if isinstance(logits_to_keep, torch.Tensor):
-            indices = logits_to_keep.detach().to("cpu").flatten().tolist()
-            normalized: list[int] = []
-            for raw_index in indices:
-                idx = int(raw_index)
-                if idx < 0:
-                    idx = seq_len + idx
-                if 0 <= idx < seq_len:
-                    normalized.append(idx)
-            return sorted(set(normalized))
+            raw = logits_to_keep.detach().to("cpu").flatten().tolist()
+            return cls._wrap_and_validate_indices(raw, seq_len)
         n = int(logits_to_keep)
         if n <= 0 or n >= seq_len:
             return list(range(seq_len))
         return list(range(seq_len - n, seq_len))
+
+    @classmethod
+    def _walk_positions_for_logits_to_keep(
+        cls,
+        logits_to_keep: Union[int, torch.Tensor],
+        seq_len: int,
+    ) -> list[int]:
+        """Unique kept positions in ascending order, for KV-cursor walks.
+
+        The Path 3 fallback interleaves prefill and size-1 infer calls
+        while advancing a monotonic cursor through the sequence, so it
+        needs a sorted, deduped set of positions even when the caller's
+        tensor contains duplicates or arrives out of order. Assembly of
+        the final output tensor uses :meth:`_output_positions_for_logits_to_keep`
+        instead so duplicates and caller order survive.
+        """
+        return sorted(set(cls._output_positions_for_logits_to_keep(logits_to_keep, seq_len)))
 
     def mxq_forward(
         self,
@@ -279,9 +315,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
             if supports_all:
                 logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
-                positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+                # HF fancy-indexing preserves caller order and duplicates;
+                # ``np.take`` matches that when we pass the output positions
+                # directly without dedup/sort.
+                output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
                 token_axis = logits_ndarray.ndim - 2
-                logits_ndarray = np.take(logits_ndarray, positions_to_keep, axis=token_axis)
+                logits_ndarray = np.take(logits_ndarray, output_positions, axis=token_axis)
 
             assert logits_ndarray is not None
             return torch.tensor(logits_ndarray, dtype=dtype, device=device)
@@ -291,10 +330,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # position). The KV cache advances monotonically through every
         # position of the input, so subsequent decode steps see the same
         # cache state as the other two paths would leave behind.
-        positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+        #
+        # ``walk_positions`` is sorted-unique so the cursor can advance
+        # monotonically; ``output_positions`` preserves caller order and
+        # duplicates so the final tensor matches HF fancy-indexing.
+        walk_positions = self._walk_positions_for_logits_to_keep(logits_to_keep, seq_len)
+        output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
         per_position_logits: dict[int, np.ndarray] = {}
         cursor = 0
-        for p in positions_to_keep:
+        for p in walk_positions:
             while cursor < p:
                 end_index = min(cursor + prefill_chunk_size, p)
                 do_infer(cursor, end_index)
@@ -306,17 +350,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             do_infer(cursor, end_index)
             cursor = end_index
 
-        if not positions_to_keep:
-            # Empty selection (empty tensor or all indices out-of-range): the
-            # KV cache has already been advanced through the entire input by
-            # the trailing loop above. Return a (1, 0, 0) placeholder rather
-            # than calling np.concatenate on an empty list. The leading 1
-            # matches the batch axis that do_infer would have produced, so
-            # single-input callers can still ``.squeeze(0)`` down to (0, 0).
+        if not output_positions:
+            # Empty selection (empty tensor input): the KV cache has already
+            # been advanced through the entire input by the trailing loop
+            # above. Return a (1, 0, 0) placeholder rather than calling
+            # np.concatenate on an empty list. The leading 1 matches the
+            # batch axis that do_infer would have produced, so single-input
+            # callers can still ``.squeeze(0)`` down to (0, 0).
             return torch.zeros((1, 0, 0), dtype=dtype, device=device)
 
         logits_ndarray = np.concatenate(
-            [per_position_logits[p] for p in positions_to_keep], axis=-2
+            [per_position_logits[p] for p in output_positions], axis=-2
         )
         return torch.tensor(logits_ndarray, dtype=dtype, device=device)
 
@@ -480,10 +524,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
-        keep_positions_by_item: dict[int, list[int]] = {}
+        # Path 2 uses the output positions directly to assemble the final
+        # per-item tensor (HF order, duplicates preserved). Path 3 also
+        # needs a sorted-unique variant to drive the shared cursor.
+        output_positions_by_item: dict[int, list[int]] = {}
+        walk_positions_by_item: dict[int, list[int]] = {}
         if not is_default_keep:
             for j in range(batch_size):
-                keep_positions_by_item[j] = self._normalize_logits_to_keep(logits_to_keep, sequence_lengths[j])
+                output_positions_by_item[j] = self._output_positions_for_logits_to_keep(
+                    logits_to_keep, sequence_lengths[j]
+                )
+                walk_positions_by_item[j] = sorted(set(output_positions_by_item[j]))
 
         def _run_batch_infer(
             cache_ids_l: list[int],
@@ -762,7 +813,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     # padding pass below can right-fill with -inf, symmetric
                     # with the Path 3 fallback.
                     item_all = np.empty((0, mxq_vocab_size), dtype=np.float32)
-                positions_j = keep_positions_by_item[j]
+                positions_j = output_positions_by_item[j]
                 sliced = item_all[positions_j, :] if positions_j else item_all[0:0, :]
                 vocab_size = max(vocab_size, sliced.shape[-1])
                 per_item_sliced.append(
@@ -796,9 +847,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # positions. Items whose kept-set is exhausted (or empty) no
         # longer force a size-1 walk across the rest of the batch — a
         # single late kept position in one item used to drag every other
-        # item into per-step infer calls. keep_positions_by_item lists
-        # are sorted+deduped by ``_normalize_logits_to_keep``, so a
-        # per-item pointer tracks the next needed position in O(1).
+        # item into per-step infer calls. ``walk_positions_by_item`` is
+        # sorted-unique so a per-item pointer tracks the next needed
+        # position in O(1); duplicates and caller order are restored from
+        # ``output_positions_by_item`` when the final tensor is assembled.
         # ------------------------------------------------------------------
         pointer_by_item: dict[int, int] = {j: 0 for j in range(batch_size)}
         per_item_kept_logits: dict[int, dict[int, torch.Tensor]] = {j: {} for j in range(batch_size)}
@@ -809,7 +861,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if cursor >= sequence_lengths[j]:
                     continue
                 ptr = pointer_by_item[j]
-                positions_j = keep_positions_by_item[j]
+                positions_j = walk_positions_by_item[j]
                 if ptr < len(positions_j):
                     nn = positions_j[ptr]
                     if min_next_needed is None or nn < min_next_needed:
@@ -866,7 +918,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             if chunk == 1:
                 for k, cache_id in enumerate(cache_ids):
                     ptr = pointer_by_item[cache_id]
-                    positions_j = keep_positions_by_item[cache_id]
+                    positions_j = walk_positions_by_item[cache_id]
                     if ptr < len(positions_j) and positions_j[ptr] == cursor:
                         per_item_kept_logits[cache_id][cursor] = logits_chunks[k, :, :].clone()
                         pointer_by_item[cache_id] = ptr + 1
@@ -879,7 +931,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         per_item_final: list[torch.Tensor] = []
         vocab_size = 0
         for j in range(batch_size):
-            positions_j = keep_positions_by_item[j]
+            # per_item_kept_logits is keyed by (unique) walk positions; the
+            # final tensor uses output positions so duplicate indices in the
+            # caller's tensor pick the same walk-position tensor twice.
+            positions_j = output_positions_by_item[j]
             if positions_j:
                 item_logits = torch.cat(
                     [per_item_kept_logits[j][p] for p in positions_j], dim=0

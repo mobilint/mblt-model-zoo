@@ -31,44 +31,83 @@ from tests.transformers._fake_mxq import (
 
 
 # ---------------------------------------------------------------------------
-# _normalize_logits_to_keep
+# _output_positions_for_logits_to_keep / _walk_positions_for_logits_to_keep
 # ---------------------------------------------------------------------------
 
 
-class TestNormalizeLogitsToKeep:
+class TestOutputPositionsForLogitsToKeep:
+    """HF-compatible selector: caller order preserved, duplicates kept."""
+
     def test_int_zero_keeps_every_position(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(0, 5) == [0, 1, 2, 3, 4]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(0, 5) == [0, 1, 2, 3, 4]
 
     def test_int_one_keeps_last_position(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(1, 5) == [4]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(1, 5) == [4]
 
     def test_int_n_keeps_last_n_positions(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(3, 5) == [2, 3, 4]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(3, 5) == [2, 3, 4]
 
     def test_int_oversized_keeps_all_positions(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(9, 4) == [0, 1, 2, 3]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(9, 4) == [0, 1, 2, 3]
 
     def test_int_equal_seq_len_keeps_all_positions(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(5, 5) == [0, 1, 2, 3, 4]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(5, 5) == [0, 1, 2, 3, 4]
 
     def test_int_negative_falls_back_to_all_positions(self) -> None:
-        assert MobilintModelMixin._normalize_logits_to_keep(-1, 3) == [0, 1, 2]
+        # Preserved from the initial implementation (commit d92a353) for
+        # backward compat; callers that want per-position selection pass a
+        # tensor, and negative ints only ever leaked in through misuse.
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(-1, 3) == [0, 1, 2]
 
-    def test_tensor_indices_are_sorted_and_deduped(self) -> None:
+    def test_tensor_preserves_caller_order(self) -> None:
         indices = torch.tensor([3, 0, 3, 2])
-        assert MobilintModelMixin._normalize_logits_to_keep(indices, seq_len=5) == [0, 2, 3]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5) == [3, 0, 3, 2]
+
+    def test_tensor_preserves_duplicates(self) -> None:
+        indices = torch.tensor([2, 2])
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5) == [2, 2]
 
     def test_tensor_negative_indices_wrap(self) -> None:
         indices = torch.tensor([-1, -3])
-        assert MobilintModelMixin._normalize_logits_to_keep(indices, seq_len=5) == [2, 4]
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5) == [4, 2]
 
-    def test_tensor_out_of_range_indices_are_dropped(self) -> None:
-        indices = torch.tensor([-100, 0, 4, 5, 99])
-        assert MobilintModelMixin._normalize_logits_to_keep(indices, seq_len=5) == [0, 4]
+    def test_tensor_out_of_range_index_raises(self) -> None:
+        indices = torch.tensor([0, 4, 99])
+        with pytest.raises(IndexError, match=r"99.*seq_len=5"):
+            MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5)
+
+    def test_tensor_negative_out_of_range_index_raises(self) -> None:
+        # -100 wraps to -95, which is still < 0 and must not be silently dropped.
+        indices = torch.tensor([-100])
+        with pytest.raises(IndexError, match=r"-100.*seq_len=5"):
+            MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5)
 
     def test_tensor_empty_returns_empty_list(self) -> None:
         indices = torch.tensor([], dtype=torch.long)
-        assert MobilintModelMixin._normalize_logits_to_keep(indices, seq_len=5) == []
+        assert MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5) == []
+
+
+class TestWalkPositionsForLogitsToKeep:
+    """Cursor helper: sorted-unique for monotonic KV walks."""
+
+    def test_tensor_sorts_and_dedupes(self) -> None:
+        indices = torch.tensor([3, 0, 3, 2])
+        assert MobilintModelMixin._walk_positions_for_logits_to_keep(indices, seq_len=5) == [0, 2, 3]
+
+    def test_int_matches_output_helper(self) -> None:
+        # For int inputs the two helpers are structurally the same because
+        # int semantics never produce duplicates or unsorted output.
+        assert MobilintModelMixin._walk_positions_for_logits_to_keep(3, 5) == [2, 3, 4]
+        assert MobilintModelMixin._walk_positions_for_logits_to_keep(0, 4) == [0, 1, 2, 3]
+
+    def test_tensor_negative_indices_wrap(self) -> None:
+        indices = torch.tensor([-1, -3])
+        assert MobilintModelMixin._walk_positions_for_logits_to_keep(indices, seq_len=5) == [2, 4]
+
+    def test_tensor_out_of_range_index_raises(self) -> None:
+        indices = torch.tensor([0, 99])
+        with pytest.raises(IndexError, match=r"99.*seq_len=5"):
+            MobilintModelMixin._walk_positions_for_logits_to_keep(indices, seq_len=5)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +251,54 @@ class TestLlmForwardSingle:
         )
         assert logits.shape == (3, mxq.vocab_size)
 
+    def test_dynamic_axis_tensor_preserves_caller_order_and_duplicates(self) -> None:
+        """HF fancy-indexing preserves caller order and duplicates; Path 2 mirrors that.
+
+        Building the "expected" from the fake's own per-chunk payload keeps
+        the assertion tied to observable behavior rather than the fake's
+        internal layout.
+        """
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        seq_len = 5
+        indices = torch.tensor([3, 0, 3, 2])
+        _model, logits = self._run(
+            mxq, seq_len=seq_len, hidden_size=3, logits_to_keep=indices, prefill_chunk_size=seq_len
+        )
+
+        # Reconstruct the single (chunk_len=5) payload the fake produced.
+        full = np.arange(seq_len * mxq.vocab_size, dtype=np.float32).reshape(seq_len, mxq.vocab_size)
+        expected = full[[3, 0, 3, 2], :]
+        assert logits.shape == (4, mxq.vocab_size)
+        np.testing.assert_allclose(logits.numpy(), expected)
+        # Duplicate index 3 → rows 0 and 2 are identical.
+        np.testing.assert_array_equal(logits[0].numpy(), logits[2].numpy())
+
+    def test_dynamic_axis_tensor_negative_indices_pick_positions_in_order(self) -> None:
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        seq_len = 4
+        _model, logits = self._run(
+            mxq,
+            seq_len=seq_len,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([-1, -2]),
+            prefill_chunk_size=seq_len,
+        )
+
+        full = np.arange(seq_len * mxq.vocab_size, dtype=np.float32).reshape(seq_len, mxq.vocab_size)
+        expected = full[[3, 2], :]  # -1 → 3, -2 → 2
+        np.testing.assert_allclose(logits.numpy(), expected)
+
+    def test_dynamic_axis_tensor_out_of_range_raises(self) -> None:
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        with pytest.raises(IndexError, match=r"99.*seq_len=5"):
+            self._run(
+                mxq,
+                seq_len=5,
+                hidden_size=3,
+                logits_to_keep=torch.tensor([0, 4, 99]),
+                prefill_chunk_size=5,
+            )
+
     def test_fallback_interleaves_size_one_infer_for_kept_positions(self) -> None:
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
         indices = torch.tensor([2, 5])
@@ -263,19 +350,54 @@ class TestLlmForwardSingle:
         assert chunk_seqs == [4, 2]
         assert logits.shape == (0, 0)
 
-    def test_fallback_all_out_of_range_indices_returns_empty_logits(self) -> None:
-        """All-out-of-range ``logits_to_keep`` must not raise on np.concatenate."""
+    def test_fallback_out_of_range_indices_raise_indexerror(self) -> None:
+        """HF fancy-indexing raises on out-of-range indices; we mirror that."""
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
-        _model, logits = self._run(
-            mxq,
-            seq_len=6,
-            hidden_size=3,
-            logits_to_keep=torch.tensor([100, -100]),
+        with pytest.raises(IndexError, match=r"100.*seq_len=6"):
+            self._run(
+                mxq,
+                seq_len=6,
+                hidden_size=3,
+                logits_to_keep=torch.tensor([100, -100]),
+                prefill_chunk_size=4,
+            )
+
+    def test_fallback_tensor_preserves_caller_order_and_duplicates(self) -> None:
+        """Path 3 KV walk is sorted-unique; final output re-uses positions in caller order.
+
+        The KV cache is threaded through so ``cache_size`` (the fake fill) is
+        distinct at each captured position: size-1 infer at position p (with
+        prior positions already walked) returns ``full(vocab, p)``. That makes
+        the picked-per-position identity visible in the assembled tensor.
+        """
+        from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
+
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        model = make_model(mxq)
+        cache = MobilintCache(mxq)
+        seq_len = 5
+        inputs_embeds = torch.zeros(1, seq_len, 3)
+        cache_position = torch.arange(seq_len)
+
+        indices = torch.tensor([3, 0, 3, 2])
+        logits = model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=cache_position,
             prefill_chunk_size=4,
+            logits_to_keep=indices,
         )
-        chunk_seqs = [c["shape"][2] for c in mxq.calls]
-        assert chunk_seqs == [4, 2]
-        assert logits.shape == (0, 0)
+
+        assert logits.shape == (4, mxq.vocab_size)
+        # Duplicate index 3 → rows 0 and 2 pick the same per_position tensor.
+        np.testing.assert_array_equal(logits[0].numpy(), logits[2].numpy())
+        # Fill at row 0 should match cache_size at position 3 (i.e. 3.0),
+        # row 1 → position 0 (fill=0), row 3 → position 2 (fill=2).
+        assert float(logits[0, 0]) == 3.0
+        assert float(logits[1, 0]) == 0.0
+        assert float(logits[3, 0]) == 2.0
+        # KV walk hit every position exactly once.
+        assert cache.get_seq_length() == seq_len
 
     def test_fallback_empty_tensor_still_advances_kv_cache(self) -> None:
         from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
@@ -388,6 +510,59 @@ class TestLlmForwardBatch:
         # Both items have position 0 and 2 in range → 2 kept positions each.
         assert logits.shape == (2, 2, mxq.vocab_size)
 
+    def test_dynamic_axis_tensor_preserves_caller_order_and_duplicates_per_item(self) -> None:
+        """Path 2 batched: caller order and duplicates survive per batch item.
+
+        With item lengths 4 and 2, ``logits_to_keep=[0, -1]`` resolves to
+        [0, 3] for item 0 and [0, 1] for item 1 — same kept length so no
+        padding, but the negative-wrap acts per-item.
+        """
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 0, 0]], dtype=torch.long)
+        indices = torch.tensor([0, -1])
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=indices,
+            prefill_chunk_size=4,
+        )
+        assert logits.shape == (2, 2, mxq.vocab_size)
+
+    def test_dynamic_axis_tensor_duplicates_produce_repeated_rows(self) -> None:
+        """A tensor with an explicit duplicate index emits the same row twice per item."""
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        indices = torch.tensor([2, 0, 2])
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=indices,
+            prefill_chunk_size=3,
+        )
+        assert logits.shape == (2, 3, mxq.vocab_size)
+        # For every item, row 0 (index 2) equals row 2 (also index 2).
+        for j in range(2):
+            np.testing.assert_array_equal(logits[j, 0].numpy(), logits[j, 2].numpy())
+
+    def test_fallback_tensor_duplicates_produce_repeated_rows_per_item(self) -> None:
+        """Path 3 batched: walk-positions drive the cursor, output-positions reassemble."""
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        indices = torch.tensor([2, 0, 2])
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=indices,
+            prefill_chunk_size=4,
+        )
+        assert logits.shape == (2, 3, mxq.vocab_size)
+        # Duplicate index 2 must yield identical rows within each batch item.
+        for j in range(2):
+            np.testing.assert_array_equal(logits[j, 0].numpy(), logits[j, 2].numpy())
+
     def test_fallback_interleaves_prefill_and_size_one_across_batch(self) -> None:
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long)
@@ -424,16 +599,19 @@ class TestLlmForwardBatch:
         assert torch.all(torch.isinf(logits[0, 3]) & (logits[0, 3] < 0))
 
     def test_fallback_asymmetric_batch_avoids_size_one_for_exhausted_item(self) -> None:
-        """One item has its only kept position at 0, the other has kept at 5.
+        """One item's walk-set is exhausted after cursor 0; the other keeps going to 5.
 
         With the previous batch-wide ``min_keep_start`` heuristic, every cursor
         step after position 0 would be forced to chunk=1 — even though item 1
         was done capturing after step 0 and item 0 didn't need another capture
         until position 5. The per-item pointer lets the middle walk use the
         caller's ``prefill_chunk_size``.
+
+        ``[0, -1]`` picks position 0 and the last valid position per item —
+        item 0 (seq_len=6) resolves to [0, 5]; item 1 (seq_len=1) resolves to
+        [0, 0] (walk-set collapses to {0} after dedup).
         """
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
-        # Item 0 seq_len=6 keeps {0, 5}; item 1 seq_len=1 keeps {0} (5 clamped away).
         attention_mask = torch.tensor(
             [[1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0]], dtype=torch.long
         )
@@ -441,7 +619,7 @@ class TestLlmForwardBatch:
             mxq,
             attention_mask=attention_mask,
             hidden_size=4,
-            logits_to_keep=torch.tensor([0, 5]),
+            logits_to_keep=torch.tensor([0, -1]),
             prefill_chunk_size=4,
         )
         # Expected trace: (chunk=1 at cursor 0 for both items), (chunk=4 for
@@ -451,10 +629,10 @@ class TestLlmForwardBatch:
         assert mxq.calls[1]["batch"] == [(0, 4, 0)]
         assert mxq.calls[2]["batch"] == [(0, 1, 0)]
 
-        # Item 0 keeps 2 positions; item 1 keeps 1 → padded stack (2, 2, vocab).
+        # Both items keep 2 positions (item 1's second row repeats position 0).
         assert logits.shape == (2, 2, mxq.vocab_size)
-        # Item 1's slot 1 is padding — -inf so softmax masks it.
-        assert torch.all(torch.isinf(logits[1, 1]) & (logits[1, 1] < 0))
+        # Item 1's duplicate index means row 0 == row 1 (both pick position 0).
+        np.testing.assert_array_equal(logits[1, 0].numpy(), logits[1, 1].numpy())
 
     def test_fallback_disjoint_per_item_kept_positions(self) -> None:
         """Kept sets share no positions: item 0 keeps {1}, item 1 keeps {5}.

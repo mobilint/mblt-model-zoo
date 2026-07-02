@@ -215,18 +215,16 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         # Batch dim preserved (no ``.squeeze(0)`` on this path).
         assert logits.shape == (1, 0, 0)
 
-    def test_fallback_all_out_of_range_indices_returns_empty_logits(self) -> None:
-        """All-out-of-range ``logits_to_keep`` must not raise on np.concatenate."""
+    def test_fallback_out_of_range_indices_raise_indexerror(self) -> None:
+        """HF fancy-indexing raises on out-of-range indices; the VL decoder inherits this."""
         mxq = _StaticLastOnlyMxq(vocab_size=5)
-        _model, logits = self._run(
-            mxq,
-            seq_len=6,
-            logits_to_keep=torch.tensor([100, -100]),
-            prefill_chunk_size=4,
-        )
-        chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
-        assert chunk_seqs == [4, 2]
-        assert logits.shape == (1, 0, 0)
+        with pytest.raises(IndexError, match=r"100.*seq_len=6"):
+            self._run(
+                mxq,
+                seq_len=6,
+                logits_to_keep=torch.tensor([100, -100]),
+                prefill_chunk_size=4,
+            )
 
     def test_deepstack_chunk_shape_matches_input_chunk(self) -> None:
         mxq = _StaticLastOnlyMxq(vocab_size=5)
