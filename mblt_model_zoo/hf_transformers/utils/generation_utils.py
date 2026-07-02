@@ -1,7 +1,8 @@
+import dataclasses
 import inspect
 from abc import ABC
 from functools import lru_cache, wraps
-from typing import Any, Callable, Dict, Optional, cast
+from typing import Any, Callable, Dict, Mapping, Optional, cast
 
 import qbruntime
 import torch
@@ -136,6 +137,142 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
         if name != "self"
         and parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
+
+
+@lru_cache(maxsize=None)
+def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
+    """Return the named parameters of ``loss_function`` (excluding ``*args``/``**kwargs``).
+
+    Only ``POSITIONAL_ONLY``, ``POSITIONAL_OR_KEYWORD``, and ``KEYWORD_ONLY``
+    parameters are returned. Variadic parameters (``*args``, ``**kwargs``) are
+    excluded because they do not carry a fixed name we can supply against.
+
+    Caching policy:
+        ``inspect.signature`` is memoized per ``loss_function`` because
+        :func:`build_loss_kwargs_dynamic` is called on the hot decoding path,
+        while the underlying signature is static per loss implementation.
+
+    Boundedness assumption:
+        Callers pass a small, fixed set of upstream loss callables
+        (``ForCausalLMLoss`` and siblings), so the unbounded cache saturates
+        at a handful of entries. Do **not** pass freshly constructed callables
+        here (lambdas, ``functools.partial`` results, per-call closures) — each
+        distinct object is a new cache key and would leak memory.
+    """
+    parameters = inspect.signature(loss_function).parameters
+    return tuple(
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    )
+
+
+# Kwarg names that :func:`build_loss_kwargs_dynamic` knows how to supply to
+# upstream loss functions. Exposed so contract tests can assert that all
+# required loss parameters upstream currently declares are covered here.
+# Extend this set (and update the helper below) when a newly-required loss
+# parameter needs a value source beyond the outer ``forward``'s ``kwargs``.
+LOSS_KWARG_SUPPLY_NAMES: frozenset[str] = frozenset(
+    {"logits", "labels", "vocab_size", "num_items_in_batch", "shift_labels"}
+)
+
+
+def build_loss_kwargs_dynamic(
+    loss_function: Callable,
+    *,
+    logits: Any,
+    labels: Any,
+    vocab_size: int,
+    upstream_kwargs: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Compute the keyword arguments to pass into ``loss_function``.
+
+    The wrapper introspects the loss function's signature so upstream additions
+    (e.g. ``num_items_in_batch``, ``shift_labels``) are picked up automatically
+    when present. Names absent from the signature are silently dropped so we do
+    not pass unexpected kwargs into older loss implementations.
+
+    Args:
+        loss_function: Bound (or unbound) loss callable from the upstream model.
+        logits: Model output logits to score.
+        labels: Ground-truth labels for the loss.
+        vocab_size: Vocabulary size expected by the loss function.
+        upstream_kwargs: Kwargs the outer ``forward`` was invoked with; supplies
+            optional loss inputs like ``num_items_in_batch`` and ``shift_labels``
+            when the upstream caller threaded them in.
+
+    Returns:
+        Kwargs dict restricted to names actually accepted by ``loss_function``.
+
+    Drift coverage:
+        * Silently absorbs upstream additions that appear in ``upstream_kwargs``
+          and are also declared on the loss signature.
+        * Does **not** cover newly-required parameters whose values must be
+          derived from something other than ``upstream_kwargs``. Extend
+          :data:`LOSS_KWARG_SUPPLY_NAMES` and the ``supply`` dict below in
+          lockstep when a new required source needs plumbing.
+    """
+    supply: Dict[str, Any] = {
+        "logits": logits,
+        "labels": labels,
+        "vocab_size": vocab_size,
+        "num_items_in_batch": upstream_kwargs.get("num_items_in_batch"),
+        "shift_labels": upstream_kwargs.get("shift_labels"),
+    }
+    assert set(supply) == LOSS_KWARG_SUPPLY_NAMES, (
+        "build_loss_kwargs_dynamic supply dict must stay in sync with "
+        "LOSS_KWARG_SUPPLY_NAMES; update both together."
+    )
+    accepted = set(_loss_function_parameter_names(loss_function))
+    return {name: value for name, value in supply.items() if name in accepted}
+
+
+def mirror_output_fields(
+    output_cls: type,
+    source_output: Any,
+    **overrides: Any,
+) -> Any:
+    """Construct ``output_cls`` by mirroring fields from ``source_output``.
+
+    For each field declared on ``output_cls`` (which must be a dataclass, as HF
+    ``ModelOutput`` subclasses are), the value is chosen in this order:
+
+    1. Use the caller-supplied override if the field name is in ``overrides``.
+    2. Otherwise, copy ``getattr(source_output, name)`` when present.
+    3. Otherwise, omit the field and let the dataclass default apply. If the
+       field has no default, dataclass ``__init__`` raises ``TypeError``, which
+       intentionally makes the drift loud instead of silently zero-filling.
+
+    Drift coverage:
+        * Silently mirrors new optional fields added to both the source model
+          output and ``output_cls`` (e.g. a future ``image_hidden_states``).
+        * Loudly fails when ``output_cls`` grows a new *required* field that
+          the source model output does not carry — signaling that the wrapper
+          needs to supply that field explicitly via ``overrides``.
+
+    Args:
+        output_cls: Dataclass type (typically an HF ``ModelOutput`` subclass).
+        source_output: Object whose attributes populate non-override fields.
+            Duck-typed via ``hasattr``/``getattr`` so tests can pass simple
+            namespaces in place of real HF outputs.
+        **overrides: Field values that take precedence over ``source_output``.
+
+    Returns:
+        An instance of ``output_cls`` with mirrored + overridden fields.
+    """
+    kwargs: Dict[str, Any] = {}
+    for field in dataclasses.fields(output_cls):
+        name = field.name
+        if name in overrides:
+            kwargs[name] = overrides[name]
+        elif hasattr(source_output, name):
+            kwargs[name] = getattr(source_output, name)
+    return output_cls(**kwargs)
 
 
 def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: str) -> Callable:

@@ -21,6 +21,8 @@ from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintDeepStackCache
 from ...utils.generation_utils import (
     MobilintGenerationMixin,
+    build_loss_kwargs_dynamic,
+    mirror_output_fields,
     upstream_positional_params,
     with_mobilint_generation_signature,
 )
@@ -599,6 +601,15 @@ class MobilintQwen3VLForConditionalGeneration(
         signature by way of ``@with_mobilint_generation_signature``, so upstream
         additions such as ``mm_token_type_ids`` continue to pass through unchanged.
 
+        Dynamic adaptation:
+            * Loss kwargs are built via :func:`build_loss_kwargs_dynamic`, so
+              upstream additions like ``num_items_in_batch`` / ``shift_labels``
+              flow through when the loss function accepts them.
+            * The returned ``Qwen3VLCausalLMOutputWithPast`` is assembled by
+              :func:`mirror_output_fields`, so new output fields (e.g. a future
+              ``image_hidden_states``) are mirrored from the upstream model
+              output automatically instead of requiring wrapper edits.
+
         Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
         last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
         safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
@@ -632,16 +643,20 @@ class MobilintQwen3VLForConditionalGeneration(
         loss = None
         if labels is not None:
             loss = self.loss_function(
-                logits=logits, labels=labels, vocab_size=self.config.text_config.vocab_size
+                **build_loss_kwargs_dynamic(
+                    self.loss_function,
+                    logits=logits,
+                    labels=labels,
+                    vocab_size=self.config.text_config.vocab_size,
+                    upstream_kwargs=kwargs,
+                )
             )
 
-        return Qwen3VLCausalLMOutputWithPast(
+        return mirror_output_fields(
+            Qwen3VLCausalLMOutputWithPast,
+            outputs,
             loss=loss,
             logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-            rope_deltas=outputs.rope_deltas,
         )
 
 
