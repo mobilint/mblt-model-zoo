@@ -181,6 +181,44 @@ class TestMxqSupportsAllLogits:
 
 
 # ---------------------------------------------------------------------------
+# _mxq_static_vocab_size
+# ---------------------------------------------------------------------------
+
+
+class TestMxqStaticVocabSize:
+    def test_first_call_returns_vocab_size(self) -> None:
+        mxq = StaticLastOnlyMxq(vocab_size=7)
+        model = make_model(mxq)
+        assert model._mxq_static_vocab_size() == 7
+
+    def test_result_is_cached_on_instance(self) -> None:
+        mxq = StaticLastOnlyMxq(vocab_size=5)
+        model = make_model(mxq)
+        assert model._mxq_static_vocab_size() == 5
+
+        # Flip the backend to a different vocab dim; a fresh probe would now
+        # return 9. The cached value must win — the compiled vocab dim is a
+        # fixed model property so we never want to re-probe.
+        mxq.get_model_output_shape = lambda: [(1, 1, 9)]  # type: ignore[assignment]
+        assert model._mxq_static_vocab_size() == 5
+
+    def test_raising_backend_propagates_error(self) -> None:
+        import qbruntime
+
+        class _ExplodingMxq(StaticLastOnlyMxq):
+            def get_model_output_shape(self):  # noqa: D401
+                raise qbruntime.QbRuntimeError("no shape for you")
+
+        model = make_model(_ExplodingMxq())
+        # Contract: probe failure re-raises rather than returning a sentinel.
+        # Path 2 has no valid fallback for an unknown vocab dim.
+        with pytest.raises(qbruntime.QbRuntimeError, match="no shape for you"):
+            model._mxq_static_vocab_size()
+        # Nothing was cached, so a subsequent call re-probes and re-raises.
+        assert getattr(model, "_mxq_static_vocab_cached", None) is None
+
+
+# ---------------------------------------------------------------------------
 # Single-item llm_forward paths
 # ---------------------------------------------------------------------------
 

@@ -208,6 +208,36 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         self._mxq_all_logits_cached = supports
         return supports
 
+    def _mxq_static_vocab_size(self) -> int:
+        """Return the compiled MXQ vocab dimension (last output-shape axis).
+
+        Symmetric with :meth:`_mxq_supports_all_logits`: probes the backend
+        once and caches the result on the instance because the compiled
+        vocab dim is fixed for the lifetime of the model. Path 2 in
+        ``_llm_forward_batch`` needs this value to synthesize placeholder
+        rows for zero-length batch items and would otherwise call
+        ``mxq_model.get_model_output_shape()`` on every batched forward.
+
+        Unlike the boolean probe, there is no safe fallback for an unknown
+        vocab size: the same ``(AttributeError, qbruntime.QbRuntimeError)``
+        probe-failure classes recognized by :meth:`_mxq_supports_all_logits`
+        propagate through here rather than being swallowed into a sentinel
+        — callers see the underlying backend error, and nothing is cached
+        so a later successful probe can still be recorded. Any other
+        exception is a real bug and also propagates.
+        """
+        cached = getattr(self, "_mxq_static_vocab_cached", None)
+        if cached is not None:
+            return cached
+        output_shapes = self.npu_backend.mxq_model.get_model_output_shape()
+        vocab = int(output_shapes[0][-1])
+        assert vocab > 0, (
+            "MXQ vocab dim must be static (>0); got %d (mblt_model_zoo assumes the LM head vocab axis is compiled statically even when the token axis is dynamic)"
+            % vocab
+        )
+        self._mxq_static_vocab_cached = vocab
+        return vocab
+
     @staticmethod
     def _is_last_only_selector(
         logits_to_keep: Union[int, torch.Tensor], seq_len: int
@@ -859,11 +889,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if past_key_values is not None:
                     past_key_values.update_seen_tokens(seen_tokens)
 
-            mxq_vocab_size = int(mxq_model.get_model_output_shape()[0][-1])
-            assert mxq_vocab_size > 0, (
-                "MXQ vocab dim must be static (>0); got %d (mblt_model_zoo assumes the LM head vocab axis is compiled statically even when the token axis is dynamic)"
-                % mxq_vocab_size
-            )
+            mxq_vocab_size = self._mxq_static_vocab_size()
             per_item_sliced: list[torch.Tensor] = []
             vocab_size = 0
             for j in range(batch_size):
