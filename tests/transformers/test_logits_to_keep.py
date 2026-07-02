@@ -54,11 +54,26 @@ class TestOutputPositionsForLogitsToKeep:
     def test_int_equal_seq_len_keeps_all_positions(self) -> None:
         assert MobilintModelMixin._output_positions_for_logits_to_keep(5, 5) == [0, 1, 2, 3, 4]
 
-    def test_int_negative_falls_back_to_all_positions(self) -> None:
-        # Preserved from the initial implementation (commit d92a353) for
-        # backward compat; callers that want per-position selection pass a
-        # tensor, and negative ints only ever leaked in through misuse.
-        assert MobilintModelMixin._output_positions_for_logits_to_keep(-1, 3) == [0, 1, 2]
+    def test_int_negative_raises_value_error(self) -> None:
+        # Negative ints are a caller mistake (HF doesn't accept them and the
+        # tensor-negative-wrap path is a separate code path). Reject explicitly
+        # rather than silently mapping to keep-all, which the initial
+        # implementation in commit d92a353 did.
+        with pytest.raises(ValueError, match=r"logits_to_keep must be a non-negative int.*got -1"):
+            MobilintModelMixin._output_positions_for_logits_to_keep(-1, 3)
+
+    def test_int_negative_raises_via_llm_forward(self) -> None:
+        model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        inputs_embeds = torch.zeros(1, 4, 3)
+        cache_position = torch.arange(4)
+        with pytest.raises(ValueError, match=r"logits_to_keep must be a non-negative int.*got -2"):
+            model.llm_forward(
+                inputs_embeds=inputs_embeds,
+                past_key_values=None,
+                cache_position=cache_position,
+                prefill_chunk_size=4,
+                logits_to_keep=-2,
+            )
 
     def test_tensor_preserves_caller_order(self) -> None:
         indices = torch.tensor([3, 0, 3, 2])

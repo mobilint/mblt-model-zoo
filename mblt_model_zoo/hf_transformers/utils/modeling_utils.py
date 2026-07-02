@@ -261,17 +261,23 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         tensor inputs: caller-supplied order is preserved and duplicates
         are kept (a repeated index picks the same position twice).
 
-        Integer semantics: ``0`` (or any non-positive int) keeps every
-        position; ``n > 0`` keeps the last ``n`` positions (clamped to
-        ``seq_len``). Negative ints fall back to keep-all for backward
-        compatibility with the initial implementation in commit d92a353;
-        callers that need per-position selection should pass a tensor.
+        Integer semantics: ``0`` keeps every position (HF keep-all);
+        ``n > 0`` keeps the last ``n`` positions (clamped to ``seq_len``,
+        so ``n >= seq_len`` also keeps every position). Negative ints are
+        rejected with :class:`ValueError`: silently mapping them to
+        keep-all is a footgun (the caller probably meant ``torch.tensor``
+        negative-wrap indexing), and HF itself does not accept them.
         """
         if isinstance(logits_to_keep, torch.Tensor):
             raw = logits_to_keep.detach().to("cpu").flatten().tolist()
             return cls._wrap_and_validate_indices(raw, seq_len)
         n = int(logits_to_keep)
-        if n <= 0 or n >= seq_len:
+        if n < 0:
+            raise ValueError(
+                "logits_to_keep must be a non-negative int (0 keeps all positions, "
+                "n>0 keeps last n) or a torch.Tensor of positions; got %d" % n
+            )
+        if n == 0 or n >= seq_len:
             return list(range(seq_len))
         return list(range(seq_len - n, seq_len))
 
