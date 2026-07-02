@@ -627,7 +627,7 @@ class MobilintQwen3VLForConditionalGeneration(
         # The Mobilint text decoder already returns logits sliced to the requested
         # positions and ``self.lm_head`` is ``nn.Identity``, so skip the upstream
         # ``hidden_states[:, slice_indices, :]`` step.
-        logits = cast(torch.FloatTensor, self.lm_head(outputs[0]))
+        logits = cast(torch.FloatTensor, self.lm_head(outputs.last_hidden_state))
 
         loss = None
         if labels is not None:
