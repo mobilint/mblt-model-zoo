@@ -351,7 +351,13 @@ class MobilintQwen2VLForConditionalGeneration(
         safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
         perplexity eval / logit collection inherit this cost on last-only builds.
         """
-        for name, value in zip(upstream_positional_params(Qwen2VLForConditionalGeneration.forward), args):
+        positional_params = upstream_positional_params(Qwen2VLForConditionalGeneration.forward)
+        if len(args) > len(positional_params):
+            raise TypeError(
+                f"forward() takes at most {len(positional_params)} positional arguments "
+                f"but {len(args)} were given"
+            )
+        for name, value in zip(positional_params, args):
             if name in kwargs:
                 raise TypeError(f"forward() got multiple values for argument {name!r}")
             kwargs[name] = value

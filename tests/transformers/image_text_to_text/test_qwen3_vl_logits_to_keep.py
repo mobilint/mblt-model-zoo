@@ -345,3 +345,28 @@ class TestQwen3VLForConditionalGenerationForward:
 
         with pytest.raises(TypeError, match="multiple values for argument 'input_ids'"):
             wrapper.forward(input_ids, input_ids=input_ids)
+
+    def test_forward_rejects_too_many_positional_args(self) -> None:
+        """Extra positional args beyond upstream's signature must raise TypeError.
+
+        ``zip`` silently drops extras, so without an explicit length check a caller
+        passing too many positional args would have those extras discarded rather
+        than surfaced. Mirror CPython's own message so the failure reads naturally.
+        """
+        from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+            upstream_positional_params,
+        )
+        from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+            Qwen3VLForConditionalGeneration,
+        )
+
+        wrapper = self._make_wrapper(kept_len=1)
+        param_count = len(upstream_positional_params(Qwen3VLForConditionalGeneration.forward))
+        extra_args = tuple(object() for _ in range(param_count + 1))
+
+        with pytest.raises(
+            TypeError,
+            match=rf"forward\(\) takes at most {param_count} positional arguments "
+            rf"but {param_count + 1} were given",
+        ):
+            wrapper.forward(*extra_args)
