@@ -983,6 +983,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_chunks = []
             seen_tokens = {}
 
+            # Every item still within its sequence gets an infer call at this
+            # cursor so its KV cache advances monotonically through all positions;
+            # this holds even when ptr == len(walk_positions_by_item[j]) — the
+            # size-1 kept-logit capture is gated later by positions_j[ptr] == cursor.
             for j in range(batch_size):
                 end_j = min(cursor + chunk, sequence_lengths[j])
                 if cursor < sequence_lengths[j] and end_j <= sequence_lengths[j]:
