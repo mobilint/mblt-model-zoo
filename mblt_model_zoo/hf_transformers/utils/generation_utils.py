@@ -99,17 +99,21 @@ def llm_eagle3_forward(
 
 @lru_cache(maxsize=None)
 def upstream_positional_params(func: Callable) -> tuple[str, ...]:
-    """Return the non-``self`` positional parameter names of ``func``.
+    """Return the positional-bindable parameter names of ``func`` (excluding ``self``).
 
-    ``*args`` (``VAR_POSITIONAL``) and ``**kwargs`` (``VAR_KEYWORD``) parameters are
-    excluded. Cached per callable so ``inspect.signature`` is not re-parsed on every
-    wrapper call in the generation loop.
+    Only ``POSITIONAL_ONLY`` and ``POSITIONAL_OR_KEYWORD`` parameters are returned —
+    i.e. names that a caller's positional ``*args`` can bind to under normal Python
+    semantics. ``KEYWORD_ONLY``, ``VAR_POSITIONAL`` (``*args``), and ``VAR_KEYWORD``
+    (``**kwargs``) parameters are excluded, so ``zip``-ing the result with a caller's
+    positional args cannot silently misbind a value to a keyword-only parameter.
+    Cached per callable so ``inspect.signature`` is not re-parsed on every wrapper
+    call in the generation loop.
     """
     return tuple(
         name
         for name, parameter in inspect.signature(func).parameters.items()
         if name != "self"
-        and parameter.kind not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+        and parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
 
 
