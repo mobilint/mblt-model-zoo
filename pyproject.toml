@@ -122,6 +122,7 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
+    "upstream_contract: pins invariants of upstream HF transformers classes that our wrappers depend on; deselect with '-m \"not upstream_contract\"' in fast CI.",
 ]
 
 [tool.ruff]
