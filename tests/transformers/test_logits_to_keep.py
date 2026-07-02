@@ -662,3 +662,120 @@ class TestLlmForwardBatch:
         assert mxq.calls[2]["batch"] == [(1, 3, 0)]
 
         assert logits.shape == (2, 1, mxq.vocab_size)
+
+
+# ---------------------------------------------------------------------------
+# Batched empty-selection early return
+# ---------------------------------------------------------------------------
+
+
+class TestBatchedEmptySelection:
+    """Path 2 and Path 3 short-circuit to a ``(batch, 0, 0)`` tensor when every
+    batch item has an empty selection.
+
+    Rationale: the padding loops in both paths build ``torch.full((rows, cols), -inf)``
+    tensors that happen to be benign when ``max_keep_len == 0`` (the ``item.shape[0]
+    < max_keep_len`` guard skips the fill). That reliance is fragile — a future
+    change to how ``max_keep_len`` or ``vocab_size`` is derived could break silently
+    — so both paths return the empty-shape contract explicitly instead.
+
+    Post-#1 (``_wrap_and_validate_indices`` raises on out-of-range), the only
+    caller-facing way to make every batch item land in this branch is an empty
+    ``logits_to_keep`` tensor. Out-of-range test scenarios like ``torch.tensor([100, 200])``
+    would raise ``IndexError`` before reaching the early return, so no dedicated
+    "all-out-of-range" test is included.
+    """
+
+    def _run(
+        self,
+        mxq,
+        *,
+        attention_mask: torch.Tensor,
+        hidden_size: int,
+        logits_to_keep,
+        prefill_chunk_size: Optional[int] = None,
+        max_batch_size: int = 4,
+        dtype: torch.dtype = torch.float32,
+    ):
+        model = make_model(mxq, max_batch_size=max_batch_size)
+        batch, seq_len = attention_mask.shape
+        inputs_embeds = torch.arange(batch * seq_len * hidden_size, dtype=dtype).reshape(
+            batch, seq_len, hidden_size
+        )
+        cache_position = torch.arange(seq_len)
+        logits = model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=prefill_chunk_size,
+            attention_mask=attention_mask,
+            logits_to_keep=logits_to_keep,
+        )
+        return model, logits, inputs_embeds
+
+    def test_batched_all_empty_tensor_returns_zero_shape_dynamic_axis(self) -> None:
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        _model, logits, inputs_embeds = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=3,
+        )
+        assert logits.shape == (2, 0, 0)
+        assert logits.dtype == inputs_embeds.dtype
+        assert logits.device == inputs_embeds.device
+
+    def test_batched_all_empty_tensor_returns_zero_shape_last_only(self) -> None:
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        _model, logits, inputs_embeds = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=3,
+        )
+        assert logits.shape == (2, 0, 0)
+        assert logits.dtype == inputs_embeds.dtype
+        assert logits.device == inputs_embeds.device
+
+    def test_batched_mixed_empty_and_nonempty_still_pads_correctly_dynamic_axis(
+        self,
+    ) -> None:
+        """Guard the early-return: mixed empty/non-empty items must still pad,
+        not short-circuit. Item 0's attention_mask row is zero (seq_len=0 →
+        empty positions with ``logits_to_keep=0``); item 1 has 3 real positions.
+        """
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
+        _model, logits, _inputs_embeds = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=0,
+            prefill_chunk_size=3,
+        )
+        # Not (2, 0, 0): item 1 contributed real positions, so padding must run.
+        assert logits.shape == (2, 3, mxq.vocab_size)
+        # Item 0 is entirely padding → all -inf.
+        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+
+    def test_batched_mixed_empty_and_nonempty_still_pads_correctly_last_only(
+        self,
+    ) -> None:
+        """Same guard as above, but for Path 3 (last-only MXQ fallback)."""
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
+        _model, logits, _inputs_embeds = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=0,
+            prefill_chunk_size=3,
+        )
+        # Not (2, 0, 0): item 1 contributed real positions, so padding must run.
+        assert logits.shape == (2, 3, mxq.vocab_size)
+        # Item 0 is entirely padding → all -inf.
+        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))

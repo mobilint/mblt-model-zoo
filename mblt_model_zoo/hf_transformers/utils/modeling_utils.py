@@ -821,6 +821,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 )
 
             max_keep_len = max((item.shape[0] for item in per_item_sliced), default=0)
+            if max_keep_len == 0:
+                # No batch item had any kept positions (e.g. empty-tensor
+                # selector). Return the (batch, 0, 0) shape contract explicitly
+                # so we don't rely on the torch.full((0, 0), -inf) idiom in the
+                # padding loop silently degenerating to a no-op when future
+                # refactors change how max_keep_len / vocab_size are computed.
+                return cast(
+                    torch.FloatTensor,
+                    torch.zeros(
+                        (batch_size, 0, 0),
+                        dtype=inputs_embeds.dtype,
+                        device=inputs_embeds.device,
+                    ),
+                )
             padded: list[torch.Tensor] = []
             for item in per_item_sliced:
                 if item.shape[0] < max_keep_len:
@@ -947,6 +961,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             per_item_final.append(item_logits)
 
         max_keep_len = max((item.shape[0] for item in per_item_final), default=0)
+        if max_keep_len == 0:
+            # No batch item had any kept positions (e.g. empty-tensor selector).
+            # Return the (batch, 0, 0) shape contract explicitly so we don't
+            # rely on the torch.full((0, 0), -inf) idiom in the padding loop
+            # silently degenerating to a no-op when future refactors change
+            # how max_keep_len / vocab_size are computed.
+            return cast(
+                torch.FloatTensor,
+                torch.zeros(
+                    (batch_size, 0, 0),
+                    dtype=inputs_embeds.dtype,
+                    device=inputs_embeds.device,
+                ),
+            )
         padded_final: list[torch.Tensor] = []
         for item in per_item_final:
             if item.shape[0] < max_keep_len:
