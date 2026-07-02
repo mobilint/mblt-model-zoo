@@ -20,7 +20,11 @@ from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
-from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
+from ...utils.generation_utils import (
+    MobilintGenerationMixin,
+    upstream_positional_params,
+    with_mobilint_generation_signature,
+)
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen2_vl import (
     MobilintQwen2VLConfig,
@@ -342,14 +346,7 @@ class MobilintQwen2VLForConditionalGeneration(
         signature by way of ``@with_mobilint_generation_signature``, so upstream
         additions such as ``position_ids`` continue to pass through unchanged.
         """
-        upstream_params = [
-            name
-            for name, parameter in inspect.signature(
-                Qwen2VLForConditionalGeneration.forward
-            ).parameters.items()
-            if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
-        ]
-        for name, value in zip(upstream_params, args):
+        for name, value in zip(upstream_positional_params(Qwen2VLForConditionalGeneration.forward), args):
             kwargs[name] = value
 
         labels = kwargs.pop("labels", None)

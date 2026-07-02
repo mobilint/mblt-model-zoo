@@ -19,7 +19,11 @@ from transformers.utils.generic import TransformersKwargs, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintDeepStackCache
-from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
+from ...utils.generation_utils import (
+    MobilintGenerationMixin,
+    upstream_positional_params,
+    with_mobilint_generation_signature,
+)
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen3_vl import (
     MobilintQwen3VLConfig,
@@ -595,14 +599,7 @@ class MobilintQwen3VLForConditionalGeneration(
         signature by way of ``@with_mobilint_generation_signature``, so upstream
         additions such as ``mm_token_type_ids`` continue to pass through unchanged.
         """
-        upstream_params = [
-            name
-            for name, parameter in inspect.signature(
-                Qwen3VLForConditionalGeneration.forward
-            ).parameters.items()
-            if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
-        ]
-        for name, value in zip(upstream_params, args):
+        for name, value in zip(upstream_positional_params(Qwen3VLForConditionalGeneration.forward), args):
             kwargs[name] = value
 
         labels = kwargs.pop("labels", None)

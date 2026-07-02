@@ -1,6 +1,6 @@
 import inspect
 from abc import ABC
-from functools import wraps
+from functools import lru_cache, wraps
 from typing import Any, Callable, Dict, Optional, cast
 
 import qbruntime
@@ -94,6 +94,20 @@ def llm_eagle3_forward(
         past_key_values=past_key_values,
         hidden_states=hidden_states,
         attentions=None,
+    )
+
+
+@lru_cache(maxsize=None)
+def upstream_positional_params(func: Callable) -> tuple[str, ...]:
+    """Return the non-``self`` positional parameter names of ``func``.
+
+    ``**kwargs`` (``VAR_KEYWORD``) parameters are excluded. Cached per callable so
+    ``inspect.signature`` is not re-parsed on every wrapper call in the generation loop.
+    """
+    return tuple(
+        name
+        for name, parameter in inspect.signature(func).parameters.items()
+        if name != "self" and parameter.kind != inspect.Parameter.VAR_KEYWORD
     )
 
 
