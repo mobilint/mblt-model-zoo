@@ -204,6 +204,43 @@ class TestLlmForwardSingle:
         # Path 1 squeezes the outer batch axis → (1, vocab).
         assert logits.shape == (1, mxq.vocab_size)
 
+    def test_scalar_tensor_seq_len_minus_one_uses_fast_path(self) -> None:
+        """``torch.tensor([seq_len - 1])`` is the tensor equivalent of ``logits_to_keep=1``.
+
+        The dynamic-axis probe would set ``_mxq_all_logits_cached`` on the
+        instance; Path 1 short-circuits before probing, so its absence
+        after the call proves the shortcut fired.
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=6)
+        seq_len = 6
+        model, logits = self._run(
+            mxq,
+            seq_len=seq_len,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([seq_len - 1]),
+            prefill_chunk_size=seq_len,
+        )
+        assert getattr(model, "_mxq_all_logits_cached", None) is None
+        chunk_seqs = [c["shape"][2] for c in mxq.calls]
+        assert chunk_seqs == [seq_len]
+        assert logits.shape == (1, mxq.vocab_size)
+
+    def test_scalar_tensor_negative_one_uses_fast_path(self) -> None:
+        """``torch.tensor([-1])`` is the HF negative-wrap equivalent of ``[seq_len - 1]``."""
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=6)
+        seq_len = 6
+        model, logits = self._run(
+            mxq,
+            seq_len=seq_len,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([-1]),
+            prefill_chunk_size=seq_len,
+        )
+        assert getattr(model, "_mxq_all_logits_cached", None) is None
+        chunk_seqs = [c["shape"][2] for c in mxq.calls]
+        assert chunk_seqs == [seq_len]
+        assert logits.shape == (1, mxq.vocab_size)
+
     def test_default_keep_ignores_dynamic_axis_probe(self) -> None:
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
         model, logits = self._run(mxq, seq_len=6, hidden_size=3, logits_to_keep=1, prefill_chunk_size=3)
@@ -463,6 +500,29 @@ class TestLlmForwardBatch:
         _model, logits = self._run(
             mxq, attention_mask=attention_mask, hidden_size=4, logits_to_keep=1, prefill_chunk_size=2
         )
+        assert logits.shape == (2, 1, mxq.vocab_size)
+
+    def test_mixed_length_scalar_tensor_does_not_take_shortcut(self) -> None:
+        """A scalar tensor selector cannot uniformly represent "last position"
+        across a mixed-length batch, so Path 1 must not fire.
+
+        For lengths ``[2, 3]`` with ``torch.tensor([-1])`` the fallback
+        walks per-item and captures position 1 for item 0 and position 2
+        for item 1. The trace-visible tell that Path 1 was skipped is the
+        size-1 batched infer calls; Path 1 would have used the caller's
+        ``prefill_chunk_size`` for a single wider infer instead.
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 0], [1, 1, 1]], dtype=torch.long)
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([-1]),
+            prefill_chunk_size=4,
+        )
+        per_call_widths = [c["batch"][0][1] for c in mxq.calls]
+        assert per_call_widths == [1, 1, 1]
         assert logits.shape == (2, 1, mxq.vocab_size)
 
     def test_dynamic_axis_keep_all_returns_per_item_padded_stack(self) -> None:

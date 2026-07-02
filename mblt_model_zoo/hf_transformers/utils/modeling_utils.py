@@ -209,6 +209,26 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         return supports
 
     @staticmethod
+    def _is_last_only_selector(
+        logits_to_keep: Union[int, torch.Tensor], seq_len: int
+    ) -> bool:
+        """Return True when ``logits_to_keep`` semantically selects only the last position.
+
+        Matches ``logits_to_keep == 1`` (the int shortcut) and its tensor
+        equivalents: a single-element tensor holding ``seq_len - 1`` or
+        ``-1``. HF callers that build the selector programmatically as
+        ``torch.tensor([seq_len - 1])`` are asking for the same last-token
+        logit as ``logits_to_keep=1`` and should hit Path 1 identically
+        rather than probing the dynamic axis and taking Path 2/3.
+        """
+        if isinstance(logits_to_keep, int) and logits_to_keep == 1:
+            return True
+        if isinstance(logits_to_keep, torch.Tensor) and logits_to_keep.numel() == 1:
+            idx = int(logits_to_keep.flatten()[0].item())
+            return idx == seq_len - 1 or idx == -1
+        return False
+
+    @staticmethod
     def _wrap_and_validate_indices(indices: list[int], seq_len: int) -> list[int]:
         """Apply HF-style negative-wrap and range-check to a list of position indices.
 
@@ -317,7 +337,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         by ``do_infer``; single-input callers typically apply
         ``.squeeze(0)`` afterwards, dual-input callers leave it as-is.
         """
-        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        is_default_keep = self._is_last_only_selector(logits_to_keep, seq_len)
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
         # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
@@ -548,7 +568,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
         )
 
-        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        # int==1 always hits Path 1 (the existing per-item cursor code handles
+        # mixed lengths correctly and this is the HF-generate default). For a
+        # scalar tensor selector we additionally require every item to share the
+        # same length, because a single value can only uniformly represent
+        # "last position" when there is only one length in the batch.
+        if isinstance(logits_to_keep, int) and logits_to_keep == 1:
+            is_default_keep = True
+        else:
+            lens_equal = all(sl == sequence_lengths[0] for sl in sequence_lengths)
+            is_default_keep = lens_equal and self._is_last_only_selector(
+                logits_to_keep, sequence_lengths[0]
+            )
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
         # Path 2 uses the output positions directly to assemble the final
