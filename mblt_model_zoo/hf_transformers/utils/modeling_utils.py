@@ -430,14 +430,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             attention_mask_bool = cast(torch.BoolTensor, attention_mask.type(torch.bool))
             inputs_embeds_masked = [inputs_embeds[i, attention_mask_bool[i, :], :] for i in range(batch_size)]
             sequence_lengths = cast(list[int], attention_mask.sum(dim=1).tolist())
-            zero_length_rows = [
-                row_index for row_index, sequence_length in enumerate(sequence_lengths) if sequence_length == 0
-            ]
-            if zero_length_rows:
-                raise ValueError(
-                    "Batched LLM inputs contain empty sequences after applying attention_mask. "
-                    f"Zero-length rows: {zero_length_rows}"
-                )
         else:
             assert inputs_embeds.shape[1] == 1
             inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
@@ -509,6 +501,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # contract regressions stay visible.
         # ------------------------------------------------------------------
         if is_default_keep:
+            zero_length_rows = [
+                row_index for row_index, sequence_length in enumerate(sequence_lengths) if sequence_length == 0
+            ]
+            if zero_length_rows:
+                raise ValueError(
+                    "Batched LLM inputs contain empty sequences after applying attention_mask. "
+                    f"Zero-length rows: {zero_length_rows}"
+                )
             num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
             logits_dict: dict[int, torch.Tensor] = {}
 
@@ -725,10 +725,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if past_key_values is not None:
                     past_key_values.update_seen_tokens(seen_tokens)
 
+            mxq_vocab_size = int(mxq_model.get_model_output_shape()[0][-1])
             per_item_sliced: list[torch.Tensor] = []
             vocab_size = 0
             for j in range(batch_size):
-                item_all = np.concatenate(all_logits_by_item[j], axis=0)
+                if all_logits_by_item[j]:
+                    item_all = np.concatenate(all_logits_by_item[j], axis=0)
+                else:
+                    # Zero-length row (attention_mask entirely zero): no chunk
+                    # contributed. Synthesize a (0, vocab) placeholder so the
+                    # padding pass below can right-fill with -inf, symmetric
+                    # with the Path 3 fallback.
+                    item_all = np.empty((0, mxq_vocab_size), dtype=np.float32)
                 positions_j = keep_positions_by_item[j]
                 sliced = item_all[positions_j, :] if positions_j else item_all[0:0, :]
                 vocab_size = max(vocab_size, sliced.shape[-1])

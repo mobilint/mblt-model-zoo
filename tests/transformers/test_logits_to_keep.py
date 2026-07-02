@@ -336,6 +336,24 @@ class TestLlmForwardBatch:
         # The padded tail of item 0 must be -inf so softmax zeros it out.
         assert torch.all(torch.isinf(logits[0, 2]) & (logits[0, 2] < 0))
 
+    def test_dynamic_axis_zero_length_row_is_softmax_masked(self) -> None:
+        """A batch item whose attention_mask row is entirely zero must not crash
+        Path 2 on ``np.concatenate([])`` — Path 3 already tolerates this and
+        Path 2 should be symmetric. The zero-length row's slot in the stacked
+        output is right-padded with -inf so softmax assigns zero probability.
+        """
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=0,
+            prefill_chunk_size=3,
+        )
+        assert logits.shape == (2, 3, mxq.vocab_size)
+        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+
     def test_dynamic_axis_tensor_indices_apply_per_item(self) -> None:
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 1, 0]], dtype=torch.long)
