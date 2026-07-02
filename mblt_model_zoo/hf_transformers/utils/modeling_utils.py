@@ -250,6 +250,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         ``torch.tensor([seq_len - 1])`` are asking for the same last-token
         logit as ``logits_to_keep=1`` and should hit Path 1 identically
         rather than probing the dynamic axis and taking Path 2/3.
+
+        Note: call sites may pre-filter ``int==1`` before calling this
+        helper. ``_llm_forward_batch`` does (its fast pre-check short-
+        circuits before reaching here, so this method only meaningfully
+        evaluates tensor selectors there), while the single-input
+        dispatch in ``_run_chunked_logits_to_keep`` does not — so the
+        ``int==1`` branch below is not globally dead.
         """
         if isinstance(logits_to_keep, int) and logits_to_keep == 1:
             return True
@@ -612,6 +619,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if isinstance(logits_to_keep, int) and logits_to_keep == 1:
             is_default_keep = True
         else:
+            # int==1 is handled by the fast pre-check above, so the call
+            # below only meaningfully evaluates torch.Tensor selectors.
             lens_equal = all(sl == sequence_lengths[0] for sl in sequence_lengths)
             is_default_keep = lens_equal and self._is_last_only_selector(
                 logits_to_keep, sequence_lengths[0]
