@@ -13,6 +13,8 @@ from typing import Any, Mapping
 
 import torch
 
+from mblt_model_zoo.hf_transformers.models.qwen3_asr._errors import QWEN_ASR_INSTALL_HINT
+
 
 _QWEN3_ASR_LANGUAGE_ALIASES = {
     "ar": "Arabic",
@@ -115,11 +117,7 @@ def ensure_qwen3_asr_backend_registered() -> None:
     except ModuleNotFoundError as exc:
         missing = exc.name or ""
         if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-            raise ModuleNotFoundError(
-                "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: uv sync --extra qwen-asr, or "
-                "pip install -U \"mblt-model-zoo[qwen-asr]\""
-            ) from exc
+            raise ModuleNotFoundError(QWEN_ASR_INSTALL_HINT) from exc
         raise
 
     try:
@@ -143,11 +141,7 @@ def ensure_qwen3_asr_backend_registered() -> None:
     except ModuleNotFoundError as exc:
         missing = exc.name or ""
         if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-            raise ModuleNotFoundError(
-                "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: uv sync --extra qwen-asr, or "
-                "pip install -U \"mblt-model-zoo[qwen-asr]\""
-            ) from exc
+            raise ModuleNotFoundError(QWEN_ASR_INSTALL_HINT) from exc
         raise
 
 
