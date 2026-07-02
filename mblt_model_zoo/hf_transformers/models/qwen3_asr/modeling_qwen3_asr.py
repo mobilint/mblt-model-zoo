@@ -318,6 +318,13 @@ class MobilintQwen3ASRTextModel(
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
+        """Run the Qwen3-ASR text decoder with HF-style ``logits_to_keep``.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
+        """
         if input_ids is None and inputs_embeds is None:
             raise ValueError("You must specify input_ids, inputs_embeds, or both.")
 

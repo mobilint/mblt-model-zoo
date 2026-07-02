@@ -345,6 +345,11 @@ class MobilintQwen2VLForConditionalGeneration(
         own ``**kwargs`` to the text model). All other arguments follow the upstream
         signature by way of ``@with_mobilint_generation_signature``, so upstream
         additions such as ``position_ids`` continue to pass through unchanged.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
         """
         for name, value in zip(upstream_positional_params(Qwen2VLForConditionalGeneration.forward), args):
             if name in kwargs:

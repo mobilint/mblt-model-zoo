@@ -345,6 +345,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         :meth:`_llm_forward_batch`, whose padded rows are filled with
         ``-inf`` so downstream softmax leaves padded positions at zero
         probability.
+
+        Performance: on last-only MXQ (:meth:`_mxq_supports_all_logits`
+        returns False), ``logits_to_keep=0`` triggers the Path 3 fallback,
+        which runs one size-1 infer per input token and is dramatically
+        slower than ``logits_to_keep=1`` on long prefills. Callers using
+        ``.generate()`` are safe because HF sets ``logits_to_keep=1``
+        automatically; callers doing manual ``.forward()`` for perplexity
+        eval / logit collection should know this cost is inherent to
+        last-only compiled models.
         """
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
@@ -430,6 +439,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         softmax assigns exactly zero probability to padded slots; callers
         that don't also track a padding mask (e.g. generation) would
         otherwise see real vocab mass leak onto padded positions.
+
+        Performance: on last-only MXQ (:meth:`_mxq_supports_all_logits`
+        returns False), ``logits_to_keep=0`` walks the batch cursor one
+        token at a time through kept positions, so long prefills are
+        dramatically slower than ``logits_to_keep=1``. ``.generate()``
+        avoids this because HF sets ``logits_to_keep=1`` automatically;
+        manual ``.forward()`` callers doing perplexity eval / logit
+        collection incur this cost inherently on last-only builds.
         """
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]

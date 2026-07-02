@@ -93,6 +93,13 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, AyaVisionCausalLMOutputWithPast]:
+        """Run the Aya-Vision text decoder with HF-style ``logits_to_keep``.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
+        """
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
