@@ -185,6 +185,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         value equal to ``_MXQ_DYNAMIC_AXIS_SENTINEL`` marks it as dynamic.
         The result is cached on the instance because the shape is fixed
         for the lifetime of the loaded model.
+
+        Cache population is lazy. Both call sites in
+        ``_run_chunked_logits_to_keep`` and ``_llm_forward_batch`` guard the
+        probe with ``False if is_default_keep else self._mxq_supports_all_logits()``,
+        so a model whose traffic is entirely last-only (Path 1) never calls
+        this method and ``_mxq_all_logits_cached`` stays unset. The first
+        non-default ``logits_to_keep`` request then pays a single
+        ``get_model_output_shape`` backend call before the cache is filled;
+        every subsequent call is a plain attribute read. This is
+        intentional: eager probing at ``__init__`` time would burn a
+        backend call on the common default-generation path where the
+        dynamic-axis answer is never consulted.
         """
         cached = getattr(self, "_mxq_all_logits_cached", None)
         if cached is not None:
