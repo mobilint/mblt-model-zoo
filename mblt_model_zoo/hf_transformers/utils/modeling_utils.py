@@ -328,7 +328,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         The three execution paths (fast path, dynamic-axis, fallback) are
         implemented once in :meth:`_run_chunked_logits_to_keep`; this
         wrapper just builds a single-input ``do_infer`` closure that
-        advances the KV cache and forwards to the shared helper.
+        advances the KV cache and forwards to the shared helper. When an
+        ``attention_mask`` is provided we dispatch to
+        :meth:`_llm_forward_batch`, whose padded rows are filled with
+        ``-inf`` so downstream softmax leaves padded positions at zero
+        probability.
         """
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
@@ -406,6 +410,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
     ):
+        """Batched sibling of :meth:`llm_forward` with the same 3-path dispatch.
+
+        Paths 2 and 3 produce a variable number of kept positions per
+        batch item and stack them into ``(batch, max_keep_len, vocab)``.
+        Padded rows are filled with ``-inf`` (not 0.0) so downstream
+        softmax assigns exactly zero probability to padded slots; callers
+        that don't also track a padding mask (e.g. generation) would
+        otherwise see real vocab mass leak onto padded positions.
+        """
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
 
@@ -723,8 +736,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             padded: list[torch.Tensor] = []
             for item in per_item_sliced:
                 if item.shape[0] < max_keep_len:
-                    pad = torch.zeros(
+                    # -inf so downstream softmax assigns 0 probability to padded
+                    # positions; using 0.0 would spread mass over real vocab rows.
+                    pad = torch.full(
                         (max_keep_len - item.shape[0], vocab_size),
+                        float("-inf"),
                         dtype=item.dtype,
                         device=item.device,
                     )
@@ -832,11 +848,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 pad_rows = max_keep_len - item.shape[0]
                 pad_cols = vocab_size if item.numel() == 0 else item.shape[-1]
                 if item.numel() == 0:
-                    item = torch.zeros(
+                    item = torch.empty(
                         (0, pad_cols), dtype=inputs_embeds.dtype, device=inputs_embeds.device
                     )
-                pad = torch.zeros(
-                    (pad_rows, pad_cols), dtype=item.dtype, device=item.device
+                # -inf so downstream softmax assigns 0 probability to padded
+                # positions; using 0.0 would spread mass over real vocab rows.
+                pad = torch.full(
+                    (pad_rows, pad_cols),
+                    float("-inf"),
+                    dtype=item.dtype,
+                    device=item.device,
                 )
                 item = torch.cat([item, pad], dim=0)
             padded_final.append(item)

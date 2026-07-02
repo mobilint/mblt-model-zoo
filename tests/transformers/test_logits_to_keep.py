@@ -450,8 +450,8 @@ class TestLlmForwardBatch:
         # Both items pad up to the longest kept-length (3 positions for item 1;
         # item 0 has 2 real positions and is right-padded).
         assert logits.shape == (2, 3, mxq.vocab_size)
-        # The padded tail of item 0 should be exactly zero.
-        assert torch.all(logits[0, 2] == 0)
+        # The padded tail of item 0 must be -inf so softmax zeros it out.
+        assert torch.all(torch.isinf(logits[0, 2]) & (logits[0, 2] < 0))
 
     def test_dynamic_axis_tensor_indices_apply_per_item(self) -> None:
         mxq = _DynamicAxisMxq(vocab_size=5, max_width=4)
@@ -499,5 +499,5 @@ class TestLlmForwardBatch:
             prefill_chunk_size=2,
         )
         assert logits.shape == (2, 4, mxq.vocab_size)
-        # Item 0's slot 3 is padding (zero row).
-        assert torch.all(logits[0, 3] == 0)
+        # Item 0's slot 3 is padding — filled with -inf so softmax masks it.
+        assert torch.all(torch.isinf(logits[0, 3]) & (logits[0, 3] < 0))
