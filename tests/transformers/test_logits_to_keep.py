@@ -501,3 +501,65 @@ class TestLlmForwardBatch:
         assert logits.shape == (2, 4, mxq.vocab_size)
         # Item 0's slot 3 is padding — filled with -inf so softmax masks it.
         assert torch.all(torch.isinf(logits[0, 3]) & (logits[0, 3] < 0))
+
+    def test_fallback_asymmetric_batch_avoids_size_one_for_exhausted_item(self) -> None:
+        """One item has its only kept position at 0, the other has kept at 5.
+
+        With the previous batch-wide ``min_keep_start`` heuristic, every cursor
+        step after position 0 would be forced to chunk=1 — even though item 1
+        was done capturing after step 0 and item 0 didn't need another capture
+        until position 5. The per-item pointer lets the middle walk use the
+        caller's ``prefill_chunk_size``.
+        """
+        mxq = _StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        # Item 0 seq_len=6 keeps {0, 5}; item 1 seq_len=1 keeps {0} (5 clamped away).
+        attention_mask = torch.tensor(
+            [[1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0]], dtype=torch.long
+        )
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([0, 5]),
+            prefill_chunk_size=4,
+        )
+        # Expected trace: (chunk=1 at cursor 0 for both items), (chunk=4 for
+        # item 0 only, walking 1→5), (chunk=1 at cursor 5 for item 0).
+        assert len(mxq.calls) == 3
+        assert mxq.calls[0]["batch"] == [(0, 1, 0), (1, 1, 0)]
+        assert mxq.calls[1]["batch"] == [(0, 4, 0)]
+        assert mxq.calls[2]["batch"] == [(0, 1, 0)]
+
+        # Item 0 keeps 2 positions; item 1 keeps 1 → padded stack (2, 2, vocab).
+        assert logits.shape == (2, 2, mxq.vocab_size)
+        # Item 1's slot 1 is padding — -inf so softmax masks it.
+        assert torch.all(torch.isinf(logits[1, 1]) & (logits[1, 1] < 0))
+
+    def test_fallback_disjoint_per_item_kept_positions(self) -> None:
+        """Kept sets share no positions: item 0 keeps {1}, item 1 keeps {5}.
+
+        Previously ``min_keep_start=1`` forced chunk=1 across the entire walk
+        after cursor=1, even though item 0 was inactive from cursor=2 onward
+        and item 1 didn't need another capture until 5.
+        """
+        mxq = _StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        # Item 0 seq_len=2 keeps {1}; item 1 seq_len=6 keeps {5} via last-index.
+        attention_mask = torch.tensor(
+            [[1, 1, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1]], dtype=torch.long
+        )
+        _model, logits = self._run(
+            mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([-1]),
+            prefill_chunk_size=4,
+        )
+        # Trace: chunk=1 @0 (both, no capture), chunk=1 @1 (both, capture item 0),
+        # chunk=3 @2 (item 1 only, KV walk), chunk=1 @5 (item 1, capture).
+        per_call = [(len(c["batch"]), c["batch"][0][1]) for c in mxq.calls]
+        assert per_call == [(2, 1), (2, 1), (1, 3), (1, 1)]
+
+        # Item 1 must not appear in the middle KV-only walk except by itself.
+        assert mxq.calls[2]["batch"] == [(1, 3, 0)]
+
+        assert logits.shape == (2, 1, mxq.vocab_size)

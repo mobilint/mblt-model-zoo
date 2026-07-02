@@ -757,27 +757,37 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         # ------------------------------------------------------------------
         # Path 3: fallback for last-only MXQ with a non-default request.
-        # We advance a shared cursor across the batch; the chunk size uses
-        # the caller's ``prefill_chunk_size`` until we reach the earliest
-        # kept position across items, then drops to 1 so each kept
-        # position is captured with its own infer call. Because items
-        # share the same iteration structure we key on the shared cursor
-        # and only record logits for items whose kept-set contains it.
+        # We advance a shared cursor across the batch and pick the chunk
+        # size from the smallest next-needed kept position across only
+        # those items that are still active AND still have pending kept
+        # positions. Items whose kept-set is exhausted (or empty) no
+        # longer force a size-1 walk across the rest of the batch — a
+        # single late kept position in one item used to drag every other
+        # item into per-step infer calls. keep_positions_by_item lists
+        # are sorted+deduped by ``_normalize_logits_to_keep``, so a
+        # per-item pointer tracks the next needed position in O(1).
         # ------------------------------------------------------------------
-        keep_sets: dict[int, set[int]] = {j: set(keep_positions_by_item[j]) for j in range(batch_size)}
-        min_keep_start = max_sequence_length
-        for j in range(batch_size):
-            positions_j = keep_positions_by_item[j]
-            if positions_j:
-                min_keep_start = min(min_keep_start, positions_j[0])
-
+        pointer_by_item: dict[int, int] = {j: 0 for j in range(batch_size)}
         per_item_kept_logits: dict[int, dict[int, torch.Tensor]] = {j: {} for j in range(batch_size)}
         cursor = 0
         while cursor < max_sequence_length:
-            if cursor < min_keep_start:
-                chunk = min(prefill_chunk_size, min_keep_start - cursor)
-            else:
+            min_next_needed: Optional[int] = None
+            for j in range(batch_size):
+                if cursor >= sequence_lengths[j]:
+                    continue
+                ptr = pointer_by_item[j]
+                positions_j = keep_positions_by_item[j]
+                if ptr < len(positions_j):
+                    nn = positions_j[ptr]
+                    if min_next_needed is None or nn < min_next_needed:
+                        min_next_needed = nn
+
+            if min_next_needed is None:
+                chunk = prefill_chunk_size
+            elif min_next_needed == cursor:
                 chunk = 1
+            else:
+                chunk = min(prefill_chunk_size, min_next_needed - cursor)
 
             sequence_lengths_chunks = []
             cache_sizes_chunks = []
@@ -822,8 +832,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
             if chunk == 1:
                 for k, cache_id in enumerate(cache_ids):
-                    if cursor in keep_sets[cache_id]:
+                    ptr = pointer_by_item[cache_id]
+                    positions_j = keep_positions_by_item[cache_id]
+                    if ptr < len(positions_j) and positions_j[ptr] == cursor:
                         per_item_kept_logits[cache_id][cursor] = logits_chunks[k, :, :].clone()
+                        pointer_by_item[cache_id] = ptr + 1
 
             if past_key_values is not None:
                 past_key_values.update_seen_tokens(seen_tokens)
