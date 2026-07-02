@@ -340,3 +340,10 @@ class TestQwen3VLForConditionalGenerationForward:
 
         assert "input_ids" in wrapper.model.received
         assert torch.equal(wrapper.model.received["input_ids"], input_ids)
+
+    def test_forward_rejects_duplicate_positional_and_keyword_arg(self) -> None:
+        wrapper = self._make_wrapper(kept_len=1)
+        input_ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+        with pytest.raises(TypeError, match="multiple values for argument 'input_ids'"):
+            wrapper.forward(input_ids, input_ids=input_ids)

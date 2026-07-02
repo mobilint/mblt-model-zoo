@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import (
@@ -110,3 +111,10 @@ class TestQwen2VLForwardLogitsToKeep:
 
         assert output.loss is not None
         assert output.loss.dim() == 0
+
+    def test_forward_rejects_duplicate_positional_and_keyword_arg(self) -> None:
+        wrapper = _make_wrapper(kept_len=1)
+        input_ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+        with pytest.raises(TypeError, match="multiple values for argument 'input_ids'"):
+            wrapper.forward(input_ids, input_ids=input_ids)

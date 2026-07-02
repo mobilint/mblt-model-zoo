@@ -600,6 +600,8 @@ class MobilintQwen3VLForConditionalGeneration(
         additions such as ``mm_token_type_ids`` continue to pass through unchanged.
         """
         for name, value in zip(upstream_positional_params(Qwen3VLForConditionalGeneration.forward), args):
+            if name in kwargs:
+                raise TypeError(f"forward() got multiple values for argument {name!r}")
             kwargs[name] = value
 
         labels = kwargs.pop("labels", None)

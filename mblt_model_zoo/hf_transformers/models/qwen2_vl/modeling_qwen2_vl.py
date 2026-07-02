@@ -347,6 +347,8 @@ class MobilintQwen2VLForConditionalGeneration(
         additions such as ``position_ids`` continue to pass through unchanged.
         """
         for name, value in zip(upstream_positional_params(Qwen2VLForConditionalGeneration.forward), args):
+            if name in kwargs:
+                raise TypeError(f"forward() got multiple values for argument {name!r}")
             kwargs[name] = value
 
         labels = kwargs.pop("labels", None)
