@@ -254,22 +254,16 @@ def test_llm_forward_counts_single_token_first_call_as_prefill() -> None:
         def infer(self, inputs, *_args):
             return [np.zeros((1, inputs[0].shape[2], 4), dtype=np.float32)]
 
-    class _DummyModel:
-        llm_forward = MobilintModelMixin.llm_forward
+    model = MobilintModelMixin.__new__(MobilintModelMixin)
+    model.npu_backend = SimpleNamespace(mxq_model=_DummyMxq())
+    model.config = SimpleNamespace(npu_prefill_chunk_size=None)
+    model.npu_time = None
+    model.logged_phases = []
 
-        def __init__(self) -> None:
-            self.npu_backend = SimpleNamespace(mxq_model=_DummyMxq())
-            self.config = SimpleNamespace()
-            self.npu_time = None
-            self.logged_phases: list[str] = []
+    def _record_npu_timing(phase, _elapsed):
+        model.logged_phases.append(phase)
 
-        def resolve_prefill_chunk_size(self, value):
-            return 128 if value is None else int(value)
-
-        def _record_npu_timing(self, phase, _elapsed):
-            self.logged_phases.append(phase)
-
-    model = _DummyModel()
+    model._record_npu_timing = _record_npu_timing
     inputs_embeds = torch.zeros((1, 1, 4), dtype=torch.float32)
     cache_position = torch.tensor([0], dtype=torch.long)
 
