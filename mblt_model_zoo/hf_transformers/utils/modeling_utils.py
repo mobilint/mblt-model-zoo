@@ -18,6 +18,10 @@ from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConf
 logger = logging.getLogger(__name__)
 
 
+_MXQ_DYNAMIC_AXIS_SENTINEL = -1
+_MXQ_TOKEN_AXIS_INDEX = -2
+
+
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     npu_backend_prefix: Literal["", "encoder_", "decoder_", "base_", "draft_", "fc_"] = ""
     _DEFAULT_PREFILL_CHUNK_SIZE = 128
@@ -151,12 +155,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         Some MXQ builds compile the LM head with a dynamic token axis, so a
         single ``mxq_model.infer`` call returns per-position logits instead
         of only the last-token logit. We probe this by inspecting the first
-        entry of :py:meth:`qbruntime.Model.get_model_output_shape`: token
-        axis is the second-to-last dimension (matching both
-        ``(batch, seq_len, vocab)`` and ``(batch, 1, seq_len, vocab)``
-        layouts we see in practice), and a value of ``-1`` marks it as
-        dynamic. The result is cached on the instance because the shape is
-        fixed for the lifetime of the loaded model.
+        entry of :py:meth:`qbruntime.Model.get_model_output_shape`: the
+        token axis lives at ``_MXQ_TOKEN_AXIS_INDEX`` (the second-to-last
+        dimension, matching both ``(batch, seq_len, vocab)`` and
+        ``(batch, 1, seq_len, vocab)`` layouts we see in practice), and a
+        value equal to ``_MXQ_DYNAMIC_AXIS_SENTINEL`` marks it as dynamic.
+        The result is cached on the instance because the shape is fixed
+        for the lifetime of the loaded model.
         """
         cached = getattr(self, "_mxq_all_logits_cached", None)
         if cached is not None:
@@ -166,7 +171,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             output_shapes = self.npu_backend.mxq_model.get_model_output_shape()
             if output_shapes:
                 first_shape = tuple(output_shapes[0])
-                if len(first_shape) >= 2 and int(first_shape[-2]) == -1:
+                if (
+                    len(first_shape) >= abs(_MXQ_TOKEN_AXIS_INDEX)
+                    and int(first_shape[_MXQ_TOKEN_AXIS_INDEX]) == _MXQ_DYNAMIC_AXIS_SENTINEL
+                ):
                     supports = True
         except (AttributeError, RuntimeError):
             # AttributeError: backend or ``get_model_output_shape`` missing.

@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 import torch
 
+from mblt_model_zoo.hf_transformers.utils import modeling_utils
 from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 from tests.transformers._fake_mxq import (
     DynamicAxisMxq,
@@ -101,6 +102,25 @@ class TestMxqSupportsAllLogits:
 
         model = make_model(_ExplodingMxq())
         assert model._mxq_supports_all_logits() is False
+
+    def test_probe_honors_patched_sentinel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The dynamic-axis sentinel is a module-level constant, not a hard-coded literal.
+
+        If a future backend represents "dynamic" with a different marker we
+        can retarget the probe by rebinding ``_MXQ_DYNAMIC_AXIS_SENTINEL``.
+        """
+        monkeypatch.setattr(modeling_utils, "_MXQ_DYNAMIC_AXIS_SENTINEL", -2)
+
+        class _NewSentinelMxq(StaticLastOnlyMxq):
+            def get_model_output_shape(self):
+                return [(1, -2, self.vocab_size)]
+
+        model = make_model(_NewSentinelMxq())
+        assert model._mxq_supports_all_logits() is True
+
+        # The old ``-1`` sentinel must no longer trigger the dynamic path.
+        stale = make_model(DynamicAxisMxq())
+        assert stale._mxq_supports_all_logits() is False
 
 
 # ---------------------------------------------------------------------------
