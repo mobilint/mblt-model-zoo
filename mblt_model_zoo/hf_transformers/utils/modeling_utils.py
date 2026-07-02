@@ -2,7 +2,7 @@ import logging
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union, cast
 
 import numpy as np
 import qbruntime
@@ -214,6 +214,100 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         return output
 
+    def _run_chunked_logits_to_keep(
+        self,
+        *,
+        do_infer: Callable[[int, int], np.ndarray],
+        seq_len: int,
+        prefill_chunk_size: int,
+        logits_to_keep: Union[int, torch.Tensor],
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Shared 3-path dispatch for HF-style ``logits_to_keep`` over a chunked MXQ.
+
+        Callers provide a ``do_infer(start, end)`` closure that runs one
+        MXQ infer over the ``[start, end)`` slice of their own input(s)
+        (advancing the KV cache) and returns the raw logits ndarray. This
+        helper handles the three execution paths uniformly:
+
+        1. ``logits_to_keep == 1``: fast path; the caller's chunk size is
+           used as-is and only the last chunk's logits are returned.
+        2. MXQ has a dynamic token axis (see
+           :meth:`_mxq_supports_all_logits`): keep the caller's chunk size
+           and concatenate per-chunk outputs, then slice to the requested
+           positions along the token axis (``ndim - 2``).
+        3. Otherwise (last-only MXQ + non-default request): a fallback that
+           prefills the non-kept prefix with normal chunks (throwing away
+           logits, only advancing the KV cache) and runs a size-1 infer at
+           each kept position to capture its logits.
+
+        The returned tensor still carries the leading batch axis produced
+        by ``do_infer``; single-input callers typically apply
+        ``.squeeze(0)`` afterwards, dual-input callers leave it as-is.
+        """
+        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
+        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
+
+        # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
+        # additionally collects every chunk's output so the concatenation
+        # covers the full input.
+        if is_default_keep or supports_all:
+            num_of_chunks = math.ceil(seq_len / prefill_chunk_size)
+            assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
+
+            per_chunk_logits: list[np.ndarray] = []
+            logits_ndarray: Optional[np.ndarray] = None
+            for i in range(num_of_chunks):
+                start_index = i * prefill_chunk_size
+                end_index = min(start_index + prefill_chunk_size, seq_len)
+                logits_ndarray = do_infer(start_index, end_index)
+                if supports_all:
+                    per_chunk_logits.append(logits_ndarray)
+
+            if supports_all:
+                logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
+                positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+                token_axis = logits_ndarray.ndim - 2
+                logits_ndarray = np.take(logits_ndarray, positions_to_keep, axis=token_axis)
+
+            assert logits_ndarray is not None
+            return torch.tensor(logits_ndarray, dtype=dtype, device=device)
+
+        # Path 3: fallback. Interleave normal chunks (for positions the
+        # caller does not care about) with size-1 infer calls (one per kept
+        # position). The KV cache advances monotonically through every
+        # position of the input, so subsequent decode steps see the same
+        # cache state as the other two paths would leave behind.
+        positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
+        per_position_logits: dict[int, np.ndarray] = {}
+        cursor = 0
+        for p in positions_to_keep:
+            while cursor < p:
+                end_index = min(cursor + prefill_chunk_size, p)
+                do_infer(cursor, end_index)
+                cursor = end_index
+            per_position_logits[p] = do_infer(cursor, cursor + 1)
+            cursor += 1
+        while cursor < seq_len:
+            end_index = min(cursor + prefill_chunk_size, seq_len)
+            do_infer(cursor, end_index)
+            cursor = end_index
+
+        if not positions_to_keep:
+            # Empty selection (empty tensor or all indices out-of-range): the
+            # KV cache has already been advanced through the entire input by
+            # the trailing loop above. Return a (1, 0, 0) placeholder rather
+            # than calling np.concatenate on an empty list. The leading 1
+            # matches the batch axis that do_infer would have produced, so
+            # single-input callers can still ``.squeeze(0)`` down to (0, 0).
+            return torch.zeros((1, 0, 0), dtype=dtype, device=device)
+
+        logits_ndarray = np.concatenate(
+            [per_position_logits[p] for p in positions_to_keep], axis=-2
+        )
+        return torch.tensor(logits_ndarray, dtype=dtype, device=device)
+
     def llm_forward(
         self,
         inputs_embeds: torch.Tensor,
@@ -231,19 +325,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         position; ``>1`` returns the last N positions; a ``torch.Tensor``
         selects specific positions.
 
-        Three execution paths cover the interaction between the request and
-        the compiled MXQ:
-
-        1. ``logits_to_keep == 1``: unchanged fast path; the caller's
-           ``prefill_chunk_size`` is used as-is.
-        2. MXQ has a dynamic token axis (see
-           :meth:`_mxq_supports_all_logits`): keep the caller's chunk size
-           and concatenate per-chunk outputs, then slice to the requested
-           positions.
-        3. Otherwise (last-only MXQ + non-default request): a fallback that
-           prefills the non-kept prefix with normal chunks (throwing away
-           logits, only advancing the KV cache) and runs a size-1 infer at
-           each kept position to capture its logits.
+        The three execution paths (fast path, dynamic-axis, fallback) are
+        implemented once in :meth:`_run_chunked_logits_to_keep`; this
+        wrapper just builds a single-input ``do_infer`` closure that
+        advances the KV cache and forwards to the shared helper.
         """
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
@@ -268,9 +353,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
         timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
-        is_default_keep = isinstance(logits_to_keep, int) and logits_to_keep == 1
-        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
-
         def _do_infer(start: int, end: int) -> np.ndarray:
             cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
             chunk = inputs_embeds_numpy[:, :, start:end, :]
@@ -288,68 +370,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 past_key_values.update_cache_position(cache_position[start:end])
             return result[0]
 
-        # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
-        # additionally collects every chunk's output so the concatenation
-        # covers the full input.
-        if is_default_keep or supports_all:
-            num_of_chunks = math.ceil(seq_len / resolved_prefill_chunk_size)
-            assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
-
-            per_chunk_logits: list[np.ndarray] = []
-            logits_ndarray: Optional[np.ndarray] = None
-            for i in range(num_of_chunks):
-                start_index = i * resolved_prefill_chunk_size
-                end_index = min(start_index + resolved_prefill_chunk_size, seq_len)
-                logits_ndarray = _do_infer(start_index, end_index)
-                if supports_all:
-                    per_chunk_logits.append(logits_ndarray)
-
-            if supports_all:
-                logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
-                positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
-                token_axis = logits_ndarray.ndim - 2
-                logits_ndarray = np.take(logits_ndarray, positions_to_keep, axis=token_axis)
-
-            assert logits_ndarray is not None
-            return torch.tensor(
-                logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device
-            ).squeeze(0)
-
-        # Path 3: fallback. Interleave normal chunks (for positions the
-        # caller does not care about) with size-1 infer calls (one per kept
-        # position). The KV cache advances monotonically through every
-        # position of the input, so subsequent decode steps see the same
-        # cache state as the other two paths would leave behind.
-        positions_to_keep = self._normalize_logits_to_keep(logits_to_keep, seq_len)
-        per_position_logits: dict[int, np.ndarray] = {}
-        cursor = 0
-        for p in positions_to_keep:
-            while cursor < p:
-                end_index = min(cursor + resolved_prefill_chunk_size, p)
-                _do_infer(cursor, end_index)
-                cursor = end_index
-            per_position_logits[p] = _do_infer(cursor, cursor + 1)
-            cursor += 1
-        while cursor < seq_len:
-            end_index = min(cursor + resolved_prefill_chunk_size, seq_len)
-            _do_infer(cursor, end_index)
-            cursor = end_index
-
-        if not positions_to_keep:
-            # Empty selection (empty tensor or all indices out-of-range): the
-            # KV cache has already been advanced through the entire input by
-            # the trailing loop above. Return a (0, 0) placeholder rather
-            # than calling np.concatenate on an empty list.
-            return torch.zeros(
-                (0, 0), dtype=inputs_embeds.dtype, device=inputs_embeds.device
-            )
-
-        logits_ndarray = np.concatenate(
-            [per_position_logits[p] for p in positions_to_keep], axis=-2
+        logits = self._run_chunked_logits_to_keep(
+            do_infer=_do_infer,
+            seq_len=seq_len,
+            prefill_chunk_size=resolved_prefill_chunk_size,
+            logits_to_keep=logits_to_keep,
+            dtype=inputs_embeds.dtype,
+            device=inputs_embeds.device,
         )
-        return torch.tensor(
-            logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device
-        ).squeeze(0)
+        return logits.squeeze(0)
 
     def resolve_batched_attention_mask(
         self,
