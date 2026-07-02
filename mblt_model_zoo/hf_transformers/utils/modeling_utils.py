@@ -168,7 +168,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 first_shape = tuple(output_shapes[0])
                 if len(first_shape) >= 2 and int(first_shape[-2]) == -1:
                     supports = True
-        except Exception:  # noqa: BLE001 - defensively fall back to slow path
+        except (AttributeError, RuntimeError):
+            # AttributeError: backend or ``get_model_output_shape`` missing.
+            # RuntimeError: backend refused the probe (``qbruntime.QbRuntimeError``
+            # is a ``RuntimeError`` subclass). Any other exception is a real bug
+            # and should propagate.
             supports = False
         self._mxq_all_logits_cached = supports
         return supports
