@@ -568,7 +568,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             sequence_lengths_chunks_l: list[int],
             cache_sizes_chunks_l: list[int],
             inputs_embeds_chunks_l: list[torch.Tensor],
-        ) -> np.ndarray:
+        ) -> tuple[np.ndarray, tuple[int, ...]]:
             inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
             inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
             if inputs_embeds_numpy_l.ndim == 3:
@@ -596,7 +596,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             else:
                 result_l = mxq_model.infer([inputs_embeds_numpy_l], None, 0, batch_params_l)
             assert result_l is not None, "mxq infer result is None!"
-            return result_l[0]
+            return result_l[0], inputs_embeds_numpy_l.shape
 
         # ------------------------------------------------------------------
         # Path 1: default fast path (logits_to_keep == 1). Preserved
@@ -640,11 +640,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if len(inputs_embeds_chunks) == 0:
                     continue
 
+                raw_output, inputs_embeds_numpy_shape = _run_batch_infer(
+                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                )
+                logits_chunks = cast(
+                    torch.FloatTensor,
+                    torch.tensor(raw_output, dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
+                        [len(cache_ids), 1, -1]
+                    ),
+                )
+
                 if debug_enabled:
-                    inputs_embeds_concat_dbg = torch.concat(inputs_embeds_chunks, dim=0).unsqueeze(0)
-                    inputs_embeds_numpy_dbg = inputs_embeds_concat_dbg.type(torch.float32).cpu().numpy()
-                    if inputs_embeds_numpy_dbg.ndim == 3:
-                        inputs_embeds_numpy_dbg = np.expand_dims(inputs_embeds_numpy_dbg, 1)
                     batch_seq_sum = sum(sequence_lengths_chunks)
                     logger.debug(
                         (
@@ -659,7 +665,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                         sequence_lengths_chunks,
                         cache_sizes_chunks,
                         prefill_masks,
-                        tuple(inputs_embeds_numpy_dbg.shape),
+                        tuple(inputs_embeds_numpy_shape),
                         batch_seq_sum,
                     )
                     logger.debug(
@@ -686,18 +692,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                         num_of_chunks,
                         input_batch_same,
                     )
-
-                raw_output = _run_batch_infer(
-                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
-                )
-                logits_chunks = cast(
-                    torch.FloatTensor,
-                    torch.tensor(raw_output, dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
-                        [len(cache_ids), 1, -1]
-                    ),
-                )
-
-                if debug_enabled:
                     first_logits = logits_chunks[0]
                     result_batch_same = all(torch.equal(chunk, first_logits) for chunk in logits_chunks[1:])
                     next_tokens = logits_chunks[:, -1, :].argmax(dim=-1).tolist()
@@ -802,7 +796,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if len(inputs_embeds_chunks) == 0:
                     continue
 
-                raw_output = _run_batch_infer(
+                raw_output, _ = _run_batch_infer(
                     cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
                 )
 
@@ -941,7 +935,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 cursor += chunk
                 continue
 
-            raw_output = _run_batch_infer(
+            raw_output, _ = _run_batch_infer(
                 cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
             )
             logits_chunks = cast(
