@@ -621,6 +621,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_masked = [inputs_embeds[i, :, :] for i in range(batch_size)]
             sequence_lengths = [1 for _ in range(batch_size)]
 
+        # Fire before any is_default_keep / supports_all decisions so the three
+        # paths agree: a zero-length row is a hard error regardless of the
+        # logits_to_keep selector. Previously only Path 1 raised while Path 2
+        # and Path 3 silently right-padded such rows with -inf, so the same
+        # batch could fail on logits_to_keep=1 and pass on logits_to_keep=0.
+        zero_length_rows = [
+            row_index for row_index, sequence_length in enumerate(sequence_lengths) if sequence_length == 0
+        ]
+        if zero_length_rows:
+            raise ValueError(
+                "Batched LLM inputs contain empty sequences after applying attention_mask. "
+                f"Zero-length rows: {zero_length_rows}"
+            )
+
         if debug_enabled:
             logger.debug(
                 "[BATCH-LLM][START] inputs_embeds=%s attention_mask=%s batch_size=%d sequence_lengths=%s",
@@ -707,14 +721,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # contract regressions stay visible.
         # ------------------------------------------------------------------
         if is_default_keep:
-            zero_length_rows = [
-                row_index for row_index, sequence_length in enumerate(sequence_lengths) if sequence_length == 0
-            ]
-            if zero_length_rows:
-                raise ValueError(
-                    "Batched LLM inputs contain empty sequences after applying attention_mask. "
-                    f"Zero-length rows: {zero_length_rows}"
-                )
             num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
             logits_dict: dict[int, torch.Tensor] = {}
 

@@ -594,23 +594,51 @@ class TestLlmForwardBatch:
         # The padded tail of item 0 must be -inf so softmax zeros it out.
         assert torch.all(torch.isinf(logits[0, 2]) & (logits[0, 2] < 0))
 
-    def test_dynamic_axis_zero_length_row_is_softmax_masked(self) -> None:
-        """A batch item whose attention_mask row is entirely zero must not crash
-        Path 2 on ``np.concatenate([])`` — Path 3 already tolerates this and
-        Path 2 should be symmetric. The zero-length row's slot in the stacked
-        output is right-padded with -inf so softmax assigns zero probability.
+    def test_dynamic_axis_zero_length_row_raises_value_error(self) -> None:
+        """A batch item whose attention_mask row is entirely zero is now a hard
+        error under Path 2, matching Path 1's long-standing behavior. Previously
+        Path 2 silently right-padded such rows with -inf, so the same batch
+        would fail on ``logits_to_keep=1`` (the ``.generate()`` default) but
+        pass on ``logits_to_keep=0`` — a footgun the unified check closes.
         """
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
-        _model, logits = self._run(
-            mxq,
-            attention_mask=attention_mask,
-            hidden_size=4,
-            logits_to_keep=0,
-            prefill_chunk_size=3,
-        )
-        assert logits.shape == (2, 3, mxq.vocab_size)
-        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+        with pytest.raises(ValueError, match=r"Zero-length rows"):
+            self._run(
+                mxq,
+                attention_mask=attention_mask,
+                hidden_size=4,
+                logits_to_keep=0,
+                prefill_chunk_size=3,
+            )
+
+    @pytest.mark.parametrize(
+        "mxq_cls,logits_to_keep",
+        [
+            (DynamicAxisMxq, 0),
+            (StaticLastOnlyMxq, torch.tensor([2, 3])),
+        ],
+        ids=["path2_dynamic_axis_keep_all", "path3_last_only_tensor_selector"],
+    )
+    def test_zero_length_row_raises_value_error_across_all_paths(
+        self, mxq_cls, logits_to_keep
+    ) -> None:
+        """Lock in the unified zero-length contract: the check fires before any
+        is_default_keep / supports_all decision, so Path 2 (dynamic-axis with
+        keep-all) and Path 3 (last-only with tensor selector) both raise —
+        not just Path 1. Prevents the asymmetry from silently regressing if
+        the check drifts back into any single path.
+        """
+        mxq = mxq_cls(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 1, 1]], dtype=torch.long)
+        with pytest.raises(ValueError, match=r"Zero-length rows"):
+            self._run(
+                mxq,
+                attention_mask=attention_mask,
+                hidden_size=4,
+                logits_to_keep=logits_to_keep,
+                prefill_chunk_size=4,
+            )
 
     def test_dynamic_axis_tensor_indices_apply_per_item(self) -> None:
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
@@ -857,44 +885,39 @@ class TestBatchedEmptySelection:
         assert logits.dtype == inputs_embeds.dtype
         assert logits.device == inputs_embeds.device
 
-    def test_batched_mixed_empty_and_nonempty_still_pads_correctly_dynamic_axis(
+    def test_batched_mixed_empty_and_nonempty_raises_value_error_dynamic_axis(
         self,
     ) -> None:
-        """Guard the early-return: mixed empty/non-empty items must still pad,
-        not short-circuit. Item 0's attention_mask row is zero (seq_len=0 →
-        empty positions with ``logits_to_keep=0``); item 1 has 3 real positions.
+        """Zero-length rows are rejected up front regardless of selector shape:
+        the empty-selector early return must NOT swallow the zero-length
+        contract. Item 0's attention_mask row is zero; item 1 has 3 real
+        positions — Path 2 must raise before considering the selector.
         """
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
-        _model, logits, _inputs_embeds = self._run(
-            mxq,
-            attention_mask=attention_mask,
-            hidden_size=4,
-            logits_to_keep=0,
-            prefill_chunk_size=3,
-        )
-        # Not (2, 0, 0): item 1 contributed real positions, so padding must run.
-        assert logits.shape == (2, 3, mxq.vocab_size)
-        # Item 0 is entirely padding → all -inf.
-        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+        with pytest.raises(ValueError, match=r"Zero-length rows"):
+            self._run(
+                mxq,
+                attention_mask=attention_mask,
+                hidden_size=4,
+                logits_to_keep=0,
+                prefill_chunk_size=3,
+            )
 
-    def test_batched_mixed_empty_and_nonempty_still_pads_correctly_last_only(
+    def test_batched_mixed_empty_and_nonempty_raises_value_error_last_only(
         self,
     ) -> None:
         """Same guard as above, but for Path 3 (last-only MXQ fallback)."""
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[0, 0, 0], [1, 1, 1]], dtype=torch.long)
-        _model, logits, _inputs_embeds = self._run(
-            mxq,
-            attention_mask=attention_mask,
-            hidden_size=4,
-            logits_to_keep=0,
-            prefill_chunk_size=3,
-        )
-        # Not (2, 0, 0): item 1 contributed real positions, so padding must run.
-        assert logits.shape == (2, 3, mxq.vocab_size)
-        # Item 0 is entirely padding → all -inf.
-        assert torch.all(torch.isinf(logits[0]) & (logits[0] < 0))
+        with pytest.raises(ValueError, match=r"Zero-length rows"):
+            self._run(
+                mxq,
+                attention_mask=attention_mask,
+                hidden_size=4,
+                logits_to_keep=0,
+                prefill_chunk_size=3,
+            )
 
 
 # ---------------------------------------------------------------------------
