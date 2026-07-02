@@ -106,8 +106,29 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
     semantics. ``KEYWORD_ONLY``, ``VAR_POSITIONAL`` (``*args``), and ``VAR_KEYWORD``
     (``**kwargs``) parameters are excluded, so ``zip``-ing the result with a caller's
     positional args cannot silently misbind a value to a keyword-only parameter.
-    Cached per callable so ``inspect.signature`` is not re-parsed on every wrapper
-    call in the generation loop.
+
+    Caching policy:
+        ``@lru_cache(maxsize=None)`` gives us per-callable memoization so
+        ``inspect.signature`` is not re-parsed on every wrapper invocation inside
+        the generation loop (this helper is called on the hot path of each
+        ``prepare_inputs_for_generation`` / ``forward`` call).
+
+    Boundedness assumption:
+        The unbounded cache is safe **only** because callers are expected to invoke
+        this function with a small, fixed set of upstream methods — e.g.
+        ``Qwen2VLForConditionalGeneration.forward`` or
+        ``GenerationMixin.prepare_inputs_for_generation`` — whose function objects
+        are module-level and interned for the lifetime of the process. Under that
+        contract the cache saturates at a handful of entries and never grows.
+
+    Warning:
+        Do **not** call this function in a loop with freshly constructed callables
+        (e.g. ``lambda``\ s, ``functools.partial`` results, or dynamically wrapped
+        methods created per iteration). Each distinct callable is a new cache key,
+        and because ``maxsize=None`` never evicts, this would leak memory
+        indefinitely by pinning the callable and its parsed ``Signature`` object.
+        If dynamic callables must be supported in the future, switch to a bounded
+        ``maxsize`` or a ``WeakKeyDictionary``-based cache.
     """
     return tuple(
         name
