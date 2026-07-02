@@ -2,7 +2,7 @@ import logging
 import math
 import os
 import time
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, Union, cast
 
 import numpy as np
 import qbruntime
@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 
 _MXQ_DYNAMIC_AXIS_SENTINEL = -1
 _MXQ_TOKEN_AXIS_INDEX = -2
+
+
+class _BatchChunkAssembly(NamedTuple):
+    """Per-chunk batched infer inputs assembled from a shared `[start, start+chunk)` window.
+
+    ``prefill_masks`` is only populated when Path 1 (last-only fast path)
+    needs the "is this the item's final chunk" flag to decide whether to
+    capture its logits; Path 2 and Path 3 pass ``include_prefill_masks=False``
+    to :meth:`MobilintModelMixin._assemble_batch_chunk` and receive ``None``.
+    """
+
+    sequence_lengths_chunks: list[int]
+    cache_sizes_chunks: list[int]
+    cache_ids: list[int]
+    inputs_embeds_chunks: list[torch.Tensor]
+    seen_tokens: dict[int, int]
+    prefill_masks: Optional[list[bool]]
 
 
 class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
@@ -605,6 +622,60 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             device=inputs_embeds.device,
         )
 
+    @staticmethod
+    def _assemble_batch_chunk(
+        batch_size: int,
+        sequence_lengths: list[int],
+        inputs_embeds_masked: list[torch.Tensor],
+        start: int,
+        chunk_size: int,
+        past_key_values: Optional[MobilintCache],
+        *,
+        include_prefill_masks: bool = False,
+    ) -> _BatchChunkAssembly:
+        """Assemble one batched infer's inputs by scanning each batch item's `[start, start+chunk_size)` window.
+
+        Shared by all three paths of :meth:`_llm_forward_batch`: Path 1 (default
+        fast path) also needs the ``prefill_masks`` bit that flags whether an
+        item still has tokens after ``end_index`` — that's how it decides
+        whether the current infer holds the item's final logits or is just a
+        KV-advancing prefill. Paths 2 and 3 don't consult it, so they pass
+        ``include_prefill_masks=False`` and ignore the ``None`` field.
+
+        ``chunk_size`` is a per-call argument (not a fixed attribute) because
+        Path 3 sizes each chunk dynamically based on the smallest next-needed
+        walk position across still-active items, while Paths 1 and 2 pass the
+        caller's ``prefill_chunk_size`` unchanged.
+        """
+        sequence_lengths_chunks: list[int] = []
+        cache_sizes_chunks: list[int] = []
+        cache_ids: list[int] = []
+        inputs_embeds_chunks: list[torch.Tensor] = []
+        seen_tokens: dict[int, int] = {}
+        prefill_masks: Optional[list[bool]] = [] if include_prefill_masks else None
+
+        for j in range(batch_size):
+            end_index = min(start + chunk_size, sequence_lengths[j])
+            if start < sequence_lengths[j] and end_index <= sequence_lengths[j]:
+                sequence_lengths_chunks.append(end_index - start)
+                cache_sizes_chunks.append(
+                    past_key_values.get_seq_length(j) if past_key_values is not None else 0
+                )
+                cache_ids.append(j)
+                inputs_embeds_chunks.append(inputs_embeds_masked[j][start:end_index, :])
+                seen_tokens[j] = end_index - start
+                if prefill_masks is not None:
+                    prefill_masks.append(end_index < inputs_embeds_masked[j].shape[0])
+
+        return _BatchChunkAssembly(
+            sequence_lengths_chunks=sequence_lengths_chunks,
+            cache_sizes_chunks=cache_sizes_chunks,
+            cache_ids=cache_ids,
+            inputs_embeds_chunks=inputs_embeds_chunks,
+            seen_tokens=seen_tokens,
+            prefill_masks=prefill_masks,
+        )
+
     def _llm_forward_batch(
         self,
         inputs_embeds: torch.Tensor,
@@ -751,24 +822,23 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             for i in range(num_of_chunks):
                 start_index = i * prefill_chunk_size
 
-                sequence_lengths_chunks: list[int] = []
-                cache_sizes_chunks: list[int] = []
-                cache_ids: list[int] = []
-                prefill_masks: list[bool] = []
-                inputs_embeds_chunks: list[torch.Tensor] = []
-                seen_tokens: dict[int, int] = {}
-
-                for j in range(batch_size):
-                    end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
-                    if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
-                        sequence_lengths_chunks.append(end_index - start_index)
-                        cache_sizes_chunks.append(
-                            past_key_values.get_seq_length(j) if past_key_values is not None else 0
-                        )
-                        cache_ids.append(j)
-                        prefill_masks.append(end_index < inputs_embeds_masked[j].shape[0])
-                        inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
-                        seen_tokens[j] = end_index - start_index
+                (
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
+                    cache_ids,
+                    inputs_embeds_chunks,
+                    seen_tokens,
+                    prefill_masks,
+                ) = self._assemble_batch_chunk(
+                    batch_size,
+                    sequence_lengths,
+                    inputs_embeds_masked,
+                    start_index,
+                    prefill_chunk_size,
+                    past_key_values,
+                    include_prefill_masks=True,
+                )
+                assert prefill_masks is not None
 
                 if len(inputs_embeds_chunks) == 0:
                     continue
@@ -909,22 +979,21 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             for i in range(num_of_chunks):
                 start_index = i * prefill_chunk_size
 
-                sequence_lengths_chunks = []
-                cache_sizes_chunks = []
-                cache_ids = []
-                inputs_embeds_chunks = []
-                seen_tokens = {}
-
-                for j in range(batch_size):
-                    end_index = min(start_index + prefill_chunk_size, sequence_lengths[j])
-                    if start_index < sequence_lengths[j] and end_index <= sequence_lengths[j]:
-                        sequence_lengths_chunks.append(end_index - start_index)
-                        cache_sizes_chunks.append(
-                            past_key_values.get_seq_length(j) if past_key_values is not None else 0
-                        )
-                        cache_ids.append(j)
-                        inputs_embeds_chunks.append(inputs_embeds_masked[j][start_index:end_index, :])
-                        seen_tokens[j] = end_index - start_index
+                (
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
+                    cache_ids,
+                    inputs_embeds_chunks,
+                    seen_tokens,
+                    _,
+                ) = self._assemble_batch_chunk(
+                    batch_size,
+                    sequence_lengths,
+                    inputs_embeds_masked,
+                    start_index,
+                    prefill_chunk_size,
+                    past_key_values,
+                )
 
                 if len(inputs_embeds_chunks) == 0:
                     continue
@@ -1043,26 +1112,25 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             else:
                 chunk = min(prefill_chunk_size, min_next_needed - cursor)
 
-            sequence_lengths_chunks = []
-            cache_sizes_chunks = []
-            cache_ids = []
-            inputs_embeds_chunks = []
-            seen_tokens = {}
-
             # Every item still within its sequence gets an infer call at this
             # cursor so its KV cache advances monotonically through all positions;
             # this holds even when ptr == len(walk_positions_by_item[j]) — the
             # size-1 kept-logit capture is gated later by positions_j[ptr] == cursor.
-            for j in range(batch_size):
-                end_j = min(cursor + chunk, sequence_lengths[j])
-                if cursor < sequence_lengths[j] and end_j <= sequence_lengths[j]:
-                    sequence_lengths_chunks.append(end_j - cursor)
-                    cache_sizes_chunks.append(
-                        past_key_values.get_seq_length(j) if past_key_values is not None else 0
-                    )
-                    cache_ids.append(j)
-                    inputs_embeds_chunks.append(inputs_embeds_masked[j][cursor:end_j, :])
-                    seen_tokens[j] = end_j - cursor
+            (
+                sequence_lengths_chunks,
+                cache_sizes_chunks,
+                cache_ids,
+                inputs_embeds_chunks,
+                seen_tokens,
+                _,
+            ) = self._assemble_batch_chunk(
+                batch_size,
+                sequence_lengths,
+                inputs_embeds_masked,
+                cursor,
+                chunk,
+                past_key_values,
+            )
 
             if not inputs_embeds_chunks:
                 cursor += chunk
