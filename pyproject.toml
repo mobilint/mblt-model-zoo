@@ -84,6 +84,9 @@ onnxruntime-gpu = [
     "onnx; sys_platform != 'darwin'",
     "onnxruntime-gpu; sys_platform != 'darwin'",
 ]
+qwen-asr = [
+    "qwen-asr",
+]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]
@@ -114,7 +117,6 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
-    "qwen-asr",
 ]
 
 [tool.pytest.ini_options]

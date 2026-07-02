@@ -5,9 +5,10 @@ from typing import Iterator
 
 QWEN_ASR_INSTALL_HINT = (
     "Mobilint Qwen3-ASR requires the upstream 'qwen-asr' package, "
-    "which is distributed separately on PyPI and is not bundled with "
-    "mblt_model_zoo[transformers]. "
-    "Install it with: pip install -U qwen-asr "
+    "which is exposed through the optional mblt-model-zoo 'qwen-asr' extra "
+    "and is not bundled with mblt_model_zoo[transformers]. "
+    "Install it with: uv sync --extra qwen-asr, or "
+    "pip install -U \"mblt-model-zoo[qwen-asr]\" "
     "(see https://huggingface.co/Qwen/Qwen3-ASR-1.7B for details)."
 )
 

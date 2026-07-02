@@ -117,7 +117,8 @@ def ensure_qwen3_asr_backend_registered() -> None:
         if missing == "qwen_asr" or missing.startswith("qwen_asr."):
             raise ModuleNotFoundError(
                 "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: pip install -U qwen-asr"
+                "Install it with: uv sync --extra qwen-asr, or "
+                "pip install -U \"mblt-model-zoo[qwen-asr]\""
             ) from exc
         raise
 
@@ -144,7 +145,8 @@ def ensure_qwen3_asr_backend_registered() -> None:
         if missing == "qwen_asr" or missing.startswith("qwen_asr."):
             raise ModuleNotFoundError(
                 "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                "Install it with: pip install -U qwen-asr"
+                "Install it with: uv sync --extra qwen-asr, or "
+                "pip install -U \"mblt-model-zoo[qwen-asr]\""
             ) from exc
         raise
 
