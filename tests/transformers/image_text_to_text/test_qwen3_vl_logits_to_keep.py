@@ -29,6 +29,11 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
 
 # ---------------------------------------------------------------------------
 # Fake MXQ backends for the dual-input Qwen3-VL text decoder
+#
+# These are intentionally NOT unified with ``tests/transformers/_fake_mxq.py``:
+# the Qwen3-VL decoder feeds two input buffers (inputs_embeds and deepstack
+# embeds) and its ``infer`` signature has no ``batch_params`` argument, so the
+# fakes exercise a different code path than the shared LLM core.
 # ---------------------------------------------------------------------------
 
 
