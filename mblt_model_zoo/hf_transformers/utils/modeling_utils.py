@@ -376,9 +376,36 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
            logits, only advancing the KV cache) and runs a size-1 infer at
            each kept position to capture its logits.
 
-        The returned tensor still carries the leading batch axis produced
-        by ``do_infer``; single-input callers typically apply
-        ``.squeeze(0)`` afterwards, dual-input callers leave it as-is.
+        Args:
+            do_infer: Callable ``(start, end) -> np.ndarray`` that runs one
+                MXQ infer over the ``[start, end)`` slice of the caller's
+                input(s), advances the KV cache, and returns raw logits
+                shaped ``(1, end - start, vocab)`` — a leading batch axis
+                of size 1, the token axis at ``ndim - 2``, and the vocab
+                axis last. Path 2 concatenates per-chunk outputs along
+                ``axis=-2`` and slices the same axis via
+                ``ndim - 2``, so this layout is load-bearing.
+
+        Returns:
+            A ``torch.Tensor`` with a leading batch axis of size 1. The
+            trailing shape depends on which path ran:
+
+            * Path 1 (last-only fast): ``(1, 1, vocab)`` — the raw
+              last-chunk ``do_infer`` output, returned as-is.
+            * Path 2 (dynamic-axis): ``(1, kept_positions, vocab)`` where
+              ``kept_positions == len(_output_positions_for_logits_to_keep(
+              logits_to_keep, seq_len))`` (caller order and duplicates are
+              preserved, matching HF fancy-indexing).
+            * Path 3 (last-only fallback): ``(1, kept_positions, vocab)``
+              when at least one position was kept, and ``(1, 0, 0)`` when
+              the caller passed an empty ``logits_to_keep`` selector — in
+              the empty case the KV cache has still been advanced through
+              the full input by the trailing prefill loop.
+
+            Caller convention: single-input ``llm_forward`` callers apply
+            ``.squeeze(0)`` afterwards to drop the leading batch axis;
+            dual-input callers (e.g. the Qwen3-VL text decoder) preserve
+            it so downstream stacking sees a consistent ``(1, ...)`` shape.
         """
         is_default_keep = self._is_last_only_selector(logits_to_keep, seq_len)
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
