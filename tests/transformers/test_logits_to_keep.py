@@ -1163,3 +1163,158 @@ class TestBatchCpuCopyHoist:
             model, attention_mask=attention_mask, logits_to_keep=0, prefill_chunk_size=3
         )
         assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Path 3 fallback phase classification for count_npu_time
+# ---------------------------------------------------------------------------
+
+
+class TestBatchPath3PhaseTiming:
+    """Path 3 chunk=1 capture calls are decode-shaped work (cursor > 0, cache
+    already populated) but the auto-heuristic inside ``_run_batch_infer`` keys
+    on ``max_sequence_length`` (batch-wide max, fixed at entry) — so without an
+    explicit override every capture would be misfiled under ``prefill_time``
+    and inflate the benchmark's prefill accounting.
+    """
+
+    def _capture_phase_calls(self, model) -> list[str]:
+        """Wrap ``_record_npu_timing`` so we can assert the phase ordering.
+
+        We hook on the instance rather than monkeypatching the class so
+        parallel test workers do not race, and so a bound-method wrap sees
+        the same ``self`` the production call site would use.
+        """
+        phases: list[str] = []
+        original = model._record_npu_timing
+
+        def spy(phase, elapsed):
+            phases.append(phase)
+            return original(phase, elapsed)
+
+        model._record_npu_timing = spy
+        return phases
+
+    def _run_batched(
+        self,
+        model,
+        *,
+        attention_mask: torch.Tensor,
+        logits_to_keep,
+        hidden_size: int = 4,
+        prefill_chunk_size: int = 4,
+    ):
+        batch, seq_len = attention_mask.shape
+        inputs_embeds = torch.arange(batch * seq_len * hidden_size, dtype=torch.float32).reshape(
+            batch, seq_len, hidden_size
+        )
+        cache_position = torch.arange(seq_len)
+        return model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=prefill_chunk_size,
+            attention_mask=attention_mask,
+            logits_to_keep=logits_to_keep,
+            count_npu_time=True,
+        )
+
+    def test_path3_chunk1_capture_records_decode_phase(self) -> None:
+        """The size-1 capture at a kept position must be filed as decode.
+
+        Trace for ``logits_to_keep=[2, 3]`` on two items of length 4 with
+        ``prefill_chunk_size=2``:
+
+        - cursor 0, chunk=2 (KV walk 0→2, no capture)              → prefill
+        - cursor 2, chunk=1 (capture position 2 for both items)    → decode
+        - cursor 3, chunk=1 (capture position 3 for both items)    → decode
+
+        The assertion pins each phase in order; a regression that reverts
+        Path 3 to the batch-wide auto-heuristic would flip both chunk=1
+        calls back to prefill.
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        model = make_model(mxq, max_batch_size=4)
+        phases = self._capture_phase_calls(model)
+
+        self._run_batched(
+            model,
+            attention_mask=torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long),
+            logits_to_keep=torch.tensor([2, 3]),
+            prefill_chunk_size=2,
+        )
+
+        assert phases == ["prefill", "decode", "decode"]
+        timing = model.get_npu_timing()
+        assert timing["prefill_calls"] == 1
+        assert timing["decode_calls"] == 2
+
+    def test_path3_bulk_walk_at_cursor_gt_zero_still_records_prefill(self) -> None:
+        """Chunk>1 walks (bulk KV extension between captures) stay prefill.
+
+        Only the size-1 capture calls are decode-shaped; a chunk>1 walk at
+        cursor > 0 is still populating the KV cache from real input tokens,
+        i.e. prefill. Anchors the narrow scope of the fix so a future change
+        doesn't over-broaden the override to every cursor > 0 call.
+
+        With ``logits_to_keep=[-1]`` and asymmetric lengths [6, 1], the walk
+        goes: chunk=1 @0 (both), chunk=4 @1 (item 0 only, bulk walk), chunk=1
+        @5 (item 0 capture). The middle call is chunk=4 at cursor=1 with a
+        non-zero cache — a regression that overrides *every* Path 3 call to
+        decode would flip its phase.
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        model = make_model(mxq, max_batch_size=4)
+        phases = self._capture_phase_calls(model)
+
+        self._run_batched(
+            model,
+            attention_mask=torch.tensor(
+                [[1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0]], dtype=torch.long
+            ),
+            logits_to_keep=torch.tensor([0, -1]),
+            prefill_chunk_size=4,
+        )
+
+        assert phases == ["decode", "prefill", "decode"]
+
+    def test_path1_default_keep_phase_uses_auto_heuristic(self) -> None:
+        """Path 1 (logits_to_keep=1) never sets phase_override, so its
+        classification must still come from the auto-heuristic. All chunks
+        run at ``max_sequence_length > 1`` → prefill.
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        model = make_model(mxq, max_batch_size=4)
+        phases = self._capture_phase_calls(model)
+
+        self._run_batched(
+            model,
+            attention_mask=torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long),
+            logits_to_keep=1,
+            prefill_chunk_size=2,
+        )
+
+        assert phases == ["prefill", "prefill"]
+        timing = model.get_npu_timing()
+        assert timing["decode_calls"] == 0
+        assert timing["prefill_calls"] == 2
+
+    def test_path2_dynamic_axis_phase_uses_auto_heuristic(self) -> None:
+        """Path 2 (dynamic-axis all-logits) also leaves phase_override=None.
+        Every chunk fires with ``max_sequence_length > 1`` → prefill.
+        """
+        mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        model = make_model(mxq, max_batch_size=4)
+        phases = self._capture_phase_calls(model)
+
+        self._run_batched(
+            model,
+            attention_mask=torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long),
+            logits_to_keep=0,
+            prefill_chunk_size=2,
+        )
+
+        assert phases == ["prefill", "prefill"]
+        timing = model.get_npu_timing()
+        assert timing["decode_calls"] == 0
+        assert timing["prefill_calls"] == 2

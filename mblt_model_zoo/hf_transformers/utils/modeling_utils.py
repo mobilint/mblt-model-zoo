@@ -822,6 +822,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             sequence_lengths_chunks_l: list[int],
             cache_sizes_chunks_l: list[int],
             inputs_embeds_chunks_l: list[torch.Tensor],
+            phase_override: Optional[Literal["prefill", "decode"]] = None,
         ) -> tuple[np.ndarray, tuple[int, ...]]:
             inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
             inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
@@ -841,7 +842,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 assert self.npu_time is not None
                 elapsed = time.perf_counter() - t0
                 self.npu_time += elapsed
-                phase: Literal["prefill", "decode"] = (
+                # Path 3 fallback advances a shared cursor across the batch, so its
+                # chunk=1 capture calls run at cursor > 0 with all cache_sizes > 0 —
+                # but the auto-heuristic below latches on max_sequence_length (the
+                # batch-wide max, not the current chunk size) and would misclassify
+                # every one of those captures as 'prefill'. Path 3 passes an
+                # explicit phase_override to keep decode_time accurate; Path 1 and
+                # Path 2 leave it None and get the auto-heuristic.
+                phase: Literal["prefill", "decode"] = phase_override or (
                     "prefill"
                     if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks_l)
                     else "decode"
@@ -1178,8 +1186,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 cursor += chunk
                 continue
 
+            # chunk == 1 iterations only fire when a kept position lands at cursor
+            # (see the ``elif min_next_needed == cursor`` branch above), so they
+            # are always the size-1 logit-capture calls at cursor > 0 with the KV
+            # cache already populated — i.e. decode-shaped work. Force the phase
+            # rather than let the auto-heuristic classify these as 'prefill'
+            # because max_sequence_length > 1.
             raw_output, _ = _run_batch_infer(
-                cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                cache_ids,
+                sequence_lengths_chunks,
+                cache_sizes_chunks,
+                inputs_embeds_chunks,
+                phase_override="decode" if chunk == 1 else None,
             )
             logits_chunks = cast(
                 torch.FloatTensor,
