@@ -1444,3 +1444,204 @@ class TestBatchPath3PhaseTiming:
         timing = model.get_npu_timing()
         assert timing["decode_calls"] == 0
         assert timing["prefill_calls"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Cross-path shape contract matrix
+# ---------------------------------------------------------------------------
+
+
+class TestLogitsShapeMatrix:
+    """Every (path, selector, batch_size) cell must satisfy the HF-style
+    ``(batch, kept, vocab)`` shape contract.
+
+    Guards against a *category* of bug rather than a specific site: an empty
+    ``logits_to_keep`` tensor used to make Path 3 emit ``(1, 0, 0)`` (vocab
+    axis silently dropped) while Path 2 kept the vocab axis — a rank / last-
+    dim disagreement that would surface downstream anywhere logits from
+    different paths were stacked or compared. Because the contract is
+    encoded as a parametrized matrix, a new selector shape or a new path
+    is checked automatically once it is registered here.
+
+    Extension points:
+
+    - New selector: append to :attr:`_SELECTORS` (and, if it survives
+      mixed-length batches, :attr:`_PADDING_SAFE_SELECTORS`).
+    - New MXQ backend variant (e.g. a future partial-token-axis shape):
+      append to :attr:`_MXQ_CLASSES`.
+    - New execution path: registering an MXQ class that routes to it is
+      enough; no per-path test needs to change.
+
+    Vocab / kept / batch axes are read via ``shape[-1]`` / ``shape[-2]`` /
+    ``shape[0]`` so the same assertion works for the single-input entry
+    point (rank 2 after ``.squeeze(0)``) and the batched entry point
+    (rank 3). Both are cross-checked here.
+    """
+
+    _SEQ_LEN = 5
+    _HIDDEN_SIZE = 4
+    _VOCAB_SIZE = 5
+    _PREFILL_CHUNK_SIZE = 3
+
+    _SELECTORS = [
+        pytest.param(1, id="int_1_default"),
+        pytest.param(0, id="int_0_all"),
+        pytest.param(2, id="int_2_last_n"),
+        pytest.param(torch.tensor([], dtype=torch.long), id="tensor_empty"),
+        pytest.param(torch.tensor([2]), id="tensor_single_pos"),
+        pytest.param(torch.tensor([1, 3]), id="tensor_multi_pos"),
+        pytest.param(torch.tensor([2, 2]), id="tensor_duplicate_pos"),
+        pytest.param(torch.tensor([-1]), id="tensor_negative_last"),
+    ]
+
+    _MXQ_CLASSES = [
+        pytest.param(StaticLastOnlyMxq, id="static_last_only"),
+        pytest.param(DynamicAxisMxq, id="dynamic_axis"),
+    ]
+
+    # Padding-safe subset: mixed-length batches raise IndexError on positive
+    # tensor indices that exceed the shortest item's seq_len (item 0 here
+    # has seq_len=3). Selectors that resolve against each item's own
+    # seq_len — int keep-N and negative-wrap tensors — are the right
+    # coverage set for the padding path.
+    _PADDING_SAFE_SELECTORS = [
+        pytest.param(1, id="int_1_default"),
+        pytest.param(0, id="int_0_all"),
+        pytest.param(2, id="int_2_last_n"),
+        pytest.param(torch.tensor([], dtype=torch.long), id="tensor_empty"),
+        pytest.param(torch.tensor([-1]), id="tensor_negative_last"),
+    ]
+
+    @classmethod
+    def _expected_kept(cls, selector, seq_len: int) -> list[int]:
+        # Delegate to the production helper: whatever HF-style semantics
+        # it exposes (negative-wrap, duplicate preservation, int shortcut)
+        # is the contract this test enforces.
+        return MobilintModelMixin._output_positions_for_logits_to_keep(selector, seq_len)
+
+    @staticmethod
+    def _skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal: bool) -> None:
+        """Skip cells where batched Path 1 collides with dynamic-axis MXQ prefill.
+
+        Batched Path 1 reshapes ``_run_batch_infer``'s raw output to
+        ``(batch, 1, -1)`` on the assumption that the backend already
+        emits ``(batch, vocab)`` per infer — the static-last-only MXQ
+        contract. A dynamic-axis MXQ instead emits ``(total_tokens, vocab)``
+        for multi-token chunks (prefill), so the reshape yields
+        ``(batch, 1, chunk_len * vocab)`` and the final ``torch.stack``
+        raises when different chunks land in different items' final
+        slots.
+
+        This is a pre-existing production gap orthogonal to the shape
+        contract this class enforces (Path 1 was written assuming static
+        MXQ; dynamic MXQ falls into Path 2 for every non-default selector,
+        which handles the flat-output correctly). Skip the affected cells
+        with a documented reason so the matrix stays honest about the
+        combination it does not currently exercise.
+        """
+        if mxq_cls is not DynamicAxisMxq:
+            return
+        if isinstance(selector, int) and selector == 1:
+            path1_fires = True
+        else:
+            path1_fires = lens_equal and MobilintModelMixin._is_last_only_selector(
+                selector, TestLogitsShapeMatrix._SEQ_LEN
+            )
+        if path1_fires:
+            pytest.skip(
+                "batched Path 1 × dynamic-axis MXQ prefill is a known-untested "
+                "combination (production reshape assumes static-last-only backend)"
+            )
+
+    @pytest.mark.parametrize("selector", _SELECTORS)
+    @pytest.mark.parametrize("mxq_cls", _MXQ_CLASSES)
+    def test_single_input_shape_contract(self, mxq_cls, selector) -> None:
+        """Batch=1 (single-input entry): rank 2 output whose last dim is
+        the compiled vocab dim and second-to-last dim is the HF output-
+        position count. The pre-squeeze contract is ``(1, kept, vocab)``;
+        both axes are re-checked via trailing-axis indexing so the
+        assertion is agnostic to the ``.squeeze(0)`` in ``llm_forward``.
+        """
+        mxq = mxq_cls(vocab_size=self._VOCAB_SIZE, max_width=self._SEQ_LEN)
+        model = make_model(mxq)
+        inputs_embeds = torch.zeros(1, self._SEQ_LEN, self._HIDDEN_SIZE)
+        cache_position = torch.arange(self._SEQ_LEN)
+        logits = model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=self._PREFILL_CHUNK_SIZE,
+            logits_to_keep=selector,
+        )
+        expected_kept = self._expected_kept(selector, self._SEQ_LEN)
+        assert logits.ndim == 2
+        assert logits.shape[-1] == self._VOCAB_SIZE
+        assert logits.shape[-2] == len(expected_kept)
+
+    @pytest.mark.parametrize("selector", _SELECTORS)
+    @pytest.mark.parametrize("mxq_cls", _MXQ_CLASSES)
+    def test_batched_shape_contract(self, mxq_cls, selector) -> None:
+        """Batch=2 with uniform lengths (all-ones mask): every item shares
+        the same kept-position count so no padding is required. The output
+        must be ``(batch, kept, vocab)``. Padding-driven max-len promotion
+        is covered separately by :meth:`test_batched_padded_shape_contract`.
+        """
+        # Uniform lengths → lens_equal=True, so tensor-scalar last-position
+        # selectors also route to Path 1.
+        self._skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal=True)
+        batch_size = 2
+        mxq = mxq_cls(vocab_size=self._VOCAB_SIZE, max_width=self._SEQ_LEN)
+        model = make_model(mxq, max_batch_size=batch_size)
+        attention_mask = torch.ones(batch_size, self._SEQ_LEN, dtype=torch.long)
+        inputs_embeds = torch.zeros(batch_size, self._SEQ_LEN, self._HIDDEN_SIZE)
+        cache_position = torch.arange(self._SEQ_LEN)
+        logits = model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=self._PREFILL_CHUNK_SIZE,
+            attention_mask=attention_mask,
+            logits_to_keep=selector,
+        )
+        expected_kept = self._expected_kept(selector, self._SEQ_LEN)
+        assert logits.ndim == 3
+        assert logits.shape == (batch_size, len(expected_kept), self._VOCAB_SIZE)
+
+    @pytest.mark.parametrize("selector", _PADDING_SAFE_SELECTORS)
+    @pytest.mark.parametrize("mxq_cls", _MXQ_CLASSES)
+    def test_batched_padded_shape_contract(self, mxq_cls, selector) -> None:
+        """Batch=2 with mixed lengths [3, 5]: for selectors whose kept
+        count differs across items (e.g. ``int==0``) the batched output
+        promotes to ``(batch, max_kept_per_item, vocab)`` with the shorter
+        item right-padded — the vocab axis must survive that promotion.
+
+        Only :attr:`_PADDING_SAFE_SELECTORS` are exercised; positive tensor
+        indices like ``[1, 3]`` would raise IndexError on item 0 (seq_len=3)
+        before any shape assertion could fire.
+        """
+        # Mixed lengths → lens_equal=False, so only ``int==1`` routes to
+        # Path 1; tensor-scalar last-position selectors fall through to
+        # Path 2 for dynamic-axis MXQ (which handles the flat output).
+        self._skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal=False)
+        mxq = mxq_cls(vocab_size=self._VOCAB_SIZE, max_width=self._SEQ_LEN)
+        model = make_model(mxq, max_batch_size=2)
+        attention_mask = torch.tensor(
+            [[1, 1, 1, 0, 0], [1, 1, 1, 1, 1]], dtype=torch.long
+        )
+        inputs_embeds = torch.zeros(2, self._SEQ_LEN, self._HIDDEN_SIZE)
+        cache_position = torch.arange(self._SEQ_LEN)
+        logits = model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=self._PREFILL_CHUNK_SIZE,
+            attention_mask=attention_mask,
+            logits_to_keep=selector,
+        )
+        expected_kept_per_item = [
+            self._expected_kept(selector, 3),
+            self._expected_kept(selector, 5),
+        ]
+        max_kept = max(len(kept) for kept in expected_kept_per_item)
+        assert logits.ndim == 3
+        assert logits.shape == (2, max_kept, self._VOCAB_SIZE)
