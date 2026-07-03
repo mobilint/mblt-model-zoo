@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import time
+import warnings
 from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, Union, cast
 
 import numpy as np
@@ -167,7 +168,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         timing[f"{phase}_calls"] = int(timing.get(f"{phase}_calls", 0)) + 1
 
     def _warn_last_only_slow_path_once(self) -> None:
-        """Emit a one-shot WARNING when a call enters the last-only MXQ Path 3.
+        """Emit a one-shot ``UserWarning`` when a call enters the last-only MXQ Path 3.
 
         Path 3 runs one MXQ infer per kept position, so a manual
         ``.forward()`` with the default ``logits_to_keep=0`` on a
@@ -175,17 +176,26 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         HF-generate case (which sets ``logits_to_keep=1``). Docstrings
         alone don't surface this; a stderr warning does. Fires at most
         once per instance so long training / eval loops don't spam.
+
+        Uses ``warnings.warn`` (not ``logger.warning``) so the reported
+        location is the caller's, not this file — that reveals *which*
+        user call triggered the slow path. ``stacklevel=4`` skips this
+        helper, the Path 3 site inside ``_run_chunked_logits_to_keep`` /
+        ``_llm_forward_batch``, and the ``llm_forward`` dispatcher, so
+        the warning is attributed to whoever invoked ``llm_forward``.
         """
         if getattr(self, "_mxq_last_only_slow_path_warned", False):
             return
-        logger.warning(
+        warnings.warn(
             "Non-default `logits_to_keep` on a last-only MXQ build triggers a "
             "fallback that runs one MXQ infer per kept position and is "
             "dramatically slower than the default on long prefills. Pass "
             "`logits_to_keep=1` for last-token workloads; HF `.generate()` "
             "already sets this automatically, so this warning does not "
             "indicate a bug in generation. This message fires once per "
-            "model instance."
+            "model instance.",
+            category=UserWarning,
+            stacklevel=4,
         )
         self._mxq_last_only_slow_path_warned = True
 

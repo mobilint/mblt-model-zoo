@@ -15,7 +15,7 @@ Both the single-item and batched paths are exercised via fake MXQ backends.
 
 from __future__ import annotations
 
-import logging
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -926,17 +926,22 @@ class TestBatchedEmptySelection:
 
 
 class TestLastOnlySlowPathWarning:
-    """Path 3 fires a WARNING once per instance so manual .forward() callers
-    see the per-token infer cost without having to read source."""
+    """Path 3 fires a ``UserWarning`` once per instance so manual .forward()
+    callers see the per-token infer cost without having to read source.
 
-    _LOGGER_NAME = "mblt_model_zoo.hf_transformers.utils.modeling_utils"
+    The switch from ``logger.warning`` to ``warnings.warn`` is the reason
+    these tests use ``warnings.catch_warnings`` instead of ``caplog``: the
+    point of the change is that the warning's reported location is the
+    caller's, not this module — a property only visible through the
+    ``warnings`` machinery.
+    """
 
     @staticmethod
-    def _slow_path_warnings(records: list[logging.LogRecord]) -> list[logging.LogRecord]:
+    def _slow_path_warnings(caught: list[warnings.WarningMessage]) -> list[warnings.WarningMessage]:
         return [
-            r
-            for r in records
-            if r.levelno == logging.WARNING and "logits_to_keep" in r.getMessage()
+            w
+            for w in caught
+            if issubclass(w.category, UserWarning) and "logits_to_keep" in str(w.message)
         ]
 
     def _run_single(
@@ -983,73 +988,91 @@ class TestLastOnlySlowPathWarning:
             logits_to_keep=logits_to_keep,
         )
 
-    def test_warns_once_on_first_path3_entry_single_input(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_warns_once_on_first_path3_entry_single_input(self) -> None:
         model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
-        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self._run_single(model, seq_len=6, logits_to_keep=0)
-            after_first = len(self._slow_path_warnings(caplog.records))
+            after_first = len(self._slow_path_warnings(caught))
             self._run_single(model, seq_len=6, logits_to_keep=0)
-            after_second = len(self._slow_path_warnings(caplog.records))
+            after_second = len(self._slow_path_warnings(caught))
 
         assert after_first == 1
         assert after_second == 1
-        message = self._slow_path_warnings(caplog.records)[0].getMessage()
+        message = str(self._slow_path_warnings(caught)[0].message)
         assert "logits_to_keep" in message
 
-    def test_warns_once_on_first_path3_entry_batched(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_warns_once_on_first_path3_entry_batched(self) -> None:
         model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4), max_batch_size=4)
         attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 1, 1]], dtype=torch.long)
-        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self._run_batched(
                 model, attention_mask=attention_mask, logits_to_keep=torch.tensor([2, 3])
             )
-            after_first = len(self._slow_path_warnings(caplog.records))
+            after_first = len(self._slow_path_warnings(caught))
             self._run_batched(
                 model, attention_mask=attention_mask, logits_to_keep=torch.tensor([2, 3])
             )
-            after_second = len(self._slow_path_warnings(caplog.records))
+            after_second = len(self._slow_path_warnings(caught))
 
         assert after_first == 1
         assert after_second == 1
-        assert "logits_to_keep" in self._slow_path_warnings(caplog.records)[0].getMessage()
+        assert "logits_to_keep" in str(self._slow_path_warnings(caught)[0].message)
 
-    def test_no_warning_on_fast_path(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_no_warning_on_fast_path(self) -> None:
         single_model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
         batched_model = make_model(
             StaticLastOnlyMxq(vocab_size=5, max_width=4), max_batch_size=4
         )
         attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
-        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self._run_single(single_model, seq_len=6, logits_to_keep=1)
             self._run_batched(batched_model, attention_mask=attention_mask, logits_to_keep=1)
 
-        assert self._slow_path_warnings(caplog.records) == []
+        assert self._slow_path_warnings(caught) == []
 
-    def test_no_warning_on_dynamic_axis(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_no_warning_on_dynamic_axis(self) -> None:
         single_model = make_model(DynamicAxisMxq(vocab_size=5, max_width=4))
         batched_model = make_model(
             DynamicAxisMxq(vocab_size=5, max_width=4), max_batch_size=4
         )
         attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
-        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self._run_single(single_model, seq_len=6, logits_to_keep=0)
             self._run_batched(batched_model, attention_mask=attention_mask, logits_to_keep=0)
 
-        assert self._slow_path_warnings(caplog.records) == []
+        assert self._slow_path_warnings(caught) == []
 
-    def test_warning_is_per_instance(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_warning_is_per_instance(self) -> None:
         model_a = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
         model_b = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
-        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self._run_single(model_a, seq_len=6, logits_to_keep=0)
             self._run_single(model_b, seq_len=6, logits_to_keep=0)
 
         # One warning per instance — the flag lives on the model, not the class.
-        assert len(self._slow_path_warnings(caplog.records)) == 2
+        assert len(self._slow_path_warnings(caught)) == 2
+
+    def test_warning_stacklevel_points_past_llm_forward(self) -> None:
+        """``stacklevel=4`` skips this helper, the Path 3 site, and ``llm_forward``
+        so the warning is attributed to the caller of ``llm_forward`` — i.e.,
+        this test method's own frame, not ``modeling_utils.py``.
+        """
+        model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._run_single(model, seq_len=6, logits_to_keep=0)
+
+        slow = self._slow_path_warnings(caught)
+        assert len(slow) == 1
+        # ``_run_single`` calls ``model.llm_forward`` directly, so the
+        # stacklevel=4 warning must land inside this test file, not the
+        # library module.
+        assert slow[0].filename.endswith("test_logits_to_keep.py")
 
 
 # ---------------------------------------------------------------------------
