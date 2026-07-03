@@ -112,7 +112,9 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
         ``@lru_cache(maxsize=None)`` gives us per-callable memoization so
         ``inspect.signature`` is not re-parsed on every wrapper invocation inside
         the generation loop (this helper is called on the hot path of each
-        ``prepare_inputs_for_generation`` / ``forward`` call).
+        ``prepare_inputs_for_generation`` / ``forward`` call). ``inspect.unwrap``
+        collapses ``__wrapped__`` chains so ``@functools.wraps``-decorated wrappers
+        share a cache entry with their underlying function.
 
     Boundedness assumption:
         The unbounded cache is safe **only** because callers are expected to invoke
@@ -124,13 +126,14 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
 
     Warning:
         Do **not** call this function in a loop with freshly constructed callables
-        (e.g. ``lambda``\ s, ``functools.partial`` results, or dynamically wrapped
-        methods created per iteration). Each distinct callable is a new cache key,
-        and because ``maxsize=None`` never evicts, this would leak memory
-        indefinitely by pinning the callable and its parsed ``Signature`` object.
-        If dynamic callables must be supported in the future, switch to a bounded
-        ``maxsize`` or a ``WeakKeyDictionary``-based cache.
+        that ``inspect.unwrap`` cannot normalize — e.g. ``lambda``\ s,
+        ``functools.partial`` results, or per-iteration closures. Each distinct
+        callable is a new cache key, and because ``maxsize=None`` never evicts,
+        this would leak memory indefinitely by pinning the callable and its parsed
+        ``Signature`` object. If such dynamic callables must be supported in the
+        future, switch to a bounded ``maxsize`` or a ``WeakKeyDictionary``-based cache.
     """
+    func = inspect.unwrap(func)
     return tuple(
         name
         for name, parameter in inspect.signature(func).parameters.items()
@@ -151,14 +154,19 @@ def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
         ``inspect.signature`` is memoized per ``loss_function`` because
         :func:`build_loss_kwargs_dynamic` is called on the hot decoding path,
         while the underlying signature is static per loss implementation.
+        ``inspect.unwrap`` collapses ``__wrapped__`` chains so
+        ``@functools.wraps``-decorated loss wrappers share a cache entry with
+        their underlying function.
 
     Boundedness assumption:
         Callers pass a small, fixed set of upstream loss callables
         (``ForCausalLMLoss`` and siblings), so the unbounded cache saturates
         at a handful of entries. Do **not** pass freshly constructed callables
-        here (lambdas, ``functools.partial`` results, per-call closures) — each
-        distinct object is a new cache key and would leak memory.
+        that ``inspect.unwrap`` cannot normalize (lambdas, ``functools.partial``
+        results, per-call closures) — each distinct object is a new cache key
+        and would leak memory.
     """
+    loss_function = inspect.unwrap(loss_function)
     parameters = inspect.signature(loss_function).parameters
     return tuple(
         name
