@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from mblt_model_zoo.hf_transformers.utils.generation_utils import upstream_positional_params
+import functools
+
+from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+    _upstream_positional_params_cached,
+    upstream_positional_params,
+)
 
 
 def test_upstream_positional_params_filters_self_args_kwargs_and_kw_only() -> None:
@@ -31,3 +36,23 @@ def test_upstream_positional_params_is_cached() -> None:
         del self, a, b
 
     assert upstream_positional_params(f) is upstream_positional_params(f)
+
+
+def test_upstream_positional_params_wrapped_shares_cache_entry_with_underlying() -> None:
+    def f(self, a, b):  # noqa: ANN001, ANN202
+        del self, a, b
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        return f(*args, **kwargs)
+
+    _upstream_positional_params_cached.cache_clear()
+    underlying = upstream_positional_params(f)
+    info_after_first = _upstream_positional_params_cached.cache_info()
+    wrapped = upstream_positional_params(wrapper)
+    info_after_second = _upstream_positional_params_cached.cache_info()
+
+    assert underlying == wrapped
+    assert info_after_first.misses == 1
+    assert info_after_second.misses == 1
+    assert info_after_second.hits == info_after_first.hits + 1

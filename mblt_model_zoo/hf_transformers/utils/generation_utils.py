@@ -99,6 +99,21 @@ def llm_eagle3_forward(
 
 
 @lru_cache(maxsize=None)
+def _upstream_positional_params_cached(func: Callable) -> tuple[str, ...]:
+    """Cached body of :func:`upstream_positional_params`.
+
+    Callers must pass an already ``inspect.unwrap``-ed callable; the public
+    wrapper is responsible for that normalization so wrapped and underlying
+    functions share this cache entry (see :func:`upstream_positional_params`).
+    """
+    return tuple(
+        name
+        for name, parameter in inspect.signature(func).parameters.items()
+        if name != "self"
+        and parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+
+
 def upstream_positional_params(func: Callable) -> tuple[str, ...]:
     """Return the positional-bindable parameter names of ``func`` (excluding ``self``).
 
@@ -109,12 +124,15 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
     positional args cannot silently misbind a value to a keyword-only parameter.
 
     Caching policy:
-        ``@lru_cache(maxsize=None)`` gives us per-callable memoization so
+        The signature parse is memoized on the unwrapped callable so
         ``inspect.signature`` is not re-parsed on every wrapper invocation inside
         the generation loop (this helper is called on the hot path of each
         ``prepare_inputs_for_generation`` / ``forward`` call). ``inspect.unwrap``
-        collapses ``__wrapped__`` chains so ``@functools.wraps``-decorated wrappers
-        share a cache entry with their underlying function.
+        runs in this outer wrapper — **before** the cache lookup — so
+        ``@functools.wraps``-decorated wrappers and their underlying function
+        share a cache entry. Doing the unwrap inside a cached body would not
+        achieve this: ``functools.lru_cache`` keys on the arguments the wrapper
+        receives, so wrapped and unwrapped callables would occupy distinct entries.
 
     Boundedness assumption:
         The unbounded cache is safe **only** because callers are expected to invoke
@@ -133,40 +151,17 @@ def upstream_positional_params(func: Callable) -> tuple[str, ...]:
         ``Signature`` object. If such dynamic callables must be supported in the
         future, switch to a bounded ``maxsize`` or a ``WeakKeyDictionary``-based cache.
     """
-    func = inspect.unwrap(func)
-    return tuple(
-        name
-        for name, parameter in inspect.signature(func).parameters.items()
-        if name != "self"
-        and parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    )
+    return _upstream_positional_params_cached(inspect.unwrap(func))
 
 
 @lru_cache(maxsize=None)
-def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
-    """Return the named parameters of ``loss_function`` (excluding ``*args``/``**kwargs``).
+def _loss_function_parameter_names_cached(loss_function: Callable) -> tuple[str, ...]:
+    """Cached body of :func:`_loss_function_parameter_names`.
 
-    Only ``POSITIONAL_ONLY``, ``POSITIONAL_OR_KEYWORD``, and ``KEYWORD_ONLY``
-    parameters are returned. Variadic parameters (``*args``, ``**kwargs``) are
-    excluded because they do not carry a fixed name we can supply against.
-
-    Caching policy:
-        ``inspect.signature`` is memoized per ``loss_function`` because
-        :func:`build_loss_kwargs_dynamic` is called on the hot decoding path,
-        while the underlying signature is static per loss implementation.
-        ``inspect.unwrap`` collapses ``__wrapped__`` chains so
-        ``@functools.wraps``-decorated loss wrappers share a cache entry with
-        their underlying function.
-
-    Boundedness assumption:
-        Callers pass a small, fixed set of upstream loss callables
-        (``ForCausalLMLoss`` and siblings), so the unbounded cache saturates
-        at a handful of entries. Do **not** pass freshly constructed callables
-        that ``inspect.unwrap`` cannot normalize (lambdas, ``functools.partial``
-        results, per-call closures) — each distinct object is a new cache key
-        and would leak memory.
+    Callers must pass an already ``inspect.unwrap``-ed callable; the public
+    wrapper is responsible for that normalization so wrapped and underlying
+    loss functions share this cache entry.
     """
-    loss_function = inspect.unwrap(loss_function)
     parameters = inspect.signature(loss_function).parameters
     return tuple(
         name
@@ -178,6 +173,34 @@ def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
             inspect.Parameter.KEYWORD_ONLY,
         )
     )
+
+
+def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
+    """Return the named parameters of ``loss_function`` (excluding ``*args``/``**kwargs``).
+
+    Only ``POSITIONAL_ONLY``, ``POSITIONAL_OR_KEYWORD``, and ``KEYWORD_ONLY``
+    parameters are returned. Variadic parameters (``*args``, ``**kwargs``) are
+    excluded because they do not carry a fixed name we can supply against.
+
+    Caching policy:
+        ``inspect.signature`` is memoized per unwrapped ``loss_function`` because
+        :func:`build_loss_kwargs_dynamic` is called on the hot decoding path,
+        while the underlying signature is static per loss implementation.
+        ``inspect.unwrap`` runs in this outer wrapper — **before** the cache
+        lookup — so ``@functools.wraps``-decorated loss wrappers share a cache
+        entry with their underlying function. Unwrapping inside a cached body
+        would not achieve this: ``functools.lru_cache`` keys on the arguments
+        the wrapper receives.
+
+    Boundedness assumption:
+        Callers pass a small, fixed set of upstream loss callables
+        (``ForCausalLMLoss`` and siblings), so the unbounded cache saturates
+        at a handful of entries. Do **not** pass freshly constructed callables
+        that ``inspect.unwrap`` cannot normalize (lambdas, ``functools.partial``
+        results, per-call closures) — each distinct object is a new cache key
+        and would leak memory.
+    """
+    return _loss_function_parameter_names_cached(inspect.unwrap(loss_function))
 
 
 # Kwarg names that :func:`build_loss_kwargs_dynamic` knows how to supply to
