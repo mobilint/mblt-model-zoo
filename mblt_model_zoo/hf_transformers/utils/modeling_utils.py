@@ -279,6 +279,48 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         self._mxq_static_vocab_cached = vocab
         return vocab
 
+    def _empty_kept_logits(
+        self,
+        batch_size: int,
+        dtype: torch.dtype,
+        device: Union[torch.device, str],
+    ) -> "torch.FloatTensor":
+        """Return the canonical ``(batch, 0, vocab)`` empty-selector logits.
+
+        All three ``_run_chunked_logits_to_keep`` execution paths (single-
+        input Path 3 fallback, batched Path 2 dynamic-axis, batched Path 3
+        last-only fallback) converge here when the caller's
+        ``logits_to_keep`` selector is empty — the compiled MXQ vocab dim
+        is preserved so the same request returns the same shape regardless
+        of which path handled it, matching HF's ``hidden_states[:, empty, :]``
+        -> LM head -> ``(batch, 0, vocab)`` contract.
+        """
+        return cast(
+            torch.FloatTensor,
+            torch.zeros(
+                (batch_size, 0, self._mxq_static_vocab_size()),
+                dtype=dtype,
+                device=device,
+            ),
+        )
+
+    def _empty_item_kept_logits(
+        self,
+        dtype: torch.dtype,
+        device: Union[torch.device, str],
+    ) -> torch.Tensor:
+        """Return a per-item ``(0, vocab)`` placeholder for an empty selector.
+
+        Symmetric with :meth:`_empty_kept_logits` but at the per-item level:
+        Path 2 and Path 3 both stack per-item kept-logits before returning
+        the batched result, and callers whose selector is empty for a
+        specific batch item use this so the downstream ``-inf`` padding
+        pass can right-fill without a shape-mismatch special case.
+        """
+        return torch.empty(
+            (0, self._mxq_static_vocab_size()), dtype=dtype, device=device
+        )
+
     @staticmethod
     def _is_last_only_selector(
         logits_to_keep: Union[int, torch.Tensor], seq_len: int
@@ -576,16 +618,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if not output_positions:
             # Empty selection (empty tensor input): the KV cache has already
             # been advanced through the entire input by the trailing loop
-            # above. Return (1, 0, vocab) rather than np.concatenate-ing an
-            # empty list; the compiled vocab dim is preserved so the
-            # single-input caller's ``.squeeze(0)`` yields (0, vocab) —
-            # matching Path 2's empty branch and HF's
-            # ``hidden_states[:, empty, :]`` -> LM head -> (batch, 0, vocab)
-            # contract. Dropping to (1, 0, 0) here would make the same
-            # ``logits_to_keep=torch.tensor([])`` request return a different
-            # rank / last-dim from the other two paths.
-            vocab = self._mxq_static_vocab_size()
-            return torch.zeros((1, 0, vocab), dtype=dtype, device=device)
+            # above. Delegate to the shared helper so the compiled vocab
+            # dim is preserved and the single-input caller's ``.squeeze(0)``
+            # yields ``(0, vocab)`` — matching Path 2's empty branch and
+            # HF's ``hidden_states[:, empty, :]`` -> LM head ->
+            # ``(batch, 0, vocab)`` contract.
+            return self._empty_kept_logits(1, dtype, device)
 
         logits_ndarray = np.concatenate(
             [per_position_logits[p] for p in output_positions], axis=-2
@@ -1162,7 +1200,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 if past_key_values is not None:
                     past_key_values.update_seen_tokens(seen_tokens)
 
-            mxq_vocab_size = self._mxq_static_vocab_size()
             per_item_sliced: list[torch.Tensor] = []
             vocab_size = 0
             for j in range(batch_size):
@@ -1174,33 +1211,28 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     sliced = np.stack(
                         [kept_by_item[j][p] for p in positions_j], axis=0
                     )
+                    item = torch.tensor(
+                        sliced, dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                    )
                 else:
                     # Empty selector: (0, vocab) placeholder so the padding
                     # pass below can right-fill with -inf, symmetric with
                     # the Path 3 fallback.
-                    sliced = np.empty((0, mxq_vocab_size), dtype=np.float32)
-                vocab_size = max(vocab_size, sliced.shape[-1])
-                per_item_sliced.append(
-                    torch.tensor(sliced, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
-                )
+                    item = self._empty_item_kept_logits(
+                        inputs_embeds.dtype, inputs_embeds.device
+                    )
+                vocab_size = max(vocab_size, item.shape[-1])
+                per_item_sliced.append(item)
 
             max_keep_len = max((item.shape[0] for item in per_item_sliced), default=0)
             if max_keep_len == 0:
                 # No batch item had any kept positions (e.g. empty-tensor
-                # selector). Return (batch, 0, vocab) so the compiled vocab
-                # axis is preserved — Path 3's empty-selector fallback and
-                # HF's ``hidden_states[:, empty, :]`` -> LM head both keep
-                # the vocab dim, and dropping it here would make the same
-                # ``logits_to_keep=torch.tensor([])`` request return a
-                # different last-dim depending on the batched vs single
-                # entry point.
-                return cast(
-                    torch.FloatTensor,
-                    torch.zeros(
-                        (batch_size, 0, mxq_vocab_size),
-                        dtype=inputs_embeds.dtype,
-                        device=inputs_embeds.device,
-                    ),
+                # selector). Shared helper preserves the compiled vocab
+                # axis so this branch matches Path 3's empty-selector
+                # fallback and HF's ``hidden_states[:, empty, :]`` -> LM
+                # head shape contract.
+                return self._empty_kept_logits(
+                    batch_size, inputs_embeds.dtype, inputs_embeds.device
                 )
             padded: list[torch.Tensor] = []
             for item in per_item_sliced:
@@ -1324,7 +1356,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             cursor += chunk
 
         per_item_final: list[torch.Tensor] = []
-        vocab_size = 0
         for j in range(batch_size):
             # per_item_kept_logits is keyed by (unique) walk positions; the
             # final tensor uses output positions so duplicate indices in the
@@ -1334,42 +1365,33 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 item_logits = torch.cat(
                     [per_item_kept_logits[j][p] for p in positions_j], dim=0
                 )
-                vocab_size = max(vocab_size, item_logits.shape[-1])
             else:
-                item_logits = torch.empty(
-                    (0, 0), dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                # Shared (0, vocab) placeholder — same last dim as the
+                # non-empty branch (MXQ vocab is compiled static) so the
+                # padding pass below can right-fill without a numel==0
+                # special case.
+                item_logits = self._empty_item_kept_logits(
+                    inputs_embeds.dtype, inputs_embeds.device
                 )
             per_item_final.append(item_logits)
 
         max_keep_len = max((item.shape[0] for item in per_item_final), default=0)
         if max_keep_len == 0:
-            # No batch item had any kept positions (e.g. empty-tensor selector).
-            # Return (batch, 0, vocab) so the compiled vocab axis is preserved,
-            # matching Path 2's batched empty branch, Path 3's single-input
-            # fallback (see :meth:`_mxq_static_vocab_size`), and HF's
-            # ``hidden_states[:, empty, :]`` -> LM head -> ``(batch, 0, vocab)``
-            # contract.
-            return cast(
-                torch.FloatTensor,
-                torch.zeros(
-                    (batch_size, 0, self._mxq_static_vocab_size()),
-                    dtype=inputs_embeds.dtype,
-                    device=inputs_embeds.device,
-                ),
+            # No batch item had any kept positions (e.g. empty-tensor
+            # selector). Shared helper preserves the compiled vocab axis so
+            # this branch matches Path 2's batched empty branch, Path 3's
+            # single-input fallback, and HF's ``hidden_states[:, empty, :]``
+            # -> LM head -> ``(batch, 0, vocab)`` contract.
+            return self._empty_kept_logits(
+                batch_size, inputs_embeds.dtype, inputs_embeds.device
             )
         padded_final: list[torch.Tensor] = []
         for item in per_item_final:
             if item.shape[0] < max_keep_len:
-                pad_rows = max_keep_len - item.shape[0]
-                pad_cols = vocab_size if item.numel() == 0 else item.shape[-1]
-                if item.numel() == 0:
-                    item = torch.empty(
-                        (0, pad_cols), dtype=inputs_embeds.dtype, device=inputs_embeds.device
-                    )
                 # -inf so downstream softmax assigns 0 probability to padded
                 # positions; using 0.0 would spread mass over real vocab rows.
                 pad = torch.full(
-                    (pad_rows, pad_cols),
+                    (max_keep_len - item.shape[0], item.shape[-1]),
                     float("-inf"),
                     dtype=item.dtype,
                     device=item.device,

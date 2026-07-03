@@ -216,8 +216,10 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         # KV prefix still walks the whole sequence in normal-sized chunks.
         chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
         assert chunk_seqs == [4, 2]
-        # Batch dim preserved (no ``.squeeze(0)`` on this path).
-        assert logits.shape == (1, 0, 0)
+        # Batch dim preserved (no ``.squeeze(0)`` on this path); vocab dim
+        # comes from the compiled MXQ output shape so the empty-selector
+        # result matches the shared core's ``(batch, 0, vocab)`` contract.
+        assert logits.shape == (1, 0, mxq.vocab_size)
 
     def test_fallback_out_of_range_indices_raise_indexerror(self) -> None:
         """HF fancy-indexing raises on out-of-range indices; the VL decoder inherits this."""
