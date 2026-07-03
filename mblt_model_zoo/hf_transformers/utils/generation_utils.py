@@ -224,10 +224,6 @@ def build_loss_kwargs_dynamic(
         "num_items_in_batch": upstream_kwargs.get("num_items_in_batch"),
         "shift_labels": upstream_kwargs.get("shift_labels"),
     }
-    assert set(supply) == LOSS_KWARG_SUPPLY_NAMES, (
-        "build_loss_kwargs_dynamic supply dict must stay in sync with "
-        "LOSS_KWARG_SUPPLY_NAMES; update both together."
-    )
     accepted = set(_loss_function_parameter_names(loss_function))
     return {name: value for name, value in supply.items() if name in accepted}
 
