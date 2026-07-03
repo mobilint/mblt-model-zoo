@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 _MXQ_DYNAMIC_AXIS_SENTINEL = -1
 _MXQ_TOKEN_AXIS_INDEX = -2
 
+_TENSOR_SELECTOR_INT_DTYPES = (
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+)
+
 
 class _BatchChunkAssembly(NamedTuple):
     """Per-chunk batched infer inputs assembled from a shared `[start, start+chunk)` window.
@@ -325,6 +333,28 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         )
 
     @staticmethod
+    def _validate_tensor_selector_dtype(logits_to_keep: torch.Tensor) -> None:
+        """Reject non-integer tensor selectors before ``int()`` erases the dtype.
+
+        HF's ``hidden_states[:, logits_to_keep, :]`` fancy-indexing accepts
+        only integer index tensors; bool tensors trigger a separate
+        boolean-mask code path. We do not support boolean-mask indexing —
+        silently coercing ``True/False`` to ``1/0`` would misread a mask
+        as positions, and no downstream path here applies masks correctly.
+        Float dtypes are rejected because ``int(1.9) == 1`` would silently
+        pick the wrong position instead of failing like PyTorch's fancy
+        indexing does.
+        """
+        if logits_to_keep.dtype not in _TENSOR_SELECTOR_INT_DTYPES:
+            raise TypeError(
+                "logits_to_keep tensor must have an integer dtype "
+                "(int8/int16/int32/int64/uint8); got "
+                f"{logits_to_keep.dtype}. Boolean-mask indexing is not "
+                "supported — convert masks to positions via "
+                "``mask.nonzero().flatten()`` before passing them in."
+            )
+
+    @staticmethod
     def _is_last_only_selector(
         logits_to_keep: Union[int, torch.Tensor], seq_len: int
     ) -> bool:
@@ -347,6 +377,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if isinstance(logits_to_keep, int) and logits_to_keep == 1:
             return True
         if isinstance(logits_to_keep, torch.Tensor) and logits_to_keep.numel() == 1:
+            MobilintModelMixin._validate_tensor_selector_dtype(logits_to_keep)
             idx = int(logits_to_keep.flatten()[0].item())
             return idx == seq_len - 1 or idx == -1
         return False
@@ -362,12 +393,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         """
         wrapped: list[int] = []
         for raw_index in indices:
-            idx = int(raw_index)
+            idx = raw_index
             if idx < 0:
                 idx = seq_len + idx
             if not 0 <= idx < seq_len:
                 raise IndexError(
-                    f"logits_to_keep index {int(raw_index)} out of range for seq_len={seq_len}"
+                    f"logits_to_keep index {raw_index} out of range for seq_len={seq_len}"
                 )
             wrapped.append(idx)
         return wrapped
@@ -403,6 +434,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         the selector once, to avoid a per-call device-to-host copy.
         """
         if isinstance(logits_to_keep, torch.Tensor):
+            cls._validate_tensor_selector_dtype(logits_to_keep)
             raw = logits_to_keep.detach().to("cpu").flatten().tolist()
             return cls._output_positions_from_cpu_indices(raw, seq_len)
         n = int(logits_to_keep)
@@ -905,6 +937,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             # Without this, a large GPU-resident selector would pay a
             # device->host copy on every batch item.
             if isinstance(logits_to_keep, torch.Tensor):
+                self._validate_tensor_selector_dtype(logits_to_keep)
                 cpu_indices = logits_to_keep.detach().to("cpu").flatten().tolist()
 
                 def _positions_for(seq_len_j: int) -> list[int]:

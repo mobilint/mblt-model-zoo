@@ -102,6 +102,42 @@ class TestOutputPositionsForLogitsToKeep:
         indices = torch.tensor([], dtype=torch.long)
         assert MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5) == []
 
+    def test_tensor_float_dtype_raises_type_error(self) -> None:
+        # Silently truncating ``1.9 -> 1`` diverges from PyTorch's
+        # ``hidden_states[:, tensor, :]``, which rejects float indices
+        # outright. Reject before ``int()`` erases the mistake.
+        indices = torch.tensor([1.9])
+        with pytest.raises(TypeError, match=r"integer dtype.*torch\.float"):
+            MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5)
+
+    def test_tensor_bool_dtype_raises_type_error(self) -> None:
+        # Boolean-mask indexing is not supported: coercing ``True/False``
+        # to ``1/0`` would silently reinterpret a mask as three integer
+        # positions.
+        indices = torch.tensor([True, False, True])
+        with pytest.raises(TypeError, match=r"integer dtype.*torch\.bool"):
+            MobilintModelMixin._output_positions_for_logits_to_keep(indices, seq_len=5)
+
+    def test_tensor_bool_dtype_raises_via_is_last_only_selector(self) -> None:
+        # A single-element bool tensor must not sneak past the fast-path
+        # check by coercing ``True`` to ``1``.
+        indices = torch.tensor([True])
+        with pytest.raises(TypeError, match=r"integer dtype.*torch\.bool"):
+            MobilintModelMixin._is_last_only_selector(indices, seq_len=5)
+
+    def test_tensor_float_dtype_raises_via_llm_forward(self) -> None:
+        model = make_model(StaticLastOnlyMxq(vocab_size=5, max_width=4))
+        inputs_embeds = torch.zeros(1, 4, 3)
+        cache_position = torch.arange(4)
+        with pytest.raises(TypeError, match=r"integer dtype.*torch\.float"):
+            model.llm_forward(
+                inputs_embeds=inputs_embeds,
+                past_key_values=None,
+                cache_position=cache_position,
+                prefill_chunk_size=4,
+                logits_to_keep=torch.tensor([0.0, 1.0]),
+            )
+
 
 class TestWalkPositionsForLogitsToKeep:
     """Cursor helper: sorted-unique for monotonic KV walks."""
