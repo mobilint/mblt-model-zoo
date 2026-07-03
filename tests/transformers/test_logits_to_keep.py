@@ -300,9 +300,10 @@ class TestLlmForwardSingle:
 
         # is_default_keep short-circuits before probing, so no cached probe result yet.
         assert getattr(model, "_mxq_all_logits_cached", None) is None
-        # Only the last chunk's logits are returned in shape (1, chunk_len, vocab)
-        # → squeeze(0) → (chunk_len, vocab) because dynamic mxq returned 3d.
-        assert logits.shape == (3, mxq.vocab_size)
+        # Path 1 must slice the final chunk's per-position payload down to the
+        # last row so HF-style logits_to_keep=1 returns exactly one kept
+        # position, matching the static-last-only contract.
+        assert logits.shape == (1, mxq.vocab_size)
 
     def test_dynamic_axis_keep_all_returns_every_position(self) -> None:
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)

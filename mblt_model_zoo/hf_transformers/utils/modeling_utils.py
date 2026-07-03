@@ -461,8 +461,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             A ``torch.Tensor`` with a leading batch axis of size 1. The
             trailing shape depends on which path ran:
 
-            * Path 1 (last-only fast): ``(1, 1, vocab)`` — the raw
-              last-chunk ``do_infer`` output, returned as-is.
+            * Path 1 (last-only fast): ``(1, 1, vocab)`` — the last row
+              of the final chunk's ``do_infer`` output. Static last-only
+              MXQ already emits a single-row payload; dynamic-axis MXQ
+              returns the whole chunk, so the token axis is sliced to
+              ``[-1:]`` before returning.
             * Path 2 (dynamic-axis): ``(1, kept_positions, vocab)`` where
               ``kept_positions == len(_output_positions_for_logits_to_keep(
               logits_to_keep, seq_len))`` (caller order and duplicates are
@@ -527,6 +530,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     assert logits_ndarray is not None
                     token_axis = logits_ndarray.ndim - 2
                     logits_ndarray = np.take(logits_ndarray, [], axis=token_axis)
+            else:
+                # Path 1 (keep-last): a static last-only MXQ already emits a
+                # single-row payload, but a dynamic-axis MXQ returns every
+                # position of the final chunk. Slice down to the last row so
+                # the returned shape stays (1, 1, vocab) regardless of the
+                # backend's token-axis shape.
+                assert logits_ndarray is not None
+                token_axis = logits_ndarray.ndim - 2
+                if logits_ndarray.shape[token_axis] > 1:
+                    logits_ndarray = np.take(logits_ndarray, [-1], axis=token_axis)
 
             assert logits_ndarray is not None
             return torch.tensor(logits_ndarray, dtype=dtype, device=device)
