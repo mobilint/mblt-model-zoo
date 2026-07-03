@@ -262,19 +262,30 @@ def mirror_output_fields(
     Args:
         output_cls: Dataclass type (typically an HF ``ModelOutput`` subclass).
         source_output: Object whose attributes populate non-override fields.
-            Duck-typed via ``hasattr``/``getattr`` so tests can pass simple
-            namespaces in place of real HF outputs.
+            When ``source_output`` is itself a dataclass (the prod case — HF
+            ``ModelOutput`` subclasses are dataclasses), only its declared
+            fields are eligible for mirroring, so future upstream additions of
+            non-field attributes whose names collide with ``output_cls`` fields
+            (e.g. ``to_tuple``, ``keys``) cannot silently smuggle a wrong value
+            through. Non-dataclass sources fall back to ``hasattr``/``getattr``
+            so tests can pass simple namespaces in place of real HF outputs.
         **overrides: Field values that take precedence over ``source_output``.
 
     Returns:
         An instance of ``output_cls`` with mirrored + overridden fields.
     """
+    if dataclasses.is_dataclass(source_output):
+        mirrorable = {field.name for field in dataclasses.fields(source_output)}
+        is_mirrorable = mirrorable.__contains__
+    else:
+        is_mirrorable = lambda name: hasattr(source_output, name)  # noqa: E731
+
     kwargs: Dict[str, Any] = {}
     for field in dataclasses.fields(output_cls):
         name = field.name
         if name in overrides:
             kwargs[name] = overrides[name]
-        elif hasattr(source_output, name):
+        elif is_mirrorable(name):
             kwargs[name] = getattr(source_output, name)
     return output_cls(**kwargs)
 
