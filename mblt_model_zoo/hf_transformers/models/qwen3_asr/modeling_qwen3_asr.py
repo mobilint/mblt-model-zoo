@@ -204,8 +204,17 @@ class MobilintQwen3ASRTextModel(
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
     ) -> torch.Tensor:
-        """Run Qwen3-ASR decoder by forwarding only suffixes missing from active cache."""
+        """Run Qwen3-ASR decoder by forwarding only suffixes missing from active cache.
+
+        ``logits_to_keep`` follows HF semantics against the current call's
+        input window (``seq_len = input_ids.shape[1]``): ``0`` keeps every
+        position (default, matching the non-beam path), ``n > 0`` keeps the
+        last ``n``, and a tensor selects arbitrary positions. The selector
+        is applied after per-beam suffix decode so beam-cache state advances
+        identically regardless of which positions the caller keeps.
+        """
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected rank-3 inputs_embeds for beam decode, got {tuple(inputs_embeds.shape)}")
 
@@ -302,7 +311,21 @@ class MobilintQwen3ASRTextModel(
             logits_list.append(row_logits)
             logits_by_target_tokens[target_key] = row_logits
 
-        return torch.cat(logits_list, dim=0)
+        logits = torch.cat(logits_list, dim=0)
+        window_length = int(input_ids.shape[1])
+        # HF-compatible selector against the current call's input window.
+        # The empty-selector branch keeps the vocab axis (via a zero-width
+        # slice of the already-produced logits) so callers stacking outputs
+        # across paths see a consistent ``(batch, 0, vocab)`` shape.
+        output_positions = self._output_positions_for_logits_to_keep(
+            logits_to_keep, window_length
+        )
+        if len(output_positions) == window_length and output_positions == list(range(window_length)):
+            return logits
+        if not output_positions:
+            return logits[:, :0, :]
+        index = torch.tensor(output_positions, dtype=torch.long, device=logits.device)
+        return logits.index_select(1, index)
 
     def forward(
         self,
@@ -364,6 +387,7 @@ class MobilintQwen3ASRTextModel(
                 cache_position=cache_position,
                 prefill_chunk_size=prefill_chunk_size,
                 count_npu_time=count_npu_time,
+                logits_to_keep=logits_to_keep,
             )
         else:
             logits = self.llm_forward(

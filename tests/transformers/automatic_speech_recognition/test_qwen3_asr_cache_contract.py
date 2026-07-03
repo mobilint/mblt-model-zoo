@@ -36,6 +36,28 @@ class _InputsEmbedAwareMxqModel:
         return [torch.full((suffix_length, 8), row_value, dtype=torch.float32).numpy()]
 
 
+class _PositionAwareMxqModel:
+    """MXQ stub that tags each returned row with its absolute cache position.
+
+    Lets a test tell which sequence position ended up in the final tensor
+    without having to reason about beam-cache internals: the logits value
+    at row ``i`` is ``cache_size + i`` (broadcast across the vocab axis),
+    so a selector's picked positions are directly readable from the output.
+    """
+
+    def __init__(self) -> None:
+        self.infer_calls = 0
+
+    def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
+        del output_buffer
+        row_embeds = inputs[0]
+        self.infer_calls += 1
+        suffix_length = int(row_embeds.shape[2])
+        vocab = 8
+        positions = torch.arange(cache_size, cache_size + suffix_length, dtype=torch.float32)
+        return [positions.unsqueeze(-1).expand(suffix_length, vocab).contiguous().numpy()]
+
+
 class _DummyCache:
     """Tiny cache stub exposing the sequence length API used by ``forward``."""
 
@@ -72,9 +94,10 @@ class _DummyQwen3ASRTextModel(MobilintQwen3ASRTextModel):
         prefill_chunk_size: int | None = None,
         count_npu_time: bool = False,
         attention_mask: torch.Tensor | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
     ) -> torch.Tensor:
         """Return deterministic logits while exposing forward-time cache state."""
-        del cache_position, prefill_chunk_size, count_npu_time, attention_mask
+        del cache_position, prefill_chunk_size, count_npu_time, attention_mask, logits_to_keep
         self.forward_past_key_values = past_key_values
         return torch.zeros(
             inputs_embeds.shape[0],
@@ -245,6 +268,190 @@ def test_qwen3_asr_duplicate_logits_reuse_single_source_beams() -> None:
     assert mxq_model.infer_calls == 1
     assert logits.shape == (2, 1, 8)
     assert torch.equal(logits[0], logits[1])
+
+
+# ---------------------------------------------------------------------------
+# Beam-path logits_to_keep contract
+#
+# The non-beam path (`llm_forward`) honors HF-style `logits_to_keep`, but the
+# beam-cache-backed path (`_beam_llm_forward`) was silently returning the
+# full input window regardless of the selector. These tests pin the same
+# `(batch, kept, vocab)` shape contract that `TestLogitsShapeMatrix` enforces
+# for the non-beam paths, and they verify that a tensor selector actually
+# picks the requested absolute positions (via the position-aware stub) so a
+# broken index-select would fail loudly instead of returning the right shape
+# with wrong contents.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("logits_to_keep", "expected_kept"),
+    [
+        pytest.param(0, 3, id="int_0_keep_all"),
+        pytest.param(1, 1, id="int_1_last_only"),
+        pytest.param(2, 2, id="int_2_last_n"),
+        pytest.param(torch.tensor([0, 2]), 2, id="tensor_pick_positions"),
+        pytest.param(torch.tensor([-1]), 1, id="tensor_negative_last"),
+        pytest.param(torch.tensor([1, 1]), 2, id="tensor_duplicate_positions"),
+        pytest.param(torch.tensor([], dtype=torch.long), 0, id="tensor_empty"),
+    ],
+)
+def test_qwen3_asr_beam_forward_honors_logits_to_keep_shape(
+    logits_to_keep: object,
+    expected_kept: int,
+) -> None:
+    """Beam path returns ``(batch, kept, vocab)`` matching HF selector semantics."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 6]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[7.0, 7.0], [8.0, 8.0], [9.0, 9.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        logits_to_keep=logits_to_keep,
+    )
+
+    assert logits.shape == (2, expected_kept, 8)
+
+
+def test_qwen3_asr_beam_forward_default_matches_pre_selector_behavior() -> None:
+    """Default (``logits_to_keep=0``) preserves the ``(batch, input_ids.shape[1], vocab)``
+    contract the beam path had before selector plumbing landed."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4], [4]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0]],
+            [[7.0, 7.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.tensor([0], dtype=torch.long),
+    )
+
+    assert logits.shape == (2, 1, 8)
+
+
+def test_qwen3_asr_beam_forward_tensor_selector_picks_correct_positions() -> None:
+    """A tensor selector must pick the requested absolute positions, not just
+    a shape-compatible slice. Uses the position-aware stub so each row of the
+    returned logits is tagged with its sequence index (``cache_size + i``)."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+    selector = torch.tensor([0, 3, 1])
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        logits_to_keep=selector,
+    )
+
+    assert logits.shape == (1, 3, 8)
+    # Row values are the absolute cache position (0..3) broadcast across vocab.
+    assert torch.equal(logits[0, 0], torch.full((8,), 0.0))
+    assert torch.equal(logits[0, 1], torch.full((8,), 3.0))
+    assert torch.equal(logits[0, 2], torch.full((8,), 1.0))
+
+
+def test_qwen3_asr_beam_forward_empty_selector_preserves_vocab_axis() -> None:
+    """``torch.tensor([])`` returns ``(batch, 0, vocab)`` — the vocab axis
+    survives so downstream stacking / lm_head passes see a consistent rank
+    regardless of which path (beam vs. non-beam) produced the logits."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5], [4, 5]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0]],
+            [[7.0, 7.0], [8.0, 8.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(2, dtype=torch.long),
+        logits_to_keep=torch.tensor([], dtype=torch.long),
+    )
+
+    assert logits.shape == (2, 0, 8)
+    assert logits.dtype == inputs_embeds.dtype
+
+
+def test_qwen3_asr_beam_forward_out_of_range_selector_raises() -> None:
+    """Out-of-range tensor indices must fail loudly, matching the non-beam
+    contract (HF fancy-indexing raises IndexError on the same input)."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0]]],
+        dtype=torch.float32,
+    )
+
+    with pytest.raises(IndexError):
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=torch.arange(2, dtype=torch.long),
+            logits_to_keep=torch.tensor([99]),
+        )
+
+
+def test_qwen3_asr_forward_routes_logits_to_keep_to_beam_path() -> None:
+    """Verify ``forward`` plumbs ``logits_to_keep`` into the beam path — the
+    review-flagged bug was that the wrapper silently dropped the selector
+    when routing to ``_beam_llm_forward``."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 6]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[7.0, 7.0], [8.0, 8.0], [9.0, 9.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    outputs = model(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        logits_to_keep=1,
+    )
+
+    assert outputs.last_hidden_state.shape == (2, 1, 8)
 
 
 def test_qwen3_asr_thinker_forward_supports_return_dict_false() -> None:
