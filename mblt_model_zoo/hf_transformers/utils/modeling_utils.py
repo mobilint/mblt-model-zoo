@@ -260,10 +260,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             return cached
         output_shapes = self.npu_backend.mxq_model.get_model_output_shape()
         vocab = int(output_shapes[0][-1])
-        assert vocab > 0, (
-            "MXQ vocab dim must be static (>0); got %d (mblt_model_zoo assumes the LM head vocab axis is compiled statically even when the token axis is dynamic)"
-            % vocab
-        )
+        if vocab <= 0:
+            raise RuntimeError(
+                f"MXQ vocab dim must be static (>0); got {vocab} "
+                "(mblt_model_zoo assumes the LM head vocab axis is compiled "
+                "statically even when the token axis is dynamic)"
+            )
         self._mxq_static_vocab_cached = vocab
         return vocab
 
