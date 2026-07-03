@@ -254,7 +254,6 @@ class MobilintQwen3ASRTextModel(
                 prefix_length = max(0, len(target_tokens) - int(input_ids.shape[1]))
             local_start_index = max(0, prefix_length - previous_length)
             timing_phase = "prefill" if prefix_length == 0 else "decode"
-            row_logits_ndarray: np.ndarray | None = None
 
             if prefix_length < previous_length:
                 suffix_tokens = torch.tensor(
@@ -275,6 +274,12 @@ class MobilintQwen3ASRTextModel(
             row_embeds_numpy = row_embeds.detach().type(torch.float32).cpu().numpy()
             row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
             num_suffix_chunks = math.ceil(suffix_length / resolved_prefill_chunk_size)
+            # Accumulate per-chunk logits so the selector below sees the full
+            # suffix window. Overwriting a single ``row_logits_ndarray`` inside
+            # the loop would silently drop every chunk except the last, so a
+            # selector referencing positions outside the final chunk would
+            # either raise or (worse) pick from the wrong window.
+            chunk_logits_tensors: list[torch.Tensor] = []
 
             for chunk_index in range(num_suffix_chunks):
                 start_index = chunk_index * resolved_prefill_chunk_size
@@ -293,20 +298,27 @@ class MobilintQwen3ASRTextModel(
                     result = mxq_model.infer([chunk], None, cache_size)
 
                 assert result is not None, "mxq infer result is None!"
-                row_logits_ndarray = result[0]
+                chunk_logits = torch.tensor(
+                    result[0], dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                )
+                while chunk_logits.ndim > 2:
+                    singleton_dims = [
+                        dim for dim, size in enumerate(chunk_logits.shape[:-1]) if int(size) == 1
+                    ]
+                    if not singleton_dims:
+                        raise ValueError(
+                            f"Unexpected Qwen3-ASR beam logits shape: {tuple(chunk_logits.shape)}"
+                        )
+                    chunk_logits = chunk_logits.squeeze(singleton_dims[0])
+                if chunk_logits.ndim == 2:
+                    chunk_logits = chunk_logits.unsqueeze(0)
+                chunk_logits_tensors.append(chunk_logits)
 
             past_key_values.commit_beam_tokens(beam_index, target_tokens)
             past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
-            if row_logits_ndarray is None:
+            if not chunk_logits_tensors:
                 raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
-            row_logits = torch.tensor(row_logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
-            while row_logits.ndim > 2:
-                singleton_dims = [dim for dim, size in enumerate(row_logits.shape[:-1]) if int(size) == 1]
-                if not singleton_dims:
-                    raise ValueError(f"Unexpected Qwen3-ASR beam logits shape: {tuple(row_logits.shape)}")
-                row_logits = row_logits.squeeze(singleton_dims[0])
-            if row_logits.ndim == 2:
-                row_logits = row_logits.unsqueeze(0)
+            row_logits = torch.cat(chunk_logits_tensors, dim=1)
             row_logits = row_logits[:, -int(input_ids.shape[1]) :, :]
             logits_list.append(row_logits)
             logits_by_target_tokens[target_key] = row_logits

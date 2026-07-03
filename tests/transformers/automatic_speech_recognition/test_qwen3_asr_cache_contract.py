@@ -428,6 +428,134 @@ def test_qwen3_asr_beam_forward_out_of_range_selector_raises() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Beam-path chunk-boundary contract
+#
+# When the suffix crosses a prefill-chunk boundary (``suffix_length >
+# resolved_prefill_chunk_size``), the beam loop must accumulate every chunk's
+# logits — not just the final chunk's — before the ``logits_to_keep`` selector
+# runs. Without that, keep-all silently returns ``(batch, final_chunk_len,
+# vocab)`` instead of ``(batch, input_ids.shape[1], vocab)`` and any tensor
+# selector referencing a position outside the final chunk either raises
+# ``IndexError`` or picks the wrong row. The shape-only tests above miss this
+# because ``_DummyQwen3ASRBeamTextModel.resolve_prefill_chunk_size`` defaults
+# to 16, well above the window sizes they use.
+# ---------------------------------------------------------------------------
+
+
+def test_qwen3_asr_beam_forward_multi_chunk_keeps_full_window() -> None:
+    """Default keep-all across a chunk boundary must return the full window.
+
+    With ``prefill_chunk_size=2`` and a 4-token window the suffix decodes over
+    two chunks; the position-aware stub tags each row with its absolute cache
+    position so the returned tensor reveals whether every chunk survived.
+    """
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        prefill_chunk_size=2,
+    )
+
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (1, 4, 8)
+    for position in range(4):
+        assert torch.equal(logits[0, position], torch.full((8,), float(position)))
+
+
+def test_qwen3_asr_beam_forward_multi_chunk_selector_picks_early_position() -> None:
+    """A tensor selector referencing a position inside the *first* chunk must
+    still resolve to that position's logits after a multi-chunk suffix decode.
+    Buggy code (final-chunk-only) either raises out-of-range or returns the
+    wrong row when the selector reaches into an earlier chunk."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+    selector = torch.tensor([0, 3])
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        prefill_chunk_size=2,
+        logits_to_keep=selector,
+    )
+
+    assert logits.shape == (1, 2, 8)
+    assert torch.equal(logits[0, 0], torch.full((8,), 0.0))
+    assert torch.equal(logits[0, 1], torch.full((8,), 3.0))
+
+
+def test_qwen3_asr_beam_forward_multi_chunk_empty_selector() -> None:
+    """Empty-selector shape contract survives multi-chunk suffix decode."""
+    mxq_model = _InputsEmbedAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        prefill_chunk_size=2,
+        logits_to_keep=torch.tensor([], dtype=torch.long),
+    )
+
+    # Empty selector still requires the KV cache to advance through every
+    # chunk — a fix that early-outs on empty selector would leave later
+    # decode steps with an incomplete cache.
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (1, 0, 8)
+
+
+def test_qwen3_asr_beam_forward_uneven_final_chunk_keeps_full_window() -> None:
+    """Odd suffix (last chunk shorter than the rest) must still yield the
+    full window. Guards against a fix that concatenates but assumes chunks
+    are all the same size."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        prefill_chunk_size=2,
+    )
+
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (1, 3, 8)
+    for position in range(3):
+        assert torch.equal(logits[0, position], torch.full((8,), float(position)))
+
+
 def test_qwen3_asr_forward_routes_logits_to_keep_to_beam_path() -> None:
     """Verify ``forward`` plumbs ``logits_to_keep`` into the beam path — the
     review-flagged bug was that the wrapper silently dropped the selector
