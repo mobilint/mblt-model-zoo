@@ -16,7 +16,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import (
     Qwen2VLModel,
 )
 from transformers.processing_utils import Unpack
-from transformers.utils.generic import TransformersKwargs, logging
+from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
@@ -331,6 +331,7 @@ class MobilintQwen2VLForConditionalGeneration(
         return model_inputs
 
     @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.forward, "count_npu_time")
+    @can_return_tuple
     def forward(
         self,
         *args: Any,
@@ -347,6 +348,12 @@ class MobilintQwen2VLForConditionalGeneration(
         own ``**kwargs`` to the text model). All other arguments follow the upstream
         signature by way of ``@with_mobilint_generation_signature``, so upstream
         additions such as ``position_ids`` continue to pass through unchanged.
+
+        Tuple mode: ``@can_return_tuple`` strips ``return_dict`` from kwargs before
+        the wrapper body runs (so ``self.model`` never returns a tuple) and converts
+        the assembled ``Qwen2VLCausalLMOutputWithPast`` back to a tuple when
+        ``return_dict=False`` was requested — matching the upstream forward's
+        contract.
 
         Dynamic adaptation:
             * Loss kwargs are built via :func:`build_loss_kwargs_dynamic`, so

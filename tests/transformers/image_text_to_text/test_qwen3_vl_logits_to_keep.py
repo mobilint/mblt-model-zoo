@@ -298,6 +298,7 @@ class TestQwen3VLForConditionalGenerationForward:
         torch.nn.Module.__init__(wrapper)
         wrapper.config = SimpleNamespace(
             text_config=SimpleNamespace(vocab_size=vocab_size),
+            return_dict=True,
         )
         wrapper.model = _RecordingModel(
             vocab_size=vocab_size, kept_len=kept_len, hidden_size=hidden_size
@@ -349,6 +350,25 @@ class TestQwen3VLForConditionalGenerationForward:
 
         with pytest.raises(TypeError, match="multiple values for argument 'input_ids'"):
             wrapper.forward(input_ids, input_ids=input_ids)
+
+    def test_forward_return_dict_false_returns_tuple(self) -> None:
+        """``return_dict=False`` must not leak into ``self.model`` and must yield a tuple.
+
+        Without ``@can_return_tuple``, ``return_dict`` would flow through to
+        ``self.model`` and the upstream ``Qwen3VLModel`` contract would return a
+        tuple whose ``.last_hidden_state`` dereference crashes the wrapper.
+        """
+        wrapper = self._make_wrapper(kept_len=2, vocab_size=5)
+        input_ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+        output = wrapper.forward(input_ids=input_ids, return_dict=False)
+
+        assert isinstance(output, tuple)
+        # ``return_dict`` must be stripped before ``self.model`` is called.
+        assert "return_dict" not in wrapper.model.received
+        # Logits are the first non-None field of Qwen3VLCausalLMOutputWithPast
+        # (loss is None because no labels).
+        assert output[0].shape == (1, 2, 5)
 
     def test_forward_rejects_too_many_positional_args(self) -> None:
         """Extra positional args beyond upstream's signature must raise TypeError.
