@@ -925,6 +925,11 @@ class TestBatchedEmptySelection:
         return model, logits, inputs_embeds
 
     def test_batched_all_empty_tensor_returns_zero_shape_dynamic_axis(self) -> None:
+        """Empty selector across the whole batch preserves the compiled vocab
+        axis: ``(batch, 0, vocab)`` — matches HF's
+        ``hidden_states[:, empty, :]`` -> LM head semantics and the
+        single-input entry point's ``(0, vocab)`` after ``.squeeze(0)``.
+        """
         mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
         _model, logits, inputs_embeds = self._run(
@@ -934,11 +939,15 @@ class TestBatchedEmptySelection:
             logits_to_keep=torch.tensor([], dtype=torch.long),
             prefill_chunk_size=3,
         )
-        assert logits.shape == (2, 0, 0)
+        assert logits.shape == (2, 0, mxq.vocab_size)
         assert logits.dtype == inputs_embeds.dtype
         assert logits.device == inputs_embeds.device
 
     def test_batched_all_empty_tensor_returns_zero_shape_last_only(self) -> None:
+        """Path 3 batched fallback must preserve the vocab axis on an
+        all-empty selector, same as Path 2's batched empty branch and
+        Path 3's single-input fallback.
+        """
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
         attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
         _model, logits, inputs_embeds = self._run(
@@ -948,9 +957,36 @@ class TestBatchedEmptySelection:
             logits_to_keep=torch.tensor([], dtype=torch.long),
             prefill_chunk_size=3,
         )
-        assert logits.shape == (2, 0, 0)
+        assert logits.shape == (2, 0, mxq.vocab_size)
         assert logits.dtype == inputs_embeds.dtype
         assert logits.device == inputs_embeds.device
+
+    def test_batched_all_empty_tensor_shape_parity_across_paths(self) -> None:
+        """Path 2 (dynamic-axis) and Path 3 (last-only fallback) must agree
+        on the batched all-empty selector shape. A divergence would surface
+        as a rank/last-dim mismatch in downstream code that compares
+        batched logits across backends or concatenates them with non-empty
+        selections.
+        """
+        dyn_mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        static_mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        _dyn_model, dyn_logits, _ = self._run(
+            dyn_mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=3,
+        )
+        _static_model, static_logits, _ = self._run(
+            static_mxq,
+            attention_mask=attention_mask,
+            hidden_size=4,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=3,
+        )
+        assert dyn_logits.shape == static_logits.shape
+        assert dyn_logits.shape == (2, 0, dyn_mxq.vocab_size)
 
     def test_batched_mixed_empty_and_nonempty_raises_value_error_dynamic_axis(
         self,

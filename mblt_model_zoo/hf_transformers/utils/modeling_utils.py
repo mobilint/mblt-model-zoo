@@ -1187,14 +1187,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             max_keep_len = max((item.shape[0] for item in per_item_sliced), default=0)
             if max_keep_len == 0:
                 # No batch item had any kept positions (e.g. empty-tensor
-                # selector). Return the (batch, 0, 0) shape contract explicitly
-                # so we don't rely on the torch.full((0, 0), -inf) idiom in the
-                # padding loop silently degenerating to a no-op when future
-                # refactors change how max_keep_len / vocab_size are computed.
+                # selector). Return (batch, 0, vocab) so the compiled vocab
+                # axis is preserved — Path 3's empty-selector fallback and
+                # HF's ``hidden_states[:, empty, :]`` -> LM head both keep
+                # the vocab dim, and dropping it here would make the same
+                # ``logits_to_keep=torch.tensor([])`` request return a
+                # different last-dim depending on the batched vs single
+                # entry point.
                 return cast(
                     torch.FloatTensor,
                     torch.zeros(
-                        (batch_size, 0, 0),
+                        (batch_size, 0, mxq_vocab_size),
                         dtype=inputs_embeds.dtype,
                         device=inputs_embeds.device,
                     ),
@@ -1341,14 +1344,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         max_keep_len = max((item.shape[0] for item in per_item_final), default=0)
         if max_keep_len == 0:
             # No batch item had any kept positions (e.g. empty-tensor selector).
-            # Return the (batch, 0, 0) shape contract explicitly so we don't
-            # rely on the torch.full((0, 0), -inf) idiom in the padding loop
-            # silently degenerating to a no-op when future refactors change
-            # how max_keep_len / vocab_size are computed.
+            # Return (batch, 0, vocab) so the compiled vocab axis is preserved,
+            # matching Path 2's batched empty branch, Path 3's single-input
+            # fallback (see :meth:`_mxq_static_vocab_size`), and HF's
+            # ``hidden_states[:, empty, :]`` -> LM head -> ``(batch, 0, vocab)``
+            # contract.
             return cast(
                 torch.FloatTensor,
                 torch.zeros(
-                    (batch_size, 0, 0),
+                    (batch_size, 0, self._mxq_static_vocab_size()),
                     dtype=inputs_embeds.dtype,
                     device=inputs_embeds.device,
                 ),
