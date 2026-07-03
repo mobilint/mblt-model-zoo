@@ -338,17 +338,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         ``.detach().to("cpu").flatten().tolist()`` because the downstream
         wrap/validate and path-3 cursor arithmetic operate on a Python
         ``list[int]``. For typical selectors (a handful to a few dozen
-        positions) this transfer is negligible. In workloads that repeatedly
-        call this helper with a very large GPU-resident selector tensor —
-        e.g. perplexity evaluation with thousands of kept positions — the
-        per-call device-to-host copy can become a hot spot; in that case
-        callers should either move the selector to CPU once up front or,
-        when the selection is contiguous, pass an int form (``0`` for
-        keep-all or ``N`` for the last ``N``) which skips the copy entirely.
+        positions) this transfer is negligible. When the same tensor
+        selector must be resolved against multiple ``seq_len`` values —
+        e.g. a batched forward with mixed lengths, or perplexity
+        evaluation reusing one large selector across the batch — call
+        :meth:`_output_positions_from_cpu_indices` after materializing
+        the selector once, to avoid a per-call device-to-host copy.
         """
         if isinstance(logits_to_keep, torch.Tensor):
             raw = logits_to_keep.detach().to("cpu").flatten().tolist()
-            return cls._wrap_and_validate_indices(raw, seq_len)
+            return cls._output_positions_from_cpu_indices(raw, seq_len)
         n = int(logits_to_keep)
         if n < 0:
             raise ValueError(
@@ -358,6 +357,25 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if n == 0 or n >= seq_len:
             return list(range(seq_len))
         return list(range(seq_len - n, seq_len))
+
+    @classmethod
+    def _output_positions_from_cpu_indices(
+        cls,
+        cpu_indices: list[int],
+        seq_len: int,
+    ) -> list[int]:
+        """Tensor-selector fast path once the CPU materialization is hoisted.
+
+        Given an already-CPU list of raw indices (typically produced by
+        ``logits_to_keep.detach().to("cpu").flatten().tolist()`` once
+        outside a per-item loop), apply the same wrap-and-validate step
+        as :meth:`_output_positions_for_logits_to_keep` — HF-style
+        negative wrap plus range check — and return the resulting output
+        positions. The batch loop in :meth:`_llm_forward_batch` uses this
+        entry point so a large GPU-resident selector is copied to host
+        exactly once per forward, instead of once per batch item.
+        """
+        return cls._wrap_and_validate_indices(cpu_indices, seq_len)
 
     @classmethod
     def _walk_positions_for_logits_to_keep(
@@ -752,12 +770,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # scalar tensor selector we additionally require every item to share the
         # same length, because a single value can only uniformly represent
         # "last position" when there is only one length in the batch.
+        lens_equal = all(sl == sequence_lengths[0] for sl in sequence_lengths)
         if isinstance(logits_to_keep, int) and logits_to_keep == 1:
             is_default_keep = True
         else:
             # int==1 is handled by the fast pre-check above, so the call
             # below only meaningfully evaluates torch.Tensor selectors.
-            lens_equal = all(sl == sequence_lengths[0] for sl in sequence_lengths)
             is_default_keep = lens_equal and self._is_last_only_selector(
                 logits_to_keep, sequence_lengths[0]
             )
@@ -769,11 +787,35 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         output_positions_by_item: dict[int, list[int]] = {}
         walk_positions_by_item: dict[int, list[int]] = {}
         if not is_default_keep:
-            for j in range(batch_size):
-                output_positions_by_item[j] = self._output_positions_for_logits_to_keep(
-                    logits_to_keep, sequence_lengths[j]
-                )
-                walk_positions_by_item[j] = sorted(set(output_positions_by_item[j]))
+            # Hoist the tensor->CPU copy: the raw selector indices are
+            # identical across the batch, only the per-item seq_len differs.
+            # Without this, a large GPU-resident selector would pay a
+            # device->host copy on every batch item.
+            if isinstance(logits_to_keep, torch.Tensor):
+                cpu_indices = logits_to_keep.detach().to("cpu").flatten().tolist()
+
+                def _positions_for(seq_len_j: int) -> list[int]:
+                    return self._output_positions_from_cpu_indices(cpu_indices, seq_len_j)
+            else:
+                def _positions_for(seq_len_j: int) -> list[int]:
+                    return self._output_positions_for_logits_to_keep(logits_to_keep, seq_len_j)
+
+            if lens_equal:
+                # Uniform-length batches (common in perplexity eval) can share
+                # a single result across every item: the position lists depend
+                # only on seq_len and the selector, both fixed across the batch.
+                # Downstream code only reads these lists (indexing / iteration /
+                # len), so sharing the same object is safe.
+                shared_out = _positions_for(sequence_lengths[0])
+                shared_walk = sorted(set(shared_out))
+                for j in range(batch_size):
+                    output_positions_by_item[j] = shared_out
+                    walk_positions_by_item[j] = shared_walk
+            else:
+                for j in range(batch_size):
+                    positions_j = _positions_for(sequence_lengths[j])
+                    output_positions_by_item[j] = positions_j
+                    walk_positions_by_item[j] = sorted(set(positions_j))
 
         def _run_batch_infer(
             cache_ids_l: list[int],

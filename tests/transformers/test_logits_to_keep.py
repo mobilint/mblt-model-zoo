@@ -1050,3 +1050,116 @@ class TestLastOnlySlowPathWarning:
 
         # One warning per instance — the flag lives on the model, not the class.
         assert len(self._slow_path_warnings(caplog.records)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression: batched tensor selector must hoist the device->host copy
+# ---------------------------------------------------------------------------
+
+
+class TestBatchCpuCopyHoist:
+    """Lock in the tensor-selector CPU-copy hoist and the ``lens_equal`` shared
+    result in :meth:`MobilintModelMixin._llm_forward_batch`.
+
+    The batch loop must not call ``logits_to_keep.detach().to("cpu").flatten()
+    .tolist()`` per batch item — one copy up front, then per-``seq_len``
+    wrap/validate via :meth:`_output_positions_from_cpu_indices`. When every
+    item shares the same length the result is computed once and shared.
+    """
+
+    @staticmethod
+    def _spy_from_cpu_indices(monkeypatch):
+        calls: list[tuple[int, int]] = []
+        orig_fn = MobilintModelMixin._output_positions_from_cpu_indices.__func__
+
+        @classmethod
+        def spy(cls, cpu_indices, seq_len):
+            calls.append((id(cpu_indices), seq_len))
+            return orig_fn(cls, cpu_indices, seq_len)
+
+        monkeypatch.setattr(
+            MobilintModelMixin, "_output_positions_from_cpu_indices", spy
+        )
+        return calls
+
+    @staticmethod
+    def _run_batched(model, *, attention_mask, logits_to_keep, hidden_size=4, prefill_chunk_size=4):
+        batch, seq_len = attention_mask.shape
+        inputs_embeds = torch.arange(batch * seq_len * hidden_size, dtype=torch.float32).reshape(
+            batch, seq_len, hidden_size
+        )
+        cache_position = torch.arange(seq_len)
+        return model.llm_forward(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            cache_position=cache_position,
+            prefill_chunk_size=prefill_chunk_size,
+            attention_mask=attention_mask,
+            logits_to_keep=logits_to_keep,
+        )
+
+    def test_from_cpu_indices_unit_matches_full_helper(self) -> None:
+        """The new entry point resolves the same way as the tensor branch of
+        :meth:`_output_positions_for_logits_to_keep`, given a pre-materialized
+        CPU list — including HF-style negative wrap and range check.
+        """
+        assert MobilintModelMixin._output_positions_from_cpu_indices([0, -1, 2], seq_len=5) == [0, 4, 2]
+        with pytest.raises(IndexError, match=r"7.*seq_len=5"):
+            MobilintModelMixin._output_positions_from_cpu_indices([0, 7], seq_len=5)
+
+    def test_lens_equal_calls_helper_exactly_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Uniform-length batch + tensor selector: the resolver runs once and
+        every batch item shares the returned list — no per-item CPU copy and
+        no per-item wrap/validate.
+        """
+        calls = self._spy_from_cpu_indices(monkeypatch)
+        model = make_model(DynamicAxisMxq(vocab_size=5, max_width=4), max_batch_size=4)
+        attention_mask = torch.tensor(
+            [[1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1]], dtype=torch.long
+        )
+        self._run_batched(
+            model,
+            attention_mask=attention_mask,
+            logits_to_keep=torch.tensor([0, 2]),
+            prefill_chunk_size=3,
+        )
+        assert len(calls) == 1
+        assert calls[0][1] == 3
+
+    def test_lens_mixed_shares_single_cpu_copy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mixed-length batch + tensor selector: wrap/validate necessarily runs
+        per seq_len, but every call must receive the SAME list identity —
+        proving the device->host copy was hoisted out of the loop.
+        """
+        calls = self._spy_from_cpu_indices(monkeypatch)
+        model = make_model(DynamicAxisMxq(vocab_size=5, max_width=4), max_batch_size=3)
+        attention_mask = torch.tensor(
+            [[1, 1, 1, 0], [1, 1, 1, 1], [1, 1, 0, 0]], dtype=torch.long
+        )
+        self._run_batched(
+            model,
+            attention_mask=attention_mask,
+            logits_to_keep=torch.tensor([0, 1]),
+            prefill_chunk_size=4,
+        )
+        assert len(calls) == 3
+        shared_ids = {c[0] for c in calls}
+        assert len(shared_ids) == 1, (
+            "device->host copy must be hoisted: every _output_positions_from_cpu_indices "
+            "call must receive the same list object, but got distinct ids per call"
+        )
+        assert sorted(c[1] for c in calls) == [2, 3, 4]
+
+    def test_int_selector_skips_from_cpu_indices(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Int selectors (non-tensor) have no device->host copy to hoist, so
+        the CPU-indices entry point must not be involved.
+        """
+        calls = self._spy_from_cpu_indices(monkeypatch)
+        model = make_model(DynamicAxisMxq(vocab_size=5, max_width=4), max_batch_size=2)
+        attention_mask = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
+        # int == 0 is not the default fast path (that's int == 1), so this
+        # exercises the shared branch with an int selector.
+        self._run_batched(
+            model, attention_mask=attention_mask, logits_to_keep=0, prefill_chunk_size=3
+        )
+        assert calls == []
