@@ -617,6 +617,31 @@ class TestLlmForwardBatch:
         )
         assert logits.shape == (2, 1, mxq.vocab_size)
 
+    def test_default_keep_path_survives_get_model_output_shape_failure(self) -> None:
+        """Batched Path 1 must not depend on ``get_model_output_shape()``.
+
+        Some backends can infer last-token logits without exposing the
+        compiled output shape via ``get_model_output_shape()``. Both the
+        boolean probe (``_mxq_supports_all_logits``) and the vocab probe
+        (``_mxq_static_vocab_size``) must be skipped on the fast path;
+        vocab is read from the raw ndarray's trailing axis instead.
+        """
+        import qbruntime
+
+        class _NoShapeStaticLastOnlyMxq(StaticLastOnlyMxq):
+            def get_model_output_shape(self):  # noqa: D401
+                raise qbruntime.QbRuntimeError("no shape for you")
+
+        mxq = _NoShapeStaticLastOnlyMxq(vocab_size=5, max_width=2)
+        attention_mask = torch.tensor([[1, 1, 0], [1, 1, 1]], dtype=torch.long)
+        model, logits = self._run(
+            mxq, attention_mask=attention_mask, hidden_size=4, logits_to_keep=1, prefill_chunk_size=2
+        )
+        assert logits.shape == (2, 1, mxq.vocab_size)
+        # Nothing was cached: the fast path never called either probe.
+        assert getattr(model, "_mxq_all_logits_cached", None) is None
+        assert getattr(model, "_mxq_static_vocab_cached", None) is None
+
     def test_mixed_length_scalar_tensor_does_not_take_shortcut(self) -> None:
         """A scalar tensor selector cannot uniformly represent "last position"
         across a mixed-length batch, so Path 1 must not fire.

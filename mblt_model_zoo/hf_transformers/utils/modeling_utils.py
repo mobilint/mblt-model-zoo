@@ -1008,31 +1008,51 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 )
                 # Two runtime layouts show up in practice for default-keep
                 # batched infer:
-                #   * per-item last row -> raw size == active * vocab, i.e.
-                #     the backend already collapsed the token axis (static
+                #   * per-item last row -> N rows == active, i.e. the
+                #     backend already collapsed the token axis (static
                 #     last-only MXQ, or a dynamic-axis MXQ whose batched
                 #     kernel happens to emit one row per item).
-                #   * per-token flat -> raw size == total_tokens * vocab,
-                #     i.e. a truly dynamic-axis backend that streams every
-                #     token row into the output (matches the shared
-                #     ``Path 2`` layout downstream).
-                # ``_mxq_static_vocab_size`` reads the compiled vocab axis
-                # once (cached); using it to disambiguate lets Path 1 stay
-                # correct across both layouts without a routing change.
+                #   * per-token flat -> N rows == total_tokens, i.e. a
+                #     truly dynamic-axis backend that streams every token
+                #     row into the output (matches the shared ``Path 2``
+                #     layout downstream).
+                # Path 1 must not require ``mxq_model.get_model_output_shape()``:
+                # some backends can infer last-token logits without
+                # exposing that probe, and ``_mxq_supports_all_logits`` is
+                # intentionally short-circuited here to avoid it. Derive
+                # vocab from the raw ndarray's trailing axis instead — LM
+                # head outputs always carry vocab as the last dim — and
+                # fall back to ``config.vocab_size`` for the rare 1D
+                # buffer case. Layout is then chosen by comparing the row
+                # count to ``active`` vs ``total_tokens``.
                 raw_arr = np.asarray(raw_output)
                 active = len(cache_ids)
                 total_tokens = sum(sequence_lengths_chunks)
-                vocab = self._mxq_static_vocab_size()
-                if raw_arr.size == active * vocab:
+                if raw_arr.ndim >= 2 and raw_arr.shape[-1] > 0:
+                    vocab = int(raw_arr.shape[-1])
+                else:
+                    vocab = int(getattr(self.config, "vocab_size", 0))
+                    if vocab <= 0 or raw_arr.size % vocab != 0:
+                        raise RuntimeError(
+                            f"Cannot derive vocab dim from flat batched MXQ "
+                            f"output of size {raw_arr.size}: raw ndarray is "
+                            f"rank {raw_arr.ndim} and config.vocab_size={vocab} "
+                            f"does not divide the buffer."
+                        )
+                n_rows = raw_arr.size // vocab
+                if n_rows == active:
+                    # Layout A (per-item last row) — includes the
+                    # active == total_tokens decode case where both
+                    # layouts coincide.
                     logits_chunks = cast(
                         torch.FloatTensor,
                         torch.tensor(
                             raw_arr, dtype=inputs_embeds.dtype, device=inputs_embeds.device
                         ).reshape([active, 1, vocab]),
                     )
-                elif raw_arr.size == total_tokens * vocab:
-                    # Per-token flat output: pick each item's last row using
-                    # cumulative offsets. Item k occupies rows
+                elif n_rows == total_tokens:
+                    # Layout B (per-token flat): pick each item's last
+                    # row using cumulative offsets. Item k occupies rows
                     # ``[offset, offset + seq_len_k)`` in the flat buffer;
                     # its default-keep row is the final one.
                     flat = raw_arr.reshape(total_tokens, vocab)
@@ -1049,10 +1069,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     )
                 else:
                     raise RuntimeError(
-                        f"Unexpected batched MXQ output size {raw_arr.size} for "
-                        f"active={active}, total_tokens={total_tokens}, vocab={vocab}: "
-                        f"expected {active * vocab} (per-item last row) or "
-                        f"{total_tokens * vocab} (per-token flat)."
+                        f"Unexpected batched MXQ output row count {n_rows} "
+                        f"(vocab={vocab}, raw size={raw_arr.size}) for "
+                        f"active={active}, total_tokens={total_tokens}: "
+                        f"expected {active} (per-item last row) or "
+                        f"{total_tokens} (per-token flat)."
                     )
 
                 if debug_enabled:

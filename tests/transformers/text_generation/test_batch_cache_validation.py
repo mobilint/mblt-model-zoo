@@ -26,8 +26,9 @@ class _FakeMxqModel:
 
     def get_model_output_shape(self):
         # Static last-only layout: token axis is 1, vocab is the compiled last dim.
-        # Path 1's runtime layout detection reads the last dim via
-        # ``_mxq_static_vocab_size`` to disambiguate per-item vs per-token outputs.
+        # Batched Path 1 no longer probes this — vocab comes from the raw
+        # ndarray's trailing axis — but Path 2/3 and the empty-selector
+        # helpers still call ``_mxq_static_vocab_size`` so the method stays.
         return [(1, 1, self._VOCAB_SIZE)]
 
     def infer(self, inputs, _, __, batch_params):
