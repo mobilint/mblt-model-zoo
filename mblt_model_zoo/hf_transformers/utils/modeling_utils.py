@@ -470,11 +470,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
               ``kept_positions == len(_output_positions_for_logits_to_keep(
               logits_to_keep, seq_len))`` (caller order and duplicates are
               preserved, matching HF fancy-indexing).
-            * Path 3 (last-only fallback): ``(1, kept_positions, vocab)``
-              when at least one position was kept, and ``(1, 0, 0)`` when
-              the caller passed an empty ``logits_to_keep`` selector — in
-              the empty case the KV cache has still been advanced through
-              the full input by the trailing prefill loop.
+            * Path 3 (last-only fallback): ``(1, kept_positions, vocab)``.
+              When the caller passes an empty ``logits_to_keep`` selector
+              ``kept_positions`` is 0 and the vocab axis comes from
+              :meth:`_mxq_static_vocab_size`, so the shape/rank stays
+              parity with Path 2's empty-selector output and HF's
+              ``hidden_states[:, empty, :]`` semantics. The KV cache has
+              still been advanced through the full input by the trailing
+              prefill loop.
 
             Caller convention: single-input ``llm_forward`` callers apply
             ``.squeeze(0)`` afterwards to drop the leading batch axis;
@@ -573,11 +576,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if not output_positions:
             # Empty selection (empty tensor input): the KV cache has already
             # been advanced through the entire input by the trailing loop
-            # above. Return a (1, 0, 0) placeholder rather than calling
-            # np.concatenate on an empty list. The leading 1 matches the
-            # batch axis that do_infer would have produced, so single-input
-            # callers can still ``.squeeze(0)`` down to (0, 0).
-            return torch.zeros((1, 0, 0), dtype=dtype, device=device)
+            # above. Return (1, 0, vocab) rather than np.concatenate-ing an
+            # empty list; the compiled vocab dim is preserved so the
+            # single-input caller's ``.squeeze(0)`` yields (0, vocab) —
+            # matching Path 2's empty branch and HF's
+            # ``hidden_states[:, empty, :]`` -> LM head -> (batch, 0, vocab)
+            # contract. Dropping to (1, 0, 0) here would make the same
+            # ``logits_to_keep=torch.tensor([])`` request return a different
+            # rank / last-dim from the other two paths.
+            vocab = self._mxq_static_vocab_size()
+            return torch.zeros((1, 0, vocab), dtype=dtype, device=device)
 
         logits_ndarray = np.concatenate(
             [per_position_logits[p] for p in output_positions], axis=-2

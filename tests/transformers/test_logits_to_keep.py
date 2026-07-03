@@ -453,7 +453,15 @@ class TestLlmForwardSingle:
         assert cache.get_seq_length() == seq_len
 
     def test_fallback_empty_tensor_returns_empty_logits(self) -> None:
-        """An empty ``logits_to_keep`` tensor must not raise on np.concatenate."""
+        """An empty ``logits_to_keep`` tensor must not raise on np.concatenate.
+
+        The kept-positions axis is 0 but the vocab axis is preserved from the
+        compiled model so this matches Path 2's empty-selector output and
+        HF's ``hidden_states[:, empty, :]`` -> LM head -> ``(batch, 0, vocab)``
+        semantics. Previously Path 3 returned ``(1, 0, 0)`` here and the
+        single-input squeeze produced ``(0, 0)``, silently disagreeing with
+        the other two paths on rank / last-dim.
+        """
         mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
         _model, logits = self._run(
             mxq,
@@ -466,7 +474,36 @@ class TestLlmForwardSingle:
         # still walks the whole sequence in normal-sized chunks.
         chunk_seqs = [c["shape"][2] for c in mxq.calls]
         assert chunk_seqs == [4, 2]
-        assert logits.shape == (0, 0)
+        assert logits.shape == (0, mxq.vocab_size)
+
+    def test_empty_tensor_shape_parity_across_paths(self) -> None:
+        """Path 2 (dynamic-axis) and Path 3 (last-only fallback) must return
+        the same shape for a single-input empty selector.
+
+        HF's ``hidden_states[:, empty, :]`` preserves the vocab axis, so
+        the caller sees ``(batch=0, vocab)`` after ``.squeeze(0)`` on both
+        paths — a divergence here would surface as a rank mismatch in
+        downstream code that stacks logits across turns or compares
+        against HF reference tensors.
+        """
+        dyn_mxq = DynamicAxisMxq(vocab_size=5, max_width=4)
+        static_mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        _dyn_model, dyn_logits = self._run(
+            dyn_mxq,
+            seq_len=6,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=4,
+        )
+        _static_model, static_logits = self._run(
+            static_mxq,
+            seq_len=6,
+            hidden_size=3,
+            logits_to_keep=torch.tensor([], dtype=torch.long),
+            prefill_chunk_size=4,
+        )
+        assert dyn_logits.shape == static_logits.shape
+        assert dyn_logits.shape == (0, dyn_mxq.vocab_size)
 
     def test_fallback_out_of_range_indices_raise_indexerror(self) -> None:
         """HF fancy-indexing raises on out-of-range indices; we mirror that."""
