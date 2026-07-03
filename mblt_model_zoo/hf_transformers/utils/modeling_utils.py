@@ -187,13 +187,16 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if getattr(self, "_mxq_last_only_slow_path_warned", False):
             return
         warnings.warn(
-            "Non-default `logits_to_keep` on a last-only MXQ build triggers a "
-            "fallback that runs one MXQ infer per kept position and is "
-            "dramatically slower than the default on long prefills. Pass "
-            "`logits_to_keep=1` for last-token workloads; HF `.generate()` "
-            "already sets this automatically, so this warning does not "
-            "indicate a bug in generation. This message fires once per "
-            "model instance.",
+            "Keep-all or multi-position `logits_to_keep` on a last-only MXQ "
+            "build triggers a fallback that runs one MXQ infer per kept "
+            "position and is dramatically slower than the last-token fast "
+            "path (`logits_to_keep=1`) on long prefills. Model `.forward()` "
+            "wrappers (e.g. Qwen2/EXAONE4/Cohere2/BLIP) default to "
+            "`logits_to_keep=0` (HF-style keep-all), which lands on this "
+            "slow path; pass `logits_to_keep=1` for last-token workloads. "
+            "HF `.generate()` already sets this automatically, so this "
+            "warning does not indicate a bug in generation. This message "
+            "fires once per model instance.",
             category=UserWarning,
             stacklevel=4,
         )
