@@ -482,29 +482,51 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
         # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
-        # additionally collects every chunk's output so the concatenation
-        # covers the full input.
+        # extracts kept-position rows on the fly and drops each chunk right
+        # after, so peak memory stays at (kept_positions * vocab) instead of
+        # spiking to (num_of_chunks * chunk_len * vocab) at concat time.
+        # logits_to_keep=1 dominates in practice; keep-all only shows up in
+        # perplexity eval — kept_positions << seq_len for the common case.
         if is_default_keep or supports_all:
             num_of_chunks = math.ceil(seq_len / prefill_chunk_size)
             assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
-            per_chunk_logits: list[np.ndarray] = []
+            if supports_all:
+                output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
+                walk_positions = sorted(set(output_positions))
+                kept_by_position: dict[int, np.ndarray] = {}
+                walk_ptr = 0
+
             logits_ndarray: Optional[np.ndarray] = None
             for i in range(num_of_chunks):
                 start_index = i * prefill_chunk_size
                 end_index = min(start_index + prefill_chunk_size, seq_len)
                 logits_ndarray = do_infer(start_index, end_index)
                 if supports_all:
-                    per_chunk_logits.append(logits_ndarray)
+                    token_axis = logits_ndarray.ndim - 2
+                    while walk_ptr < len(walk_positions) and walk_positions[walk_ptr] < end_index:
+                        p = walk_positions[walk_ptr]
+                        # np.take returns a fresh allocation, so the chunk
+                        # itself can be freed as soon as this iteration ends.
+                        kept_by_position[p] = np.take(
+                            logits_ndarray, [p - start_index], axis=token_axis
+                        )
+                        walk_ptr += 1
 
             if supports_all:
-                logits_ndarray = np.concatenate(per_chunk_logits, axis=-2)
-                # HF fancy-indexing preserves caller order and duplicates;
-                # ``np.take`` matches that when we pass the output positions
-                # directly without dedup/sort.
-                output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
-                token_axis = logits_ndarray.ndim - 2
-                logits_ndarray = np.take(logits_ndarray, output_positions, axis=token_axis)
+                if output_positions:
+                    # HF fancy-indexing preserves caller order and duplicates —
+                    # concatenating in output_positions order mirrors that.
+                    logits_ndarray = np.concatenate(
+                        [kept_by_position[p] for p in output_positions],
+                        axis=-2,
+                    )
+                else:
+                    # Empty selector: (1, 0, vocab) matches pre-refactor Path 2.
+                    # The KV cache has already been advanced by the loop above.
+                    assert logits_ndarray is not None
+                    token_axis = logits_ndarray.ndim - 2
+                    logits_ndarray = np.take(logits_ndarray, [], axis=token_axis)
 
             assert logits_ndarray is not None
             return torch.tensor(logits_ndarray, dtype=dtype, device=device)
@@ -1030,13 +1052,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # ------------------------------------------------------------------
         # Path 2: dynamic-output MXQ. The compiled model already produces
         # per-position logits, so we keep the caller's chunk size and split
-        # each chunk's flat output by per-item offsets. Per-item logits are
-        # concatenated, sliced by that item's kept positions, right-padded
-        # to the longest kept sequence, and stacked.
+        # each chunk's flat output by per-item offsets. We stash only the
+        # rows at each item's kept walk positions (keyed by position) and
+        # drop the chunk immediately — peak memory stays at
+        # (kept_positions * vocab) per item instead of spiking to
+        # (batch * num_of_chunks * chunk_len * vocab) at concat time.
+        # Final assembly reindexes by ``output_positions_by_item`` so HF
+        # caller order and duplicates survive.
         # ------------------------------------------------------------------
         if supports_all:
             num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
-            all_logits_by_item: dict[int, list[np.ndarray]] = {j: [] for j in range(batch_size)}
+            kept_by_item: dict[int, dict[int, np.ndarray]] = {j: {} for j in range(batch_size)}
+            walk_ptr_by_item: dict[int, int] = {j: 0 for j in range(batch_size)}
 
             for i in range(num_of_chunks):
                 start_index = i * prefill_chunk_size
@@ -1069,7 +1096,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 offset = 0
                 for k, cache_id in enumerate(cache_ids):
                     len_k = sequence_lengths_chunks[k]
-                    all_logits_by_item[cache_id].append(flat_output[offset : offset + len_k, :].copy())
+                    walk_j = walk_positions_by_item[cache_id]
+                    ptr = walk_ptr_by_item[cache_id]
+                    chunk_end_global = start_index + len_k
+                    while ptr < len(walk_j) and walk_j[ptr] < chunk_end_global:
+                        p = walk_j[ptr]
+                        # .copy() so the whole chunk buffer can be dropped
+                        # once this iteration ends — the point of Option C.
+                        kept_by_item[cache_id][p] = flat_output[
+                            offset + (p - start_index), :
+                        ].copy()
+                        ptr += 1
+                    walk_ptr_by_item[cache_id] = ptr
                     offset += len_k
 
                 if debug_enabled:
@@ -1090,16 +1128,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             per_item_sliced: list[torch.Tensor] = []
             vocab_size = 0
             for j in range(batch_size):
-                if all_logits_by_item[j]:
-                    item_all = np.concatenate(all_logits_by_item[j], axis=0)
-                else:
-                    # Zero-length row (attention_mask entirely zero): no chunk
-                    # contributed. Synthesize a (0, vocab) placeholder so the
-                    # padding pass below can right-fill with -inf, symmetric
-                    # with the Path 3 fallback.
-                    item_all = np.empty((0, mxq_vocab_size), dtype=np.float32)
                 positions_j = output_positions_by_item[j]
-                sliced = item_all[positions_j, :] if positions_j else item_all[0:0, :]
+                if positions_j:
+                    # np.stack of the per-position 1D rows reconstructs the
+                    # (kept, vocab) tensor in HF caller order (duplicates
+                    # preserved since positions_j is not deduped).
+                    sliced = np.stack(
+                        [kept_by_item[j][p] for p in positions_j], axis=0
+                    )
+                else:
+                    # Empty selector: (0, vocab) placeholder so the padding
+                    # pass below can right-fill with -inf, symmetric with
+                    # the Path 3 fallback.
+                    sliced = np.empty((0, mxq_vocab_size), dtype=np.float32)
                 vocab_size = max(vocab_size, sliced.shape[-1])
                 per_item_sliced.append(
                     torch.tensor(sliced, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
