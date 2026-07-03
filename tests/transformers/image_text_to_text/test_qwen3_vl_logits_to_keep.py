@@ -163,14 +163,18 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         assert logits.shape == (1, 6, mxq.vocab_size)
 
         # Concatenation should be in call order, one chunk per prefill_chunk_size window.
+        # Without a caller cache, ``_do_infer`` uses ``start_index`` as cache_size so
+        # the NPU sees prior chunks' KV state — the fake mirrors that by offsetting.
         expected_chunks = []
+        running_cache_size = 0
         for chunk_len in (3, 3):
-            base = 0  # past_key_values is None so cache_size stays 0.
+            base = running_cache_size * mxq.vocab_size
             expected_chunks.append(
                 (np.arange(chunk_len * mxq.vocab_size, dtype=np.float32) + base).reshape(
                     1, chunk_len, mxq.vocab_size
                 )
             )
+            running_cache_size += chunk_len
         expected = np.concatenate(expected_chunks, axis=1)
         np.testing.assert_allclose(logits.numpy(), expected)
 

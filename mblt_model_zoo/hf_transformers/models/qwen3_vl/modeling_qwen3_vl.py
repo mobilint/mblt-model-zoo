@@ -438,7 +438,14 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         self.npu_time = 0.0 if count_npu_time else None
 
         def _do_infer(start_index: int, end_index: int) -> np.ndarray:
-            cache_size = past_key_values.get_seq_length() if past_key_values is not None else 0
+            # See modeling_utils.llm_forward._do_infer: without a caller cache,
+            # start_index is the running "processed so far" count within this
+            # call, so use it as the KV cache_size — otherwise Path 3's prefix
+            # walks would pass 0 to every chunk and the size-1 kept-position
+            # captures would see no left context.
+            cache_size = (
+                past_key_values.get_seq_length() if past_key_values is not None else start_index
+            )
             inputs_chunk = inputs_np[:, start_index:end_index, :]
             if past_key_values is None:
                 deepstack_chunk = deepstack_tensor[:, start_index:end_index, :].to(dtype=torch.float32).cpu().numpy()

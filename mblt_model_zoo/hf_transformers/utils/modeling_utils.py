@@ -631,7 +631,17 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
         def _do_infer(start: int, end: int) -> np.ndarray:
-            cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
+            # When the caller did not supply a cache, use ``start`` (the number
+            # of tokens already fed to the NPU within this call) as the KV
+            # cache_size. Every path calls ``_do_infer`` with monotonically
+            # increasing, contiguous windows, so ``start`` is exactly the
+            # running "processed so far" count. Without this, Path 3's prefix
+            # walks would pass cache_size=0 for every chunk and the size-1
+            # kept-position captures would see no left context — silently
+            # corrupting keep-all / perplexity logits when use_cache is unset.
+            # Path 1 and Path 2 have the same latent issue for multi-chunk
+            # prefills; the same fix covers them.
+            cache_size = start if past_key_values is None else past_key_values.get_seq_length()
             chunk = inputs_embeds_numpy[:, :, start:end, :]
             if count_npu_time:
                 t0 = time.perf_counter()
@@ -710,8 +720,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             end_index = min(start + chunk_size, sequence_lengths[j])
             if start < sequence_lengths[j] and end_index <= sequence_lengths[j]:
                 sequence_lengths_chunks.append(end_index - start)
+                # Without a caller-supplied cache, use ``start`` as the KV
+                # cache_size — item j has been walked contiguously from 0 to
+                # ``start`` by prior chunks in this call, so ``start`` is its
+                # running "processed so far" count. Passing 0 here would tell
+                # the NPU to treat every chunk as a fresh sequence, silently
+                # dropping left-context between chunks (see the matching fix
+                # in ``llm_forward._do_infer``).
                 cache_sizes_chunks.append(
-                    past_key_values.get_seq_length(j) if past_key_values is not None else 0
+                    past_key_values.get_seq_length(j) if past_key_values is not None else start
                 )
                 cache_ids.append(j)
                 inputs_embeds_chunks.append(inputs_embeds_masked[j][start:end_index, :])

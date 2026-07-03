@@ -314,7 +314,9 @@ class TestLlmForwardSingle:
         assert logits.shape == (6, mxq.vocab_size)
 
         # Reconstruct the same per-chunk payload the fake produced so we can
-        # check the concatenation ordering.
+        # check the concatenation ordering. Without a caller cache, ``_do_infer``
+        # uses ``start`` as the running cache_size so the NPU sees prior chunks'
+        # KV state — the fake mirrors that by offsetting per chunk by cache_size.
         expected_chunks = []
         cache_size_running = 0
         for chunk_len in (3, 3):
@@ -325,7 +327,7 @@ class TestLlmForwardSingle:
                 )
                 + offset
             )
-            cache_size_running = 0  # past_key_values is None → cache_size stays 0
+            cache_size_running += chunk_len
         expected = np.concatenate(expected_chunks, axis=1).squeeze(0)
         np.testing.assert_allclose(logits.numpy(), expected)
 
@@ -405,6 +407,28 @@ class TestLlmForwardSingle:
         assert chunk_seqs == [2, 1, 2, 1]
         # ``.squeeze(0)`` in path 3 drops the leading batch axis.
         assert logits.shape == (len(indices), mxq.vocab_size)
+
+    def test_fallback_advances_cache_size_without_caller_cache(self) -> None:
+        """Path 3 with ``past_key_values=None`` must still tell the NPU about
+        prior tokens.
+
+        Without this, the discarded prefix ``_do_infer`` calls would pass
+        ``cache_size=0`` and each size-1 kept-position capture would be
+        evaluated as if it were the start of a fresh sequence — silently
+        corrupting keep-all / perplexity logits when ``.forward()`` is
+        called without ``use_cache=True`` (the new HF default is
+        ``logits_to_keep=0``, which triggers Path 3 on last-only MXQ).
+        """
+        mxq = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+        indices = torch.tensor([2, 5])
+        _model, _logits = self._run(
+            mxq, seq_len=6, hidden_size=3, logits_to_keep=indices, prefill_chunk_size=4
+        )
+        # Chunks: (0..2 prefill), (2..3 capture), (3..5 prefill), (5..6 capture).
+        # cache_size at each infer entry equals the running "processed so far"
+        # count, which is the chunk's ``start`` position.
+        cache_sizes = [c["cache_size"] for c in mxq.calls]
+        assert cache_sizes == [0, 2, 3, 5]
 
     def test_fallback_advances_kv_cache_across_all_positions(self) -> None:
         from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
@@ -768,10 +792,12 @@ class TestLlmForwardBatch:
         )
         # Expected trace: (chunk=1 at cursor 0 for both items), (chunk=4 for
         # item 0 only, walking 1→5), (chunk=1 at cursor 5 for item 0).
+        # cache_sizes track the running cursor per item (start=cursor when
+        # past_key_values is None) so the NPU sees prior chunks' KV state.
         assert len(mxq.calls) == 3
         assert mxq.calls[0]["batch"] == [(0, 1, 0), (1, 1, 0)]
-        assert mxq.calls[1]["batch"] == [(0, 4, 0)]
-        assert mxq.calls[2]["batch"] == [(0, 1, 0)]
+        assert mxq.calls[1]["batch"] == [(0, 4, 1)]
+        assert mxq.calls[2]["batch"] == [(0, 1, 5)]
 
         # Both items keep 2 positions (item 1's second row repeats position 0).
         assert logits.shape == (2, 2, mxq.vocab_size)
@@ -803,7 +829,10 @@ class TestLlmForwardBatch:
         assert per_call == [(2, 1), (2, 1), (1, 3), (1, 1)]
 
         # Item 1 must not appear in the middle KV-only walk except by itself.
-        assert mxq.calls[2]["batch"] == [(1, 3, 0)]
+        # cache_size=2 because item 1 has been walked contiguously through
+        # cursor 0 and 1 by prior chunks (running cursor when the caller
+        # passes past_key_values=None).
+        assert mxq.calls[2]["batch"] == [(1, 3, 2)]
 
         assert logits.shape == (2, 1, mxq.vocab_size)
 
