@@ -2,7 +2,7 @@ import dataclasses
 import inspect
 from abc import ABC
 from functools import lru_cache, wraps
-from typing import Any, Callable, Dict, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, cast
 
 import qbruntime
 import torch
@@ -203,14 +203,45 @@ def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
     return _loss_function_parameter_names_cached(inspect.unwrap(loss_function))
 
 
+# Kwarg names that :func:`build_loss_kwargs_dynamic` reads from the outer
+# ``forward``'s ``kwargs`` mapping. These are LOSS-ONLY: they carry no meaning
+# for the inner text model and MUST NOT be forwarded to it — some inner text
+# models (e.g. ``MobilintQwen2VLTextModel``) declare no ``**kwargs`` sink and
+# would raise ``TypeError`` on unexpected loss-only kwargs. Wrappers should
+# strip these names via :func:`pop_loss_only_kwargs` before calling
+# ``self.model``.
+LOSS_ONLY_UPSTREAM_KWARG_NAMES: frozenset[str] = frozenset(
+    {"num_items_in_batch", "shift_labels"}
+)
+
 # Kwarg names that :func:`build_loss_kwargs_dynamic` knows how to supply to
 # upstream loss functions. Exposed so contract tests can assert that all
 # required loss parameters upstream currently declares are covered here.
 # Extend this set (and update the helper below) when a newly-required loss
 # parameter needs a value source beyond the outer ``forward``'s ``kwargs``.
-LOSS_KWARG_SUPPLY_NAMES: frozenset[str] = frozenset(
-    {"logits", "labels", "vocab_size", "num_items_in_batch", "shift_labels"}
+LOSS_KWARG_SUPPLY_NAMES: frozenset[str] = (
+    frozenset({"logits", "labels", "vocab_size"}) | LOSS_ONLY_UPSTREAM_KWARG_NAMES
 )
+
+
+def pop_loss_only_kwargs(kwargs: MutableMapping[str, Any]) -> Dict[str, Any]:
+    """Pop loss-only kwargs out of ``kwargs`` into a separate mapping.
+
+    The names in :data:`LOSS_ONLY_UPSTREAM_KWARG_NAMES` are consumed by
+    :func:`build_loss_kwargs_dynamic` and must not flow into the wrapper's
+    inner model call — the upstream VL ``Model.forward`` forwards its own
+    ``**kwargs`` to ``self.language_model``, and the Mobilint text models
+    accept only a fixed set of named parameters. Loss-only kwargs like
+    ``num_items_in_batch`` would otherwise raise ``TypeError`` there.
+
+    Args:
+        kwargs: The outer ``forward`` wrapper's live ``kwargs`` mapping.
+
+    Returns:
+        A new dict containing the popped loss-only kwargs; suitable to pass as
+        ``upstream_kwargs`` to :func:`build_loss_kwargs_dynamic`.
+    """
+    return {name: kwargs.pop(name) for name in LOSS_ONLY_UPSTREAM_KWARG_NAMES if name in kwargs}
 
 
 def build_loss_kwargs_dynamic(
@@ -235,7 +266,9 @@ def build_loss_kwargs_dynamic(
         vocab_size: Vocabulary size expected by the loss function.
         upstream_kwargs: Kwargs the outer ``forward`` was invoked with; supplies
             optional loss inputs like ``num_items_in_batch`` and ``shift_labels``
-            when the upstream caller threaded them in.
+            when the upstream caller threaded them in. Callers should first
+            strip these with :func:`pop_loss_only_kwargs` so they don't leak
+            into the inner model, then pass the popped mapping here.
 
     Returns:
         Kwargs dict restricted to names actually accepted by ``loss_function``.
@@ -245,16 +278,18 @@ def build_loss_kwargs_dynamic(
           and are also declared on the loss signature.
         * Does **not** cover newly-required parameters whose values must be
           derived from something other than ``upstream_kwargs``. Extend
-          :data:`LOSS_KWARG_SUPPLY_NAMES` and the ``supply`` dict below in
-          lockstep when a new required source needs plumbing.
+          :data:`LOSS_ONLY_UPSTREAM_KWARG_NAMES` when a new upstream-sourced
+          loss kwarg needs plumbing, or :data:`LOSS_KWARG_SUPPLY_NAMES` and
+          the ``supply`` dict below in lockstep when a new required source
+          needs to come from somewhere other than ``upstream_kwargs``.
     """
     supply: Dict[str, Any] = {
         "logits": logits,
         "labels": labels,
         "vocab_size": vocab_size,
-        "num_items_in_batch": upstream_kwargs.get("num_items_in_batch"),
-        "shift_labels": upstream_kwargs.get("shift_labels"),
     }
+    for name in LOSS_ONLY_UPSTREAM_KWARG_NAMES:
+        supply[name] = upstream_kwargs.get(name)
     accepted = set(_loss_function_parameter_names(loss_function))
     return {name: value for name, value in supply.items() if name in accepted}
 

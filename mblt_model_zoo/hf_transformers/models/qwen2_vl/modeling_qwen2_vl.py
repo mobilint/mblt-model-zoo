@@ -24,6 +24,7 @@ from ...utils.generation_utils import (
     MobilintGenerationMixin,
     build_loss_kwargs_dynamic,
     mirror_output_fields,
+    pop_loss_only_kwargs,
     upstream_positional_params,
     with_mobilint_generation_signature,
 )
@@ -382,6 +383,12 @@ class MobilintQwen2VLForConditionalGeneration(
 
         labels = kwargs.pop("labels", None)
         logits_to_keep = kwargs.pop("logits_to_keep", 0)
+        # Loss-only kwargs (``num_items_in_batch``, ``shift_labels``) must be
+        # stripped BEFORE ``self.model`` is called: upstream ``Qwen2VLModel``
+        # forwards its own ``**kwargs`` to ``self.language_model``, and
+        # ``MobilintQwen2VLTextModel.forward`` declares no ``**kwargs`` sink,
+        # so leaking these into that call would raise ``TypeError``.
+        loss_only_kwargs = pop_loss_only_kwargs(kwargs)
 
         outputs = self.model(
             logits_to_keep=logits_to_keep,
@@ -402,7 +409,7 @@ class MobilintQwen2VLForConditionalGeneration(
                     logits=logits,
                     labels=labels,
                     vocab_size=self.config.text_config.vocab_size,
-                    upstream_kwargs=kwargs,
+                    upstream_kwargs=loss_only_kwargs,
                 )
             )
 

@@ -351,6 +351,30 @@ class TestQwen3VLForConditionalGenerationForward:
         with pytest.raises(TypeError, match="multiple values for argument 'input_ids'"):
             wrapper.forward(input_ids, input_ids=input_ids)
 
+    def test_forward_strips_loss_only_kwargs_before_model_call(self) -> None:
+        """Loss-only kwargs must not leak into ``self.model``.
+
+        Upstream ``Qwen3VLModel.forward`` forwards its ``**kwargs`` to
+        ``self.language_model``. Even though ``MobilintQwen3VLTextModel``
+        accepts ``**kwargs``, loss-only kwargs conceptually belong to loss
+        computation only and must be stripped for parity with Qwen2-VL.
+        """
+        wrapper = self._make_wrapper(kept_len=4, vocab_size=5)
+        input_ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+        labels = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
+
+        output = wrapper.forward(
+            input_ids=input_ids,
+            labels=labels,
+            num_items_in_batch=2,
+            shift_labels=torch.tensor([[1, 2, 3, -100]], dtype=torch.long),
+        )
+
+        assert "num_items_in_batch" not in wrapper.model.received
+        assert "shift_labels" not in wrapper.model.received
+        # Loss still computes normally with the stripped loss-only kwargs.
+        assert output.loss is not None
+
     def test_forward_return_dict_false_returns_tuple(self) -> None:
         """``return_dict=False`` must not leak into ``self.model`` and must yield a tuple.
 
