@@ -1519,40 +1519,6 @@ class TestLogitsShapeMatrix:
         # is the contract this test enforces.
         return MobilintModelMixin._output_positions_for_logits_to_keep(selector, seq_len)
 
-    @staticmethod
-    def _skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal: bool) -> None:
-        """Skip cells where batched Path 1 collides with dynamic-axis MXQ prefill.
-
-        Batched Path 1 reshapes ``_run_batch_infer``'s raw output to
-        ``(batch, 1, -1)`` on the assumption that the backend already
-        emits ``(batch, vocab)`` per infer — the static-last-only MXQ
-        contract. A dynamic-axis MXQ instead emits ``(total_tokens, vocab)``
-        for multi-token chunks (prefill), so the reshape yields
-        ``(batch, 1, chunk_len * vocab)`` and the final ``torch.stack``
-        raises when different chunks land in different items' final
-        slots.
-
-        This is a pre-existing production gap orthogonal to the shape
-        contract this class enforces (Path 1 was written assuming static
-        MXQ; dynamic MXQ falls into Path 2 for every non-default selector,
-        which handles the flat-output correctly). Skip the affected cells
-        with a documented reason so the matrix stays honest about the
-        combination it does not currently exercise.
-        """
-        if mxq_cls is not DynamicAxisMxq:
-            return
-        if isinstance(selector, int) and selector == 1:
-            path1_fires = True
-        else:
-            path1_fires = lens_equal and MobilintModelMixin._is_last_only_selector(
-                selector, TestLogitsShapeMatrix._SEQ_LEN
-            )
-        if path1_fires:
-            pytest.skip(
-                "batched Path 1 × dynamic-axis MXQ prefill is a known-untested "
-                "combination (production reshape assumes static-last-only backend)"
-            )
-
     @pytest.mark.parametrize("selector", _SELECTORS)
     @pytest.mark.parametrize("mxq_cls", _MXQ_CLASSES)
     def test_single_input_shape_contract(self, mxq_cls, selector) -> None:
@@ -1586,9 +1552,6 @@ class TestLogitsShapeMatrix:
         must be ``(batch, kept, vocab)``. Padding-driven max-len promotion
         is covered separately by :meth:`test_batched_padded_shape_contract`.
         """
-        # Uniform lengths → lens_equal=True, so tensor-scalar last-position
-        # selectors also route to Path 1.
-        self._skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal=True)
         batch_size = 2
         mxq = mxq_cls(vocab_size=self._VOCAB_SIZE, max_width=self._SEQ_LEN)
         model = make_model(mxq, max_batch_size=batch_size)
@@ -1619,10 +1582,6 @@ class TestLogitsShapeMatrix:
         indices like ``[1, 3]`` would raise IndexError on item 0 (seq_len=3)
         before any shape assertion could fire.
         """
-        # Mixed lengths → lens_equal=False, so only ``int==1`` routes to
-        # Path 1; tensor-scalar last-position selectors fall through to
-        # Path 2 for dynamic-axis MXQ (which handles the flat output).
-        self._skip_if_batched_path1_dynamic_axis_prefill(mxq_cls, selector, lens_equal=False)
         mxq = mxq_cls(vocab_size=self._VOCAB_SIZE, max_width=self._SEQ_LEN)
         model = make_model(mxq, max_batch_size=2)
         attention_mask = torch.tensor(

@@ -16,17 +16,26 @@ class _FakeInputBufferInfo:
 
 
 class _FakeMxqModel:
+    _VOCAB_SIZE = 5
+
     def __init__(self):
         self.calls: list[list[int]] = []
 
     def get_input_buffer_info(self):
         return [_FakeInputBufferInfo(max_width=2)]
 
+    def get_model_output_shape(self):
+        # Static last-only layout: token axis is 1, vocab is the compiled last dim.
+        # Path 1's runtime layout detection reads the last dim via
+        # ``_mxq_static_vocab_size`` to disambiguate per-item vs per-token outputs.
+        return [(1, 1, self._VOCAB_SIZE)]
+
     def infer(self, inputs, _, __, batch_params):
         self.calls.append([param.cache_id for param in batch_params])
         active_batch = len(batch_params)
-        vocab_size = 5
-        logits = torch.arange(active_batch * vocab_size, dtype=torch.float32).reshape(active_batch, vocab_size)
+        logits = torch.arange(active_batch * self._VOCAB_SIZE, dtype=torch.float32).reshape(
+            active_batch, self._VOCAB_SIZE
+        )
         return [logits.numpy()]
 
 

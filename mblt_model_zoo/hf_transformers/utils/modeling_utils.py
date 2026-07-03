@@ -1006,12 +1006,54 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 raw_output, inputs_embeds_numpy_shape = _run_batch_infer(
                     cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
                 )
-                logits_chunks = cast(
-                    torch.FloatTensor,
-                    torch.tensor(raw_output, dtype=inputs_embeds.dtype, device=inputs_embeds.device).reshape(
-                        [len(cache_ids), 1, -1]
-                    ),
-                )
+                # Two runtime layouts show up in practice for default-keep
+                # batched infer:
+                #   * per-item last row -> raw size == active * vocab, i.e.
+                #     the backend already collapsed the token axis (static
+                #     last-only MXQ, or a dynamic-axis MXQ whose batched
+                #     kernel happens to emit one row per item).
+                #   * per-token flat -> raw size == total_tokens * vocab,
+                #     i.e. a truly dynamic-axis backend that streams every
+                #     token row into the output (matches the shared
+                #     ``Path 2`` layout downstream).
+                # ``_mxq_static_vocab_size`` reads the compiled vocab axis
+                # once (cached); using it to disambiguate lets Path 1 stay
+                # correct across both layouts without a routing change.
+                raw_arr = np.asarray(raw_output)
+                active = len(cache_ids)
+                total_tokens = sum(sequence_lengths_chunks)
+                vocab = self._mxq_static_vocab_size()
+                if raw_arr.size == active * vocab:
+                    logits_chunks = cast(
+                        torch.FloatTensor,
+                        torch.tensor(
+                            raw_arr, dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                        ).reshape([active, 1, vocab]),
+                    )
+                elif raw_arr.size == total_tokens * vocab:
+                    # Per-token flat output: pick each item's last row using
+                    # cumulative offsets. Item k occupies rows
+                    # ``[offset, offset + seq_len_k)`` in the flat buffer;
+                    # its default-keep row is the final one.
+                    flat = raw_arr.reshape(total_tokens, vocab)
+                    last_rows = np.empty((active, vocab), dtype=flat.dtype)
+                    offset = 0
+                    for k, len_k in enumerate(sequence_lengths_chunks):
+                        last_rows[k] = flat[offset + len_k - 1]
+                        offset += len_k
+                    logits_chunks = cast(
+                        torch.FloatTensor,
+                        torch.tensor(
+                            last_rows, dtype=inputs_embeds.dtype, device=inputs_embeds.device
+                        ).reshape([active, 1, vocab]),
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Unexpected batched MXQ output size {raw_arr.size} for "
+                        f"active={active}, total_tokens={total_tokens}, vocab={vocab}: "
+                        f"expected {active * vocab} (per-item last row) or "
+                        f"{total_tokens * vocab} (per-token flat)."
+                    )
 
                 if debug_enabled:
                     batch_seq_sum = sum(sequence_lengths_chunks)
