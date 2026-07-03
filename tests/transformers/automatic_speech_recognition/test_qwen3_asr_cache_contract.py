@@ -603,3 +603,205 @@ def test_qwen3_asr_thinker_forward_uses_config_return_dict_default() -> None:
 
     assert isinstance(outputs, tuple)
     assert torch.equal(outputs[0], model.get_input_embeddings()(input_ids))
+
+
+# ---------------------------------------------------------------------------
+# Beam-path selector contract under active-cache prefix reuse
+#
+# When two beams share an audio source (identical ``inputs_embeds`` rows) but
+# their ``input_ids`` share only a proper prefix, the first beam commits an
+# active cache the second beam partially reuses. Concretely: beam 0 forwards
+# ``[A, B, X]`` (active cache becomes ``[A, B, X]``), and beam 1's target
+# ``[A, B, Y]`` yields ``prefix_length=2 > previous_length=0``, so beam 1's
+# ``local_start_index=2`` and only 1 suffix row is decoded. The resulting
+# ``row_logits`` for beam 1 spans window positions ``[2, 3)`` only; window
+# positions ``[0, 2)`` were not decoded this call. The selector must either
+# limit itself to the decoded suffix or raise ``IndexError`` — silently
+# returning a shortened tensor or picking the wrong absolute row is what
+# these tests guard against.
+# ---------------------------------------------------------------------------
+
+
+def test_beam_forward_prefix_reuse_keep_all_raises() -> None:
+    """``logits_to_keep=0`` (keep-all) must fail when the beam-cache prefix
+    covers part of the input window — the pre-fix code silently returned a
+    ``(batch, suffix_length, vocab)`` tensor shorter than the window."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    with pytest.raises(IndexError, match="beam cache offset"):
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=torch.arange(3, dtype=torch.long),
+            logits_to_keep=0,
+        )
+
+
+def test_beam_forward_prefix_reuse_last_one_ok() -> None:
+    """``logits_to_keep=1`` (HF ``.generate()`` default) always succeeds
+    because the last window position is inside every beam's decoded suffix.
+    The position-aware stub tags each row with its absolute cache position,
+    so the returned value equals the last input window position."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        logits_to_keep=1,
+    )
+
+    assert logits.shape == (2, 1, 8)
+    assert torch.equal(logits[0, 0], torch.full((8,), 2.0))
+    assert torch.equal(logits[1, 0], torch.full((8,), 2.0))
+
+
+def test_beam_forward_prefix_reuse_last_n_within_suffix_ok() -> None:
+    """``logits_to_keep=n`` where ``n`` equals the aligned suffix length
+    returns ``(batch, n, vocab)`` with row values matching the tail window
+    positions. Setup: shared prefix of length 1 → ``beam_offset=1``, so the
+    aligned suffix has 2 rows and ``n=2`` is fully inside it."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        logits_to_keep=2,
+    )
+
+    assert logits.shape == (2, 2, 8)
+    for beam in range(2):
+        assert torch.equal(logits[beam, 0], torch.full((8,), 1.0))
+        assert torch.equal(logits[beam, 1], torch.full((8,), 2.0))
+
+
+def test_beam_forward_prefix_reuse_tensor_selector_in_suffix_ok() -> None:
+    """A tensor selector referencing only positions inside every beam's
+    decoded suffix (``>= beam_offset``) returns the absolute-position rows,
+    not the ``[0]`` of the trimmed tensor. Duplicate positions are preserved."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+    selector = torch.tensor([2, 1, 2])
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        logits_to_keep=selector,
+    )
+
+    assert logits.shape == (2, 3, 8)
+    for beam in range(2):
+        assert torch.equal(logits[beam, 0], torch.full((8,), 2.0))
+        assert torch.equal(logits[beam, 1], torch.full((8,), 1.0))
+        assert torch.equal(logits[beam, 2], torch.full((8,), 2.0))
+
+
+def test_beam_forward_prefix_reuse_tensor_selector_below_offset_raises() -> None:
+    """A tensor selector referencing a position covered only by the active
+    beam cache (``< beam_offset``) raises ``IndexError`` — the pre-fix code
+    silently returned the wrong absolute row via ``index_select`` on the
+    trimmed tensor."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    with pytest.raises(IndexError, match="beam cache offset"):
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=torch.arange(3, dtype=torch.long),
+            logits_to_keep=torch.tensor([0]),
+        )
+
+
+def test_beam_forward_prefix_reuse_heterogeneous_beams_align() -> None:
+    """Two beams with different ``local_start_index`` must align to the
+    largest offset so ``torch.cat`` succeeds; pre-fix code left the two
+    ``row_logits`` at mismatched ``shape[1]`` and either raised a cryptic
+    size error or (with a lucky shape) picked wrong rows. Under
+    ``logits_to_keep=1`` the aligned last-position rows carry each beam's
+    absolute last-window position."""
+    mxq_model = _PositionAwareMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=2)
+    # Beam 0 has no shared prefix (it forwards first, so its own history
+    # is empty and prefix_length=0 → local_start_index=0). Beam 1 shares
+    # a 2-token prefix with beam 0's committed active tokens →
+    # local_start_index=2. Alignment must front-trim beam 0 to shape (1,1,vocab).
+    input_ids = torch.tensor([[4, 5, 6], [4, 5, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+            [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(3, dtype=torch.long),
+        logits_to_keep=1,
+    )
+
+    # Aligned suffix length = window_length - max(local_start_index) = 3 - 2 = 1.
+    assert logits.shape == (2, 1, 8)
+    # Last window position is index 2 for both beams; position-aware stub
+    # tags each row with its absolute cache position.
+    assert torch.equal(logits[0, 0], torch.full((8,), 2.0))
+    assert torch.equal(logits[1, 0], torch.full((8,), 2.0))

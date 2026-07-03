@@ -214,6 +214,16 @@ class MobilintQwen3ASRTextModel(
         last ``n``, and a tensor selects arbitrary positions. The selector
         is applied after per-beam suffix decode so beam-cache state advances
         identically regardless of which positions the caller keeps.
+
+        Beam-cache prefix reuse constraint: when the active beam cache already
+        represents a longer common prefix than a beam's own logical history
+        (``prefix_length > previous_length``), the NPU only forwards the
+        uncached suffix so window positions ``[0, beam_offset)`` are not
+        recoverable this call. Any selector referencing such a position
+        raises :class:`IndexError`, mirroring HF's out-of-range fancy-index
+        semantics. Callers needing keep-all or arbitrary early positions
+        should pass ``use_cache=False`` (or ``logits_to_keep=1`` for the
+        common last-token case, which is always safe).
         """
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected rank-3 inputs_embeds for beam decode, got {tuple(inputs_embeds.shape)}")
@@ -227,7 +237,8 @@ class MobilintQwen3ASRTextModel(
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
         logits_list: list[torch.Tensor] = []
-        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], torch.Tensor] = {}
+        beam_offsets: list[int] = []
+        logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], tuple[torch.Tensor, int]] = {}
         self.npu_time = 0.0 if count_npu_time else None
         input_ids = input_ids.view(batch_size, -1)
         embedding_source_indices = self._resolve_source_indices(inputs_embeds)
@@ -247,7 +258,9 @@ class MobilintQwen3ASRTextModel(
             prefix_length = past_key_values.get_common_prefix_length(target_tokens, source_index=source_index)
             previous_length = len(previous_tokens)
             if prefix_length == len(target_tokens) and target_key in logits_by_target_tokens:
-                logits_list.append(logits_by_target_tokens[target_key])
+                cached_row_logits, cached_offset = logits_by_target_tokens[target_key]
+                logits_list.append(cached_row_logits)
+                beam_offsets.append(cached_offset)
                 past_key_values.commit_beam_tokens(beam_index, target_tokens)
                 continue
             if prefix_length == len(target_tokens):
@@ -270,6 +283,12 @@ class MobilintQwen3ASRTextModel(
                 row_embeds = inputs_embeds[beam_index : beam_index + 1, -1:, :]
                 suffix_length = 1
                 prefix_length = max(0, len(target_tokens) - 1)
+                # Only the last input window position is decoded, so the
+                # first ``window_length - 1`` window positions are outside
+                # the suffix. Keep ``local_start_index`` consistent with
+                # the actual produced suffix for downstream beam_offset
+                # alignment and selector validation.
+                local_start_index = max(0, int(input_ids.shape[1]) - 1)
 
             row_embeds_numpy = row_embeds.detach().type(torch.float32).cpu().numpy()
             row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
@@ -321,8 +340,23 @@ class MobilintQwen3ASRTextModel(
             row_logits = torch.cat(chunk_logits_tensors, dim=1)
             row_logits = row_logits[:, -int(input_ids.shape[1]) :, :]
             logits_list.append(row_logits)
-            logits_by_target_tokens[target_key] = row_logits
+            beam_offsets.append(local_start_index)
+            logits_by_target_tokens[target_key] = (row_logits, local_start_index)
 
+        # Align beams to a shared suffix window before ``torch.cat``. When
+        # one beam's active-cache prefix covered more of the input window
+        # than another's, their row_logits have different shape[1]; front-
+        # trim each beam to ``[beam_offset, window_length)`` where
+        # ``beam_offset = max(local_start_index across beams)`` so the
+        # stacked tensor has shape ``(batch, window_length - beam_offset,
+        # vocab)``. When every beam had ``local_start_index == 0`` this is
+        # a no-op.
+        beam_offset = max(beam_offsets) if beam_offsets else 0
+        if beam_offset > 0:
+            for i, offset in enumerate(beam_offsets):
+                drop = beam_offset - offset
+                if drop:
+                    logits_list[i] = logits_list[i][:, drop:, :]
         logits = torch.cat(logits_list, dim=0)
         window_length = int(input_ids.shape[1])
         # HF-compatible selector against the current call's input window.
@@ -332,12 +366,33 @@ class MobilintQwen3ASRTextModel(
         output_positions = self._output_positions_for_logits_to_keep(
             logits_to_keep, window_length
         )
-        if len(output_positions) == window_length and output_positions == list(range(window_length)):
-            return logits
         if not output_positions:
             return logits[:, :0, :]
-        index = torch.tensor(output_positions, dtype=torch.long, device=logits.device)
-        return logits.index_select(1, index)
+        if beam_offset == 0:
+            if len(output_positions) == window_length and output_positions == list(range(window_length)):
+                return logits
+            index = torch.tensor(output_positions, dtype=torch.long, device=logits.device)
+            return logits.index_select(1, index)
+        # ``beam_offset > 0``: positions in ``[0, beam_offset)`` were not
+        # decoded for at least one beam. Refuse to fabricate them so the
+        # caller sees the same out-of-range signal HF fancy-indexing would
+        # give for a genuinely invalid position.
+        unsupported = [p for p in output_positions if p < beam_offset]
+        if unsupported:
+            raise IndexError(
+                f"logits_to_keep positions {unsupported} refer to window positions "
+                f"already covered by the active beam cache (beam cache offset = "
+                f"{beam_offset}); only positions in [{beam_offset}, {window_length}) "
+                f"are recoverable this call. Pass logits_to_keep=1 (HF .generate() "
+                f"default), restrict the selector to the suffix, or set "
+                f"use_cache=False to force a full recompute."
+            )
+        shifted = torch.tensor(
+            [p - beam_offset for p in output_positions],
+            dtype=torch.long,
+            device=logits.device,
+        )
+        return logits.index_select(1, shifted)
 
     def forward(
         self,
