@@ -591,11 +591,21 @@ def main() -> int:
 
         elapsed = time.monotonic() - start
         all_rcs = list(worker_rcs.values()) + [batch_rc, eagle3_rc]
-        overall_rc = 0 if all(r == 0 for r in all_rcs) else max(r for r in all_rcs if r != 0)
+        # rc 5 = pytest "no tests collected"; benign when `-k`/`-m` filters
+        # deselect every test in a shard, so remap to 0 for aggregation.
+        effective_rcs = [0 if r == 5 else r for r in all_rcs]
+        overall_rc = (
+            0 if all(r == 0 for r in effective_rcs) else max(r for r in effective_rcs if r != 0)
+        )
 
         version_logs = sorted(log_dir.glob(f"pytest-{v}-*.log"))
         counts = merge_count_strings([extract_pytest_summary(p) for p in version_logs])
-        note = "BAD_ALLOC" if scan_for_bad_alloc(log_dir, v) else ""
+        notes: list[str] = []
+        if scan_for_bad_alloc(log_dir, v):
+            notes.append("BAD_ALLOC")
+        if any(r == 5 for r in all_rcs):
+            notes.append("NO_TESTS")
+        note = ",".join(notes)
         results.append((v, overall_rc, counts, elapsed, note))
         append_summary(v, status_str(overall_rc), counts, elapsed, note)
         suffix = f" [{note}]" if note else ""
