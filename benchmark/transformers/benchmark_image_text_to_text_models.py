@@ -261,9 +261,7 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
-    disable_npu_specific_args = bool(getattr(args, "original_models", False) and not getattr(args, "mxq_dir", None))
-    vision_core_mode = None if disable_npu_specific_args else getattr(args, "vision_core_mode", None)
-    text_core_mode = None if disable_npu_specific_args else getattr(args, "text_core_mode", None)
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
         core_mode,
@@ -310,15 +308,31 @@ def _append_vlm_subconfig_core_mode_suffix(
     return f"{label}{suffix}", f"{base}{suffix}"
 
 
+def _resolve_vlm_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Return the effective (vision_core_mode, text_core_mode) for the run.
+
+    Vision/text overrides are dropped whenever ``_build_pipeline`` skips
+    NPU-specific parameters for original-model native runs (``args.original_models``
+    without ``args.mxq_dir``). Otherwise the CLI-provided values are used unchanged.
+    """
+    if getattr(args, "original_models", False) and not getattr(args, "mxq_dir", None):
+        return None, None
+    return (
+        getattr(args, "vision_core_mode", None),
+        getattr(args, "text_core_mode", None),
+    )
+
+
 def _vlm_subconfig_core_mode_payload_fields(
     args: argparse.Namespace,
     core_mode: str | None,
 ) -> dict[str, Any]:
     """Return the core_mode / vision_core_mode / text_core_mode fields for a VLM payload."""
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     return {
         "core_mode": core_mode,
-        "vision_core_mode": getattr(args, "vision_core_mode", None),
-        "text_core_mode": getattr(args, "text_core_mode", None),
+        "vision_core_mode": vision_core_mode,
+        "text_core_mode": text_core_mode,
     }
 
 
@@ -1602,8 +1616,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     run_targets: list[
         tuple[str, str | None, str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
     ] = []
-    vision_core_mode = getattr(args, "vision_core_mode", None)
-    text_core_mode = getattr(args, "text_core_mode", None)
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
         target_prefill_range, target_cache_lengths = _target_sweep_lengths(
             args,
@@ -1762,8 +1775,7 @@ def _collect_vlm_run_targets(
         )
     ]
     run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int, str]] = []
-    vision_core_mode = getattr(args, "vision_core_mode", None)
-    text_core_mode = getattr(args, "text_core_mode", None)
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
         for core_mode in _iter_core_modes_for_target(
             args,

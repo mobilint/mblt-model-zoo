@@ -747,6 +747,7 @@ def _build_no_samples_payload(
 ) -> dict[str, Any]:
     """Build a status-only payload for targets that produced no measured ASR samples."""
 
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     return {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "measure",
@@ -765,8 +766,8 @@ def _build_no_samples_payload(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
-        "encoder_core_mode": getattr(args, "encoder_core_mode", None),
-        "decoder_core_mode": getattr(args, "decoder_core_mode", None),
+        "encoder_core_mode": encoder_core_mode,
+        "decoder_core_mode": decoder_core_mode,
         "status": "no_samples",
         "reason": reason,
     }
@@ -904,6 +905,7 @@ def _write_target_json(
     reported_num_beams = _reported_num_beams(sample_timings)
     asr_summary = summary_to_dict(summary)
     augmented_device_metric = add_device_efficiency_metrics(asr_summary, device_metric)
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "measure",
@@ -922,8 +924,8 @@ def _write_target_json(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
-        "encoder_core_mode": getattr(args, "encoder_core_mode", None),
-        "decoder_core_mode": getattr(args, "decoder_core_mode", None),
+        "encoder_core_mode": encoder_core_mode,
+        "decoder_core_mode": decoder_core_mode,
         "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
         "asr": asr_summary,
         "device": augmented_device_metric,
@@ -1011,8 +1013,7 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
     core_modes = [None] if (args.original_models and not args.mxq_dir) else _iter_core_modes_common(args.core_mode)
     if args.original_models and not args.mxq_dir and getattr(args, "_core_mode_explicit", False):
         print("Note: --core-mode is not supported for --original-models ASR native runs and will be ignored.")
-    encoder_core_mode = getattr(args, "encoder_core_mode", None)
-    decoder_core_mode = getattr(args, "decoder_core_mode", None)
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     for target in targets:
         subconfig_applies = _uses_encoder_decoder_core_mode_kwargs(target.model_id)
         for core_mode in core_modes:

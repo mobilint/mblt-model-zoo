@@ -559,6 +559,100 @@ def test_resolve_asr_subconfig_core_modes_keeps_overrides_without_original_model
     assert asr_bench._resolve_asr_subconfig_core_modes(args) == ("global8", "global4")
 
 
+def test_asr_build_run_targets_drops_subconfig_suffix_for_original_native(monkeypatch) -> None:
+    """Verify --original-models without --mxq-dir strips enc/dec suffixes from filenames.
+
+    The pipeline is called with encoder/decoder_core_mode=None in this case, so the
+    generated filename must not claim overrides that never reached the model.
+    """
+    monkeypatch.setattr(asr_bench, "_resolve_original_model_ids", lambda model_ids: list(model_ids))
+    args = asr_bench._parse_args(
+        [
+            "--model",
+            "openai/whisper-tiny",
+            "--original-models",
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    mode_base = asr_bench._build_run_targets(args)[0][3]
+    assert "-enc" not in mode_base
+    assert "-dec" not in mode_base
+
+
+def test_asr_write_target_json_drops_subconfig_core_modes_for_original_native(tmp_path) -> None:
+    """Verify _write_target_json records None for encoder/decoder core-mode on native original runs."""
+    import json
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-tiny",
+        revision_candidates=[None],
+        label="openai/whisper-tiny",
+        base="openai__whisper-tiny",
+        mxq_path=None,
+        is_original=True,
+    )
+    args = asr_bench._parse_args(
+        [
+            "--model",
+            "openai/whisper-tiny",
+            "--original-models",
+            "--num-beams",
+            "1",
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    summary = asr_bench.ASRMetricSummary(
+        num_samples=1,
+        total_audio_s=1.0,
+        total_generate_s=0.5,
+        wer=0.0,
+        cer=0.0,
+        mean_latency_s=0.5,
+        p50_latency_s=0.5,
+        p95_latency_s=0.5,
+        throughput_samples_per_s=2.0,
+        rtf=0.5,
+        inverse_rtf=2.0,
+        decode_tokens_per_s=10.0,
+        avg_tokens_per_sample=5.0,
+    )
+    timing = asr_bench.SampleTiming(
+        sample_id="s1",
+        audio_duration_s=1.0,
+        generate_time_s=0.5,
+        num_generated_tokens=5,
+        num_beams=1,
+        reference="hello",
+        hypothesis="hello",
+        effective_generate_kwargs={"num_beams": 1},
+    )
+    out_path = tmp_path / "whisper-tiny_beams1.json"
+
+    asr_bench._write_target_json(
+        out_path,
+        target=target,
+        label="openai/whisper-tiny",
+        args=args,
+        revision=None,
+        core_mode=None,
+        summary=summary,
+        device_metric={},
+        device_trace={},
+        sample_timings=[timing],
+    )
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["core_mode"] is None
+    assert payload["encoder_core_mode"] is None
+    assert payload["decoder_core_mode"] is None
+
+
 def test_build_asr_pipeline_no_subconfig_kwargs_when_disabled(monkeypatch) -> None:
     """Verify _build_asr_pipeline with encoder/decoder=None doesn't leak subconfig kwargs.
 

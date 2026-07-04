@@ -138,9 +138,10 @@ def _make_text_target(model_id: str = "Qwen/Qwen2-VL-2B") -> TextBenchmarkTarget
 def _mode_bases_for(
     monkeypatch,
     *,
-    core_mode: str,
+    core_mode: str | None,
     vision_core_mode: str | None = None,
     text_core_mode: str | None = None,
+    original_models: bool = False,
 ) -> list[str]:
     """Drive `_collect_vlm_run_targets` with stubbed deps and return the mode_bases."""
 
@@ -162,13 +163,14 @@ def _mode_bases_for(
         "_iter_core_modes_for_target",
         lambda args, batch_mode, disable_npu_specific_args=False: [core_mode],
     )
+    monkeypatch.setattr(vlm_bench, "_resolve_original_model_ids", lambda model_ids: list(model_ids))
     args = argparse.Namespace(
         models=[text_target.model_id],
         mxq_dir=None,
         mxq_path=None,
         revision=None,
         all=False,
-        original_models=False,
+        original_models=original_models,
         batch_mode="non_batch",
         core_mode=core_mode,
         vision_core_mode=vision_core_mode,
@@ -299,3 +301,52 @@ def test_build_pipeline_non_original_keeps_subconfig_core_modes(monkeypatch) -> 
     model_kwargs = captured.get("model_kwargs", {})
     assert model_kwargs["vision_core_mode"] == "global8"
     assert model_kwargs["text_core_mode"] == "global4"
+
+
+def test_collect_vlm_run_targets_drops_subconfig_suffix_for_original_native(monkeypatch) -> None:
+    """Verify --original-models without --mxq-dir strips vis/txt suffixes from filenames.
+
+    The pipeline drops vision/text_core_mode in this case, so filenames must not
+    claim overrides that never reached the model.
+    """
+    mode_base = _mode_bases_for(
+        monkeypatch,
+        core_mode=None,
+        vision_core_mode="global8",
+        text_core_mode="global4",
+        original_models=True,
+    )[0]
+    assert "-vis" not in mode_base
+    assert "-txt" not in mode_base
+
+
+def test_vlm_subconfig_core_mode_payload_fields_drops_overrides_for_original_native() -> None:
+    """Verify payload records None for vision/text_core_mode on original-model native runs."""
+    args = argparse.Namespace(
+        original_models=True,
+        mxq_dir=None,
+        vision_core_mode="global8",
+        text_core_mode="global4",
+    )
+    fields = vlm_bench._vlm_subconfig_core_mode_payload_fields(args, None)
+    assert fields == {
+        "core_mode": None,
+        "vision_core_mode": None,
+        "text_core_mode": None,
+    }
+
+
+def test_vlm_subconfig_core_mode_payload_fields_keeps_overrides_with_mxq_dir(tmp_path) -> None:
+    """Verify --original-models WITH --mxq-dir still records the subconfig overrides."""
+    args = argparse.Namespace(
+        original_models=True,
+        mxq_dir=str(tmp_path),
+        vision_core_mode="global8",
+        text_core_mode="global4",
+    )
+    fields = vlm_bench._vlm_subconfig_core_mode_payload_fields(args, "single")
+    assert fields == {
+        "core_mode": "single",
+        "vision_core_mode": "global8",
+        "text_core_mode": "global4",
+    }
