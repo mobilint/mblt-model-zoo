@@ -44,6 +44,11 @@ class MobilintBlipConfig(MobilintVisionTextConfigMixin, BlipConfig):
         label_smoothing: float = 0.0,
         **kwargs: Any,
     ) -> None:
+        # Strip `text_*` / `vision_*` NPU keys before PretrainedConfig.__init__
+        # so its setattr-loop does not fire our prefixed property setters
+        # before `self.text_config` / `self.vision_config` are built.
+        text_kwargs, vision_kwargs = self._split_sub_backend_kwargs(kwargs)
+
         PretrainedConfig.__init__(self, **kwargs)
 
         if text_config is None:
@@ -56,6 +61,8 @@ class MobilintBlipConfig(MobilintVisionTextConfigMixin, BlipConfig):
 
         self.text_config = MobilintBlipTextConfig(**text_config)
         self.vision_config = MobilintBlipVisionConfig(**vision_config)
+
+        self._apply_sub_backend_kwargs(text_kwargs, vision_kwargs)
 
         self.text_config.encoder_hidden_size = self.vision_config.hidden_size
 

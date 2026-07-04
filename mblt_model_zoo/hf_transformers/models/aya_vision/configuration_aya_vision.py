@@ -23,7 +23,13 @@ class MobilintAyaVisionConfig(MobilintVisionTextConfigMixin, AyaVisionConfig):
             text_config = dict(text_config)
             text_config.setdefault("model_type", "mobilint-cohere2")
 
+        # Defense in depth: pop prefixed NPU kwargs before AyaVisionConfig's
+        # own setattr loop so we never depend on sub-config existence ordering.
+        text_kwargs, vision_kwargs = self._split_sub_backend_kwargs(kwargs)
+
         AyaVisionConfig.__init__(self, vision_config=vision_config, text_config=text_config, **kwargs)
+
+        self._apply_sub_backend_kwargs(text_kwargs, vision_kwargs)
 
         if self.vision_feature_select_strategy != "full":
             raise ValueError(
