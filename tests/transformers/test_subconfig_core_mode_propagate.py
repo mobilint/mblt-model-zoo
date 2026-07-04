@@ -331,3 +331,180 @@ def test_extract_subconfig_pipeline_kwargs_from_namespace() -> None:
     assert options.text_target_clusters == [1]
     assert options.text_mxq_path == "/tmp/text.mxq"
     assert options.vision_target_cores == ["0:0"]
+
+
+def test_append_asr_subconfig_core_mode_suffix_noop_without_overrides() -> None:
+    """Verify no suffix is added when neither encoder nor decoder overrides are set."""
+    label, base = asr_bench._append_asr_subconfig_core_mode_suffix(
+        "openai/whisper-tiny-single",
+        "openai__whisper-tiny-single",
+        "single",
+    )
+    assert label == "openai/whisper-tiny-single"
+    assert base == "openai__whisper-tiny-single"
+
+
+def test_append_asr_subconfig_core_mode_suffix_noop_when_matches_base() -> None:
+    """Verify a subconfig override that matches the base core mode adds no suffix."""
+    label, base = asr_bench._append_asr_subconfig_core_mode_suffix(
+        "openai/whisper-tiny-single",
+        "openai__whisper-tiny-single",
+        "single",
+        encoder_core_mode="single",
+        decoder_core_mode="single",
+    )
+    assert label == "openai/whisper-tiny-single"
+    assert base == "openai__whisper-tiny-single"
+
+
+def test_append_asr_subconfig_core_mode_suffix_encoder_only() -> None:
+    """Verify encoder-only overrides append an `enc<mode>` suffix."""
+    label, base = asr_bench._append_asr_subconfig_core_mode_suffix(
+        "openai/whisper-tiny-single",
+        "openai__whisper-tiny-single",
+        "single",
+        encoder_core_mode="global8",
+    )
+    assert label == "openai/whisper-tiny-single-encglobal8"
+    assert base == "openai__whisper-tiny-single-encglobal8"
+
+
+def test_append_asr_subconfig_core_mode_suffix_decoder_only() -> None:
+    """Verify decoder-only overrides append a `dec<mode>` suffix."""
+    label, base = asr_bench._append_asr_subconfig_core_mode_suffix(
+        "openai/whisper-tiny-single",
+        "openai__whisper-tiny-single",
+        "single",
+        decoder_core_mode="global4",
+    )
+    assert label == "openai/whisper-tiny-single-decglobal4"
+    assert base == "openai__whisper-tiny-single-decglobal4"
+
+
+def test_append_asr_subconfig_core_mode_suffix_encoder_and_decoder() -> None:
+    """Verify both overrides combine into an `enc<mode>-dec<mode>` suffix."""
+    label, base = asr_bench._append_asr_subconfig_core_mode_suffix(
+        "openai/whisper-tiny-single",
+        "openai__whisper-tiny-single",
+        "single",
+        encoder_core_mode="global8",
+        decoder_core_mode="global4",
+    )
+    assert label == "openai/whisper-tiny-single-encglobal8-decglobal4"
+    assert base == "openai__whisper-tiny-single-encglobal8-decglobal4"
+
+
+def test_asr_build_run_targets_distinguishes_subconfig_variants() -> None:
+    """Verify _build_run_targets writes distinct mode_base values per encoder/decoder combo."""
+    common_flags = [
+        "--model",
+        "openai/whisper-tiny",
+        "--core-mode",
+        "single",
+    ]
+
+    default_base = asr_bench._build_run_targets(asr_bench._parse_args(common_flags))[0][3]
+    encoder_override_base = asr_bench._build_run_targets(
+        asr_bench._parse_args(common_flags + ["--encoder-core-mode", "global8"])
+    )[0][3]
+    decoder_override_base = asr_bench._build_run_targets(
+        asr_bench._parse_args(common_flags + ["--decoder-core-mode", "global4"])
+    )[0][3]
+    both_override_base = asr_bench._build_run_targets(
+        asr_bench._parse_args(
+            common_flags
+            + ["--encoder-core-mode", "global8", "--decoder-core-mode", "global4"]
+        )
+    )[0][3]
+
+    assert default_base.endswith("-single")
+    assert encoder_override_base.endswith("-single-encglobal8")
+    assert decoder_override_base.endswith("-single-decglobal4")
+    assert both_override_base.endswith("-single-encglobal8-decglobal4")
+    assert len({default_base, encoder_override_base, decoder_override_base, both_override_base}) == 4
+
+
+def test_asr_build_run_targets_ignores_subconfig_for_non_encoder_decoder_models() -> None:
+    """Verify non encoder-decoder ASR models keep the current mode_base layout."""
+    args = asr_bench._parse_args(
+        [
+            "--model",
+            "facebook/wav2vec2-base-960h",
+            "--core-mode",
+            "single",
+            "--encoder-core-mode",
+            "global8",
+        ]
+    )
+    mode_base = asr_bench._build_run_targets(args)[0][3]
+
+    assert mode_base.endswith("-single")
+    assert "enc" not in mode_base.split("-single", 1)[1]
+
+
+def test_asr_write_target_json_records_subconfig_core_modes(tmp_path) -> None:
+    """Verify _write_target_json records encoder/decoder core-mode fields in the payload."""
+    import json
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-tiny",
+        revision_candidates=[None],
+        label="openai/whisper-tiny",
+        base="openai__whisper-tiny",
+        mxq_path=None,
+        is_original=False,
+    )
+    args = asr_bench._parse_args(
+        [
+            "--num-beams",
+            "1",
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    summary = asr_bench.ASRMetricSummary(
+        num_samples=1,
+        total_audio_s=1.0,
+        total_generate_s=0.5,
+        wer=0.0,
+        cer=0.0,
+        mean_latency_s=0.5,
+        p50_latency_s=0.5,
+        p95_latency_s=0.5,
+        throughput_samples_per_s=2.0,
+        rtf=0.5,
+        inverse_rtf=2.0,
+        decode_tokens_per_s=10.0,
+        avg_tokens_per_sample=5.0,
+    )
+    timing = asr_bench.SampleTiming(
+        sample_id="s1",
+        audio_duration_s=1.0,
+        generate_time_s=0.5,
+        num_generated_tokens=5,
+        num_beams=1,
+        reference="hello",
+        hypothesis="hello",
+        effective_generate_kwargs={"num_beams": 1},
+    )
+    out_path = tmp_path / "whisper-tiny-single-encglobal8-decglobal4_beams1.json"
+
+    asr_bench._write_target_json(
+        out_path,
+        target=target,
+        label="openai/whisper-tiny-single-encglobal8-decglobal4",
+        args=args,
+        revision=None,
+        core_mode="single",
+        summary=summary,
+        device_metric={},
+        device_trace={},
+        sample_timings=[timing],
+    )
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["core_mode"] == "single"
+    assert payload["encoder_core_mode"] == "global8"
+    assert payload["decoder_core_mode"] == "global4"

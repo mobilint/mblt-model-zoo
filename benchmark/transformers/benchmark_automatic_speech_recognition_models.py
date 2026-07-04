@@ -212,6 +212,31 @@ def _uses_encoder_decoder_core_mode_kwargs(model_id: str) -> bool:
     return _is_qwen3_asr_model(model_id) or _is_whisper_like_model(model_id)
 
 
+def _append_asr_subconfig_core_mode_suffix(
+    label: str,
+    base: str,
+    core_mode: str | None,
+    *,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
+) -> tuple[str, str]:
+    """Extend the label/base with a suffix identifying encoder/decoder core-mode overrides.
+
+    Only overrides that differ from the shared ``core_mode`` (and are non-None) are appended,
+    so runs without subconfig overrides keep the current filename layout untouched.
+    """
+
+    parts: list[str] = []
+    if encoder_core_mode is not None and encoder_core_mode != core_mode:
+        parts.append(f"enc{encoder_core_mode}")
+    if decoder_core_mode is not None and decoder_core_mode != core_mode:
+        parts.append(f"dec{decoder_core_mode}")
+    if not parts:
+        return label, base
+    suffix = "-" + "-".join(parts)
+    return f"{label}{suffix}", f"{base}{suffix}"
+
+
 def _apply_asr_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     model_id: str,
@@ -725,6 +750,8 @@ def _build_no_samples_payload(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
+        "encoder_core_mode": getattr(args, "encoder_core_mode", None),
+        "decoder_core_mode": getattr(args, "decoder_core_mode", None),
         "status": "no_samples",
         "reason": reason,
     }
@@ -880,6 +907,8 @@ def _write_target_json(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
+        "encoder_core_mode": getattr(args, "encoder_core_mode", None),
+        "decoder_core_mode": getattr(args, "decoder_core_mode", None),
         "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
         "asr": asr_summary,
         "device": augmented_device_metric,
@@ -967,9 +996,20 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
     core_modes = [None] if (args.original_models and not args.mxq_dir) else _iter_core_modes_common(args.core_mode)
     if args.original_models and not args.mxq_dir and getattr(args, "_core_mode_explicit", False):
         print("Note: --core-mode is not supported for --original-models ASR native runs and will be ignored.")
+    encoder_core_mode = getattr(args, "encoder_core_mode", None)
+    decoder_core_mode = getattr(args, "decoder_core_mode", None)
     for target in targets:
+        subconfig_applies = _uses_encoder_decoder_core_mode_kwargs(target.model_id)
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            if subconfig_applies:
+                mode_label, mode_base = _append_asr_subconfig_core_mode_suffix(
+                    mode_label,
+                    mode_base,
+                    core_mode,
+                    encoder_core_mode=encoder_core_mode,
+                    decoder_core_mode=decoder_core_mode,
+                )
             run_targets.append((target, core_mode, mode_label, mode_base))
     return run_targets
 
