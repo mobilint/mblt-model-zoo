@@ -199,7 +199,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             "build triggers a fallback that runs one MXQ infer per kept "
             "position and is dramatically slower than the last-token fast "
             "path (`logits_to_keep=1`) on long prefills. Model `.forward()` "
-            "wrappers (e.g. Qwen2/EXAONE4/Cohere2/BLIP) default to "
+            "wrappers (e.g. Qwen2/EXAONE4/Cohere2) default to "
             "`logits_to_keep=0` (HF-style keep-all), which lands on this "
             "slow path; pass `logits_to_keep=1` for last-token workloads. "
             "HF `.generate()` already sets this automatically, so this "
