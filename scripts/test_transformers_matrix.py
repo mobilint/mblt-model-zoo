@@ -4,15 +4,18 @@ For each target version this script:
   1. Deletes `.venv/` (and `uv.lock` if present).
   2. Recreates a fresh venv with `uv venv --python <PY>`.
   3. Installs the project with `-e ".[transformers]" --group dev "transformers==<V>"`.
-  4. Runs `pytest tests/transformers` in two phases:
-     - Phase A (parallel): every non-batch test file, split round-robin across N
-       workers. Each worker pins its NPU backend to a distinct core via
-       `--core-mode single --target-cores <cluster>:<core>` (and the encoder /
-       decoder / vision / text variants) so workers do not contend on the same
-       NPU core.
+  4. Runs `pytest tests/transformers` in three phases:
+     - Phase A (parallel): every test file except batch and eagle3 suites,
+       split round-robin across N workers. Each worker pins its NPU backend
+       to a distinct core via `--core-mode single --target-cores <cluster>:<core>`
+       (and the encoder / decoder / vision / text variants) so workers do
+       not contend on the same NPU core.
      - Phase B (serial): batch text-generation tests run alone with all 8 NPU
        cores. Their conftest already validates `--core-mode` == single and pops
        `target_cores` unless the user provided one.
+     - Phase C (serial): eagle3 text-generation tests run with no `--core-mode`
+       override so they land on their default `global4` layout (the compiled
+       MXQ is not compatible with single-core execution).
 
 Version selection defaults to the latest patch of every major.minor release of
 `transformers` on PyPI that falls within the range declared in `pyproject.toml`
@@ -20,8 +23,9 @@ Version selection defaults to the latest patch of every major.minor release of
 
 Logs land under `logs/tx-matrix/<timestamp>/`:
   - install-<V>.log
-  - pytest-<V>-w<i>.log + junit-<V>-w<i>.xml   (Phase A, one per worker)
-  - pytest-<V>-batch.log + junit-<V>-batch.xml (Phase B)
+  - pytest-<V>-w<i>.log + junit-<V>-w<i>.xml     (Phase A, one per worker)
+  - pytest-<V>-batch.log + junit-<V>-batch.xml   (Phase B)
+  - pytest-<V>-eagle3.log + junit-<V>-eagle3.xml (Phase C)
   - summary.txt (tab-separated: version, status, counts, elapsed [, note])
 
 Counts merge every worker + batch junit into one compact string:
@@ -70,6 +74,7 @@ VERSION_MAX = (5, 12, 1)
 
 TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
 BATCH_DIR = TESTS_ROOT / "text_generation" / "batch"
+EAGLE3_DIR = TESTS_ROOT / "text_generation" / "eagle3"
 DEFAULT_CORE_MAP = ("0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3")
 MAX_WORKERS = len(DEFAULT_CORE_MAP)
 _BAD_ALLOC_RE = re.compile(r"BadAlloc|out of memory", re.IGNORECASE)
@@ -167,16 +172,27 @@ def install_matrix(version: str, log_file: Path) -> int:
     )
 
 
-def collect_non_batch_test_files() -> list[Path]:
-    """Return relative paths of test_*.py under tests/transformers, excluding batch dir."""
+def collect_phase_a_test_files() -> list[Path]:
+    """Return relative paths of test_*.py under tests/transformers eligible for phase A.
+
+    Excludes batch dir (phase B: all-8-core serial) and eagle3 dir (phase C: default
+    global4 serial). Phase A forces `--core-mode single --target-cores <c>:<c>` per
+    worker, which mismatches the compiled MXQ layout for those two suites.
+    """
     files: list[Path] = []
     for p in sorted(TESTS_ROOT.rglob("test_*.py")):
+        rel = p.relative_to(REPO_ROOT)
         try:
             p.relative_to(BATCH_DIR)
             continue
         except ValueError:
             pass
-        files.append(p.relative_to(REPO_ROOT))
+        try:
+            p.relative_to(EAGLE3_DIR)
+            continue
+        except ValueError:
+            pass
+        files.append(rel)
     return files
 
 
@@ -207,7 +223,7 @@ def run_phase_parallel(
     core_map: tuple[str, ...],
 ) -> dict[int, int]:
     """Launch `workers` pytest processes on non-batch tests, one per core in core_map."""
-    files = collect_non_batch_test_files()
+    files = collect_phase_a_test_files()
     if not files:
         return {}
     buckets = partition_round_robin(files, workers)
@@ -258,6 +274,26 @@ def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
         "pytest",
         str(BATCH_DIR.relative_to(REPO_ROOT)),
         "--core-mode=single",
+        f"--junit-xml={junit_path}",
+        *extra_args,
+    ]
+    return run(cmd, log_file=log_path)
+
+
+def run_phase_eagle3(version: str, log_dir: Path, extra_args: list[str]) -> int:
+    """Run EAGLE-3 tests serially without --core-mode override.
+
+    `build_eagle3_specs` defaults to `global4` in quick mode; the compiled MXQ
+    is only compatible with that layout, so forcing single-core (as phase A
+    does) triggers `Model_MXQAndModelConfigNotMatch`.
+    """
+    log_path = log_dir / f"pytest-{version}-eagle3.log"
+    junit_path = log_dir / f"junit-{version}-eagle3.xml"
+    cmd = [
+        str(venv_python()),
+        "-m",
+        "pytest",
+        str(EAGLE3_DIR.relative_to(REPO_ROOT)),
         f"--junit-xml={junit_path}",
         *extra_args,
     ]
@@ -337,11 +373,11 @@ def merge_count_strings(counts_list: list[str]) -> str:
 
 
 def _log_group_for_version(name: str) -> str | None:
-    """Map `pytest-<V>.log` / `pytest-<V>-w<i>.log` / `pytest-<V>-batch.log` to `<V>`."""
+    """Map `pytest-<V>*.log` variants (worker, batch, eagle3) to `<V>`."""
     if not name.startswith("pytest-") or not name.endswith(".log"):
         return None
     stem = name[len("pytest-") : -len(".log")]
-    m = re.match(r"^(?P<v>.+?)(?:-(?:w\d+|batch))?$", stem)
+    m = re.match(r"^(?P<v>.+?)(?:-(?:w\d+|batch|eagle3))?$", stem)
     if not m:
         return None
     return m.group("v")
@@ -546,13 +582,15 @@ def main() -> int:
             append_summary(v, f"INSTALL_FAIL({rc})", "-", elapsed)
             continue
 
-        print(f"[phase A] {workers} worker(s) on non-batch tests", flush=True)
+        print(f"[phase A] {workers} worker(s) on non-batch, non-eagle3 tests", flush=True)
         worker_rcs = run_phase_parallel(v, log_dir, extra, workers, core_map)
         print("[phase B] batch tests (serial, all 8 cores)", flush=True)
         batch_rc = run_phase_batch(v, log_dir, extra)
+        print("[phase C] eagle3 tests (serial, default global4)", flush=True)
+        eagle3_rc = run_phase_eagle3(v, log_dir, extra)
 
         elapsed = time.monotonic() - start
-        all_rcs = list(worker_rcs.values()) + [batch_rc]
+        all_rcs = list(worker_rcs.values()) + [batch_rc, eagle3_rc]
         overall_rc = 0 if all(r == 0 for r in all_rcs) else max(r for r in all_rcs if r != 0)
 
         version_logs = sorted(log_dir.glob(f"pytest-{v}-*.log"))
