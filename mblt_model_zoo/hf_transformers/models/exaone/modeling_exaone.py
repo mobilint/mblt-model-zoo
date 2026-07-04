@@ -41,9 +41,17 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[Tuple[Union[torch.Tensor, MobilintCache], ...], CausalLMOutputWithPast]:
+        """Run the Exaone causal LM with HF-style ``logits_to_keep``.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
+        """
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -83,6 +91,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             prefill_chunk_size,
             count_npu_time=count_npu_time,
             attention_mask=effective_attention_mask,
+            logits_to_keep=logits_to_keep,
         )
 
         loss = None

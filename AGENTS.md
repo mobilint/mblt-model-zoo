@@ -94,6 +94,35 @@ because they are the most consistently structured.
   `tests.npu_backend_options.build_vision_engine_kwargs()` so `dev_no`, `core_mode`,
   `target_cores`, and `target_clusters` stay aligned with the engine signature.
 
+#### Transformers Test Scope
+
+Pick the narrowest command that covers the change. `pytest tests/transformers` walks every
+category and takes several minutes; only run it when touching shared code such as
+`mblt_model_zoo/hf_transformers/utils/generation_utils.py`, base helpers in
+`mblt_model_zoo/hf_transformers/utils/`, or other cross-model utilities. Reserve
+`pytest tests/transformers --full-matrix` for the pre-merge or release gate, not per-change
+iteration. Pass `-x` (stop on first failure) as the default flag while iterating on a fix.
+
+Map the touched source path to a single test file where possible:
+
+- `mblt_model_zoo/hf_transformers/models/qwen2/**` -> `pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"`
+- `mblt_model_zoo/hf_transformers/models/qwen3/**` -> `pytest tests/transformers/text_generation/non_batch/test_qwen3.py -k "0.6B"`
+- `mblt_model_zoo/hf_transformers/models/llama/**` -> `pytest tests/transformers/text_generation/non_batch/test_llama.py -k "1B"`
+- `mblt_model_zoo/hf_transformers/models/exaone/**` -> `pytest tests/transformers/text_generation/non_batch/test_exaone.py -k "2.4B"`
+- `mblt_model_zoo/hf_transformers/models/exaone4/**` -> `pytest tests/transformers/text_generation/non_batch/test_exaone4.py`
+- `mblt_model_zoo/hf_transformers/models/qwen2_eagle3/**` -> `pytest tests/transformers/text_generation/eagle3/test_qwen2_eagle3.py`
+- `mblt_model_zoo/hf_transformers/models/qwen2_vl/**` -> `pytest tests/transformers/image_text_to_text/test_qwen2_vl.py`
+- `mblt_model_zoo/hf_transformers/models/qwen3_vl/**` -> `pytest tests/transformers/image_text_to_text/test_qwen3_vl.py -k "2B"`
+- `mblt_model_zoo/hf_transformers/models/aya_vision/**` -> `pytest tests/transformers/image_text_to_text/test_aya.py`
+- `mblt_model_zoo/hf_transformers/models/blip/**` -> `pytest tests/transformers/image_to_text/test_blip.py`
+- `mblt_model_zoo/hf_transformers/models/whisper/**` -> `pytest tests/transformers/automatic_speech_recognition/test_whisper.py -k "small"`
+- `mblt_model_zoo/hf_transformers/models/qwen3_asr/**` -> `pytest tests/transformers/automatic_speech_recognition/test_qwen3_asr.py`
+- `mblt_model_zoo/hf_transformers/models/bert/**` -> `pytest tests/transformers/fill_mask/test_bert.py -k "bert-base-uncased"`
+
+For model families without a dedicated test file (e.g., `cohere2`, `siglip`) or for edits that
+span multiple families in one directory, consult `tests/transformers/TEST.md` for the closest
+subdirectory-level scope.
+
 ## Comment Style Guide
 
 ### Inline Comments
@@ -138,7 +167,7 @@ pre-commit run --files path/to/touched_file.py
 
 ```bash
 pytest tests/vision/test_resnet50.py
-pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
 pytest tests/MeloTTS/test_melo.py -k "KR"
 ```
 

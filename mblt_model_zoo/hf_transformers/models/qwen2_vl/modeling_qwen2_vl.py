@@ -1,6 +1,6 @@
 import inspect
 from functools import lru_cache
-from typing import Union, cast
+from typing import Any, Union, cast
 
 import torch
 import torch.nn as nn
@@ -16,11 +16,18 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import (
     Qwen2VLModel,
 )
 from transformers.processing_utils import Unpack
-from transformers.utils.generic import TransformersKwargs, logging
+from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintCache
-from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
+from ...utils.generation_utils import (
+    MobilintGenerationMixin,
+    build_loss_kwargs_dynamic,
+    mirror_output_fields,
+    pop_loss_only_kwargs,
+    upstream_positional_params,
+    with_mobilint_generation_signature,
+)
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen2_vl import (
     MobilintQwen2VLConfig,
@@ -207,6 +214,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         output_hidden_states: Union[bool, None] = None,
         return_dict: Union[bool, None] = None,
         cache_position: Union[torch.LongTensor, None] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[tuple, BaseModelOutputWithPast]:
@@ -248,6 +256,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position,
             prefill_chunk_size,
             count_npu_time=count_npu_time,
+            logits_to_keep=logits_to_keep,
         )
 
         if not return_dict:
@@ -323,20 +332,93 @@ class MobilintQwen2VLForConditionalGeneration(
         return model_inputs
 
     @with_mobilint_generation_signature(Qwen2VLForConditionalGeneration.forward, "count_npu_time")
+    @can_return_tuple
     def forward(
         self,
-        *args: object,
+        *args: Any,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> Union[tuple, Qwen2VLCausalLMOutputWithPast]:
-        """Forward to upstream while injecting Mobilint decoder timing collection.
+        """Route ``logits_to_keep`` to the Mobilint text decoder.
 
-        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
-        generation helpers still see Qwen2-VL's real inputs such as ``position_ids`` and
-        ``logits_to_keep``.
+        Upstream ``Qwen2VLForConditionalGeneration.forward`` extracts ``logits_to_keep``
+        as a named argument and performs its own final slice on the text model output,
+        which bypasses the Mobilint decoder's position selection. To keep that decoder
+        in charge of picking positions, we pop ``logits_to_keep`` here and thread it
+        into ``self.model`` via kwargs (upstream ``Qwen2VLModel.forward`` forwards its
+        own ``**kwargs`` to the text model). All other arguments follow the upstream
+        signature by way of ``@with_mobilint_generation_signature``, so upstream
+        additions such as ``position_ids`` continue to pass through unchanged.
+
+        Tuple mode: ``@can_return_tuple`` strips ``return_dict`` from kwargs before
+        the wrapper body runs (so ``self.model`` never returns a tuple) and converts
+        the assembled ``Qwen2VLCausalLMOutputWithPast`` back to a tuple when
+        ``return_dict=False`` was requested — matching the upstream forward's
+        contract.
+
+        Dynamic adaptation:
+            * Loss kwargs are built via :func:`build_loss_kwargs_dynamic`, so
+              upstream additions like ``num_items_in_batch`` / ``shift_labels``
+              flow through when the loss function accepts them.
+            * The returned ``Qwen2VLCausalLMOutputWithPast`` is assembled by
+              :func:`mirror_output_fields`, so new output fields (e.g. a future
+              ``image_hidden_states``) are mirrored from the upstream model
+              output automatically instead of requiring wrapper edits.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
         """
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        positional_params = upstream_positional_params(Qwen2VLForConditionalGeneration.forward)
+        if len(args) > len(positional_params):
+            raise TypeError(
+                f"forward() takes at most {len(positional_params)} positional arguments "
+                f"but {len(args)} were given"
+            )
+        for name, value in zip(positional_params, args):
+            if name in kwargs:
+                raise TypeError(f"forward() got multiple values for argument {name!r}")
+            kwargs[name] = value
+
+        labels = kwargs.pop("labels", None)
+        logits_to_keep = kwargs.pop("logits_to_keep", 0)
+        # Loss-only kwargs (``num_items_in_batch``, ``shift_labels``) must be
+        # stripped BEFORE ``self.model`` is called: upstream ``Qwen2VLModel``
+        # forwards its own ``**kwargs`` to ``self.language_model``, and
+        # ``MobilintQwen2VLTextModel.forward`` declares no ``**kwargs`` sink,
+        # so leaking these into that call would raise ``TypeError``.
+        loss_only_kwargs = pop_loss_only_kwargs(kwargs)
+
+        outputs = self.model(
+            logits_to_keep=logits_to_keep,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+
+        # The Mobilint text decoder already returns logits sliced to the requested
+        # positions and ``self.lm_head`` is ``nn.Identity``, so skip the upstream
+        # ``hidden_states[:, slice_indices, :]`` step.
+        logits = cast(torch.FloatTensor, self.lm_head(outputs.last_hidden_state))
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(
+                **build_loss_kwargs_dynamic(
+                    self.loss_function,
+                    logits=logits,
+                    labels=labels,
+                    vocab_size=self.config.text_config.vocab_size,
+                    upstream_kwargs=loss_only_kwargs,
+                )
+            )
+
+        return mirror_output_fields(
+            Qwen2VLCausalLMOutputWithPast,
+            outputs,
+            loss=loss,
+            logits=logits,
+        )
 
 
 AutoModel.register(MobilintQwen2VLConfig, MobilintQwen2VLForConditionalGeneration)

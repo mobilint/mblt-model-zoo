@@ -1,7 +1,8 @@
+import dataclasses
 import inspect
 from abc import ABC
-from functools import wraps
-from typing import Any, Callable, Dict, Optional, cast
+from functools import lru_cache, wraps
+from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, cast
 
 import qbruntime
 import torch
@@ -95,6 +96,256 @@ def llm_eagle3_forward(
         hidden_states=hidden_states,
         attentions=None,
     )
+
+
+@lru_cache(maxsize=None)
+def _upstream_positional_params_cached(func: Callable) -> tuple[str, ...]:
+    """Cached body of :func:`upstream_positional_params`.
+
+    Callers must pass an already ``inspect.unwrap``-ed callable; the public
+    wrapper is responsible for that normalization so wrapped and underlying
+    functions share this cache entry (see :func:`upstream_positional_params`).
+    """
+    return tuple(
+        name
+        for name, parameter in inspect.signature(func).parameters.items()
+        if name != "self"
+        and parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+
+
+def upstream_positional_params(func: Callable) -> tuple[str, ...]:
+    """Return the positional-bindable parameter names of ``func`` (excluding ``self``).
+
+    Only ``POSITIONAL_ONLY`` and ``POSITIONAL_OR_KEYWORD`` parameters are returned —
+    i.e. names that a caller's positional ``*args`` can bind to under normal Python
+    semantics. ``KEYWORD_ONLY``, ``VAR_POSITIONAL`` (``*args``), and ``VAR_KEYWORD``
+    (``**kwargs``) parameters are excluded, so ``zip``-ing the result with a caller's
+    positional args cannot silently misbind a value to a keyword-only parameter.
+
+    Caching policy:
+        The signature parse is memoized on the unwrapped callable so
+        ``inspect.signature`` is not re-parsed on every wrapper invocation inside
+        the generation loop (this helper is called on the hot path of each
+        ``prepare_inputs_for_generation`` / ``forward`` call). ``inspect.unwrap``
+        runs in this outer wrapper — **before** the cache lookup — so
+        ``@functools.wraps``-decorated wrappers and their underlying function
+        share a cache entry. Doing the unwrap inside a cached body would not
+        achieve this: ``functools.lru_cache`` keys on the arguments the wrapper
+        receives, so wrapped and unwrapped callables would occupy distinct entries.
+
+    Boundedness assumption:
+        The unbounded cache is safe **only** because callers are expected to invoke
+        this function with a small, fixed set of upstream methods — e.g.
+        ``Qwen2VLForConditionalGeneration.forward`` or
+        ``GenerationMixin.prepare_inputs_for_generation`` — whose function objects
+        are module-level and interned for the lifetime of the process. Under that
+        contract the cache saturates at a handful of entries and never grows.
+
+    Warning:
+        Do **not** call this function in a loop with freshly constructed callables
+        that ``inspect.unwrap`` cannot normalize — e.g. ``lambda``\ s,
+        ``functools.partial`` results, or per-iteration closures. Each distinct
+        callable is a new cache key, and because ``maxsize=None`` never evicts,
+        this would leak memory indefinitely by pinning the callable and its parsed
+        ``Signature`` object. If such dynamic callables must be supported in the
+        future, switch to a bounded ``maxsize`` or a ``WeakKeyDictionary``-based cache.
+    """
+    return _upstream_positional_params_cached(inspect.unwrap(func))
+
+
+@lru_cache(maxsize=None)
+def _loss_function_parameter_names_cached(loss_function: Callable) -> tuple[str, ...]:
+    """Cached body of :func:`_loss_function_parameter_names`.
+
+    Callers must pass an already ``inspect.unwrap``-ed callable; the public
+    wrapper is responsible for that normalization so wrapped and underlying
+    loss functions share this cache entry.
+    """
+    parameters = inspect.signature(loss_function).parameters
+    return tuple(
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    )
+
+
+def _loss_function_parameter_names(loss_function: Callable) -> tuple[str, ...]:
+    """Return the named parameters of ``loss_function`` (excluding ``*args``/``**kwargs``).
+
+    Only ``POSITIONAL_ONLY``, ``POSITIONAL_OR_KEYWORD``, and ``KEYWORD_ONLY``
+    parameters are returned. Variadic parameters (``*args``, ``**kwargs``) are
+    excluded because they do not carry a fixed name we can supply against.
+
+    Caching policy:
+        ``inspect.signature`` is memoized per unwrapped ``loss_function`` because
+        :func:`build_loss_kwargs_dynamic` is called on the hot decoding path,
+        while the underlying signature is static per loss implementation.
+        ``inspect.unwrap`` runs in this outer wrapper — **before** the cache
+        lookup — so ``@functools.wraps``-decorated loss wrappers share a cache
+        entry with their underlying function. Unwrapping inside a cached body
+        would not achieve this: ``functools.lru_cache`` keys on the arguments
+        the wrapper receives.
+
+    Boundedness assumption:
+        Callers pass a small, fixed set of upstream loss callables
+        (``ForCausalLMLoss`` and siblings), so the unbounded cache saturates
+        at a handful of entries. Do **not** pass freshly constructed callables
+        that ``inspect.unwrap`` cannot normalize (lambdas, ``functools.partial``
+        results, per-call closures) — each distinct object is a new cache key
+        and would leak memory.
+    """
+    return _loss_function_parameter_names_cached(inspect.unwrap(loss_function))
+
+
+# Kwarg names that :func:`build_loss_kwargs_dynamic` reads from the outer
+# ``forward``'s ``kwargs`` mapping. These are LOSS-ONLY: they carry no meaning
+# for the inner text model and MUST NOT be forwarded to it — some inner text
+# models (e.g. ``MobilintQwen2VLTextModel``) declare no ``**kwargs`` sink and
+# would raise ``TypeError`` on unexpected loss-only kwargs. Wrappers should
+# strip these names via :func:`pop_loss_only_kwargs` before calling
+# ``self.model``.
+LOSS_ONLY_UPSTREAM_KWARG_NAMES: frozenset[str] = frozenset(
+    {"num_items_in_batch", "shift_labels"}
+)
+
+# Kwarg names that :func:`build_loss_kwargs_dynamic` knows how to supply to
+# upstream loss functions. Exposed so contract tests can assert that all
+# required loss parameters upstream currently declares are covered here.
+# Extend this set (and update the helper below) when a newly-required loss
+# parameter needs a value source beyond the outer ``forward``'s ``kwargs``.
+LOSS_KWARG_SUPPLY_NAMES: frozenset[str] = (
+    frozenset({"logits", "labels", "vocab_size"}) | LOSS_ONLY_UPSTREAM_KWARG_NAMES
+)
+
+
+def pop_loss_only_kwargs(kwargs: MutableMapping[str, Any]) -> Dict[str, Any]:
+    """Pop loss-only kwargs out of ``kwargs`` into a separate mapping.
+
+    The names in :data:`LOSS_ONLY_UPSTREAM_KWARG_NAMES` are consumed by
+    :func:`build_loss_kwargs_dynamic` and must not flow into the wrapper's
+    inner model call — the upstream VL ``Model.forward`` forwards its own
+    ``**kwargs`` to ``self.language_model``, and the Mobilint text models
+    accept only a fixed set of named parameters. Loss-only kwargs like
+    ``num_items_in_batch`` would otherwise raise ``TypeError`` there.
+
+    Args:
+        kwargs: The outer ``forward`` wrapper's live ``kwargs`` mapping.
+
+    Returns:
+        A new dict containing the popped loss-only kwargs; suitable to pass as
+        ``upstream_kwargs`` to :func:`build_loss_kwargs_dynamic`.
+    """
+    return {name: kwargs.pop(name) for name in LOSS_ONLY_UPSTREAM_KWARG_NAMES if name in kwargs}
+
+
+def build_loss_kwargs_dynamic(
+    loss_function: Callable,
+    *,
+    logits: Any,
+    labels: Any,
+    vocab_size: int,
+    upstream_kwargs: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Compute the keyword arguments to pass into ``loss_function``.
+
+    The wrapper introspects the loss function's signature so upstream additions
+    (e.g. ``num_items_in_batch``, ``shift_labels``) are picked up automatically
+    when present. Names absent from the signature are silently dropped so we do
+    not pass unexpected kwargs into older loss implementations.
+
+    Args:
+        loss_function: Bound (or unbound) loss callable from the upstream model.
+        logits: Model output logits to score.
+        labels: Ground-truth labels for the loss.
+        vocab_size: Vocabulary size expected by the loss function.
+        upstream_kwargs: Kwargs the outer ``forward`` was invoked with; supplies
+            optional loss inputs like ``num_items_in_batch`` and ``shift_labels``
+            when the upstream caller threaded them in. Callers should first
+            strip these with :func:`pop_loss_only_kwargs` so they don't leak
+            into the inner model, then pass the popped mapping here.
+
+    Returns:
+        Kwargs dict restricted to names actually accepted by ``loss_function``.
+
+    Drift coverage:
+        * Silently absorbs upstream additions that appear in ``upstream_kwargs``
+          and are also declared on the loss signature.
+        * Does **not** cover newly-required parameters whose values must be
+          derived from something other than ``upstream_kwargs``. Extend
+          :data:`LOSS_ONLY_UPSTREAM_KWARG_NAMES` when a new upstream-sourced
+          loss kwarg needs plumbing, or :data:`LOSS_KWARG_SUPPLY_NAMES` and
+          the ``supply`` dict below in lockstep when a new required source
+          needs to come from somewhere other than ``upstream_kwargs``.
+    """
+    supply: Dict[str, Any] = {
+        "logits": logits,
+        "labels": labels,
+        "vocab_size": vocab_size,
+    }
+    for name in LOSS_ONLY_UPSTREAM_KWARG_NAMES:
+        supply[name] = upstream_kwargs.get(name)
+    accepted = set(_loss_function_parameter_names(loss_function))
+    return {name: value for name, value in supply.items() if name in accepted}
+
+
+def mirror_output_fields(
+    output_cls: type,
+    source_output: Any,
+    **overrides: Any,
+) -> Any:
+    """Construct ``output_cls`` by mirroring fields from ``source_output``.
+
+    For each field declared on ``output_cls`` (which must be a dataclass, as HF
+    ``ModelOutput`` subclasses are), the value is chosen in this order:
+
+    1. Use the caller-supplied override if the field name is in ``overrides``.
+    2. Otherwise, copy ``getattr(source_output, name)`` when present.
+    3. Otherwise, omit the field and let the dataclass default apply. If the
+       field has no default, dataclass ``__init__`` raises ``TypeError``, which
+       intentionally makes the drift loud instead of silently zero-filling.
+
+    Drift coverage:
+        * Silently mirrors new optional fields added to both the source model
+          output and ``output_cls`` (e.g. a future ``image_hidden_states``).
+        * Loudly fails when ``output_cls`` grows a new *required* field that
+          the source model output does not carry — signaling that the wrapper
+          needs to supply that field explicitly via ``overrides``.
+
+    Args:
+        output_cls: Dataclass type (typically an HF ``ModelOutput`` subclass).
+        source_output: Object whose attributes populate non-override fields.
+            When ``source_output`` is itself a dataclass (the prod case — HF
+            ``ModelOutput`` subclasses are dataclasses), only its declared
+            fields are eligible for mirroring, so future upstream additions of
+            non-field attributes whose names collide with ``output_cls`` fields
+            (e.g. ``to_tuple``, ``keys``) cannot silently smuggle a wrong value
+            through. Non-dataclass sources fall back to ``hasattr``/``getattr``
+            so tests can pass simple namespaces in place of real HF outputs.
+        **overrides: Field values that take precedence over ``source_output``.
+
+    Returns:
+        An instance of ``output_cls`` with mirrored + overridden fields.
+    """
+    if dataclasses.is_dataclass(source_output):
+        mirrorable = {field.name for field in dataclasses.fields(source_output)}
+        is_mirrorable = mirrorable.__contains__
+    else:
+        is_mirrorable = lambda name: hasattr(source_output, name)  # noqa: E731
+
+    kwargs: Dict[str, Any] = {}
+    for field in dataclasses.fields(output_cls):
+        name = field.name
+        if name in overrides:
+            kwargs[name] = overrides[name]
+        elif is_mirrorable(name):
+            kwargs[name] = getattr(source_output, name)
+    return output_cls(**kwargs)
 
 
 def with_mobilint_generation_signature(wrapped: Callable, *extra_keyword_names: str) -> Callable:

@@ -8,36 +8,24 @@ paths:
 
 You can validate Mobilint's Transformers integration with [`pytest`](https://docs.pytest.org/en/stable/). The snippets below assume your virtual environment is already activated.
 
+## Choose the Smallest Command
+
+Pick the smallest command that covers your change. `pytest tests/transformers` runs every category and takes several minutes, so reserve it for shared code. `--full-matrix` is even heavier and is only appropriate as a release or merge gate.
+
+| Change scope | Recommended command |
+| --- | --- |
+| Single model file edit | [Run a Single Test File](#run-a-single-test-file) |
+| Single model case validation | [Run a Single Model Case](#run-a-single-model-case) with `-k` |
+| Category-wide edit (e.g., all `text_generation` models) | [Run a Subdirectory of Tests](#run-a-subdirectory-of-tests) |
+| Shared utility edit (`generation_utils.py`, base pipelines, cross-model helpers) | [Run All Categories (Quick Mode)](#run-all-categories-quick-mode) |
+| Release / merge gate | [Run the Full Matrix](#run-the-full-matrix) |
+
 ## Install Development Dependencies
 
 Install the runtime extras plus the developer tooling (pytest, datasets, torchvision, audio libs, etc.) required by the test suite:
 
 ```bash
 pip install -e ".[transformers]" --group dev
-```
-
-## Run Quick Tests
-
-Execute the quick default suite. Unless you explicitly override model or core options, pytest keeps only the first model in each `MODEL_PATHS` list and runs single-core cases only:
-
-```bash
-pytest tests/transformers
-```
-
-## Run the Full Matrix
-
-Restore the full architecture matrix, including every model path declared in a test module plus the default core sweeps:
-
-```bash
-pytest tests/transformers --full-matrix
-```
-
-## Run a Subdirectory of Tests
-
-Limit execution to a test category, e.g., only causal language-model tests:
-
-```bash
-pytest tests/transformers/text_generation
 ```
 
 ## Run a Single Test File
@@ -60,6 +48,30 @@ Or you can just write the part of the model name.
 
 ```bash
 pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
+```
+
+## Run a Subdirectory of Tests
+
+Limit execution to a test category, e.g., only causal language-model tests:
+
+```bash
+pytest tests/transformers/text_generation
+```
+
+## Run All Categories (Quick Mode)
+
+Execute every category in quick mode. Unless you explicitly override model or core options, pytest keeps only the first model in each `MODEL_PATHS` list and runs single-core cases only. This still walks the full directory, so prefer a narrower scope from the table above when possible:
+
+```bash
+pytest tests/transformers
+```
+
+## Run the Full Matrix
+
+Restore the full architecture matrix, including every model path declared in a test module plus the default core sweeps. Reserve this for pre-merge or release validation, not per-change iteration:
+
+```bash
+pytest tests/transformers --full-matrix
 ```
 
 ## Sweep Core Modes
