@@ -13,9 +13,10 @@ For each target version this script:
      - Phase B (serial): batch text-generation tests run alone with all 8 NPU
        cores. Their conftest already validates `--core-mode` == single and pops
        `target_cores` unless the user provided one.
-     - Phase C (serial): eagle3 text-generation tests run with no `--core-mode`
-       override so they land on their default `global4` layout (the compiled
-       MXQ is not compatible with single-core execution).
+     - Phase C (serial): eagle3 text-generation tests run with
+       `--core-mode=global4` because the compiled MXQ only supports that
+       layout; forcing global4 explicitly keeps `--full-matrix` (which would
+       otherwise sweep single/global4/global8) from breaking the phase.
 
 Version selection defaults to the latest patch of every major.minor release of
 `transformers` on PyPI that falls within the range declared in `pyproject.toml`
@@ -235,11 +236,14 @@ def run_phase_parallel(
         core = core_map[i]
         log_path = log_dir / f"pytest-{version}-w{i}.log"
         junit_path = log_dir / f"junit-{version}-w{i}.xml"
+        # Runner-owned flags come after `extra_args` so a forwarded `-- --core-mode ...`
+        # or `-- --target-cores ...` cannot silently reroute a worker off its assigned core.
         cmd = [
             str(venv_python()),
             "-m",
             "pytest",
             *(str(f) for f in bucket),
+            *extra_args,
             "--core-mode=single",
             f"--target-cores={core}",
             f"--vision-target-cores={core}",
@@ -247,7 +251,6 @@ def run_phase_parallel(
             f"--encoder-target-cores={core}",
             f"--decoder-target-cores={core}",
             f"--junit-xml={junit_path}",
-            *extra_args,
         ]
         proc, fh = spawn_pytest_process(cmd, log_path)
         procs.append((i, proc, fh))
@@ -268,34 +271,41 @@ def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
     """Run batch text-generation tests serially; batch conftest uses all 8 cores by default."""
     log_path = log_dir / f"pytest-{version}-batch.log"
     junit_path = log_dir / f"junit-{version}-batch.xml"
+    # Runner-owned flags come after `extra_args` so a forwarded core-mode override
+    # cannot bypass the single-only invariant the batch conftest expects.
     cmd = [
         str(venv_python()),
         "-m",
         "pytest",
         str(BATCH_DIR.relative_to(REPO_ROOT)),
+        *extra_args,
         "--core-mode=single",
         f"--junit-xml={junit_path}",
-        *extra_args,
     ]
     return run(cmd, log_file=log_path)
 
 
 def run_phase_eagle3(version: str, log_dir: Path, extra_args: list[str]) -> int:
-    """Run EAGLE-3 tests serially without --core-mode override.
+    """Run EAGLE-3 tests serially and pin them to their compiled `global4` layout.
 
-    `build_eagle3_specs` defaults to `global4` in quick mode; the compiled MXQ
-    is only compatible with that layout, so forcing single-core (as phase A
-    does) triggers `Model_MXQAndModelConfigNotMatch`.
+    The default in quick mode is already `global4`, but `--full-matrix` (or a
+    user-provided `--core-mode=all`) would otherwise expand
+    `build_eagle3_specs` into `single`/`global4`/`global8`, and the compiled
+    MXQ is only compatible with `global4`. Forcing `--core-mode=global4` here
+    keeps that invariant regardless of what the caller forwards.
     """
     log_path = log_dir / f"pytest-{version}-eagle3.log"
     junit_path = log_dir / f"junit-{version}-eagle3.xml"
+    # Runner-owned flags come after `extra_args` so pytest's argparse (last value wins)
+    # collapses any forwarded --core-mode back onto the layout the MXQ was built for.
     cmd = [
         str(venv_python()),
         "-m",
         "pytest",
         str(EAGLE3_DIR.relative_to(REPO_ROOT)),
-        f"--junit-xml={junit_path}",
         *extra_args,
+        "--core-mode=global4",
+        f"--junit-xml={junit_path}",
     ]
     return run(cmd, log_file=log_path)
 
