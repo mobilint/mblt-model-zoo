@@ -315,11 +315,13 @@ def status_str(rc: int) -> str:
         return "PASS"
     if rc < 0:
         return "RESET_FAIL"
+    if rc == 5:
+        return "NO_TESTS"
     return f"FAIL({rc})"
 
 
 _PYTEST_SUMMARY_LINE = re.compile(
-    r"^=+\s*(?P<body>.*?(?:passed|failed|error|errors|no tests ran|xfailed|xpassed).*?)\s*=+\s*$"
+    r"^=+\s*(?P<body>.*?(?:passed|failed|error|errors|no tests ran|xfailed|xpassed|deselected|skipped).*?)\s*=+\s*$"
 )
 _COUNT_TOKEN = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|deselected|xfailed|xpassed|warnings)")
 
@@ -603,17 +605,23 @@ def main() -> int:
         all_rcs = list(worker_rcs.values()) + [batch_rc, eagle3_rc]
         # rc 5 = pytest "no tests collected"; benign when `-k`/`-m` filters
         # deselect every test in a shard, so remap to 0 for aggregation.
-        effective_rcs = [0 if r == 5 else r for r in all_rcs]
-        overall_rc = (
-            0 if all(r == 0 for r in effective_rcs) else max(r for r in effective_rcs if r != 0)
-        )
+        # But if *every* phase came back with 5, no test actually ran for this
+        # version and PASS would be misleading -- surface it as NO_TESTS instead.
+        non_empty_rcs = [r for r in all_rcs if r != 5]
+        if not non_empty_rcs:
+            overall_rc = 5
+        else:
+            non_zero = [r for r in non_empty_rcs if r != 0]
+            overall_rc = 0 if not non_zero else max(non_zero)
 
         version_logs = sorted(log_dir.glob(f"pytest-{v}-*.log"))
         counts = merge_count_strings([extract_pytest_summary(p) for p in version_logs])
         notes: list[str] = []
         if scan_for_bad_alloc(log_dir, v):
             notes.append("BAD_ALLOC")
-        if any(r == 5 for r in all_rcs):
+        # Partial-empty case only: some shards were empty but at least one ran.
+        # When *all* were empty, overall_rc == 5 already labels the version.
+        if overall_rc != 5 and any(r == 5 for r in all_rcs):
             notes.append("NO_TESTS")
         note = ",".join(notes)
         results.append((v, overall_rc, counts, elapsed, note))
