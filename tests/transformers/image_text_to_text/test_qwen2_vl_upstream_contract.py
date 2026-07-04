@@ -110,6 +110,7 @@ def _make_bare_qwen2_vl_model() -> Qwen2VLModel:
         output_attentions=False,
         output_hidden_states=False,
         use_return_dict=True,
+        return_dict=True,
     )
     model.language_model = _RecordingLanguageModel()
     model.rope_deltas = torch.zeros(1, dtype=torch.long)
