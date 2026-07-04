@@ -172,6 +172,8 @@ def build_asr_pipeline(
     ensure_qwen3_asr_backend_registered: Any,
     apply_asr_core_mode_model_kwargs: Any,
     hf_pipeline: Any,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ) -> Any:
     """Build one ASR pipeline/native model for benchmarking."""
 
@@ -221,7 +223,13 @@ def build_asr_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = apply_asr_core_mode_model_kwargs(model_kwargs, target.model_id, core_mode)
+    model_kwargs = apply_asr_core_mode_model_kwargs(
+        model_kwargs,
+        target.model_id,
+        core_mode,
+        encoder_core_mode=encoder_core_mode,
+        decoder_core_mode=decoder_core_mode,
+    )
     if target.mxq_path:
         model_kwargs["mxq_path"] = target.mxq_path
     if model_kwargs:

@@ -31,7 +31,14 @@ class MobilintQwen2VLConfig(MobilintVisionTextConfigMixin, Qwen2VLConfig):
 
     @wraps(Qwen2VLConfig.__init__)
     def __init__(self, **kwargs):
+        # Qwen2VLConfig calls `super().__init__(**kwargs)` before creating the
+        # sub-configs, which drives PretrainedConfig into setattr'ing unknown
+        # kwargs — that triggers our `text_*` / `vision_*` property setters
+        # before `self.text_config` / `self.vision_config` exist. Strip and
+        # re-apply after sub-configs are constructed.
+        text_kwargs, vision_kwargs = self._split_sub_backend_kwargs(kwargs)
         Qwen2VLConfig.__init__(self, **kwargs)
+        self._apply_sub_backend_kwargs(text_kwargs, vision_kwargs)
 
         self.tie_word_embeddings = False
         self._attn_implementation = "eager"
