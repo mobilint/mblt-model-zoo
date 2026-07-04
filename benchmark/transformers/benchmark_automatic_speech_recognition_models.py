@@ -525,6 +525,21 @@ def _args_for_target_device_backend(
     )
 
 
+def _resolve_asr_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Return the effective (encoder_core_mode, decoder_core_mode) for the run.
+
+    Encoder/decoder overrides are dropped whenever the shared ``--core-mode`` is
+    ignored for original-model native runs (``args.original_models`` without
+    ``args.mxq_dir``). Otherwise the CLI-provided values are used unchanged.
+    """
+    if args.original_models and not args.mxq_dir:
+        return None, None
+    return (
+        getattr(args, "encoder_core_mode", None),
+        getattr(args, "decoder_core_mode", None),
+    )
+
+
 def _build_asr_pipeline(
     target: ASRBenchmarkTarget,
     *,
@@ -1027,6 +1042,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     _collect_host_pc_info(output_dir)
     run_targets = _build_run_targets(args)
+    resolved_encoder_core_mode, resolved_decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
     if args.dry_run:
@@ -1085,8 +1101,8 @@ def main(argv: list[str] | None = None) -> int:
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     native_generate_kwargs=generate_kwargs,
-                    encoder_core_mode=getattr(args, "encoder_core_mode", None),
-                    decoder_core_mode=getattr(args, "decoder_core_mode", None),
+                    encoder_core_mode=resolved_encoder_core_mode,
+                    decoder_core_mode=resolved_decoder_core_mode,
                 )
             except Exception as exc:
                 if _is_cuda_oom_error(exc):

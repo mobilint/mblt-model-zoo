@@ -261,12 +261,15 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
+    disable_npu_specific_args = bool(getattr(args, "original_models", False) and not getattr(args, "mxq_dir", None))
+    vision_core_mode = None if disable_npu_specific_args else getattr(args, "vision_core_mode", None)
+    text_core_mode = None if disable_npu_specific_args else getattr(args, "text_core_mode", None)
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
         core_mode,
         default_single_target_cores=default_single_target_cores,
-        vision_core_mode=getattr(args, "vision_core_mode", None),
-        text_core_mode=getattr(args, "text_core_mode", None),
+        vision_core_mode=vision_core_mode,
+        text_core_mode=text_core_mode,
     )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path

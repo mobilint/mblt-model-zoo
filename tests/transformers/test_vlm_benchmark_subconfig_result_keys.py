@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import types
 from pathlib import Path
 
 _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[2] / "benchmark" / "transformers"
@@ -209,3 +210,92 @@ def test_collect_vlm_run_targets_distinguishes_subconfig_variants(monkeypatch, t
     assert both_base.endswith("-single-visglobal8-txtglobal4")
     assert matching_base == default_base
     assert len({default_base, vision_base, text_base, both_base}) == 4
+
+
+def _make_vlm_pipeline_args(
+    *,
+    original_models: bool,
+    mxq_dir: str | None,
+    vision_core_mode: str | None,
+    text_core_mode: str | None,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        trust_remote_code=True,
+        tokenizer=None,
+        device=None,
+        device_map=None,
+        dtype=None,
+        original_models=original_models,
+        mxq_dir=mxq_dir,
+        vision_core_mode=vision_core_mode,
+        text_core_mode=text_core_mode,
+    )
+
+
+def _capture_build_pipeline_kwargs(
+    monkeypatch,
+    args: argparse.Namespace,
+    *,
+    core_mode: str | None,
+) -> dict[str, object]:
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(model_kwargs=kwargs.get("model_kwargs", {}))
+
+    monkeypatch.setattr(vlm_bench, "hf_pipeline", _fake_pipeline)
+    vlm_bench._build_pipeline(
+        args,
+        "mobilint/Qwen2-VL-2B",
+        None,
+        None,
+        core_mode,
+    )
+    return captured
+
+
+def test_build_pipeline_original_models_drops_subconfig_core_modes(monkeypatch) -> None:
+    """Verify --original-models without --mxq-dir strips vision/text overrides from model_kwargs."""
+    args = _make_vlm_pipeline_args(
+        original_models=True,
+        mxq_dir=None,
+        vision_core_mode="global8",
+        text_core_mode="global4",
+    )
+    captured = _capture_build_pipeline_kwargs(monkeypatch, args, core_mode=None)
+    model_kwargs = captured.get("model_kwargs", {})
+    assert "vision_core_mode" not in model_kwargs
+    assert "text_core_mode" not in model_kwargs
+    assert "vision_target_cores" not in model_kwargs
+    assert "vision_target_clusters" not in model_kwargs
+    assert "text_target_cores" not in model_kwargs
+    assert "text_target_clusters" not in model_kwargs
+
+
+def test_build_pipeline_original_models_with_mxq_dir_keeps_subconfig_core_modes(monkeypatch, tmp_path) -> None:
+    """Verify --original-models WITH --mxq-dir still applies vision/text overrides."""
+    args = _make_vlm_pipeline_args(
+        original_models=True,
+        mxq_dir=str(tmp_path),
+        vision_core_mode="global8",
+        text_core_mode="global4",
+    )
+    captured = _capture_build_pipeline_kwargs(monkeypatch, args, core_mode="single")
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs["vision_core_mode"] == "global8"
+    assert model_kwargs["text_core_mode"] == "global4"
+
+
+def test_build_pipeline_non_original_keeps_subconfig_core_modes(monkeypatch) -> None:
+    """Verify overrides still reach model_kwargs when --original-models is not set."""
+    args = _make_vlm_pipeline_args(
+        original_models=False,
+        mxq_dir=None,
+        vision_core_mode="global8",
+        text_core_mode="global4",
+    )
+    captured = _capture_build_pipeline_kwargs(monkeypatch, args, core_mode="single")
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs["vision_core_mode"] == "global8"
+    assert model_kwargs["text_core_mode"] == "global4"

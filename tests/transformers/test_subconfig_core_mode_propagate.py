@@ -508,3 +508,98 @@ def test_asr_write_target_json_records_subconfig_core_modes(tmp_path) -> None:
     assert payload["core_mode"] == "single"
     assert payload["encoder_core_mode"] == "global8"
     assert payload["decoder_core_mode"] == "global4"
+
+
+def test_resolve_asr_subconfig_core_modes_drops_overrides_for_original_native_runs() -> None:
+    """Verify --original-models without --mxq-dir yields (None, None) for subconfig core modes."""
+    args = asr_bench._parse_args(
+        [
+            "--model",
+            "openai/whisper-tiny",
+            "--original-models",
+            "--core-mode",
+            "single",
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    assert asr_bench._resolve_asr_subconfig_core_modes(args) == (None, None)
+
+
+def test_resolve_asr_subconfig_core_modes_keeps_overrides_with_mxq_dir(tmp_path) -> None:
+    """Verify --original-models WITH --mxq-dir still keeps encoder/decoder overrides."""
+    args = asr_bench._parse_args(
+        [
+            "--original-models",
+            "--mxq-dir",
+            str(tmp_path),
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    assert asr_bench._resolve_asr_subconfig_core_modes(args) == ("global8", "global4")
+
+
+def test_resolve_asr_subconfig_core_modes_keeps_overrides_without_original_models() -> None:
+    """Verify overrides pass through when --original-models is not set."""
+    args = asr_bench._parse_args(
+        [
+            "--model",
+            "openai/whisper-tiny",
+            "--encoder-core-mode",
+            "global8",
+            "--decoder-core-mode",
+            "global4",
+        ]
+    )
+    assert asr_bench._resolve_asr_subconfig_core_modes(args) == ("global8", "global4")
+
+
+def test_build_asr_pipeline_no_subconfig_kwargs_when_disabled(monkeypatch) -> None:
+    """Verify _build_asr_pipeline with encoder/decoder=None doesn't leak subconfig kwargs.
+
+    Mirrors what ``main()`` passes when the shared --core-mode is ignored for
+    original-model native runs.
+    """
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(model=types.SimpleNamespace(generation_config=None))
+
+    import transformers  # local import to avoid module-import time cost
+
+    monkeypatch.setattr(transformers, "pipeline", _fake_pipeline)
+
+    target = asr_bench.ASRBenchmarkTarget(
+        model_id="openai/whisper-tiny",
+        revision_candidates=[None],
+        label="openai/whisper-tiny",
+        base="openai__whisper-tiny",
+        mxq_path=None,
+        is_original=True,
+    )
+    asr_bench._build_asr_pipeline(
+        target,
+        revision=None,
+        device=None,
+        device_map=None,
+        dtype=None,
+        trust_remote_code=True,
+        core_mode=None,
+        native_generate_kwargs=None,
+        encoder_core_mode=None,
+        decoder_core_mode=None,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert "encoder_core_mode" not in model_kwargs
+    assert "decoder_core_mode" not in model_kwargs
+    assert "encoder_target_cores" not in model_kwargs
+    assert "decoder_target_cores" not in model_kwargs
+    assert "encoder_target_clusters" not in model_kwargs
+    assert "decoder_target_clusters" not in model_kwargs
