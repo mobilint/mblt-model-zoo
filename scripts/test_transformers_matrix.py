@@ -515,7 +515,6 @@ def main() -> int:
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = args.log_dir or (REPO_ROOT / "logs" / "tx-matrix" / ts)
-    log_dir.mkdir(parents=True, exist_ok=True)
 
     extra = list(args.pytest_args)
     if extra and extra[0] == "--":
@@ -552,6 +551,7 @@ def main() -> int:
     if args.dry_run:
         return 0
 
+    log_dir.mkdir(parents=True, exist_ok=True)
     summary_path = log_dir / "summary.txt"
     results: list[tuple[str, int, str, float, str]] = []
 
