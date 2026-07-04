@@ -236,6 +236,22 @@ class MobilintQwen3ASRTextModel(
         past_key_values.ensure_batch_size(batch_size)
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
+        # Mirror the 3-path dispatch in ``_run_chunked_logits_to_keep``: on a
+        # last-only MXQ each ``mxq_model.infer`` returns a single row instead
+        # of one row per input token, so the per-chunk concat would collapse
+        # a multi-chunk suffix to ``num_chunks`` rows and misalign every
+        # selector below. ``is_default_keep`` takes the last-token fast path
+        # on both backends; ``supports_all`` keeps the caller's chunk size;
+        # ``last_only_slow`` forces size-1 captures so each infer emits one
+        # row per suffix position and the outer alignment/selector logic
+        # sees the ``(1, suffix_length, vocab)`` shape it already expects.
+        window_length = int(input_ids.shape[1])
+        is_default_keep = self._is_last_only_selector(logits_to_keep, window_length)
+        supports_all = False if is_default_keep else self._mxq_supports_all_logits()
+        last_only_slow = not is_default_keep and not supports_all
+        if last_only_slow:
+            self._warn_last_only_slow_path_once()
+        effective_chunk_size = 1 if last_only_slow else resolved_prefill_chunk_size
         logits_list: list[torch.Tensor] = []
         beam_offsets: list[int] = []
         logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], tuple[torch.Tensor, int]] = {}
@@ -292,7 +308,7 @@ class MobilintQwen3ASRTextModel(
 
             row_embeds_numpy = row_embeds.detach().type(torch.float32).cpu().numpy()
             row_embeds_numpy = np.expand_dims(row_embeds_numpy, 1)
-            num_suffix_chunks = math.ceil(suffix_length / resolved_prefill_chunk_size)
+            num_suffix_chunks = math.ceil(suffix_length / effective_chunk_size)
             # Accumulate per-chunk logits so the selector below sees the full
             # suffix window. Overwriting a single ``row_logits_ndarray`` inside
             # the loop would silently drop every chunk except the last, so a
@@ -301,8 +317,8 @@ class MobilintQwen3ASRTextModel(
             chunk_logits_tensors: list[torch.Tensor] = []
 
             for chunk_index in range(num_suffix_chunks):
-                start_index = chunk_index * resolved_prefill_chunk_size
-                end_index = min(start_index + resolved_prefill_chunk_size, suffix_length)
+                start_index = chunk_index * effective_chunk_size
+                end_index = min(start_index + effective_chunk_size, suffix_length)
                 cache_size = prefix_length + start_index
                 chunk = row_embeds_numpy[:, :, start_index:end_index, :]
 
@@ -337,12 +353,27 @@ class MobilintQwen3ASRTextModel(
             past_key_values.commit_active_tokens(target_tokens, source_index=source_index)
             if not chunk_logits_tensors:
                 raise RuntimeError("Qwen3-ASR beam decode produced no logits.")
-            row_logits = torch.cat(chunk_logits_tensors, dim=1)
-            row_logits = row_logits[:, -int(input_ids.shape[1]) :, :]
+            if is_default_keep:
+                # Last-token fast path: on a static last-only MXQ the final
+                # chunk already emits ``(1, 1, vocab)``, and on a dynamic-axis
+                # MXQ the last row of the final chunk is the last-token logit.
+                # Skip the per-position concat + window slice below so the
+                # post-loop short-circuit returns ``(batch, 1, vocab)``.
+                row_logits = chunk_logits_tensors[-1][:, -1:, :]
+            else:
+                row_logits = torch.cat(chunk_logits_tensors, dim=1)
+                row_logits = row_logits[:, -window_length :, :]
             logits_list.append(row_logits)
             beam_offsets.append(local_start_index)
             logits_by_target_tokens[target_key] = (row_logits, local_start_index)
 
+        if is_default_keep:
+            # Every per-beam ``row_logits`` is already ``(1, 1, vocab)`` (the
+            # last-token logit). The cross-beam alignment and HF-selector
+            # block below would try to ``index_select`` window position
+            # ``window_length - 1`` from an axis that only has one row, so
+            # short-circuit here and stack the last-token logits directly.
+            return torch.cat(logits_list, dim=0)
         # Align beams to a shared suffix window before ``torch.cat``. When
         # one beam's active-cache prefix covered more of the input window
         # than another's, their row_logits have different shape[1]; front-
@@ -358,7 +389,6 @@ class MobilintQwen3ASRTextModel(
                 if drop:
                     logits_list[i] = logits_list[i][:, drop:, :]
         logits = torch.cat(logits_list, dim=0)
-        window_length = int(input_ids.shape[1])
         # HF-compatible selector against the current call's input window.
         # The empty-selector branch keeps the vocab axis (via a zero-width
         # slice of the already-produced logits) so callers stacking outputs

@@ -26,6 +26,13 @@ class _InputsEmbedAwareMxqModel:
     def __init__(self) -> None:
         self.infer_calls = 0
 
+    def get_model_output_shape(self) -> list[tuple[int, ...]]:
+        # Dynamic token axis: matches the ``per-token logits`` shape this
+        # stub returns from ``infer``, so ``_mxq_supports_all_logits`` picks
+        # the ``supports_all`` branch of ``_beam_llm_forward`` and the
+        # caller's ``prefill_chunk_size`` is preserved.
+        return [(1, -1, 8)]
+
     def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
         """Return logits whose value identifies the forwarded embedding row."""
         del output_buffer, cache_size
@@ -48,6 +55,10 @@ class _PositionAwareMxqModel:
     def __init__(self) -> None:
         self.infer_calls = 0
 
+    def get_model_output_shape(self) -> list[tuple[int, ...]]:
+        # Dynamic token axis; see ``_InputsEmbedAwareMxqModel``.
+        return [(1, -1, 8)]
+
     def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
         del output_buffer
         row_embeds = inputs[0]
@@ -56,6 +67,37 @@ class _PositionAwareMxqModel:
         vocab = 8
         positions = torch.arange(cache_size, cache_size + suffix_length, dtype=torch.float32)
         return [positions.unsqueeze(-1).expand(suffix_length, vocab).contiguous().numpy()]
+
+
+class _LastOnlyMxqModel:
+    """MXQ stub compiled with a static token axis of 1 (last-token-only output).
+
+    ``get_model_output_shape`` reports ``(1, 1, vocab)`` — no
+    ``_MXQ_DYNAMIC_AXIS_SENTINEL`` in the token axis — so
+    ``_mxq_supports_all_logits`` returns ``False`` and the beam path routes
+    a non-default ``logits_to_keep`` request through the ``last_only_slow``
+    branch. ``infer`` emits a single row per call regardless of chunk width,
+    matching how a real last-only build behaves; the row value carries the
+    absolute cache position of the last input token in the chunk so tests
+    can assert which position ended up in the final tensor.
+    """
+
+    def __init__(self) -> None:
+        self.infer_calls = 0
+        self.vocab_size = 8
+
+    def get_model_output_shape(self) -> list[tuple[int, ...]]:
+        return [(1, 1, self.vocab_size)]
+
+    def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
+        del output_buffer
+        row_embeds = inputs[0]
+        self.infer_calls += 1
+        chunk_len = int(row_embeds.shape[2])
+        last_position = int(cache_size) + chunk_len - 1
+        return [
+            torch.full((1, self.vocab_size), float(last_position), dtype=torch.float32).numpy()
+        ]
 
 
 class _DummyCache:
@@ -805,3 +847,181 @@ def test_beam_forward_prefix_reuse_heterogeneous_beams_align() -> None:
     # tags each row with its absolute cache position.
     assert torch.equal(logits[0, 0], torch.full((8,), 2.0))
     assert torch.equal(logits[1, 0], torch.full((8,), 2.0))
+
+
+# ---------------------------------------------------------------------------
+# Beam-path last-only MXQ contract
+#
+# A last-only MXQ build compiles the LM head with a static token axis of 1,
+# so every ``mxq_model.infer`` call returns one row regardless of chunk
+# width. Before the ``_mxq_supports_all_logits`` dispatch landed in the beam
+# path, a multi-chunk suffix on such a backend produced ``num_chunks`` rows
+# instead of ``suffix_length`` rows: ``logits_to_keep=0`` returned a
+# truncated tensor and tensor / last-N selectors either raised
+# ``IndexError`` or picked from the wrong shortened axis. These tests pin
+# the fix in place:
+#
+# * ``logits_to_keep=1`` hits the last-token fast path and preserves the
+#   caller's ``prefill_chunk_size`` — only ``ceil(suffix_length /
+#   prefill_chunk_size)`` infer calls, and the returned row is the last
+#   window position on both static and dynamic backends.
+# * ``logits_to_keep=0`` (and any non-default selector) hits the size-1
+#   fallback so each infer emits one row per suffix position, matching
+#   the shape contract the outer alignment / selector logic already
+#   expects. Slow-path warning fires once per model instance.
+# ---------------------------------------------------------------------------
+
+
+def test_beam_forward_last_only_backend_logits_to_keep_1_uses_fast_path() -> None:
+    """``logits_to_keep=1`` on a last-only MXQ preserves the caller's
+    ``prefill_chunk_size`` (no size-1 override) and returns the last-token
+    logit. Pre-fix code either raised ``IndexError`` on the outer
+    ``index_select`` or picked from the wrong shortened axis when the
+    suffix crossed a chunk boundary."""
+    mxq_model = _LastOnlyMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        prefill_chunk_size=2,
+        logits_to_keep=1,
+    )
+
+    # Fast path: 2 chunks of the caller's ``prefill_chunk_size=2``.
+    assert mxq_model.infer_calls == 2
+    assert logits.shape == (1, 1, 8)
+    # Last window position is index 3 (``cache_size + chunk_len - 1`` for
+    # the final chunk).
+    assert torch.equal(logits[0, 0], torch.full((8,), 3.0))
+
+
+def test_beam_forward_last_only_backend_keep_all_uses_size_1_fallback() -> None:
+    """``logits_to_keep=0`` on a last-only MXQ forces ``effective_chunk_size
+    = 1`` so each infer captures one row per suffix position. The returned
+    tensor must span the full input window with each row tagged by its
+    absolute position — pre-fix code returned ``(1, num_chunks, vocab)``
+    with silently truncated content."""
+    mxq_model = _LastOnlyMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+
+    with pytest.warns(UserWarning, match="last-only MXQ"):
+        logits = model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=torch.arange(4, dtype=torch.long),
+            prefill_chunk_size=2,
+            logits_to_keep=0,
+        )
+
+    # Size-1 override: one infer per suffix position.
+    assert mxq_model.infer_calls == 4
+    assert logits.shape == (1, 4, 8)
+    for position in range(4):
+        assert torch.equal(logits[0, position], torch.full((8,), float(position)))
+
+
+def test_beam_forward_last_only_backend_tensor_selector_picks_absolute_positions() -> None:
+    """A tensor selector on a last-only MXQ still resolves to the absolute
+    positions requested — the size-1 fallback gives the outer selector
+    ``(1, suffix_length, vocab)`` rows to index against."""
+    mxq_model = _LastOnlyMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+    selector = torch.tensor([0, 3, 1])
+
+    logits = model._beam_llm_forward(
+        input_ids=input_ids,
+        inputs_embeds=inputs_embeds,
+        past_key_values=cache,
+        cache_position=torch.arange(4, dtype=torch.long),
+        prefill_chunk_size=2,
+        logits_to_keep=selector,
+    )
+
+    assert mxq_model.infer_calls == 4
+    assert logits.shape == (1, 3, 8)
+    assert torch.equal(logits[0, 0], torch.full((8,), 0.0))
+    assert torch.equal(logits[0, 1], torch.full((8,), 3.0))
+    assert torch.equal(logits[0, 2], torch.full((8,), 1.0))
+
+
+def test_beam_forward_last_only_backend_last_only_selector_does_not_warn() -> None:
+    """The slow-path warning is scoped to the ``last_only_slow`` branch: a
+    ``logits_to_keep=1`` request (fast path) must not emit it."""
+    mxq_model = _LastOnlyMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    cache = MobilintBeamCache(mxq_model, batch_size=1)
+    input_ids = torch.tensor([[4, 5, 6, 7]], dtype=torch.long)
+    inputs_embeds = torch.tensor(
+        [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]],
+        dtype=torch.float32,
+    )
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=cache,
+            cache_position=torch.arange(4, dtype=torch.long),
+            prefill_chunk_size=2,
+            logits_to_keep=1,
+        )
+
+
+def test_beam_forward_last_only_backend_warns_only_once_per_instance() -> None:
+    """The slow-path warning fires at most once per model instance, matching
+    ``_warn_last_only_slow_path_once``'s contract."""
+    mxq_model = _LastOnlyMxqModel()
+    model = _DummyQwen3ASRBeamTextModel(mxq_model)
+    input_ids = torch.tensor([[4, 5]], dtype=torch.long)
+    inputs_embeds = torch.tensor([[[1.0, 1.0], [2.0, 2.0]]], dtype=torch.float32)
+
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        # First call fires the warning.
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=MobilintBeamCache(mxq_model, batch_size=1),
+            cache_position=torch.arange(2, dtype=torch.long),
+            prefill_chunk_size=2,
+            logits_to_keep=0,
+        )
+        # Second call — same instance — must not re-emit it.
+        model._beam_llm_forward(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values=MobilintBeamCache(mxq_model, batch_size=1),
+            cache_position=torch.arange(2, dtype=torch.long),
+            prefill_chunk_size=2,
+            logits_to_keep=0,
+        )
+
+    last_only_warnings = [w for w in caught if "last-only MXQ" in str(w.message)]
+    assert len(last_only_warnings) == 1
