@@ -824,18 +824,44 @@ def _print_device_status(args: argparse.Namespace, tracker: Any) -> None:
     _print_device_status_common(args, tracker)
 
 
+_SUBCONFIG_MXQ_PATH_ATTRS: tuple[str, ...] = (
+    "base_mxq_path",
+    "draft_mxq_path",
+    "fc_mxq_path",
+    "vision_mxq_path",
+    "text_mxq_path",
+)
+
+
+def _effective_mxq_path_for_defaults(args: argparse.Namespace) -> str | None:
+    """Return any MXQ path (base or subconfig prefix) provided by the user.
+
+    Used only to steer default-device/backend resolution: if any MXQ artifact was
+    supplied, the target should be treated as Mobilint even without ``--mxq-path``.
+    """
+    base = getattr(args, "mxq_path", None)
+    if base:
+        return base
+    for attr in _SUBCONFIG_MXQ_PATH_ATTRS:
+        value = getattr(args, attr, None)
+        if value:
+            return value
+    return None
+
+
 def _normalize_runtime_defaults(args: argparse.Namespace) -> None:
+    effective_mxq_path = _effective_mxq_path_for_defaults(args)
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=args.device is not None,
         model_id=args.model,
-        mxq_path=args.mxq_path,
+        mxq_path=effective_mxq_path,
     )
     args.device_backend = _resolve_default_device_backend_common(
         device_backend=args.device_backend or "none",
         device_backend_explicit=args.device_backend is not None,
         model_id=args.model,
-        mxq_path=args.mxq_path,
+        mxq_path=effective_mxq_path,
     )
 
 
