@@ -24,6 +24,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -82,6 +85,20 @@ class Eagle3PipelineOptions:
     base_target_clusters: list[int] | None = None
     draft_target_clusters: list[int] | None = None
     fc_target_clusters: list[int] | None = None
+
+
+@dataclass(frozen=True)
+class SubconfigPipelineOptions:
+    """Bundle VLM vision/text subconfig overrides for pipeline construction."""
+
+    vision_core_mode: str | None = None
+    text_core_mode: str | None = None
+    vision_target_cores: list[str] | None = None
+    text_target_cores: list[str] | None = None
+    vision_target_clusters: list[int] | None = None
+    text_target_clusters: list[int] | None = None
+    vision_mxq_path: str | None = None
+    text_mxq_path: str | None = None
 
 
 def _warn_eagle3_override(
@@ -222,20 +239,29 @@ def _apply_vlm_core_mode_model_kwargs(
     target_cores: list[str] | None = None,
     target_clusters: list[int] | None = None,
     default_single_target_cores: Sequence[str] | None = None,
+    vision_core_mode: str | None = None,
+    text_core_mode: str | None = None,
+    vision_target_cores: list[str] | None = None,
+    text_target_cores: list[str] | None = None,
+    vision_target_clusters: list[int] | None = None,
+    text_target_clusters: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Apply shared VLM core-mode kwargs to both vision and text sub-configs."""
-    expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(
-        expanded,
+    """Apply shared VLM core-mode kwargs to both vision and text sub-configs.
+
+    ``vision_*`` and ``text_*`` overrides take precedence over the base values for their prefix,
+    while the base values continue to fill in any subconfig left unspecified.
+    """
+    return _apply_subconfig_core_mode_model_kwargs_common(
+        model_kwargs,
+        ("vision", "text"),
         core_mode,
-        target_cores=target_cores,
-        target_clusters=target_clusters,
+        subconfig_core_modes={"vision": vision_core_mode, "text": text_core_mode},
+        base_target_cores=target_cores,
+        subconfig_target_cores={"vision": vision_target_cores, "text": text_target_cores},
+        base_target_clusters=target_clusters,
+        subconfig_target_clusters={"vision": vision_target_clusters, "text": text_target_clusters},
         default_single_target_cores=default_single_target_cores,
     )
-    for prefix in ("vision", "text"):
-        for key, value in expanded.items():
-            model_kwargs[f"{prefix}_{key}"] = value
-    return model_kwargs
 
 
 def _normalize_max_batch_size(value: Any) -> int | None:
@@ -372,6 +398,7 @@ def _build_pipeline(
     target_cores: Union[list[str], None],
     target_clusters: Union[list[int], None],
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    subconfig_options: SubconfigPipelineOptions | None = None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -422,6 +449,7 @@ def _build_pipeline(
             eagle3_options.fc_target_clusters,
         )
     )
+    subconfig_options = subconfig_options or SubconfigPipelineOptions()
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
             model_kwargs,
@@ -429,7 +457,17 @@ def _build_pipeline(
             target_cores=target_cores,
             target_clusters=target_clusters,
             default_single_target_cores=default_single_target_cores,
+            vision_core_mode=subconfig_options.vision_core_mode,
+            text_core_mode=subconfig_options.text_core_mode,
+            vision_target_cores=subconfig_options.vision_target_cores,
+            text_target_cores=subconfig_options.text_target_cores,
+            vision_target_clusters=subconfig_options.vision_target_clusters,
+            text_target_clusters=subconfig_options.text_target_clusters,
         )
+        if subconfig_options.vision_mxq_path:
+            model_kwargs["vision_mxq_path"] = subconfig_options.vision_mxq_path
+        if subconfig_options.text_mxq_path:
+            model_kwargs["text_mxq_path"] = subconfig_options.text_mxq_path
     elif eagle3_prefix_requested:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
         _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
@@ -532,6 +570,20 @@ def _build_pipeline(
         return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
     except Exception as e:
         _raise_cuda_nvml_hint(e)
+
+
+def _extract_subconfig_pipeline_kwargs(args: argparse.Namespace) -> SubconfigPipelineOptions:
+    """Return VLM subconfig overrides from parsed CLI arguments."""
+    return SubconfigPipelineOptions(
+        vision_core_mode=getattr(args, "vision_core_mode", None),
+        text_core_mode=getattr(args, "text_core_mode", None),
+        vision_target_cores=getattr(args, "vision_target_cores", None),
+        text_target_cores=getattr(args, "text_target_cores", None),
+        vision_target_clusters=getattr(args, "vision_target_clusters", None),
+        text_target_clusters=getattr(args, "text_target_clusters", None),
+        vision_mxq_path=getattr(args, "vision_mxq_path", None),
+        text_mxq_path=getattr(args, "text_mxq_path", None),
+    )
 
 
 def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineOptions:
@@ -1122,6 +1174,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
+        subconfig_options=_extract_subconfig_pipeline_kwargs(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -1414,6 +1467,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
+        subconfig_options=_extract_subconfig_pipeline_kwargs(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -1722,6 +1776,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
+        subconfig_options=_extract_subconfig_pipeline_kwargs(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2212,6 +2267,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
+        subconfig_options=_extract_subconfig_pipeline_kwargs(args),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2761,6 +2817,12 @@ def add_tps_parser(
             p.add_argument(
                 f"--{prefix}-mxq-path", default=None, help=f"override {prefix} mxq_path for pipeline loading"
             )
+        for prefix in ("vision", "text"):
+            p.add_argument(
+                f"--{prefix}-mxq-path",
+                default=None,
+                help=f"VLM only: override {prefix} mxq_path for pipeline loading",
+            )
         p.add_argument(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
@@ -2797,6 +2859,25 @@ def add_tps_parser(
                 type=_parse_target_clusters,
                 default=None,
                 help=f'{prefix} target clusters (e.g., "0;1")',
+            )
+        for prefix in ("vision", "text"):
+            p.add_argument(
+                f"--{prefix}-core-mode",
+                choices=list(_CORE_MODE_CHOICES),
+                default=None,
+                help=f"VLM only: {prefix} NPU core mode override (falls back to --core-mode)",
+            )
+            p.add_argument(
+                f"--{prefix}-target-cores",
+                type=_parse_target_cores,
+                default=None,
+                help=f'VLM only: {prefix} target cores override (e.g., "0:0;0:1")',
+            )
+            p.add_argument(
+                f"--{prefix}-target-clusters",
+                type=_parse_target_clusters,
+                default=None,
+                help=f'VLM only: {prefix} target clusters override (e.g., "0;1")',
             )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
         p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")

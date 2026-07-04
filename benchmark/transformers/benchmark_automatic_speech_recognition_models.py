@@ -114,6 +114,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -213,17 +216,24 @@ def _apply_asr_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     model_id: str,
     core_mode: str | None,
+    *,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Apply core-mode kwargs for ASR models, expanding composite encoder/decoder configs when needed."""
+    """Apply core-mode kwargs for ASR models, expanding composite encoder/decoder configs when needed.
+
+    ``encoder_core_mode``/``decoder_core_mode`` overrides take precedence over the shared value for
+    the matching prefix on encoder-decoder models.
+    """
     if not _uses_encoder_decoder_core_mode_kwargs(model_id):
         return _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
 
-    expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(expanded, core_mode)
-    for prefix in ("encoder", "decoder"):
-        for key, value in expanded.items():
-            model_kwargs[f"{prefix}_{key}"] = value
-    return model_kwargs
+    return _apply_subconfig_core_mode_model_kwargs_common(
+        model_kwargs,
+        ("encoder", "decoder"),
+        core_mode,
+        subconfig_core_modes={"encoder": encoder_core_mode, "decoder": decoder_core_mode},
+    )
 
 
 def _optional_generate_kwargs_for_model(args: argparse.Namespace, model_id: str) -> dict[str, Any]:
@@ -420,6 +430,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="core mode passed to model_kwargs; all expands to single/global4/global8",
     )
+    for prefix in ("encoder", "decoder"):
+        parser.add_argument(
+            f"--{prefix}-core-mode",
+            choices=list(_CORE_MODE_CHOICES_COMMON),
+            default=None,
+            help=(
+                f"encoder-decoder ASR only: {prefix} NPU core mode override (falls back to --core-mode)"
+            ),
+        )
     _add_device_tracking_args(parser)
     args = parser.parse_args(argv)
     num_samples_explicit = _flag_present(raw_argv, "--num-samples")
@@ -491,6 +510,8 @@ def _build_asr_pipeline(
     trust_remote_code: bool,
     core_mode: str | None,
     native_generate_kwargs: Mapping[str, Any] | None = None,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ):
     from transformers import pipeline as hf_pipeline
 
@@ -512,6 +533,8 @@ def _build_asr_pipeline(
         ensure_qwen3_asr_backend_registered=_ensure_qwen3_asr_backend_registered,
         apply_asr_core_mode_model_kwargs=_apply_asr_core_mode_model_kwargs,
         hf_pipeline=hf_pipeline,
+        encoder_core_mode=encoder_core_mode,
+        decoder_core_mode=decoder_core_mode,
     )
 
 
@@ -1022,6 +1045,8 @@ def main(argv: list[str] | None = None) -> int:
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     native_generate_kwargs=generate_kwargs,
+                    encoder_core_mode=getattr(args, "encoder_core_mode", None),
+                    decoder_core_mode=getattr(args, "decoder_core_mode", None),
                 )
             except Exception as exc:
                 if _is_cuda_oom_error(exc):

@@ -66,6 +66,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -262,6 +265,8 @@ def _build_pipeline(
         model_kwargs,
         core_mode,
         default_single_target_cores=default_single_target_cores,
+        vision_core_mode=getattr(args, "vision_core_mode", None),
+        text_core_mode=getattr(args, "text_core_mode", None),
     )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
@@ -282,6 +287,8 @@ def _apply_vlm_core_mode_model_kwargs(
     core_mode: str | None,
     *,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    vision_core_mode: str | None = None,
+    text_core_mode: str | None = None,
 ) -> dict[str, Any]:
     """Apply shared VLM NPU core-mode kwargs to both vision and text sub-configs.
 
@@ -290,25 +297,24 @@ def _apply_vlm_core_mode_model_kwargs(
     ``core_mode`` leaves them unused by the config loader, and Transformers forwards them to the
     model constructor where upstream VLM classes can reject them. This helper maps the benchmark's
     shared ``--core-mode`` option onto the VLM-specific ``vision_*`` and ``text_*`` config fields.
+    Per-subconfig overrides take precedence over the shared value for the matching prefix.
 
     Args:
         model_kwargs: Existing model kwargs to update.
         core_mode: Core mode requested by the benchmark CLI.
+        vision_core_mode: Optional vision-only core mode override.
+        text_core_mode: Optional text-only core mode override.
 
     Returns:
         The updated model kwargs.
     """
-    expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(
-        expanded,
+    return _apply_subconfig_core_mode_model_kwargs_common(
+        model_kwargs,
+        ("vision", "text"),
         core_mode,
+        subconfig_core_modes={"vision": vision_core_mode, "text": text_core_mode},
         default_single_target_cores=default_single_target_cores,
     )
-
-    for prefix in ("vision", "text"):
-        for key, value in expanded.items():
-            model_kwargs[f"{prefix}_{key}"] = value
-    return model_kwargs
 
 
 def _collect_vlm_config_mxq_paths(config: dict[str, Any]) -> list[str]:
@@ -1301,6 +1307,13 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         default="global8",
         help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
+    for prefix in ("vision", "text"):
+        parser.add_argument(
+            f"--{prefix}-core-mode",
+            choices=list(_CORE_MODE_CHOICES_COMMON),
+            default=None,
+            help=f"{prefix} NPU core mode override (falls back to --core-mode when omitted)",
+        )
     parser.add_argument("--prompt", default="Describe the image in one sentence.")
     parser.add_argument(
         "--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs"
