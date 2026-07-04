@@ -4,28 +4,55 @@ For each target version this script:
   1. Deletes `.venv/` (and `uv.lock` if present).
   2. Recreates a fresh venv with `uv venv --python <PY>`.
   3. Installs the project with `-e ".[transformers]" --group dev "transformers==<V>"`.
-  4. Runs `pytest tests/transformers` with a per-version JUnit XML.
+  4. Runs `pytest tests/transformers` in two phases:
+     - Phase A (parallel): every non-batch test file, split round-robin across N
+       workers. Each worker pins its NPU backend to a distinct core via
+       `--core-mode single --target-cores <cluster>:<core>` (and the encoder /
+       decoder / vision / text variants) so workers do not contend on the same
+       NPU core.
+     - Phase B (serial): batch text-generation tests run alone with all 8 NPU
+       cores. Their conftest already validates `--core-mode` == single and pops
+       `target_cores` unless the user provided one.
 
 Version selection defaults to the latest patch of every major.minor release of
 `transformers` on PyPI that falls within the range declared in `pyproject.toml`
 (`>=4.54.0, <=5.12.1`).
 
 Logs land under `logs/tx-matrix/<timestamp>/`:
-  - install-<V>.log, pytest-<V>.log, junit-<V>.xml
-  - summary.txt (tab-separated: version, status, elapsed)
+  - install-<V>.log
+  - pytest-<V>-w<i>.log + junit-<V>-w<i>.xml   (Phase A, one per worker)
+  - pytest-<V>-batch.log + junit-<V>-batch.xml (Phase B)
+  - summary.txt (tab-separated: version, status, counts, elapsed [, note])
+
+Counts merge every worker + batch junit into one compact string:
+  702p/4s/44d/42w  → 702 passed, 4 skipped, 44 deselected, 42 warnings
+  10F/50p          → 10 failed, 50 passed
+Letters: p=passed, F=failed, E=error, s=skipped, d=deselected, xF=xfailed,
+         xP=xpassed, w=warnings.
+
+Caveats:
+  - `--full-matrix` and high parallelism together will likely OOM the NPU. If
+    `--full-matrix` is detected in the forwarded pytest args, workers are
+    forced to 1 with a warning.
+  - If a worker log contains `BadAlloc` / `out of memory`, the version's row
+    in summary.txt is annotated with `BAD_ALLOC`; reduce `--workers`.
 
 Usage (Linux/macOS/Windows, uv required):
-    python scripts/test_transformers_matrix.py
+    python scripts/test_transformers_matrix.py                           # workers=8
+    python scripts/test_transformers_matrix.py --workers 4
+    python scripts/test_transformers_matrix.py --no-parallel             # workers=1
     python scripts/test_transformers_matrix.py -v 5.11.0 5.12.1
     python scripts/test_transformers_matrix.py --start-from 5.5.4
     python scripts/test_transformers_matrix.py --dry-run
-    python scripts/test_transformers_matrix.py -- -k Qwen        # extra pytest args
+    python scripts/test_transformers_matrix.py -- -k Qwen                # extra pytest args
+    python scripts/test_transformers_matrix.py --rebuild-summary logs/tx-matrix/<ts>
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +67,14 @@ UV_LOCK = REPO_ROOT / "uv.lock"
 DEFAULT_PYTHON = "3.12"
 VERSION_MIN = (4, 54, 0)
 VERSION_MAX = (5, 12, 1)
+
+TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
+BATCH_DIR = TESTS_ROOT / "text_generation" / "batch"
+DEFAULT_CORE_MAP = ("0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3")
+MAX_WORKERS = len(DEFAULT_CORE_MAP)
+_BAD_ALLOC_RE = re.compile(r"BadAlloc|out of memory", re.IGNORECASE)
+_COUNT_LETTER_ORDER = ("p", "F", "E", "s", "d", "xF", "xP", "w")
+_COUNT_TOKEN_RE = re.compile(r"^(\d+)(p|F|E|s|d|xF|xP|w)$")
 
 
 def parse_version(raw: str) -> tuple[int, int, int] | None:
@@ -132,18 +167,101 @@ def install_matrix(version: str, log_file: Path) -> int:
     )
 
 
-def run_pytest(version: str, log_dir: Path, extra_args: list[str]) -> int:
-    junit = log_dir / f"junit-{version}.xml"
-    log = log_dir / f"pytest-{version}.log"
+def collect_non_batch_test_files() -> list[Path]:
+    """Return relative paths of test_*.py under tests/transformers, excluding batch dir."""
+    files: list[Path] = []
+    for p in sorted(TESTS_ROOT.rglob("test_*.py")):
+        try:
+            p.relative_to(BATCH_DIR)
+            continue
+        except ValueError:
+            pass
+        files.append(p.relative_to(REPO_ROOT))
+    return files
+
+
+def partition_round_robin(items: list[Path], n: int) -> list[list[Path]]:
+    buckets: list[list[Path]] = [[] for _ in range(n)]
+    for i, item in enumerate(items):
+        buckets[i % n].append(item)
+    return buckets
+
+
+def spawn_pytest_process(cmd: list[str], log_path: Path) -> tuple[subprocess.Popen, "object"]:
+    print(f"$ {' '.join(cmd)}  > {log_path.name}", flush=True)
+    fh = log_path.open("wb")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=REPO_ROOT,
+        stdout=fh,
+        stderr=subprocess.STDOUT,
+    )
+    return proc, fh
+
+
+def run_phase_parallel(
+    version: str,
+    log_dir: Path,
+    extra_args: list[str],
+    workers: int,
+    core_map: tuple[str, ...],
+) -> dict[int, int]:
+    """Launch `workers` pytest processes on non-batch tests, one per core in core_map."""
+    files = collect_non_batch_test_files()
+    if not files:
+        return {}
+    buckets = partition_round_robin(files, workers)
+
+    procs: list[tuple[int, subprocess.Popen, object]] = []
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        core = core_map[i]
+        log_path = log_dir / f"pytest-{version}-w{i}.log"
+        junit_path = log_dir / f"junit-{version}-w{i}.xml"
+        cmd = [
+            str(venv_python()),
+            "-m",
+            "pytest",
+            *(str(f) for f in bucket),
+            "--core-mode=single",
+            f"--target-cores={core}",
+            f"--vision-target-cores={core}",
+            f"--text-target-cores={core}",
+            f"--encoder-target-cores={core}",
+            f"--decoder-target-cores={core}",
+            f"--junit-xml={junit_path}",
+            *extra_args,
+        ]
+        proc, fh = spawn_pytest_process(cmd, log_path)
+        procs.append((i, proc, fh))
+
+    rcs: dict[int, int] = {}
+    for i, proc, fh in procs:
+        rc = proc.wait()
+        try:
+            fh.close()
+        except Exception:
+            pass
+        rcs[i] = rc
+        print(f"  [phase A worker {i}] rc={rc}", flush=True)
+    return rcs
+
+
+def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
+    """Run batch text-generation tests serially; batch conftest uses all 8 cores by default."""
+    log_path = log_dir / f"pytest-{version}-batch.log"
+    junit_path = log_dir / f"junit-{version}-batch.xml"
     cmd = [
         str(venv_python()),
         "-m",
         "pytest",
-        "tests/transformers",
-        f"--junit-xml={junit}",
+        str(BATCH_DIR.relative_to(REPO_ROOT)),
+        "--core-mode=single",
+        f"--junit-xml={junit_path}",
         *extra_args,
     ]
-    return run(cmd, log_file=log)
+    return run(cmd, log_file=log_path)
 
 
 def status_str(rc: int) -> str:
@@ -152,6 +270,119 @@ def status_str(rc: int) -> str:
     if rc < 0:
         return "RESET_FAIL"
     return f"FAIL({rc})"
+
+
+_PYTEST_SUMMARY_LINE = re.compile(
+    r"^=+\s*(?P<body>.*?(?:passed|failed|error|errors|no tests ran|xfailed|xpassed).*?)\s*=+\s*$"
+)
+_COUNT_TOKEN = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|deselected|xfailed|xpassed|warnings)")
+
+
+def extract_pytest_summary(log_path: Path) -> str:
+    """Return a compact `passed/failed/skipped/...` summary from a pytest log.
+
+    Falls back to a marker if the log has no recognizable summary line
+    (e.g. pytest crashed during collection).
+    """
+    if not log_path.exists():
+        return "NO_LOG"
+    last: str | None = None
+    with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = _PYTEST_SUMMARY_LINE.match(line.strip())
+            if m:
+                last = m.group("body")
+    if last is None:
+        return "NO_SUMMARY"
+    counts = _COUNT_TOKEN.findall(last)
+    if not counts:
+        return last.strip()
+    letter_map = {
+        "passed": "p",
+        "failed": "F",
+        "error": "E",
+        "errors": "E",
+        "skipped": "s",
+        "deselected": "d",
+        "xfailed": "xF",
+        "xpassed": "xP",
+        "warnings": "w",
+    }
+    parts = [f"{n}{letter_map.get(name, name)}" for n, name in counts]
+    return "/".join(parts)
+
+
+def merge_count_strings(counts_list: list[str]) -> str:
+    """Sum multiple compact count strings (e.g. `702p/4s/44d`) into a single one."""
+    totals: dict[str, int] = {}
+    for cs in counts_list:
+        if cs in ("NO_LOG", "NO_SUMMARY", "-", ""):
+            continue
+        for token in cs.split("/"):
+            m = _COUNT_TOKEN_RE.match(token.strip())
+            if not m:
+                continue
+            n, letter = m.groups()
+            totals[letter] = totals.get(letter, 0) + int(n)
+    if not totals:
+        return "-"
+    parts: list[str] = []
+    for letter in _COUNT_LETTER_ORDER:
+        if letter in totals:
+            parts.append(f"{totals[letter]}{letter}")
+    for letter, n in totals.items():
+        if letter not in _COUNT_LETTER_ORDER:
+            parts.append(f"{n}{letter}")
+    return "/".join(parts)
+
+
+def _log_group_for_version(name: str) -> str | None:
+    """Map `pytest-<V>.log` / `pytest-<V>-w<i>.log` / `pytest-<V>-batch.log` to `<V>`."""
+    if not name.startswith("pytest-") or not name.endswith(".log"):
+        return None
+    stem = name[len("pytest-") : -len(".log")]
+    m = re.match(r"^(?P<v>.+?)(?:-(?:w\d+|batch))?$", stem)
+    if not m:
+        return None
+    return m.group("v")
+
+
+def scan_for_bad_alloc(log_dir: Path, version: str) -> bool:
+    for p in log_dir.glob(f"pytest-{version}-*.log"):
+        try:
+            with p.open("r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if _BAD_ALLOC_RE.search(line):
+                        return True
+        except OSError:
+            continue
+    return False
+
+
+def rebuild_summary(log_dir: Path) -> int:
+    if not log_dir.is_dir():
+        print(f"ERROR: log dir not found: {log_dir}", file=sys.stderr)
+        return 2
+    groups: dict[str, list[Path]] = {}
+    for log in sorted(log_dir.glob("pytest-*.log")):
+        version = _log_group_for_version(log.name)
+        if version is None:
+            continue
+        groups.setdefault(version, []).append(log)
+    if not groups:
+        print(f"ERROR: no pytest-*.log files under {log_dir}", file=sys.stderr)
+        return 2
+    entries: list[tuple[str, str]] = []
+    for version, logs in sorted(groups.items()):
+        counts = merge_count_strings([extract_pytest_summary(p) for p in logs])
+        entries.append((version, counts))
+    if not entries:
+        print(f"ERROR: no pytest-*.log files under {log_dir}", file=sys.stderr)
+        return 2
+    print(f"log_dir: {log_dir}")
+    for version, counts in entries:
+        print(f"  {version:<10} {counts}")
+    return 0
 
 
 def main() -> int:
@@ -185,11 +416,40 @@ def main() -> int:
         help="Print the plan without touching the venv or running tests.",
     )
     ap.add_argument(
+        "--rebuild-summary",
+        type=Path,
+        default=None,
+        metavar="LOG_DIR",
+        help="Rescan pytest-*.log in LOG_DIR and print a summary table without running anything.",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=MAX_WORKERS,
+        help=f"Number of parallel pytest workers for phase A (1..{MAX_WORKERS}, default: {MAX_WORKERS}).",
+    )
+    ap.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Shortcut for --workers 1.",
+    )
+    ap.add_argument(
+        "--core-map",
+        default=",".join(DEFAULT_CORE_MAP),
+        help=(
+            "Comma-separated cluster:core assignments for phase A workers "
+            f"(default: {','.join(DEFAULT_CORE_MAP)})."
+        ),
+    )
+    ap.add_argument(
         "pytest_args",
         nargs=argparse.REMAINDER,
         help="Extra arguments forwarded to pytest (place after `--`).",
     )
     args = ap.parse_args()
+
+    if args.rebuild_summary is not None:
+        return rebuild_summary(args.rebuild_summary)
 
     if not args.dry_run and running_from_target_venv():
         print(
@@ -225,15 +485,46 @@ def main() -> int:
     if extra and extra[0] == "--":
         extra = extra[1:]
 
+    core_map = tuple(item.strip() for item in args.core_map.split(",") if item.strip())
+    if not core_map:
+        print("ERROR: --core-map must list at least one cluster:core.", file=sys.stderr)
+        return 2
+
+    workers = 1 if args.no_parallel else args.workers
+    if workers < 1:
+        print("ERROR: --workers must be >= 1.", file=sys.stderr)
+        return 2
+    if workers > len(core_map):
+        print(
+            f"ERROR: --workers ({workers}) exceeds core map size ({len(core_map)}).",
+            file=sys.stderr,
+        )
+        return 2
+    if any("--full-matrix" in a for a in extra) and workers > 1:
+        print(
+            f"WARNING: --full-matrix detected in pytest args; forcing workers=1 (was {workers}) to avoid NPU BadAlloc.",
+            file=sys.stderr,
+        )
+        workers = 1
+
     print(f"[plan] python:       {args.python}")
     print(f"[plan] versions:     {versions}")
     print(f"[plan] log_dir:      {log_dir}")
+    print(f"[plan] workers:      {workers}")
+    print(f"[plan] core_map:     {list(core_map[:workers])}")
     print(f"[plan] pytest extra: {extra}")
     if args.dry_run:
         return 0
 
     summary_path = log_dir / "summary.txt"
-    results: list[tuple[str, int, float]] = []
+    results: list[tuple[str, int, str, float, str]] = []
+
+    def append_summary(version: str, status: str, counts: str, elapsed: float, note: str = "") -> None:
+        with summary_path.open("a", encoding="utf-8") as fh:
+            row = f"{version}\t{status}\t{counts}\t{elapsed:.1f}s"
+            if note:
+                row += f"\t{note}"
+            fh.write(row + "\n")
 
     for v in versions:
         print(f"\n===== transformers=={v} =====", flush=True)
@@ -243,32 +534,44 @@ def main() -> int:
         except Exception as exc:
             elapsed = time.monotonic() - start
             print(f"[reset failed] {exc}", file=sys.stderr)
-            results.append((v, -1, elapsed))
-            with summary_path.open("a", encoding="utf-8") as fh:
-                fh.write(f"{v}\tRESET_FAIL\t{elapsed:.1f}s\n")
+            results.append((v, -1, "-", elapsed, ""))
+            append_summary(v, "RESET_FAIL", "-", elapsed)
             continue
 
         rc = install_matrix(v, log_dir / f"install-{v}.log")
         if rc != 0:
             elapsed = time.monotonic() - start
             print(f"[install failed] rc={rc}", file=sys.stderr)
-            results.append((v, rc, elapsed))
-            with summary_path.open("a", encoding="utf-8") as fh:
-                fh.write(f"{v}\tINSTALL_FAIL({rc})\t{elapsed:.1f}s\n")
+            results.append((v, rc, "-", elapsed, ""))
+            append_summary(v, f"INSTALL_FAIL({rc})", "-", elapsed)
             continue
 
-        rc = run_pytest(v, log_dir, extra)
+        print(f"[phase A] {workers} worker(s) on non-batch tests", flush=True)
+        worker_rcs = run_phase_parallel(v, log_dir, extra, workers, core_map)
+        print("[phase B] batch tests (serial, all 8 cores)", flush=True)
+        batch_rc = run_phase_batch(v, log_dir, extra)
+
         elapsed = time.monotonic() - start
-        results.append((v, rc, elapsed))
-        with summary_path.open("a", encoding="utf-8") as fh:
-            fh.write(f"{v}\t{status_str(rc)}\t{elapsed:.1f}s\n")
-        print(f"[done] transformers=={v}: {status_str(rc)} in {elapsed:.1f}s", flush=True)
+        all_rcs = list(worker_rcs.values()) + [batch_rc]
+        overall_rc = 0 if all(r == 0 for r in all_rcs) else max(r for r in all_rcs if r != 0)
+
+        version_logs = sorted(log_dir.glob(f"pytest-{v}-*.log"))
+        counts = merge_count_strings([extract_pytest_summary(p) for p in version_logs])
+        note = "BAD_ALLOC" if scan_for_bad_alloc(log_dir, v) else ""
+        results.append((v, overall_rc, counts, elapsed, note))
+        append_summary(v, status_str(overall_rc), counts, elapsed, note)
+        suffix = f" [{note}]" if note else ""
+        print(
+            f"[done] transformers=={v}: {status_str(overall_rc)} {counts} in {elapsed:.1f}s{suffix}",
+            flush=True,
+        )
 
     print("\n===== Summary =====")
     print(f"log_dir: {log_dir}")
-    for v, rc, elapsed in results:
-        print(f"  {v:<10} {status_str(rc):<16} {elapsed:>7.1f}s")
-    return 0 if all(rc == 0 for _, rc, _ in results) else 1
+    for v, rc, counts, elapsed, note in results:
+        note_col = f" {note}" if note else ""
+        print(f"  {v:<10} {status_str(rc):<16} {counts:<40} {elapsed:>7.1f}s{note_col}")
+    return 0 if all(rc == 0 for _, rc, _, _, _ in results) else 1
 
 
 if __name__ == "__main__":
