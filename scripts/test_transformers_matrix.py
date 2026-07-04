@@ -338,7 +338,7 @@ def status_str(rc: int) -> str:
 _PYTEST_SUMMARY_LINE = re.compile(
     r"^=+\s*(?P<body>.*?(?:passed|failed|error|errors|no tests ran|xfailed|xpassed|deselected|skipped).*?)\s*=+\s*$"
 )
-_COUNT_TOKEN = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|deselected|xfailed|xpassed|warnings)")
+_COUNT_TOKEN = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|deselected|xfailed|xpassed|warnings|warning)")
 
 
 def extract_pytest_summary(log_path: Path) -> str:
@@ -370,6 +370,7 @@ def extract_pytest_summary(log_path: Path) -> str:
         "xfailed": "xF",
         "xpassed": "xP",
         "warnings": "w",
+        "warning": "w",
     }
     parts = [f"{n}{letter_map.get(name, name)}" for n, name in counts]
     return "/".join(parts)
