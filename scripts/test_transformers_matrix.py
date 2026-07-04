@@ -39,6 +39,12 @@ Caveats:
   - `--full-matrix` and high parallelism together will likely OOM the NPU. If
     `--full-matrix` is detected in the forwarded pytest args, workers are
     forced to 1 with a warning.
+  - When `--full-matrix` is forwarded, this runner only exercises the full
+    *model* matrix, not the core-mode sweep. Phase A hard-pins each pytest
+    process to `--core-mode=single` (per-worker core placement is what makes
+    parallelism safe) and Phase C hard-pins to `--core-mode=global4` (the
+    only layout the compiled EAGLE-3 MXQ supports). To exercise the
+    single/global4/global8 sweep, run pytest directly without this wrapper.
   - If a worker log contains `BadAlloc` / `out of memory`, the version's row
     in summary.txt is annotated with `BAD_ALLOC`; reduce `--workers`.
 
@@ -78,6 +84,10 @@ BATCH_DIR = TESTS_ROOT / "text_generation" / "batch"
 EAGLE3_DIR = TESTS_ROOT / "text_generation" / "eagle3"
 DEFAULT_CORE_MAP = ("0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3")
 MAX_WORKERS = len(DEFAULT_CORE_MAP)
+# Sentinel for the venv reset path; kept out of the signal range (-1..-255) so
+# `status_str` can distinguish a reset failure from a subprocess killed by a
+# signal (`subprocess.Popen.returncode` returns `-signal_number` in that case).
+_RESET_FAIL_SENTINEL = -1000
 _BAD_ALLOC_RE = re.compile(r"BadAlloc|out of memory", re.IGNORECASE)
 _COUNT_LETTER_ORDER = ("p", "F", "E", "s", "d", "xF", "xP", "w")
 _COUNT_TOKEN_RE = re.compile(r"^(\d+)(p|F|E|s|d|xF|xP|w)$")
@@ -313,8 +323,13 @@ def run_phase_eagle3(version: str, log_dir: Path, extra_args: list[str]) -> int:
 def status_str(rc: int) -> str:
     if rc == 0:
         return "PASS"
-    if rc < 0:
+    if rc == _RESET_FAIL_SENTINEL:
         return "RESET_FAIL"
+    if rc < 0:
+        # subprocess returncode is -signal_number when the child is killed by
+        # a signal. SIGKILL from OOM (this runner's headline diagnostic) shows
+        # up here, so surface it explicitly instead of hiding behind FAIL().
+        return f"SIGNAL({-rc})"
     if rc == 5:
         return "NO_TESTS"
     return f"FAIL({rc})"
@@ -547,12 +562,20 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if any("--full-matrix" in a for a in extra) and workers > 1:
+    if any("--full-matrix" in a for a in extra):
         print(
-            f"WARNING: --full-matrix detected in pytest args; forcing workers=1 (was {workers}) to avoid NPU BadAlloc.",
+            "WARNING: --full-matrix only expands the model matrix in this runner. "
+            "Phase A pins --core-mode=single and Phase C pins --core-mode=global4, "
+            "so the single/global4/global8 core sweep is NOT exercised here; "
+            "run pytest directly without this wrapper to cover that sweep.",
             file=sys.stderr,
         )
-        workers = 1
+        if workers > 1:
+            print(
+                f"WARNING: --full-matrix detected in pytest args; forcing workers=1 (was {workers}) to avoid NPU BadAlloc.",
+                file=sys.stderr,
+            )
+            workers = 1
 
     print(f"[plan] python:       {args.python}")
     print(f"[plan] versions:     {versions}")
@@ -582,7 +605,7 @@ def main() -> int:
         except Exception as exc:
             elapsed = time.monotonic() - start
             print(f"[reset failed] {exc}", file=sys.stderr)
-            results.append((v, -1, "-", elapsed, ""))
+            results.append((v, _RESET_FAIL_SENTINEL, "-", elapsed, ""))
             append_summary(v, "RESET_FAIL", "-", elapsed)
             continue
 
@@ -607,12 +630,22 @@ def main() -> int:
         # deselect every test in a shard, so remap to 0 for aggregation.
         # But if *every* phase came back with 5, no test actually ran for this
         # version and PASS would be misleading -- surface it as NO_TESTS instead.
+        # Signal terminations (negative rc, e.g. SIGKILL from OOM) take
+        # precedence over positive failures because that is the failure mode
+        # this runner is trying to diagnose; a plain `max()` would let a
+        # concurrent positive rc from another phase mask the signal.
         non_empty_rcs = [r for r in all_rcs if r != 5]
         if not non_empty_rcs:
             overall_rc = 5
         else:
-            non_zero = [r for r in non_empty_rcs if r != 0]
-            overall_rc = 0 if not non_zero else max(non_zero)
+            signal_rcs = [r for r in non_empty_rcs if r < 0]
+            positive_rcs = [r for r in non_empty_rcs if r > 0]
+            if signal_rcs:
+                overall_rc = min(signal_rcs)
+            elif positive_rcs:
+                overall_rc = max(positive_rcs)
+            else:
+                overall_rc = 0
 
         version_logs = sorted(log_dir.glob(f"pytest-{v}-*.log"))
         counts = merge_count_strings([extract_pytest_summary(p) for p in version_logs])
