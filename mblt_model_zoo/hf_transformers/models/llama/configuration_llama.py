@@ -28,7 +28,26 @@ class MobilintLlamaConfig(MobilintConfigMixin, LlamaConfig):
         if head_dim is not None and head_dim <= 0:
             raise ValueError(f"head_dim must be positive, got {head_dim}.")
 
-    def __init__(self, **kwargs,):
+    def validate(self) -> None:
+        """Validate the config with Mobilint-specific architecture rules.
+
+        Upstream strict Llama configs generate a ``validate`` method that keeps
+        enforcing ``hidden_size % num_attention_heads == 0`` even after this
+        subclass restores Kanana's non-divisible hidden size. Defining the
+        validation entry point here keeps later ``config.validate()`` calls on
+        the Mobilint path.
+        """
+        for validator_name in (
+            "validate_output_attentions",
+            "validate_architecture",
+            "validate_token_ids",
+            "validate_layer_type",
+        ):
+            validator = getattr(self, validator_name, None)
+            if validator is not None:
+                validator()
+
+    def __init__(self, **kwargs):
         """Initialize the config while allowing non-square Mobilint query projections."""
         actual_hidden_size = kwargs.get("hidden_size")
         temporary_hidden_size = self._get_strict_compatible_hidden_size(
@@ -44,7 +63,7 @@ class MobilintLlamaConfig(MobilintConfigMixin, LlamaConfig):
 
         if temporary_hidden_size is not None:
             self.hidden_size = actual_hidden_size
-        
+
         self.tie_word_embeddings = False
 
 AutoConfig.register("mobilint-llama", MobilintLlamaConfig)
