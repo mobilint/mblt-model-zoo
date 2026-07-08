@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 from time import time
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import torch
@@ -78,6 +78,8 @@ def _load_ground_truths(data_path: str, dataset: CustomDOTAv1) -> dict[str, dict
                 parts = line.split()
                 if len(parts) < 9:
                     continue
+                if len(parts) >= 10 and parts[9] == "2":
+                    continue
                 cls = _label_to_index(parts[8])
                 if cls >= get_dotav1_class_num():
                     raise ValueError(f"Unsupported DOTAv1 class index {cls} in {original_label_path}.")
@@ -88,7 +90,11 @@ def _load_ground_truths(data_path: str, dataset: CustomDOTAv1) -> dict[str, dict
         polygon_tensor = (
             torch.stack(polygons).to(torch.float32) if polygons else torch.zeros((0, 4, 2), dtype=torch.float32)
         )
-        boxes = xyxyxyxy2xywhr(polygon_tensor).to(torch.float32) if polygon_tensor.numel() else torch.zeros((0, 5))
+        if polygon_tensor.numel():
+            boxes_xywhr = xyxyxyxy2xywhr(polygon_tensor)
+            boxes = cast(torch.Tensor, boxes_xywhr).to(torch.float32)
+        else:
+            boxes = torch.zeros((0, 5), dtype=torch.float32)
 
         ground_truths[image_id] = {
             "cls": torch.tensor(classes, dtype=torch.int64),
@@ -243,13 +249,15 @@ def _nms_output_to_predictions(nms_out: torch.Tensor) -> dict[str, torch.Tensor]
 
 
 def _ratio_pad_for_shape(
-    input_shape: tuple[int, int],
+    input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
 ) -> tuple[float, tuple[float, float]]:
     """Return letterbox gain and padding for an image."""
     if ratio_pad is not None:
         return float(ratio_pad[0][0]), (float(ratio_pad[1][0]), float(ratio_pad[1][1]))
+    if len(input_shape) < 2:
+        raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
     gain = min(input_shape[0] / org_shape[0], input_shape[1] / org_shape[1])
     pad_x = round((input_shape[1] - round(org_shape[1] * gain)) / 2 - 0.1)
@@ -259,7 +267,7 @@ def _ratio_pad_for_shape(
 
 def _ground_truth_to_input_space(
     ground_truth: dict[str, torch.Tensor],
-    input_shape: tuple[int, int],
+    input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
 ) -> dict[str, torch.Tensor]:
@@ -275,7 +283,8 @@ def _ground_truth_to_input_space(
     transformed = polygons.clone().to(torch.float32)
     transformed[..., 0] = transformed[..., 0] * gain + pad[0]
     transformed[..., 1] = transformed[..., 1] * gain + pad[1]
-    return {"cls": classes, "bboxes": xyxyxyxy2xywhr(transformed).to(torch.float32)}
+    transformed_boxes = xyxyxyxy2xywhr(transformed)
+    return {"cls": classes, "bboxes": cast(torch.Tensor, transformed_boxes).to(torch.float32)}
 
 
 def _process_image_stats(

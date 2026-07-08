@@ -168,7 +168,7 @@ def run_vision_inference(
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk
-        elif actual_task in {"object_detection", "face_detection", "instance_segmentation", "pose_estimation"}:
+        elif actual_task in {"object_detection", "face_detection", "instance_segmentation", "pose_estimation", "obb"}:
             model.set_postprocess_thresholds(conf_thres=args.conf_thres, iou_thres=args.iou_thres)
 
         input_img = model.preprocess(args.source)

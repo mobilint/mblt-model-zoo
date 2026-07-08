@@ -62,9 +62,16 @@ class YOLODFLFreePost(YOLOPostBase):
 
     def _stack_topk_outputs(self, outputs: list[torch.Tensor]) -> torch.Tensor:
         """Pad or trim per-image detections to a fixed batch tensor."""
-        output_dim = 6 + self.n_extra
+        if not outputs:
+            raise ValueError("At least one output tensor is required.")
+
+        output_dim = int(outputs[0].shape[1])
         padded_outputs = []
         for output in outputs:
+            if output.ndim != 2:
+                raise ValueError(f"Expected 2D detection rows, got shape {tuple(output.shape)}.")
+            if output.shape[1] != output_dim:
+                raise ValueError(f"Inconsistent detection row width {output.shape[1]}; expected {output_dim}.")
             output = output[: self.max_det]
             if output.shape[0] < self.max_det:
                 pad = torch.zeros(

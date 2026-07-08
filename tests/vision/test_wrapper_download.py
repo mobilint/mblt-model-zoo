@@ -838,6 +838,36 @@ def test_non_e2e_segmentation_uses_converted_detections_and_proto() -> None:
     assert result[1].shape == (1, 32, 16, 16)
 
 
+def test_non_e2e_dflfree_obb_preserves_canonical_row_width() -> None:
+    """Pad non-e2e DFL-free OBB converted outputs using canonical pre-NMS row widths."""
+
+    expected_max_det = 300
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "obb",
+        "nl": 3,
+        "nc": 15,
+        "n_extra": 1,
+        "conf_thres": 0.8,
+        "iou_thres": 0.7,
+        "dflfree": True,
+        "e2e": False,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+
+    result = postprocessor(_make_converted_obb_parts())
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, expected_max_det, 20)
+    first_image = result[0]
+    assert torch.equal(first_image[:3], _make_converted_obb_rows()[0])
+    assert torch.count_nonzero(first_image[3:]) == 0
+
+
 def test_raw_mxq_like_outputs_are_not_final_detections() -> None:
     """Do not treat split MXQ-style head tensors as already-decoded detections."""
 
