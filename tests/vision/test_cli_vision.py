@@ -669,7 +669,7 @@ def test_dota_matching_uses_one_to_one_duplicates() -> None:
         iouv=torch.tensor([0.5]),
     )
 
-    assert correct.tolist() == [[True], [False]]
+    assert correct.tolist() == [[False], [True]]
 
 
 def test_dota_ground_truth_loader_skips_difficult_original_labels(tmp_path: Path) -> None:

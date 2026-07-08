@@ -503,7 +503,7 @@ This section lists the publicly pre-trained models supported by the vision frame
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
 <details>
-<summary>Pose Estimation (COCO)</summary>
+<summary>Oriented Bounding Boxes (DOTA v1.0)</summary>
 
 - $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ values are for single-model single-scale on the [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset.
 

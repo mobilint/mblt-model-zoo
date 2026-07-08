@@ -214,8 +214,9 @@ def _match_predictions(
             continue
         if matches.shape[0] > 1:
             matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-            matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-            matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+            # Preserve the IoU-ranked order while keeping the first match per prediction and target.
+            matches = matches[np.sort(np.unique(matches[:, 1], return_index=True)[1])]
+            matches = matches[np.sort(np.unique(matches[:, 0], return_index=True)[1])]
         correct[matches[:, 1].astype(int), iou_index] = True
     return correct
 
