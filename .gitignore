@@ -39,5 +39,6 @@ runs/
 tmp/
 uv.lock
 !assets/
-!rc/
+!tests/vision/rc/
+!tests/vision/rc/**
 .omc

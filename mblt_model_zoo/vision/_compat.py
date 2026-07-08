@@ -8,11 +8,48 @@ constructor shape while delegating model loading to ``MBLT_Engine``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence, TypeAlias
 
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
+
+
+class CompatMBLTEngine(MBLT_Engine):
+    """Typed base for dynamically generated legacy compatibility wrappers."""
+
+    def __init__(
+        self,
+        local_path: str | None = None,
+        model_type: str = "DEFAULT",
+        infer_mode: CoreMode = "global8",
+        product: str = "aries",
+        dev_no: int = 0,
+        target_cores: Sequence[str] | None = None,
+        target_clusters: Sequence[int] | None = None,
+        model_path: str | None = None,
+        mxq_path: str | None = None,
+        onnx_path: str | None = None,
+        framework: str | None = None,
+    ) -> None:
+        """Type-only constructor matching the generated legacy wrappers."""
+        del (
+            local_path,
+            model_type,
+            infer_mode,
+            product,
+            dev_no,
+            target_cores,
+            target_clusters,
+            model_path,
+            mxq_path,
+            onnx_path,
+            framework,
+        )
+        raise NotImplementedError
+
+
+CompatMBLTEngineClass: TypeAlias = type[CompatMBLTEngine]
 
 
 def _normalize_name(value: str) -> str:
@@ -118,7 +155,7 @@ def _build_missing_init(class_name: str, reason: str) -> Callable[..., None]:
     return __init__
 
 
-def create_model_class(class_name: str, module_name: str) -> type[MBLT_Engine]:
+def create_model_class(class_name: str, module_name: str) -> CompatMBLTEngineClass:
     """Creates a legacy model class that delegates to ``MBLT_Engine``.
 
     Args:
@@ -135,7 +172,7 @@ def create_model_class(class_name: str, module_name: str) -> type[MBLT_Engine]:
     except ValueError as exc:
         return type(
             class_name,
-            (MBLT_Engine,),
+            (CompatMBLTEngine,),
             {
                 "__doc__": class_doc,
                 "__init__": _build_missing_init(class_name, str(exc)),
@@ -146,7 +183,7 @@ def create_model_class(class_name: str, module_name: str) -> type[MBLT_Engine]:
 
     return type(
         class_name,
-        (MBLT_Engine,),
+        (CompatMBLTEngine,),
         {
             "__doc__": class_doc,
             "__init__": _build_init(yaml_name),

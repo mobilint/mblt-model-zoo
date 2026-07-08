@@ -8,11 +8,12 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
+    YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
 )
-from .yolo_dflfree_post import YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
+from .yolo_dflfree_post import YOLODFLFreeOBBPost, YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
 from .yolo_nmsfree_post import YOLONMSFreePost
 
 
@@ -38,7 +39,7 @@ def build_postprocess(
     task_lower = post_cfg["task"].lower()
     if task_lower == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
-    if task_lower == "object_detection":
+    if task_lower in {"object_detection", "face_detection"}:
         if post_cfg.get("anchors", False):
             return YOLOAnchorPost(
                 pre_cfg,
@@ -88,6 +89,18 @@ def build_postprocess(
                 **kwargs,
             )
         return YOLOAnchorlessPosePost(
+            pre_cfg,
+            post_cfg,
+            **kwargs,
+        )
+    if task_lower == "obb":
+        if post_cfg.get("dflfree", False):
+            return YOLODFLFreeOBBPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        return YOLOAnchorlessOBBPost(
             pre_cfg,
             post_cfg,
             **kwargs,

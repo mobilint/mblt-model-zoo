@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -56,6 +57,7 @@ class YOLOPostBase(PostBase):
         "instance_segmentation": 80,
         "pose_estimation": 1,
         "obb": 15,
+        "face_detection": 1,
     }
 
     def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs) -> None:
@@ -256,7 +258,7 @@ class YOLOPostBase(PostBase):
 
         final_det_dim = 6 + self.n_extra
 
-        if isinstance(x, list):
+        if isinstance(x, Sequence):
             if not x:
                 return None, None
 
@@ -380,11 +382,12 @@ class YOLOPostBase(PostBase):
             tensor_input = cast(torch.Tensor, x)
             tensors = [tensor_input.to(self.device)]
         else:
-            assert isinstance(x, list), f"Got unexpected type for x={type(x)}."
+            if not isinstance(x, Sequence):
+                raise TypeError(f"Got unexpected type for x={type(x)}.")
             if all(isinstance(xi, np.ndarray) for xi in x):
                 tensors = [torch.from_numpy(xi).to(self.device) for xi in x]
             elif all(isinstance(xi, torch.Tensor) for xi in x):
-                torch_inputs = cast(list[torch.Tensor], x)
+                torch_inputs = cast(Sequence[torch.Tensor], x)
                 tensors = [xi.to(self.device) for xi in torch_inputs]
             else:
                 raise TypeError(f"Got unexpected element type for x[0]={type(x[0])}.")
@@ -407,6 +410,43 @@ class YOLOPostBase(PostBase):
                 raise ValueError(f"Got unexpected dim for xi={xi.ndim}.")
             y.append(xi)
         return y
+
+    def normalize_split_head(self, x: torch.Tensor, expected_channels: set[int]) -> torch.Tensor:
+        """Normalize a split detection head to ``(B, C, H, W)`` layout.
+
+        This accepts the channel-last tensors produced by ONNX export flows as
+        well as the channel-first tensors commonly returned by MXQ/NPU inference.
+
+        Args:
+            x: Raw split-head tensor.
+            expected_channels: Valid channel sizes for the current head group.
+
+        Returns:
+            The normalized tensor in ``(B, C, H, W)`` format.
+
+        Raises:
+            ValueError: If the tensor shape cannot be interpreted.
+        """
+        while x.ndim > 4:
+            singleton_dims = [idx for idx, size in enumerate(x.shape) if size == 1]
+            if not singleton_dims:
+                raise ValueError(f"Expected up to 4D split-head tensor, got shape {tuple(x.shape)}.")
+            x = x.squeeze(singleton_dims[0])
+        if x.ndim == 3:
+            x = x.unsqueeze(0)
+        if x.ndim != 4:
+            raise ValueError(f"Expected 3D or 4D split-head tensor, got shape {tuple(x.shape)}.")
+
+        if x.shape[1] in expected_channels and x.shape[-1] not in expected_channels:
+            return x
+        if x.shape[-1] in expected_channels and x.shape[1] not in expected_channels:
+            return x.permute(0, 3, 1, 2)
+        if x.shape[1] in expected_channels and x.shape[-1] in expected_channels:
+            return x
+
+        raise ValueError(
+            f"Could not infer split-head layout for shape {tuple(x.shape)} with expected channels {expected_channels}."
+        )
 
     @abstractmethod
     def rearrange(self, x: list[torch.Tensor]) -> Any:

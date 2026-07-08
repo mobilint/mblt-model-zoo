@@ -135,7 +135,7 @@ if __name__ == "__main__":
         core_mode=normalize_core_mode(args.core_mode),
     )
     if args.save_path is None:
-        args.save_path = os.path.join(TEST_DIR, "tmp", f"yolo11m_{os.path.basename(args.input_path)}")
+        args.save_path = os.path.join(TEST_DIR, "tmp", f"{args.model_cls}_{os.path.basename(args.input_path)}")
 
     try:
         run_inference(model, args.input_path, args.save_path, args.conf_thres, args.iou_thres)

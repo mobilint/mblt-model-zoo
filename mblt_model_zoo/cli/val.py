@@ -17,6 +17,7 @@ DEFAULT_WIDERFACE_IMAGE_SOURCE = "https://huggingface.co/datasets/CUHK-CSE/wider
 DEFAULT_WIDERFACE_ANNOTATION_SOURCE = (
     "https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/wider_face_split.zip"
 )
+DEFAULT_DOTAV1_SOURCE = "https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip"
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -106,6 +107,15 @@ def _resolve_widerface_sources(args: argparse.Namespace, data_path: str) -> tupl
     return image_dir or DEFAULT_WIDERFACE_IMAGE_SOURCE, annotation_dir or DEFAULT_WIDERFACE_ANNOTATION_SOURCE
 
 
+def _resolve_dotav1_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolves a local or remote source for DOTAv1 organization."""
+
+    dataset_path = args.annotation_dir or args.image_dir
+    if not args.force_organize:
+        dataset_path = dataset_path or _find_existing_source(data_path, ["DOTAv1.zip", "DOTAv1"])
+    return dataset_path or DEFAULT_DOTAV1_SOURCE
+
+
 def _default_data_path_for_task(task: str) -> str:
     """Returns the default organized dataset path for a vision task."""
 
@@ -115,6 +125,8 @@ def _default_data_path_for_task(task: str) -> str:
         return os.path.expanduser("~/.mblt_model_zoo/datasets/coco")
     if task == "face_detection":
         return os.path.expanduser("~/.mblt_model_zoo/datasets/widerface")
+    if task == "obb":
+        return os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1")
     raise SystemExit(f"Unsupported vision task for validation: {task}")
 
 
@@ -129,7 +141,17 @@ def _dataset_ready(task: str, data_path: str) -> bool:
     if task == "pose_estimation":
         return (root / "val2017").is_dir() and (root / "person_keypoints_val2017.json").is_file()
     if task == "face_detection":
-        return (root / "images").is_dir() and (root / "wider_face_val_bbx_gt.txt").is_file()
+        required_files = (
+            "wider_face_val.mat",
+            "wider_easy_val.mat",
+            "wider_medium_val.mat",
+            "wider_hard_val.mat",
+        )
+        return (root / "images").is_dir() and all((root / file_name).is_file() for file_name in required_files)
+    if task == "obb":
+        return (root / "images" / "val").is_dir() and (
+            (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
+        )
     return False
 
 
@@ -142,7 +164,12 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
         return data_path
 
     try:
-        from mblt_model_zoo.vision.utils.datasets import organize_coco, organize_imagenet, organize_widerface
+        from mblt_model_zoo.vision.utils.datasets import (
+            organize_coco,
+            organize_dotav1,
+            organize_imagenet,
+            organize_widerface,
+        )
     except ImportError as exc:
         print(f"Missing dependencies for vision dataset organization: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -169,6 +196,11 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             annotation_dir=annotation_dir,
             output_dir=data_path,
         )
+    elif task == "obb":
+        organize_dotav1(
+            dataset_path=_resolve_dotav1_source(args, data_path),
+            output_dir=data_path,
+        )
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
@@ -180,7 +212,7 @@ def _run_validation(args: argparse.Namespace) -> float:
 
     try:
         from mblt_model_zoo.vision import MBLT_Engine
-        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_imagenet
+        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
         from mblt_model_zoo.vision.wrapper import normalize_core_mode
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
@@ -218,11 +250,37 @@ def _run_validation(args: argparse.Namespace) -> float:
             print(f"Validation score (mAP 50-95): {score:.5f}")
             return score
 
-        if task == "face_detection":
-            raise SystemExit(
-                "Validation for face detection models is not available yet. "
-                "WiderFace evaluation is still pending in the current codebase."
+        if task == "obb":
+            dota_result = eval_dota(
+                model=model,
+                data_path=data_path,
+                batch_size=args.batch_size,
+                conf_thres=args.conf_thres,
+                iou_thres=args.iou_thres,
             )
+            print(
+                "Validation score "
+                f"(rotated mAP test 50): {dota_result.map50:.5f}, "
+                f"(rotated mAP test 50-95): {dota_result.map5095:.5f}"
+            )
+            return dota_result.map5095
+
+        if task == "face_detection":
+            widerface_result = eval_widerface(
+                model=model,
+                data_path=data_path,
+                batch_size=args.batch_size,
+                conf_thres=args.conf_thres,
+                iou_thres=args.iou_thres,
+            )
+            print(
+                "Validation score "
+                f"(Easy AP): {widerface_result.easy_ap:.5f}, "
+                f"(Medium AP): {widerface_result.medium_ap:.5f}, "
+                f"(Hard AP): {widerface_result.hard_ap:.5f}, "
+                f"(Mean AP): {widerface_result.mean_ap:.5f}"
+            )
+            return widerface_result.mean_ap
 
         raise SystemExit(f"Unsupported vision task for validation: {task}")
     finally:

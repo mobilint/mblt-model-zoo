@@ -264,6 +264,35 @@ class YOLOAnchorPost(YOLOPostBase):
 class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
     """Postprocessing for YOLO segmentation models with anchors."""
 
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return the export-style output tensor for anchor-based YOLO segmentation models.
+
+        Args:
+            x: Checked raw model outputs.
+
+        Returns:
+            A detection tensor, or detections paired with prototype masks.
+        """
+        if any(xi.ndim <= 4 and self.no in xi.shape[1:] for xi in x):
+            converted, proto_outs = self.conversion(x)
+            return [self._converted_to_batch_output(converted), self._proto_to_nchw(proto_outs)]
+        return super().non_e2e(x)
+
+    def _proto_to_nchw(self, proto: torch.Tensor) -> torch.Tensor:
+        """Convert prototype tensors to ``(B, C, H, W)`` if needed.
+
+        Args:
+            proto: Prototype tensor from a model runtime.
+
+        Returns:
+            Prototype tensor in channel-first batch layout.
+        """
+        if proto.ndim == 4 and proto.shape[1] == self.n_extra:
+            return proto
+        if proto.ndim == 4 and proto.shape[-1] == self.n_extra:
+            return proto.permute(0, 3, 1, 2)
+        raise ValueError(f"Unsupported proto tensor shape {tuple(proto.shape)} for non-e2e output.")
+
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[Any, torch.Tensor | None]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 

@@ -7,8 +7,8 @@ import pytest
 from tests.npu_backend_options import (
     BaseNpuParams,
     BaseNpuSweepSpec,
-    Eagle3NpuSweepSpec,
     Eagle3NpuParams,
+    Eagle3NpuSweepSpec,
     EncoderDecoderNpuParams,
     EncoderDecoderNpuSweepSpec,
     VisionTextNpuParams,
@@ -225,28 +225,51 @@ def _extract_model_path(value: object) -> str | None:
     return None
 
 
+def _item_module(item: pytest.Item) -> ModuleType | None:
+    """Return the collected test module when pytest exposes it on the item."""
+    module = getattr(item, "module", None)
+    if isinstance(module, ModuleType):
+        return module
+    return None
+
+
+def _item_callspec_params(item: pytest.Item) -> dict[str, object] | None:
+    """Return parametrized call arguments for items created from ``pytest.mark.parametrize``."""
+    callspec = getattr(item, "callspec", None)
+    params = getattr(callspec, "params", None)
+    if isinstance(params, dict):
+        return params
+    return None
+
+
 def _item_uses_nondefault_model(item: pytest.Item) -> bool:
     """Return whether a collected item targets a non-default model path."""
-    if not hasattr(item, "callspec"):
+    callspec_params = _item_callspec_params(item)
+    if callspec_params is None:
         return False
 
-    model_paths = _module_model_paths(item.module)
+    module = _item_module(item)
+    if module is None:
+        return False
+
+    model_paths = _module_model_paths(module)
     if len(model_paths) <= 1:
         return False
 
     first_model_path = model_paths[0]
     return any(
         model_path is not None and model_path != first_model_path
-        for model_path in (_extract_model_path(value) for value in item.callspec.params.values())
+        for model_path in (_extract_model_path(value) for value in callspec_params.values())
     )
 
 
 def _item_uses_non_single_core(item: pytest.Item) -> bool:
     """Return whether a collected item uses a non-single-core sweep spec."""
-    if not hasattr(item, "callspec"):
+    callspec_params = _item_callspec_params(item)
+    if callspec_params is None:
         return False
 
-    for value in item.callspec.params.values():
+    for value in callspec_params.values():
         if isinstance(value, BaseNpuSweepSpec):
             return value.base_core_mode not in {None, "single"}
         if isinstance(value, EncoderDecoderNpuSweepSpec):

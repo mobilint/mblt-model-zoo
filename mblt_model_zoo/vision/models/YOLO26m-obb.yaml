@@ -19,7 +19,7 @@ DEFAULT:
     nl: 3
     n_extra: 1
     dflfree: true
-    conf_thres: 0.001
+    conf_thres: 0.01
     iou_thres: 0.7
 TURBO:
   update: DEFAULT

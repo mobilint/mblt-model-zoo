@@ -8,11 +8,17 @@ import torch
 
 from .base import YOLOPostBase
 from .common import (
+    YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
+    concat_converted_obb_outputs,
+    decode_split_converted_obb_outputs,
     dist2bbox,
+    dist2rbox,
     non_max_suppression,
+    rotated_nms,
     xywh2xyxy,
+    yolo_multilabel_candidates,
 )
 
 
@@ -288,6 +294,35 @@ class YOLOAnchorlessPost(YOLOPostBase):
 class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
     """Postprocessing for YOLO segmentation models without anchors."""
 
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return the export-style output tensor for anchorless YOLO segmentation models.
+
+        Args:
+            x: Checked raw model outputs.
+
+        Returns:
+            A detection tensor, or detections paired with prototype masks.
+        """
+        if len(x) == 2:
+            converted, proto_outs = self.conversion(x)
+            return [self._converted_to_batch_output(converted), self._proto_to_nchw(proto_outs)]
+        return super().non_e2e(x)
+
+    def _proto_to_nchw(self, proto: torch.Tensor) -> torch.Tensor:
+        """Convert prototype tensors to ``(B, C, H, W)`` if needed.
+
+        Args:
+            proto: Prototype tensor from a model runtime.
+
+        Returns:
+            Prototype tensor in channel-first batch layout.
+        """
+        if proto.ndim == 4 and proto.shape[1] == self.n_extra:
+            return proto
+        if proto.ndim == 4 and proto.shape[-1] == self.n_extra:
+            return proto.permute(0, 3, 1, 2)
+        raise ValueError(f"Unsupported proto tensor shape {tuple(proto.shape)} for non-e2e output.")
+
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
@@ -444,3 +479,215 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
         key_coord = (key_coord * 2 + anchors.unsqueeze(1) - 0.5) * stride.unsqueeze(1)
         keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(x.shape[0], self.n_extra, -1)
         return torch.cat([dbox, scores.sigmoid(), keypoints], dim=1)
+
+
+class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessPost):
+    """Postprocessing for anchorless YOLO OBB models."""
+
+    def _angle_from_raw(self, angle: torch.Tensor) -> torch.Tensor:
+        """Decode YOLOv8/YOLO11 raw angle logits to radians."""
+        return (angle.sigmoid() - 0.25) * torch.pi
+
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+        """Preprocess OBB inputs into row-major detections.
+
+        Args:
+            x: Raw model outputs.
+
+        Returns:
+            A tuple of detections and no prototype output.
+        """
+        if len(x) in {1, 3, 5}:
+            return self.filter_conversion(self.conversion(x)), None
+        return self.decode(self.rearrange(x)), None
+
+    def conversion(self, x: list[torch.Tensor]) -> torch.Tensor:
+        """Convert exported OBB outputs to one canonical tensor.
+
+        Args:
+            x: Converted OBB runtime outputs.
+
+        Returns:
+            Detections in ``cx, cy, w, h, class scores..., angle`` format.
+        """
+        if len(x) == 5:
+            return decode_split_converted_obb_outputs(
+                x,
+                self.nc,
+                self.n_extra,
+                self.anchors_as_tensor(),
+                self.stride_as_tensor(),
+            )
+        return concat_converted_obb_outputs(x, self.nc, self.n_extra)
+
+    def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
+        """Rearrange raw OBB heads into ``(batch, channels, anchors)`` format.
+
+        Args:
+            x: Raw model output tensors.
+
+        Returns:
+            Concatenated OBB detection tensor.
+        """
+        target_count = len(x) // 3
+        y_det: list[torch.Tensor] = []
+        y_cls: list[torch.Tensor] = []
+        y_angle: list[torch.Tensor] = []
+        ambiguous: list[tuple[torch.Tensor, list[int]]] = []
+        for xi in x:
+            if xi.ndim == 3:
+                xi = xi.unsqueeze(0)
+            elif xi.ndim > 4:
+                while xi.ndim > 4 and 1 in xi.shape:
+                    xi = xi.squeeze(next(idx for idx, size in enumerate(xi.shape) if size == 1))
+                if xi.ndim == 3:
+                    xi = xi.unsqueeze(0)
+            if xi.ndim != 4:
+                raise ValueError(f"Expected 3D or 4D OBB head, got shape {tuple(xi.shape)}.")
+
+            candidates: list[tuple[int, torch.Tensor]] = []
+            if xi.shape[1] in {self.reg_max * 4, self.nc, self.n_extra}:
+                candidates.append((int(xi.shape[1]), xi))
+            if xi.shape[-1] in {self.reg_max * 4, self.nc, self.n_extra}:
+                candidates.append((int(xi.shape[-1]), xi.permute(0, 3, 1, 2)))
+
+            deduped: list[tuple[int, torch.Tensor]] = []
+            seen_channels: set[int] = set()
+            for channel_count, candidate in candidates:
+                if channel_count not in seen_channels:
+                    seen_channels.add(channel_count)
+                    deduped.append((channel_count, candidate))
+
+            if len(candidates) == 2 and len(deduped) == 1:
+                channel_count, _ = deduped[0]
+                normalized = xi.permute(0, 3, 1, 2)
+                if channel_count == self.reg_max * 4:
+                    y_det.append(normalized)
+                elif channel_count == self.nc:
+                    y_cls.append(normalized)
+                elif channel_count == self.n_extra:
+                    y_angle.append(normalized)
+                else:
+                    raise ValueError(f"Wrong shape of input: {xi.shape}")
+            elif len(deduped) == 1:
+                channel_count, normalized = deduped[0]
+                if channel_count == self.reg_max * 4:
+                    y_det.append(normalized)
+                elif channel_count == self.nc:
+                    y_cls.append(normalized)
+                elif channel_count == self.n_extra:
+                    y_angle.append(normalized)
+                else:
+                    raise ValueError(f"Wrong shape of input: {xi.shape}")
+            elif len(deduped) > 1:
+                ambiguous.append((xi, [channel_count for channel_count, _ in deduped]))
+            else:
+                raise ValueError(f"Wrong shape of input: {xi.shape}")
+
+        for xi, channel_options in ambiguous:
+            if self.reg_max * 4 in channel_options and len(y_det) < target_count:
+                y_det.append(xi if xi.shape[1] == self.reg_max * 4 else xi.permute(0, 3, 1, 2))
+                continue
+            if self.nc in channel_options and len(y_cls) < target_count:
+                y_cls.append(xi if xi.shape[1] == self.nc else xi.permute(0, 3, 1, 2))
+                continue
+            if self.n_extra in channel_options and len(y_angle) < target_count:
+                y_angle.append(xi if xi.shape[1] == self.n_extra else xi.permute(0, 3, 1, 2))
+                continue
+            raise ValueError(f"Wrong shape of input: {xi.shape}")
+
+        y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
+        y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+        y_angle = sorted(y_angle, key=lambda x: x.numel(), reverse=True)
+        if not (len(y_det) == len(y_cls) == len(y_angle)):
+            raise ValueError("OBB output arguments are not in a proper form.")
+        return torch.cat(
+            [
+                torch.cat((yi_det, yi_cls, yi_angle), dim=1).flatten(2)
+                for yi_det, yi_cls, yi_angle in zip(y_det, y_cls, y_angle)
+            ],
+            dim=-1,
+        )
+
+    def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode every OBB anchor without confidence filtering."""
+        box, scores, angle = torch.split(x, [self.reg_max * 4, self.nc, self.n_extra], dim=1)
+        anchors = self.anchors_as_tensor().unsqueeze(0)
+        stride = self.stride_as_tensor().unsqueeze(0)
+        angle = self._angle_from_raw(angle)
+        rbox = dist2rbox(self.dfl(box), angle, anchors, dim=1) * stride
+        return torch.cat([rbox, scores.sigmoid(), angle], dim=1)
+
+    def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
+        """Processes OBB results for a single image.
+
+        Args:
+            box_cls: Raw detections for one image.
+
+        Returns:
+            Decoded rotated boxes, scores, and angle.
+        """
+        ic = torch.amax(box_cls[-self.nc - self.n_extra : -self.n_extra, :], dim=0) > self.inv_conf_thres
+        box_cls = box_cls[:, ic]
+        if box_cls.numel() == 0:
+            return torch.zeros((4 + self.nc + self.n_extra, 0), dtype=torch.float32, device=self.device)
+        anchors = self.anchors_as_tensor()
+        stride = self.stride_as_tensor()
+        box, scores, angle = torch.split(box_cls[None], [self.reg_max * 4, self.nc, self.n_extra], dim=1)
+        angle = self._angle_from_raw(angle)
+        rbox = dist2rbox(self.dfl(box), angle, anchors[:, ic], dim=1) * stride[:, ic]
+        return torch.cat([rbox, scores.sigmoid(), angle], dim=1).squeeze(0)
+
+    def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
+        """Filters converted OBB outputs from a single ONNX tensor.
+
+        Args:
+            x: Converted output tensor.
+
+        Returns:
+            Per-image row-major tensors in ``cx, cy, w, h, scores..., angle`` format.
+        """
+        while x.ndim == 4 and 1 in (x.shape[0], x.shape[1]):
+            if x.shape[0] == 1:
+                x = x.squeeze(0)
+            elif x.shape[1] == 1:
+                x = x.squeeze(1)
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D converted tensor, got shape {tuple(x.shape)}.")
+        expected_dim = 4 + self.nc + self.n_extra
+        if x.shape[-1] == expected_dim:
+            normalized = x
+        elif x.shape[1] == expected_dim:
+            normalized = x.transpose(1, 2)
+        else:
+            raise ValueError(f"Unsupported converted tensor shape {tuple(x.shape)}.")
+
+        outputs = []
+        for xi in torch.split(normalized, 1, dim=0):
+            xi = xi.squeeze(0)
+            ic = torch.amax(xi[:, 4 : 4 + self.nc], dim=1) > self.conf_thres
+            if torch.any(ic):
+                outputs.append(xi[ic])
+            else:
+                outputs.append(torch.zeros((0, expected_dim), dtype=xi.dtype, device=xi.device))
+        return outputs
+
+    def _nms_single(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+        """Apply rotated NMS to a single decoded OBB image tensor."""
+        if xi.numel() == 0:
+            return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
+        xi_t = xi.transpose(0, 1)
+        return self._nms_single_legacy_rows(xi_t, max_det=max_det, max_nms=max_nms, max_wh=max_wh)
+
+    def _nms_single_legacy_rows(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+        """Apply rotated NMS to row-major OBB detections."""
+        if xi.numel() == 0:
+            return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
+        xi_out = yolo_multilabel_candidates(xi, self.nc, self.n_extra, self.conf_thres)
+        if xi_out.numel() == 0:
+            return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
+        xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
+        c = xi_out[:, 5:6] * max_wh
+        boxes = torch.cat([xi_out[:, :2] + c, xi_out[:, 2:4], xi_out[:, 6:7]], dim=-1)
+        keep = rotated_nms(boxes, xi_out[:, 4], self.iou_thres)[:max_det]
+        return xi_out[keep]

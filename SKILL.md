@@ -25,20 +25,22 @@ Start with the smallest set of files that anchor the task:
 - `pyproject.toml` for dependencies, extras, scripts, Ruff settings, and Python versions
 - `README.md` for the public package contract
 - Area-specific docs such as `tests/vision/TEST.md`, `tests/transformers/TEST.md`,
-  `tests/MeloTTS/TEST.md`, `benchmark/vision/README.md`, or
-  `mblt_model_zoo/hf_transformers/README.md`
+  `tests/MeloTTS/TEST.md`, `benchmark/vision/README.md`,
+  `benchmark/transformers/README.md`, or `mblt_model_zoo/hf_transformers/README.md`
 - `git status --short` before editing so you do not overwrite unrelated user changes
 
 ## Repo Map
 
 - `mblt_model_zoo/vision`: Vision public API, model wrappers, preprocessing, postprocessing,
-  datasets, evaluation, and result objects
+  datasets, evaluation, result objects, and task subpackages including face detection, OCR, and
+  oriented bounding boxes
 - `mblt_model_zoo/hf_transformers`: Custom model, config, and proxy integrations for Transformers
 - `mblt_model_zoo/MeloTTS`: MeloTTS runtime, API, CLI glue, and text normalization utilities
 - `mblt_model_zoo/cli`: Installed CLI entry points. `mblt-model-zoo` is defined in
-  `pyproject.toml`
+  `pyproject.toml`, and `mblt-melotts-download` is also exposed for MeloTTS setup
 - `tests`: Pytest suites grouped by feature area
-- `benchmark`: Dataset organization and benchmark scripts
+- `benchmark/vision`: Vision dataset organizers and benchmark scripts
+- `benchmark/transformers`: TPS benchmark scripts and CLI examples for Hugging Face integrations
 
 ## Working Conventions
 
@@ -57,8 +59,15 @@ When editing these files:
   pattern.
 - Preserve public constructor arguments such as `local_path`, `model_type`, `infer_mode`, and
   `product`.
+- Legacy compatibility wrappers still accept `product`, but the current YAML-backed registry
+  ignores it. Use explicit `model_cls`, `model_type`, or `model_path` values when a task needs a
+  non-default artifact.
 - Be careful with changes that affect `list_models()` discovery. Exported classes must remain
   subclasses of `MBLT_Engine`.
+- Keep `mblt_model_zoo/vision/__init__.py` lazy top-level compatibility exports aligned with task
+  package `__all__` lists. The current package still supports imports such as
+  `from mblt_model_zoo.vision import ResNet50`, even though `MBLT_Engine` and task subpackages are
+  the preferred surfaces for new code.
 
 ### Shared Vision Pipeline Work
 
@@ -90,6 +99,8 @@ These areas have optional dependencies and heavier runtime assumptions.
 - Prefer the commands documented in the corresponding `tests/*/TEST.md`.
 - Narrow test scope with a subdirectory, file path, or `-k` filter before attempting a full suite.
 - Expect some tests to require Mobilint hardware, model downloads, or extra data files.
+- Remember the repo also defines optional extras for ONNX Runtime-backed vision work
+  (`onnxruntime`, `onnxruntime-gpu`) and Qwen3-ASR (`qwen-asr`).
 - `tool.ruff.exclude` currently excludes `mblt_model_zoo/hf_transformers` and
   `mblt_model_zoo/MeloTTS`, so preserve local style there instead of forcing broad cleanup.
 
@@ -101,8 +112,8 @@ These areas have optional dependencies and heavier runtime assumptions.
   `MBLT_Engine`, `list_models()`, the shared `--model-path` CLI option, and framework auto-detect
   are the preferred surfaces for new guidance.
 - `benchmark/vision/README.md` currently covers organizer flows for ImageNet, COCO, WiderFace,
-  and DOTAv1. Only ImageNet and COCO benchmark execution sections are complete; WiderFace and
-  DOTAv1 still have pending benchmark steps.
+  and DOTAv1. ImageNet, COCO, and DOTAv1 benchmark execution sections are complete; WiderFace
+  benchmark execution is still pending.
 - For rule or workflow documents, include YAML frontmatter with at least `description` and
   `paths`.
 
@@ -121,6 +132,9 @@ pip install -e . --group dev
 ```bash
 pip install -e ".[transformers]" --group dev
 pip install -e ".[MeloTTS]" --group dev
+pip install -e ".[onnxruntime]" --group dev
+pip install -e ".[onnxruntime-gpu]" --group dev
+pip install -e ".[qwen-asr]" --group dev
 ```
 
 ### Lint and Format Python
@@ -135,8 +149,10 @@ pre-commit run --files path/to/touched_file.py
 
 ```bash
 pytest tests/vision/test_resnet50.py
-pytest tests/transformers/text-generation/test_qwen2.py -k "0.5B"
+pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
 pytest tests/MeloTTS/test_melo.py -k "KR"
+pytest tests/vision/test_cli_vision.py
+pytest tests/vision/test_wrapper_download.py
 ```
 
 For the recent vision runtime and CLI path-resolution work, these targeted tests are especially
@@ -167,9 +183,8 @@ The unified vision validation CLI currently supports:
 
 - ImageNet for image classification models.
 - COCO for object detection, instance segmentation, and pose estimation models.
-
-Face detection validation is intentionally unavailable because WiderFace evaluation is still
-pending in the current codebase.
+- WiderFace for face detection models.
+- DOTAv1 for oriented bounding box models.
 
 ## Things to Avoid
 

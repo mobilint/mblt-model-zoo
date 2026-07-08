@@ -496,3 +496,15 @@ This section lists the publicly pre-trained models supported by the vision frame
 - $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{pose}}}$ values are for single-model single-scale on the [COCO Keypoints val2017](https://cocodataset.org/) dataset.
 
 </details>
+
+### Oriented Bounding Boxes
+
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+<details>
+<summary>Oriented Bounding Boxes (DOTA v1.0)</summary>
+
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ values are for single-model single-scale on the [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset.
+
+</details>

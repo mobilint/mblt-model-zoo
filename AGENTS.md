@@ -15,10 +15,12 @@ because they are the most consistently structured.
 ## Repo Map
 
 - `mblt_model_zoo/vision`: Vision public API, model wrappers, preprocess and postprocess helpers,
-  evaluation, datasets, and result types
+  evaluation, datasets, result types, and task subpackages including face detection, OCR, and
+  oriented bounding boxes
 - `mblt_model_zoo/hf_transformers`: Hugging Face model integrations and utilities
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization
 - `mblt_model_zoo/cli`: CLI entry points and command registration
+- `benchmark/transformers`: TPS benchmark scripts and CLI examples for Hugging Face integrations
 - `tests`: Feature-specific pytest suites plus shared fixtures in `tests/conftest.py`
 - `benchmark`: Dataset organization and benchmark scripts
 
@@ -73,22 +75,25 @@ because they are the most consistently structured.
   imports such as `from mblt_model_zoo.vision import ResNet50`. For new docs and examples, prefer
   `MBLT_Engine` or task-subpackage imports unless the change is specifically about backward
   compatibility.
+- Legacy compatibility wrappers still accept `product`, but the YAML-backed registry ignores it.
+  If a change needs non-default artifacts, route that selection through explicit `model_cls`,
+  `model_type`, or `model_path` values instead.
 - When adding or renaming exported vision models, update the relevant `__init__.py` files so
   `mblt_model_zoo.vision.list_models()` continues to discover them, and keep
-  `mblt_model_zoo.vision.__init__` compatibility exports in sync.
+  `mblt_model_zoo.vision.__init__` lazy compatibility exports in sync.
 
 ### Tests and Benchmarks
 
 - Many tests depend on Mobilint hardware, downloaded model artifacts, or optional extras.
 - Prefer targeted validation over running the entire matrix by default.
 - Reuse the documented commands in `tests/vision/TEST.md`, `tests/transformers/TEST.md`,
-  `tests/MeloTTS/TEST.md`, and `benchmark/vision/README.md`.
-- The unified vision CLI validation flow currently covers ImageNet-backed image classification and
-  COCO-backed object detection, instance segmentation, and pose estimation. Face detection
-  validation is still pending because WiderFace evaluation is not implemented yet.
+  `tests/MeloTTS/TEST.md`, `benchmark/vision/README.md`, and `benchmark/transformers/README.md`.
+- The unified vision CLI validation flow currently covers ImageNet-backed image classification,
+  COCO-backed object detection, instance segmentation, and pose estimation, WiderFace-backed face
+  detection, and DOTAv1-backed oriented bounding boxes.
 - `benchmark/vision/README.md` currently documents dataset organization for ImageNet, COCO,
-  WiderFace, and DOTAv1, but only ImageNet and COCO benchmark execution commands are fully
-  documented there today. Treat the WiderFace and DOTAv1 benchmark sections as incomplete.
+  WiderFace, and DOTAv1. ImageNet, COCO, and DOTAv1 benchmark execution commands are documented
+  there today; WiderFace benchmark execution is still pending.
 - Use the shared NPU pytest options from `tests/conftest.py` instead of inventing custom flags.
 - For vision tests that call `MBLT_Engine(**kwargs)`, prefer the typed helper
   `tests.npu_backend_options.build_vision_engine_kwargs()` so `dev_no`, `core_mode`,
@@ -150,6 +155,9 @@ pip install -e . --group dev
 ```bash
 pip install -e ".[transformers]" --group dev
 pip install -e ".[MeloTTS]" --group dev
+pip install -e ".[onnxruntime]" --group dev
+pip install -e ".[onnxruntime-gpu]" --group dev
+pip install -e ".[qwen-asr]" --group dev
 ```
 
 If validation fails with `ImportError` or `ModuleNotFoundError`, install the relevant optional
@@ -169,6 +177,8 @@ pre-commit run --files path/to/touched_file.py
 pytest tests/vision/test_resnet50.py
 pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
 pytest tests/MeloTTS/test_melo.py -k "KR"
+pytest tests/vision/test_cli_vision.py
+pytest tests/vision/test_wrapper_download.py
 ```
 
 If required hardware, models, or extras are unavailable, run the narrowest safe validation and

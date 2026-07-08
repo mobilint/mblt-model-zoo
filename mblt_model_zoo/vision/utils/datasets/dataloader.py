@@ -117,6 +117,101 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
     )
 
 
+class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
+    """Custom DOTAv1 validation dataset for OBB evaluation.
+
+    Attributes:
+        root: DOTAv1 dataset root.
+        image_root: Directory containing validation images.
+        ids: Image IDs derived from file stems.
+    """
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
+
+    def __init__(self, root: str) -> None:
+        """Initializes the DOTAv1 validation dataset.
+
+        Args:
+            root: DOTAv1 root containing ``images/val`` and ``labels/val``.
+
+        Raises:
+            FileNotFoundError: If the validation image directory is missing.
+        """
+        self.root = root
+        self.image_root = os.path.join(root, "images", "val")
+        if not os.path.isdir(self.image_root):
+            raise FileNotFoundError(f"DOTAv1 image directory not found: {self.image_root}")
+        self.image_paths = [
+            os.path.join(self.image_root, file_name)
+            for file_name in sorted(os.listdir(self.image_root))
+            if file_name.lower().endswith(self.IMG_EXTENSIONS)
+        ]
+        self.ids = [os.path.splitext(os.path.basename(path))[0] for path in self.image_paths]
+
+    def _load_image(self, image_path: str) -> np.ndarray:
+        """Load an image as RGB."""
+        image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, str, int, int]:
+        """Get the image and metadata by index."""
+        image_path = self.image_paths[index]
+        image = self._load_image(image_path)
+        height, width = image.shape[:2]
+        return image, self.ids[index], height, width
+
+    def __len__(self) -> int:
+        """Return the number of validation images."""
+        return len(self.image_paths)
+
+
+def get_dota_loader(dataset: CustomDOTAv1, batch_size: int, preprocess_fn: Callable) -> torch.utils.data.DataLoader:
+    """Creates a DataLoader for DOTAv1 validation.
+
+    Args:
+        dataset: The DOTAv1 dataset instance.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Function used to preprocess images.
+
+    Returns:
+        Configured DataLoader for DOTAv1.
+    """
+
+    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray, list[Any], tuple[str, ...]]:
+        """Collate function for DOTAv1 DataLoader."""
+        batch = list(filter(lambda x: x is not None, batch))
+        images, image_ids, height, width = zip(*batch)
+
+        processed_images = []
+        ratio_pads = []
+        for img in images:
+            processed = preprocess_fn(img)
+            if isinstance(processed, tuple) and len(processed) == 2 and isinstance(processed[1], dict):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((np.array(height), np.array(width)), axis=1),
+            ratio_pads,
+            image_ids,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
+
+
 class CustomImageFolder(torch.utils.data.Dataset[tuple[Image.Image, int]]):
     """Custom ImageFolder dataset for loading images from class-based directory structures.
 
@@ -320,22 +415,31 @@ def get_widerface_loader(
 
     def loader(
         batch: list[Any],
-    ) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], tuple[str, ...]]:
+    ) -> tuple[np.ndarray, np.ndarray, list[Any | None], tuple[str, ...], tuple[str, ...]]:
         """Collate function for WiderFace DataLoader."""
         batch = list(filter(lambda x: x is not None, batch))
         images, target_classes, fnames = zip(*batch)
         processed_images = []
         heights = []
         widths = []
+        ratio_pads = []
         for img in images:
             height, width = img.shape[:2]
-            processed_images.append(preprocess_fn(img))
+            processed = preprocess_fn(img)
+            if isinstance(processed, tuple):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
             heights.append(height)
             widths.append(width)
 
         return (
             np.stack(processed_images, axis=0),
             np.stack((heights, widths), axis=1),
+            ratio_pads,
             target_classes,
             fnames,
         )
