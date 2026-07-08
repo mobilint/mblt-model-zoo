@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark.transformers.asr_metrics import SampleTiming, add_device_efficiency_metrics
+from mblt_model_zoo.hf_transformers.models.qwen3_asr._errors import QWEN_ASR_INSTALL_HINT
 
 
 def asr_pipeline_inputs(sample: Mapping[str, Any]) -> list[tuple[Any, dict[str, Any]]]:
@@ -171,6 +172,8 @@ def build_asr_pipeline(
     ensure_qwen3_asr_backend_registered: Any,
     apply_asr_core_mode_model_kwargs: Any,
     hf_pipeline: Any,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ) -> Any:
     """Build one ASR pipeline/native model for benchmarking."""
 
@@ -181,10 +184,7 @@ def build_asr_pipeline(
         except ModuleNotFoundError as exc:
             missing = exc.name or ""
             if missing == "qwen_asr" or missing.startswith("qwen_asr."):
-                raise ModuleNotFoundError(
-                    "Qwen3-ASR original-model benchmarks require the optional 'qwen-asr' package. "
-                    "Install it with: pip install -U qwen-asr"
-                ) from exc
+                raise ModuleNotFoundError(QWEN_ASR_INSTALL_HINT) from exc
             raise
 
         quiet_apscheduler_info_logs()
@@ -223,7 +223,13 @@ def build_asr_pipeline(
     if device_map:
         kwargs["device_map"] = device_map
     model_kwargs: dict[str, Any] = {}
-    model_kwargs = apply_asr_core_mode_model_kwargs(model_kwargs, target.model_id, core_mode)
+    model_kwargs = apply_asr_core_mode_model_kwargs(
+        model_kwargs,
+        target.model_id,
+        core_mode,
+        encoder_core_mode=encoder_core_mode,
+        decoder_core_mode=decoder_core_mode,
+    )
     if target.mxq_path:
         model_kwargs["mxq_path"] = target.mxq_path
     if model_kwargs:

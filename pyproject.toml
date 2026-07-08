@@ -60,12 +60,12 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 
 [project.optional-dependencies]
 transformers = [
-    "transformers[serving]>=4.54.0, <=5.6.2",
+    "transformers[serving]>=4.54.0, <=5.12.1",
     "sentencepiece",
     "torchvision",
 ]
 MeloTTS = [
-    "transformers>=4.54.0, <=5.6.2",
+    "transformers>=4.54.0, <=5.12.1",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",
@@ -83,6 +83,9 @@ onnxruntime = [
 onnxruntime-gpu = [
     "onnx; sys_platform != 'darwin'",
     "onnxruntime-gpu; sys_platform != 'darwin'",
+]
+qwen-asr = [
+    "qwen-asr",
 ]
 
 # Tools setting -----------------------------------------
@@ -114,12 +117,12 @@ dev = [
     "torchvision",
     "soundfile",
     "rich",
-    "qwen-asr",
 ]
 
 [tool.pytest.ini_options]
 markers = [
     "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
+    "upstream_contract: pins invariants of upstream HF transformers classes that our wrappers depend on; deselect with '-m \"not upstream_contract\"' in fast CI.",
 ]
 
 [tool.ruff]

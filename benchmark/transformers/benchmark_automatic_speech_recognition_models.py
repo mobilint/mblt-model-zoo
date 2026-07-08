@@ -114,6 +114,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -209,21 +212,53 @@ def _uses_encoder_decoder_core_mode_kwargs(model_id: str) -> bool:
     return _is_qwen3_asr_model(model_id) or _is_whisper_like_model(model_id)
 
 
+def _append_asr_subconfig_core_mode_suffix(
+    label: str,
+    base: str,
+    core_mode: str | None,
+    *,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
+) -> tuple[str, str]:
+    """Extend the label/base with a suffix identifying encoder/decoder core-mode overrides.
+
+    Only overrides that differ from the shared ``core_mode`` (and are non-None) are appended,
+    so runs without subconfig overrides keep the current filename layout untouched.
+    """
+
+    parts: list[str] = []
+    if encoder_core_mode is not None and encoder_core_mode != core_mode:
+        parts.append(f"enc{encoder_core_mode}")
+    if decoder_core_mode is not None and decoder_core_mode != core_mode:
+        parts.append(f"dec{decoder_core_mode}")
+    if not parts:
+        return label, base
+    suffix = "-" + "-".join(parts)
+    return f"{label}{suffix}", f"{base}{suffix}"
+
+
 def _apply_asr_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     model_id: str,
     core_mode: str | None,
+    *,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Apply core-mode kwargs for ASR models, expanding composite encoder/decoder configs when needed."""
+    """Apply core-mode kwargs for ASR models, expanding composite encoder/decoder configs when needed.
+
+    ``encoder_core_mode``/``decoder_core_mode`` overrides take precedence over the shared value for
+    the matching prefix on encoder-decoder models.
+    """
     if not _uses_encoder_decoder_core_mode_kwargs(model_id):
         return _apply_core_mode_model_kwargs_common(model_kwargs, core_mode)
 
-    expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(expanded, core_mode)
-    for prefix in ("encoder", "decoder"):
-        for key, value in expanded.items():
-            model_kwargs[f"{prefix}_{key}"] = value
-    return model_kwargs
+    return _apply_subconfig_core_mode_model_kwargs_common(
+        model_kwargs,
+        ("encoder", "decoder"),
+        core_mode,
+        subconfig_core_modes={"encoder": encoder_core_mode, "decoder": decoder_core_mode},
+    )
 
 
 def _optional_generate_kwargs_for_model(args: argparse.Namespace, model_id: str) -> dict[str, Any]:
@@ -420,6 +455,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="core mode passed to model_kwargs; all expands to single/global4/global8",
     )
+    for prefix in ("encoder", "decoder"):
+        parser.add_argument(
+            f"--{prefix}-core-mode",
+            choices=list(_CORE_MODE_CHOICES_COMMON),
+            default=None,
+            help=(
+                f"encoder-decoder ASR only: {prefix} NPU core mode override (falls back to --core-mode)"
+            ),
+        )
     _add_device_tracking_args(parser)
     args = parser.parse_args(argv)
     num_samples_explicit = _flag_present(raw_argv, "--num-samples")
@@ -481,6 +525,21 @@ def _args_for_target_device_backend(
     )
 
 
+def _resolve_asr_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Return the effective (encoder_core_mode, decoder_core_mode) for the run.
+
+    Encoder/decoder overrides are dropped whenever the shared ``--core-mode`` is
+    ignored for original-model native runs (``args.original_models`` without
+    ``args.mxq_dir``). Otherwise the CLI-provided values are used unchanged.
+    """
+    if args.original_models and not args.mxq_dir:
+        return None, None
+    return (
+        getattr(args, "encoder_core_mode", None),
+        getattr(args, "decoder_core_mode", None),
+    )
+
+
 def _build_asr_pipeline(
     target: ASRBenchmarkTarget,
     *,
@@ -491,6 +550,8 @@ def _build_asr_pipeline(
     trust_remote_code: bool,
     core_mode: str | None,
     native_generate_kwargs: Mapping[str, Any] | None = None,
+    encoder_core_mode: str | None = None,
+    decoder_core_mode: str | None = None,
 ):
     from transformers import pipeline as hf_pipeline
 
@@ -512,6 +573,8 @@ def _build_asr_pipeline(
         ensure_qwen3_asr_backend_registered=_ensure_qwen3_asr_backend_registered,
         apply_asr_core_mode_model_kwargs=_apply_asr_core_mode_model_kwargs,
         hf_pipeline=hf_pipeline,
+        encoder_core_mode=encoder_core_mode,
+        decoder_core_mode=decoder_core_mode,
     )
 
 
@@ -684,6 +747,7 @@ def _build_no_samples_payload(
 ) -> dict[str, Any]:
     """Build a status-only payload for targets that produced no measured ASR samples."""
 
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     return {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "measure",
@@ -702,6 +766,8 @@ def _build_no_samples_payload(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
+        "encoder_core_mode": encoder_core_mode,
+        "decoder_core_mode": decoder_core_mode,
         "status": "no_samples",
         "reason": reason,
     }
@@ -839,6 +905,7 @@ def _write_target_json(
     reported_num_beams = _reported_num_beams(sample_timings)
     asr_summary = summary_to_dict(summary)
     augmented_device_metric = add_device_efficiency_metrics(asr_summary, device_metric)
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     payload: dict[str, Any] = {
         "schema_version": _ASR_BENCHMARK_SCHEMA_VERSION,
         "benchmark_type": "measure",
@@ -857,6 +924,8 @@ def _write_target_json(
         },
         "mxq_path": target.mxq_path,
         "core_mode": core_mode,
+        "encoder_core_mode": encoder_core_mode,
+        "decoder_core_mode": decoder_core_mode,
         "generate_kwargs": _generate_kwargs_for_target(args, target.model_id),
         "asr": asr_summary,
         "device": augmented_device_metric,
@@ -944,9 +1013,19 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
     core_modes = [None] if (args.original_models and not args.mxq_dir) else _iter_core_modes_common(args.core_mode)
     if args.original_models and not args.mxq_dir and getattr(args, "_core_mode_explicit", False):
         print("Note: --core-mode is not supported for --original-models ASR native runs and will be ignored.")
+    encoder_core_mode, decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     for target in targets:
+        subconfig_applies = _uses_encoder_decoder_core_mode_kwargs(target.model_id)
         for core_mode in core_modes:
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            if subconfig_applies:
+                mode_label, mode_base = _append_asr_subconfig_core_mode_suffix(
+                    mode_label,
+                    mode_base,
+                    core_mode,
+                    encoder_core_mode=encoder_core_mode,
+                    decoder_core_mode=decoder_core_mode,
+                )
             run_targets.append((target, core_mode, mode_label, mode_base))
     return run_targets
 
@@ -964,6 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     _collect_host_pc_info(output_dir)
     run_targets = _build_run_targets(args)
+    resolved_encoder_core_mode, resolved_decoder_core_mode = _resolve_asr_subconfig_core_modes(args)
     base_generate_kwargs = _resolve_generate_kwargs(args)
 
     if args.dry_run:
@@ -1022,6 +1102,8 @@ def main(argv: list[str] | None = None) -> int:
                     trust_remote_code=args.trust_remote_code,
                     core_mode=core_mode,
                     native_generate_kwargs=generate_kwargs,
+                    encoder_core_mode=resolved_encoder_core_mode,
+                    decoder_core_mode=resolved_decoder_core_mode,
                 )
             except Exception as exc:
                 if _is_cuda_oom_error(exc):

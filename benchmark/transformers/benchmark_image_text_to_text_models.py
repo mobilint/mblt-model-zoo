@@ -66,6 +66,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     build_device_tracker as _build_device_tracker,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -258,10 +261,13 @@ def _build_pipeline(
     if args.device_map:
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
         core_mode,
         default_single_target_cores=default_single_target_cores,
+        vision_core_mode=vision_core_mode,
+        text_core_mode=text_core_mode,
     )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
@@ -277,11 +283,66 @@ def _build_pipeline(
     return hf_pipeline(**kwargs)
 
 
+def _append_vlm_subconfig_core_mode_suffix(
+    label: str,
+    base: str,
+    core_mode: str | None,
+    *,
+    vision_core_mode: str | None = None,
+    text_core_mode: str | None = None,
+) -> tuple[str, str]:
+    """Extend the label/base with a suffix identifying vision/text core-mode overrides.
+
+    Only overrides that differ from the shared ``core_mode`` (and are non-None) are appended,
+    so runs without subconfig overrides keep the current filename layout untouched.
+    """
+
+    parts: list[str] = []
+    if vision_core_mode is not None and vision_core_mode != core_mode:
+        parts.append(f"vis{vision_core_mode}")
+    if text_core_mode is not None and text_core_mode != core_mode:
+        parts.append(f"txt{text_core_mode}")
+    if not parts:
+        return label, base
+    suffix = "-" + "-".join(parts)
+    return f"{label}{suffix}", f"{base}{suffix}"
+
+
+def _resolve_vlm_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Return the effective (vision_core_mode, text_core_mode) for the run.
+
+    Vision/text overrides are dropped whenever ``_build_pipeline`` skips
+    NPU-specific parameters for original-model native runs (``args.original_models``
+    without ``args.mxq_dir``). Otherwise the CLI-provided values are used unchanged.
+    """
+    if getattr(args, "original_models", False) and not getattr(args, "mxq_dir", None):
+        return None, None
+    return (
+        getattr(args, "vision_core_mode", None),
+        getattr(args, "text_core_mode", None),
+    )
+
+
+def _vlm_subconfig_core_mode_payload_fields(
+    args: argparse.Namespace,
+    core_mode: str | None,
+) -> dict[str, Any]:
+    """Return the core_mode / vision_core_mode / text_core_mode fields for a VLM payload."""
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
+    return {
+        "core_mode": core_mode,
+        "vision_core_mode": vision_core_mode,
+        "text_core_mode": text_core_mode,
+    }
+
+
 def _apply_vlm_core_mode_model_kwargs(
     model_kwargs: dict[str, Any],
     core_mode: str | None,
     *,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    vision_core_mode: str | None = None,
+    text_core_mode: str | None = None,
 ) -> dict[str, Any]:
     """Apply shared VLM NPU core-mode kwargs to both vision and text sub-configs.
 
@@ -290,25 +351,24 @@ def _apply_vlm_core_mode_model_kwargs(
     ``core_mode`` leaves them unused by the config loader, and Transformers forwards them to the
     model constructor where upstream VLM classes can reject them. This helper maps the benchmark's
     shared ``--core-mode`` option onto the VLM-specific ``vision_*`` and ``text_*`` config fields.
+    Per-subconfig overrides take precedence over the shared value for the matching prefix.
 
     Args:
         model_kwargs: Existing model kwargs to update.
         core_mode: Core mode requested by the benchmark CLI.
+        vision_core_mode: Optional vision-only core mode override.
+        text_core_mode: Optional text-only core mode override.
 
     Returns:
         The updated model kwargs.
     """
-    expanded: dict[str, Any] = {}
-    _apply_core_mode_model_kwargs_common(
-        expanded,
+    return _apply_subconfig_core_mode_model_kwargs_common(
+        model_kwargs,
+        ("vision", "text"),
         core_mode,
+        subconfig_core_modes={"vision": vision_core_mode, "text": text_core_mode},
         default_single_target_cores=default_single_target_cores,
     )
-
-    for prefix in ("vision", "text"):
-        for key, value in expanded.items():
-            model_kwargs[f"{prefix}_{key}"] = value
-    return model_kwargs
 
 
 def _collect_vlm_config_mxq_paths(config: dict[str, Any]) -> list[str]:
@@ -1301,6 +1361,13 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         default="global8",
         help="core mode passed to model_kwargs; all expands to single/global4/global8 (default: global8)",
     )
+    for prefix in ("vision", "text"):
+        parser.add_argument(
+            f"--{prefix}-core-mode",
+            choices=list(_CORE_MODE_CHOICES_COMMON),
+            default=None,
+            help=f"{prefix} NPU core mode override (falls back to --core-mode when omitted)",
+        )
     parser.add_argument("--prompt", default="Describe the image in one sentence.")
     parser.add_argument(
         "--warmup", type=_parse_positive_int, default=1, help="number of warmup runs before measured runs"
@@ -1549,6 +1616,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     run_targets: list[
         tuple[str, str | None, str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
     ] = []
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
         target_prefill_range, target_cache_lengths = _target_sweep_lengths(
             args,
@@ -1561,6 +1629,13 @@ def _run_sweep(args: argparse.Namespace) -> int:
             disable_npu_specific_args=disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
+                mode_label,
+                mode_base,
+                core_mode,
+                vision_core_mode=vision_core_mode,
+                text_core_mode=text_core_mode,
+            )
             run_targets.append(
                 (
                     target.model_id,
@@ -1634,6 +1709,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             target_args.prefill_range = prefill_range
             target_args.cache_lengths = cache_lengths
             payload, rows = _run_model(target_args, label, pipeline)
+            payload.update(_vlm_subconfig_core_mode_payload_fields(target_args, core_mode))
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
             _plot_model(payload, png_path)
@@ -1699,6 +1775,7 @@ def _collect_vlm_run_targets(
         )
     ]
     run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int, str]] = []
+    vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
         for core_mode in _iter_core_modes_for_target(
             args,
@@ -1706,6 +1783,13 @@ def _collect_vlm_run_targets(
             disable_npu_specific_args=disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
+                mode_label,
+                mode_base,
+                core_mode,
+                vision_core_mode=vision_core_mode,
+                text_core_mode=text_core_mode,
+            )
             run_targets.append(
                 (
                     target.model_id,
@@ -2177,6 +2261,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "task": "image-text-to-text",
                 "batch_mode": batch_mode,
                 "batch_size": batch_size,
+                **_vlm_subconfig_core_mode_payload_fields(args, core_mode),
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
                 "prefill": args.prefill,

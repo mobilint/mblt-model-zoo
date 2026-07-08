@@ -15,11 +15,18 @@ from transformers.models.qwen3_vl.modeling_qwen3_vl import (
     Qwen3VLPreTrainedModel,
 )
 from transformers.processing_utils import Unpack
-from transformers.utils.generic import TransformersKwargs, logging
+from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
 from ...utils.cache_utils import MobilintDeepStackCache
-from ...utils.generation_utils import MobilintGenerationMixin, with_mobilint_generation_signature
+from ...utils.generation_utils import (
+    MobilintGenerationMixin,
+    build_loss_kwargs_dynamic,
+    mirror_output_fields,
+    pop_loss_only_kwargs,
+    upstream_positional_params,
+    with_mobilint_generation_signature,
+)
 from ...utils.modeling_utils import MobilintModelMixin
 from .configuration_qwen3_vl import (
     MobilintQwen3VLConfig,
@@ -76,6 +83,12 @@ class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
 class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedModel):
     config: MobilintQwen3VLVisionConfig
     input_modalities = ("image", "video")
+
+    @classmethod
+    def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
+        """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
+        kwargs["_internal_call"] = True
+        return super()._from_config(config, **kwargs)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -276,6 +289,12 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     config: MobilintQwen3VLTextConfig
     input_modalities = ("text",)
 
+    @classmethod
+    def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
+        """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
+        kwargs["_internal_call"] = True
+        return super()._from_config(config, **kwargs)
+
     def __init__(self, config: MobilintQwen3VLTextConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
 
@@ -324,6 +343,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         cache_position: Optional[torch.LongTensor] = None,
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
@@ -355,6 +375,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             count_npu_time=count_npu_time,
             deepstack_visual_embeds=deepstack_visual_embeds,
             visual_pos_masks=visual_pos_masks,
+            logits_to_keep=logits_to_keep,
         )
 
         return BaseModelOutputWithPast(
@@ -371,8 +392,14 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         cache_position: torch.Tensor,
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
+        logits_to_keep: Union[int, torch.Tensor] = 1,
     ) -> torch.Tensor:
-        """Run the dual-input MXQ decoder.
+        """Run the dual-input MXQ decoder with HF-style ``logits_to_keep``.
+
+        ``logits_to_keep`` follows the ``transformers`` semantics: ``1``
+        (default) returns only the last-token logits; ``0`` returns every
+        position; ``>1`` returns the last N positions; a ``torch.Tensor``
+        selects specific positions.
 
         Args:
             inputs_embeds: Token embeddings of shape `(batch, seq_len, hidden)`.
@@ -382,9 +409,11 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position: Cache position range.
             prefill_chunk_size: Optional chunk size.
             count_npu_time: Whether to accumulate NPU time.
+            logits_to_keep: HF-style position selector; see the shared
+                :meth:`MobilintModelMixin.llm_forward` for details.
 
         Returns:
-            Decoder logits for the most recent token positions.
+            Decoder logits for the requested token positions.
         """
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}")
@@ -402,19 +431,22 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             past_key_values.set_deepstack_tensor(deepstack_tensor)
 
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
+        seq_len = int(inputs_np.shape[1])
 
         resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
-        num_chunks = int(np.ceil(inputs_np.shape[1] / resolved_prefill_chunk_size))
 
         mxq_model = self.get_mxq_model()
         self.npu_time = 0.0 if count_npu_time else None
-        logits_ndarray = None
 
-        for chunk_idx in range(num_chunks):
-            start_index = chunk_idx * resolved_prefill_chunk_size
-            end_index = min(start_index + resolved_prefill_chunk_size, inputs_np.shape[1])
-            cache_size = past_key_values.get_seq_length() if past_key_values is not None else 0
-
+        def _do_infer(start_index: int, end_index: int) -> np.ndarray:
+            # See modeling_utils.llm_forward._do_infer: without a caller cache,
+            # start_index is the running "processed so far" count within this
+            # call, so use it as the KV cache_size — otherwise Path 3's prefix
+            # walks would pass 0 to every chunk and the size-1 kept-position
+            # captures would see no left context.
+            cache_size = (
+                past_key_values.get_seq_length() if past_key_values is not None else start_index
+            )
             inputs_chunk = inputs_np[:, start_index:end_index, :]
             if past_key_values is None:
                 deepstack_chunk = deepstack_tensor[:, start_index:end_index, :].to(dtype=torch.float32).cpu().numpy()
@@ -431,21 +463,29 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
 
                 t1 = time.perf_counter()
                 result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                assert self.npu_time is not None
                 self.npu_time += time.perf_counter() - t1
             else:
                 result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
 
             if result is None:
                 raise RuntimeError("Text MXQ inference returned None.")
-            logits_ndarray = result[0]
-
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start_index:end_index])
+            return result[0]
 
-        if logits_ndarray is None:
-            raise RuntimeError("Text MXQ inference did not produce logits.")
-
-        return torch.tensor(logits_ndarray, dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+        # The 3-path dispatch (fast / dynamic-axis / fallback) lives in the
+        # shared helper so single-input and dual-input decoders stay in sync.
+        # Unlike the single-input caller, we keep the leading batch axis
+        # produced by ``do_infer``.
+        return self._run_chunked_logits_to_keep(
+            do_infer=_do_infer,
+            seq_len=seq_len,
+            prefill_chunk_size=resolved_prefill_chunk_size,
+            logits_to_keep=logits_to_keep,
+            dtype=inputs_embeds.dtype,
+            device=inputs_embeds.device,
+        )
 
     def _build_deepstack_tensor(
         self,
@@ -552,21 +592,95 @@ class MobilintQwen3VLForConditionalGeneration(
         return model_inputs
 
     @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.forward, "count_npu_time")
+    @can_return_tuple
     def forward(
         self,
-        *args: object,
+        *args: Any,
         count_npu_time: bool = False,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
-        """Forward to upstream while injecting Mobilint decoder timing collection.
+        """Route ``logits_to_keep`` to the Mobilint text decoder.
 
-        The ``@wraps`` metadata preserves the installed upstream signature so Transformers'
-        generation helpers still see Qwen3-VL's real inputs such as ``mm_token_type_ids`` and
-        ``logits_to_keep``.
+        Upstream ``Qwen3VLForConditionalGeneration.forward`` extracts ``logits_to_keep``
+        as a named argument and performs its own final slice on the text model output,
+        which bypasses the Mobilint decoder's position selection. To keep that decoder
+        in charge of picking positions, we pop ``logits_to_keep`` here and thread it
+        into ``self.model`` via kwargs (upstream ``Qwen3VLModel.forward`` forwards its
+        own ``**kwargs`` to the text model). All other arguments follow the upstream
+        signature by way of ``@with_mobilint_generation_signature``, so upstream
+        additions such as ``mm_token_type_ids`` continue to pass through unchanged.
+
+        Tuple mode: ``@can_return_tuple`` strips ``return_dict`` from kwargs before
+        the wrapper body runs (so ``self.model`` never returns a tuple) and converts
+        the assembled ``Qwen3VLCausalLMOutputWithPast`` back to a tuple when
+        ``return_dict=False`` was requested — matching the upstream forward's
+        contract.
+
+        Dynamic adaptation:
+            * Loss kwargs are built via :func:`build_loss_kwargs_dynamic`, so
+              upstream additions like ``num_items_in_batch`` / ``shift_labels``
+              flow through when the loss function accepts them.
+            * The returned ``Qwen3VLCausalLMOutputWithPast`` is assembled by
+              :func:`mirror_output_fields`, so new output fields (e.g. a future
+              ``image_hidden_states``) are mirrored from the upstream model
+              output automatically instead of requiring wrapper edits.
+
+        Performance: the default ``logits_to_keep=0`` (keep-all) matches HF but on
+        last-only MXQ triggers a size-1 infer per input token. ``.generate()`` is
+        safe (HF passes ``logits_to_keep=1``); manual ``.forward()`` callers doing
+        perplexity eval / logit collection inherit this cost on last-only builds.
         """
-        kwargs["count_npu_time"] = count_npu_time
-        return super().forward(*args, **kwargs)
+        positional_params = upstream_positional_params(Qwen3VLForConditionalGeneration.forward)
+        if len(args) > len(positional_params):
+            raise TypeError(
+                f"forward() takes at most {len(positional_params)} positional arguments "
+                f"but {len(args)} were given"
+            )
+        for name, value in zip(positional_params, args):
+            if name in kwargs:
+                raise TypeError(f"forward() got multiple values for argument {name!r}")
+            kwargs[name] = value
+
+        labels = kwargs.pop("labels", None)
+        logits_to_keep = kwargs.pop("logits_to_keep", 0)
+        # Loss-only kwargs (``num_items_in_batch``, ``shift_labels``) must be
+        # stripped BEFORE ``self.model`` is called so they don't reach the
+        # inner text model via upstream ``Qwen3VLModel``'s ``**kwargs`` pass-
+        # through. Keeps parity with the Qwen2-VL wrapper.
+        loss_only_kwargs = pop_loss_only_kwargs(kwargs)
+
+        outputs = self.model(
+            logits_to_keep=logits_to_keep,
+            count_npu_time=count_npu_time,
+            **kwargs,
+        )
+
+        # The Mobilint text decoder already returns logits sliced to the requested
+        # positions and ``self.lm_head`` is ``nn.Identity``, so skip the upstream
+        # ``hidden_states[:, slice_indices, :]`` step.
+        logits = cast(torch.FloatTensor, self.lm_head(outputs.last_hidden_state))
+
+        loss = None
+        if labels is not None:
+            loss = self.loss_function(
+                **build_loss_kwargs_dynamic(
+                    self.loss_function,
+                    logits=logits,
+                    labels=labels,
+                    vocab_size=self.config.text_config.vocab_size,
+                    upstream_kwargs=loss_only_kwargs,
+                )
+            )
+
+        return mirror_output_fields(
+            Qwen3VLCausalLMOutputWithPast,
+            outputs,
+            loss=loss,
+            logits=logits,
+        )
 
 
+AutoModel.register(MobilintQwen3VLVisionConfig, MobilintQwen3VLVisionModel)
+AutoModel.register(MobilintQwen3VLTextConfig, MobilintQwen3VLTextModel)
 AutoModel.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)
 AutoModelForImageTextToText.register(MobilintQwen3VLConfig, MobilintQwen3VLForConditionalGeneration)

@@ -229,6 +229,68 @@ def apply_core_mode_model_kwargs(
     return model_kwargs
 
 
+def coalesce_subconfig(preferred: Any, fallback: Any) -> Any:
+    """Return the subconfig-specific value when set, otherwise fall back to the base value."""
+    return preferred if preferred is not None else fallback
+
+
+def apply_subconfig_core_mode_model_kwargs(
+    model_kwargs: dict[str, Any],
+    prefixes: Sequence[str],
+    base_core_mode: str | None,
+    *,
+    subconfig_core_modes: Mapping[str, str | None] | None = None,
+    base_target_cores: list[str] | None = None,
+    subconfig_target_cores: Mapping[str, list[str] | None] | None = None,
+    base_target_clusters: list[int] | None = None,
+    subconfig_target_clusters: Mapping[str, list[int] | None] | None = None,
+    base_mxq_path: str | None = None,
+    subconfig_mxq_paths: Mapping[str, str | None] | None = None,
+    default_single_target_cores: Sequence[str] | None = DEFAULT_SINGLE_TARGET_CORES,
+) -> dict[str, Any]:
+    """Apply core-mode kwargs to each subconfig, letting each override the base value.
+
+    Subconfig prefixes (e.g., ``"vision"``, ``"text"``, ``"encoder"``, ``"decoder"``) each get
+    their own ``{prefix}_core_mode`` etc. Missing subconfig entries inherit the base value.
+
+    Args:
+        model_kwargs: Existing model kwargs to update in place.
+        prefixes: Subconfig prefixes to populate.
+        base_core_mode: Fallback core mode when a subconfig does not specify one.
+        subconfig_core_modes: Optional per-prefix core mode overrides.
+        base_target_cores: Fallback target cores when a subconfig does not specify one.
+        subconfig_target_cores: Optional per-prefix target cores overrides.
+        base_target_clusters: Fallback target clusters when a subconfig does not specify one.
+        subconfig_target_clusters: Optional per-prefix target clusters overrides.
+        base_mxq_path: Fallback mxq path applied to each subconfig when not overridden.
+        subconfig_mxq_paths: Optional per-prefix mxq path overrides.
+        default_single_target_cores: Default cores injected for single mode when nothing is set.
+
+    Returns:
+        The updated ``model_kwargs``.
+    """
+    subconfig_core_modes = subconfig_core_modes or {}
+    subconfig_target_cores = subconfig_target_cores or {}
+    subconfig_target_clusters = subconfig_target_clusters or {}
+    subconfig_mxq_paths = subconfig_mxq_paths or {}
+    for prefix in prefixes:
+        effective_core_mode = coalesce_subconfig(subconfig_core_modes.get(prefix), base_core_mode)
+        effective_target_cores = coalesce_subconfig(subconfig_target_cores.get(prefix), base_target_cores)
+        effective_target_clusters = coalesce_subconfig(subconfig_target_clusters.get(prefix), base_target_clusters)
+        apply_core_mode_model_kwargs(
+            model_kwargs,
+            effective_core_mode,
+            prefix=prefix,
+            target_cores=effective_target_cores,
+            target_clusters=effective_target_clusters,
+            default_single_target_cores=default_single_target_cores,
+        )
+        effective_mxq_path = coalesce_subconfig(subconfig_mxq_paths.get(prefix), base_mxq_path)
+        if effective_mxq_path:
+            model_kwargs[f"{prefix}_mxq_path"] = effective_mxq_path
+    return model_kwargs
+
+
 def infer_gpu_ids(device: str | None, device_gpu_id: Optional[list[int]]) -> Optional[int | list[int]]:
     """Infer GPU tracker ids from explicit tracker args or CUDA device text."""
 

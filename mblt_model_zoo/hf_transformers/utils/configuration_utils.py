@@ -127,10 +127,29 @@ class MobilintConfigMixin(PretrainedConfig):
 
         super()._remove_keys_not_serialized(d)
 
-    def to_dict(self):
-        output = super().to_dict()
-        if hasattr(self, "npu_backend"):
-            output.update(self.npu_backend.to_dict(prefix=""))
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the config and flatten Mobilint NPU backend fields into the top level.
+
+        The ``npu_backend`` attribute is temporarily detached before delegating to the upstream
+        :meth:`PretrainedConfig.to_dict` implementation so it is neither serialized as a nested
+        object nor picked up by upstream diff/equality helpers. It is reattached in a ``finally``
+        block, and its unprefixed field mapping is merged into the returned dictionary so callers
+        see the individual NPU parameters (``mxq_path``, ``dev_no``, etc.) at the top level.
+
+        Returns:
+            A dictionary representation of the config with the Mobilint NPU backend fields
+            merged in at the top level (no ``npu_backend`` key).
+        """
+        npu_backend = getattr(self, "npu_backend", None)
+        if npu_backend is not None:
+            del self.npu_backend
+        try:
+            output = super().to_dict()
+        finally:
+            if npu_backend is not None:
+                self.npu_backend = npu_backend
+        if npu_backend is not None:
+            output.update(npu_backend.to_dict(prefix=""))
         return output
 
 
@@ -271,6 +290,50 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
 class MobilintVisionTextConfigMixin(PretrainedConfig):
     sub_configs = {"vision_config": MobilintConfigMixin, "text_config": MobilintConfigMixin}
+
+    _SUB_BACKEND_FIELDS = (
+        "mxq_path",
+        "dev_no",
+        "max_batch_size",
+        "core_mode",
+        "target_cores",
+        "target_clusters",
+        "npu_prefill_chunk_size",
+    )
+
+    @classmethod
+    def _split_sub_backend_kwargs(cls, kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Pop ``text_*`` / ``vision_*`` NPU keys out of ``kwargs`` in place.
+
+        Upstream composite configs (e.g. ``Qwen2VLConfig``, ``BlipConfig``) may
+        call ``PretrainedConfig.__init__(**kwargs)`` before instantiating their
+        sub-configs, which triggers the prefixed property setters on this mixin
+        while ``self.text_config`` / ``self.vision_config`` do not yet exist.
+        Removing the keys up front and re-applying them after the sub-configs
+        are built avoids that ordering hazard.
+        """
+        text_kwargs: dict[str, Any] = {}
+        vision_kwargs: dict[str, Any] = {}
+        for field in cls._SUB_BACKEND_FIELDS:
+            text_key = f"text_{field}"
+            if text_key in kwargs:
+                text_kwargs[field] = kwargs.pop(text_key)
+            vision_key = f"vision_{field}"
+            if vision_key in kwargs:
+                vision_kwargs[field] = kwargs.pop(vision_key)
+        return text_kwargs, vision_kwargs
+
+    def _apply_sub_backend_kwargs(
+        self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]
+    ) -> None:
+        text_config = getattr(self, "text_config", None)
+        if text_config is not None:
+            for key, value in text_kwargs.items():
+                setattr(text_config, key, value)
+        vision_config = getattr(self, "vision_config", None)
+        if vision_config is not None:
+            for key, value in vision_kwargs.items():
+                setattr(vision_config, key, value)
 
     @PretrainedConfig.name_or_path.setter
     def name_or_path(self, value):
@@ -533,6 +596,54 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         draft_config = getattr(self, "draft_config", None)
         if draft_config is not None:
             draft_config.name_or_path = value
+
+    @property
+    def base_dev_no(self) -> int:
+        return self.base_npu_backend.dev_no
+
+    @base_dev_no.setter
+    def base_dev_no(self, value: int) -> None:
+        self.base_npu_backend.dev_no = value
+
+    @property
+    def draft_dev_no(self) -> int:
+        return self.draft_npu_backend.dev_no
+
+    @draft_dev_no.setter
+    def draft_dev_no(self, value: int) -> None:
+        self.draft_npu_backend.dev_no = value
+
+    @property
+    def fc_dev_no(self) -> int:
+        return self.fc_npu_backend.dev_no
+
+    @fc_dev_no.setter
+    def fc_dev_no(self, value: int) -> None:
+        self.fc_npu_backend.dev_no = value
+
+    @property
+    def base_max_batch_size(self) -> int:
+        return self.base_npu_backend.max_batch_size
+
+    @base_max_batch_size.setter
+    def base_max_batch_size(self, value: int) -> None:
+        self.base_npu_backend.max_batch_size = max(1, value)
+
+    @property
+    def draft_max_batch_size(self) -> int:
+        return self.draft_npu_backend.max_batch_size
+
+    @draft_max_batch_size.setter
+    def draft_max_batch_size(self, value: int) -> None:
+        self.draft_npu_backend.max_batch_size = max(1, value)
+
+    @property
+    def fc_max_batch_size(self) -> int:
+        return self.fc_npu_backend.max_batch_size
+
+    @fc_max_batch_size.setter
+    def fc_max_batch_size(self, value: int) -> None:
+        self.fc_npu_backend.max_batch_size = max(1, value)
 
     @property
     def base_core_mode(self) -> str:
