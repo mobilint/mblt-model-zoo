@@ -9,6 +9,7 @@ import random
 import sys
 import warnings
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 import torch
@@ -65,6 +66,31 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+_DEFAULT_TPS_TASK = "text-generation"
+_VLM_TASK_FALLBACK = "image-text-to-text"
+_VLM_MODEL_TYPE_MARKERS = (
+    "_vl",
+    "-vl",
+    "vlm",
+    "vision2seq",
+    "blip",
+    "aya_vision",
+)
+
+
+class _TaskAction(argparse.Action):
+    """Argparse action that records whether ``--task`` was explicitly supplied."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        del parser, option_string
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "task_explicit", True)
 
 
 @dataclass(frozen=True)
@@ -230,6 +256,71 @@ def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
 def _is_vlm_task(task: str) -> bool:
     """Return whether a transformers pipeline task should use VLM TPS measurement."""
     return task in {"image-text-to-text", "image-to-text"}
+
+
+def _is_vlm_config(config: Any) -> bool:
+    """Return whether a Transformers config appears to describe a VLM model."""
+    if getattr(config, "vision_config", None) is not None and getattr(config, "text_config", None) is not None:
+        return True
+
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    if any(marker in model_type for marker in _VLM_MODEL_TYPE_MARKERS):
+        return True
+
+    architectures = getattr(config, "architectures", None)
+    if isinstance(architectures, (list, tuple)):
+        return any(any(marker in str(item).lower() for marker in _VLM_MODEL_TYPE_MARKERS) for item in architectures)
+
+    return False
+
+
+def _auto_detect_vlm_task(args: argparse.Namespace) -> str | None:
+    """Detect a VLM task from model config when the user did not explicitly pass ``--task``."""
+    try:
+        from transformers import AutoConfig
+    except Exception as exc:
+        warnings.warn(
+            f"Could not import transformers to auto-detect TPS task; keeping task={args.task!r}: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+
+    config_kwargs: dict[str, Any] = {"trust_remote_code": args.trust_remote_code}
+    if args.revision:
+        config_kwargs["revision"] = args.revision
+    try:
+        config = AutoConfig.from_pretrained(args.model, **config_kwargs)
+    except Exception as exc:
+        warnings.warn(
+            f"Could not inspect model config to auto-detect TPS task; keeping task={args.task!r}: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+
+    if not _is_vlm_config(config):
+        return None
+    return _VLM_TASK_FALLBACK
+
+
+def _normalize_task_defaults(args: argparse.Namespace) -> None:
+    """Infer the TPS pipeline task for VLM models unless the user supplied ``--task`` explicitly."""
+    if getattr(args, "task_explicit", False):
+        return
+    if getattr(args, "task", None) != _DEFAULT_TPS_TASK:
+        return
+
+    detected_task = _auto_detect_vlm_task(args)
+    if detected_task is None or detected_task == args.task:
+        return
+
+    print(
+        f"[tps] auto-detected VLM model; using task={detected_task}. "
+        f"Pass --task {_DEFAULT_TPS_TASK} to force text-only measurement.",
+        file=sys.stderr,
+    )
+    args.task = detected_task
 
 
 def _apply_vlm_core_mode_model_kwargs(
@@ -732,6 +823,14 @@ def _start_qbruntime_trace(trace_path: str | None):
     return start_qbruntime_trace(trace_path)
 
 
+def _phase_trace_path(trace_path: str | None, phase: str) -> str | None:
+    """Return a phase-specific trace path derived from a user-provided path."""
+    if not trace_path:
+        return None
+    path = Path(trace_path)
+    return str(path.with_name(f"{path.stem}.{phase}{path.suffix}"))
+
+
 def _stop_qbruntime_trace(handle) -> None:
     """Stop qbruntime event tracing for a CLI measured section."""
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import stop_qbruntime_trace
@@ -1190,6 +1289,7 @@ def _vlm_llm_aggregate_payload(result: Any) -> dict[str, Any]:
 
 def _cmd_measure(args: argparse.Namespace) -> int:
     """Dispatch a single TPS measurement to the text or VLM measurement path."""
+    _normalize_task_defaults(args)
     if _is_vlm_task(args.task):
         return _run_vlm_measure(args)
     return _run_text_measure(args)
@@ -1604,28 +1704,60 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     tracker = _build_device_tracker(args, pipeline)
     _print_device_status(args, tracker)
 
-    for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
-        _measure_fixed_vlm_run(show_progress=False)
+    for _ in tqdm(range(args.warmup), desc="vision warmup runs", leave=False):
+        measurer.measure_vision(
+            image_resolution=args.image_resolution,
+            repeat=1,
+            prompt=args.prompt,
+            batch_size=batch_size,
+            show_progress=False,
+        )
 
-    runs = []
-    device_metrics = []
-    device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
-    trace_handle = _start_qbruntime_trace(getattr(args, "trace", None))
+    vision_trace_path = _phase_trace_path(getattr(args, "trace", None), "vision")
+    llm_trace_path = _phase_trace_path(getattr(args, "trace", None), "llm")
+    vision_runs = []
+    vision_device_metrics: list[dict[str, Optional[float]]] = []
+    vision_device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+
+    trace_handle = _start_qbruntime_trace(vision_trace_path)
     try:
-        for _ in tqdm(range(args.repeat), desc="measure runs", leave=False):
+        for _ in tqdm(range(args.repeat), desc="vision measure runs", leave=False):
             if tracker is not None:
                 tracker.start()
             try:
-                vision_latency, vision_fps = measurer.measure_vision(
-                    image_resolution=args.image_resolution,
-                    repeat=1,
-                    prompt=args.prompt,
-                    batch_size=batch_size,
-                    show_progress=False,
-                )[0]
+                vision_runs.append(
+                    measurer.measure_vision(
+                        image_resolution=args.image_resolution,
+                        repeat=1,
+                        prompt=args.prompt,
+                        batch_size=batch_size,
+                        show_progress=False,
+                    )[0]
+                )
             finally:
                 _stop_tracker_safe(tracker)
-            llm_result = None
+            if tracker is not None:
+                vision_device_metrics.append(_extract_device_metric(tracker))
+                vision_device_time_series_runs.append(_extract_device_time_series(tracker))
+    finally:
+        _stop_qbruntime_trace(trace_handle)
+
+    for _ in tqdm(range(args.warmup), desc="llm warmup runs", leave=False):
+        measurer.measure_llm_full(
+            image_resolution=args.image_resolution,
+            prompt=args.prompt,
+            prefill_range=(args.prefill, args.prefill, args.prefill),
+            cache_lengths=[args.prefill],
+            decode_window=args.decode,
+            prefill_chunk_size=args.prefill_chunk_size,
+            show_progress=False,
+            batch_size=batch_size,
+        )
+
+    llm_results = []
+    trace_handle = _start_qbruntime_trace(llm_trace_path)
+    try:
+        for _ in tqdm(range(args.repeat), desc="llm measure runs", leave=False):
             llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
             try:
                 llm_result = measurer.measure_llm_full(
@@ -1645,42 +1777,49 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             finally:
                 _stop_tracker_safe(llm_tracker_prefill)
                 _stop_tracker_safe(llm_tracker_decode)
-            run = VLMSingleMeasurement(
-                image_resolution=args.image_resolution,
-                vision_encode_latency=vision_latency,
-                vision_fps=vision_fps,
-                llm=_single_llm_measurement(llm_result),
-            )
+            llm_measurement = _single_llm_measurement(llm_result)
             if llm_tracker_prefill is not None and llm_tracker_decode is not None:
                 prefill_metric = _extract_device_metric(llm_tracker_prefill)
                 decode_metric = _extract_device_metric(llm_tracker_decode)
                 prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
                 decode_time_series = _extract_device_time_series(llm_tracker_decode)
                 _enrich_single_run_device(
-                    run=run.llm,
+                    run=llm_measurement,
                     prefill_metric=prefill_metric,
                     decode_metric=decode_metric,
                     batch_size=batch_size,
                     prefill_time_series=prefill_time_series,
                     decode_time_series=decode_time_series,
                 )
-            runs.append(run)
-            if tracker is not None:
-                metric = _extract_device_metric(tracker)
-                device_time_series = _extract_device_time_series(tracker)
-                vision_energy = _energy_from_device_time_series(device_time_series)
-                llm_prefill_energy = getattr(run.llm, "prefill_energy_j", None)
-                llm_decode_energy = getattr(run.llm, "decode_energy_j", None)
-                llm_energy = getattr(run.llm, "total_energy_j", None)
-                metric["vision_energy_j"] = vision_energy
-                metric["llm_prefill_energy_j"] = llm_prefill_energy
-                metric["llm_decode_energy_j"] = llm_decode_energy
-                metric["llm_total_energy_j"] = llm_energy
-                metric["total_energy_j"] = _sum_required_energies(vision_energy, llm_energy)
-                device_metrics.append(metric)
-                device_time_series_runs.append(device_time_series)
+            llm_results.append(llm_measurement)
     finally:
         _stop_qbruntime_trace(trace_handle)
+
+    runs = []
+    device_metrics = []
+    device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+    for idx, ((vision_latency, vision_fps), llm_measurement) in enumerate(zip(vision_runs, llm_results)):
+        run = VLMSingleMeasurement(
+            image_resolution=args.image_resolution,
+            vision_encode_latency=vision_latency,
+            vision_fps=vision_fps,
+            llm=llm_measurement,
+        )
+        runs.append(run)
+        if idx < len(vision_device_metrics) and idx < len(vision_device_time_series_runs):
+            metric = vision_device_metrics[idx]
+            device_time_series = vision_device_time_series_runs[idx]
+            vision_energy = _energy_from_device_time_series(device_time_series)
+            llm_prefill_energy = getattr(run.llm, "prefill_energy_j", None)
+            llm_decode_energy = getattr(run.llm, "decode_energy_j", None)
+            llm_energy = getattr(run.llm, "total_energy_j", None)
+            metric["vision_energy_j"] = vision_energy
+            metric["llm_prefill_energy_j"] = llm_prefill_energy
+            metric["llm_decode_energy_j"] = llm_decode_energy
+            metric["llm_total_energy_j"] = llm_energy
+            metric["total_energy_j"] = _sum_required_energies(vision_energy, llm_energy)
+            device_metrics.append(metric)
+            device_time_series_runs.append(device_time_series)
 
     vision_ms = [r.vision_encode_latency * 1000.0 for r in runs]
     vision_fps = [r.vision_fps for r in runs]
@@ -1799,6 +1938,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
     """Dispatch a TPS sweep to the text or VLM measurement path."""
+    _normalize_task_defaults(args)
     if _is_vlm_task(args.task):
         return _run_vlm_sweep(args)
     return _run_text_sweep(args)
@@ -2344,18 +2484,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             )
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
-    for _ in range(args.warmup):
-        measurer.measure_llm_full(
-            image_resolution=llm_resolution,
-            prompt=args.prompt,
-            prefill_range=args.prefill_range,
-            cache_lengths=args.cache_lengths,
-            decode_window=args.decode_window,
-            show_progress=False,
-            batch_size=batch_size,
-        )
+    vision_trace_path = _phase_trace_path(getattr(args, "trace", None), "vision")
+    llm_trace_path = _phase_trace_path(getattr(args, "trace", None), "llm")
 
-    trace_handle = _start_qbruntime_trace(getattr(args, "trace", None))
+    trace_handle = _start_qbruntime_trace(vision_trace_path)
     try:
         for resolution in args.image_resolutions:
             vision_runs = []
@@ -2542,8 +2674,24 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 }
             )
 
-        llm_runs = []
-        llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
+    finally:
+        _stop_qbruntime_trace(trace_handle)
+
+    for _ in range(args.warmup):
+        measurer.measure_llm_full(
+            image_resolution=llm_resolution,
+            prompt=args.prompt,
+            prefill_range=args.prefill_range,
+            cache_lengths=args.cache_lengths,
+            decode_window=args.decode_window,
+            show_progress=False,
+            batch_size=batch_size,
+        )
+
+    llm_runs = []
+    llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
+    trace_handle = _start_qbruntime_trace(llm_trace_path)
+    try:
         for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
             llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
             try:
@@ -2844,7 +2992,13 @@ def add_tps_parser(
     tps_sub = parser.add_subparsers(dest="tps_cmd", required=True)
 
     def add_common(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--task", default="text-generation", help="transformers pipeline task")
+        p.set_defaults(task_explicit=False)
+        p.add_argument(
+            "--task",
+            action=_TaskAction,
+            default=_DEFAULT_TPS_TASK,
+            help="transformers pipeline task",
+        )
         p.add_argument(
             "--model",
             required=True,

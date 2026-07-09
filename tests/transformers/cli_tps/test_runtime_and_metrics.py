@@ -2633,6 +2633,14 @@ def _trace_result(prefill: int = 8, decode: int = 4) -> BenchmarkResult:
     return result
 
 
+def test_phase_trace_path_preserves_cli_trace_shape() -> None:
+    """Phase trace paths should preserve the user-facing single --trace argument shape."""
+    assert tps_cli._phase_trace_path("trace.json", "vision") == "trace.vision.json"
+    assert tps_cli._phase_trace_path("outputs/trace.json", "llm").replace("\\", "/") == "outputs/trace.llm.json"
+    assert tps_cli._phase_trace_path("trace", "vision") == "trace.vision"
+    assert tps_cli._phase_trace_path(None, "vision") is None
+
+
 def test_qbruntime_trace_ignores_nested_start_to_preserve_outer_file(monkeypatch):
     """Nested qbruntime trace requests should not overwrite the active outer trace file."""
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
@@ -2727,7 +2735,7 @@ def test_run_text_sweep_traces_all_measured_repeats(monkeypatch):
 
 
 def test_run_vlm_measure_traces_all_measured_repeats(monkeypatch):
-    """VLM measure should trace all measured vision and LLM repeats after warmup."""
+    """VLM measure should trace measured vision and LLM phases separately after warmup."""
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
     events: list[str] = []
@@ -2756,13 +2764,25 @@ def test_run_vlm_measure_traces_all_measured_repeats(monkeypatch):
     monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
 
     assert tps_cli._run_vlm_measure(_trace_scope_args(task="image-text-to-text")) == 0
-    assert events.count("start:trace.json") == 1
-    assert events.count("stop") == 1
-    assert events == ["vision", "llm", "start:trace.json", "vision", "llm", "vision", "llm", "stop"]
+    assert events.count("start:trace.vision.json") == 1
+    assert events.count("start:trace.llm.json") == 1
+    assert events.count("stop") == 2
+    assert events == [
+        "vision",
+        "start:trace.vision.json",
+        "vision",
+        "vision",
+        "stop",
+        "llm",
+        "start:trace.llm.json",
+        "llm",
+        "llm",
+        "stop",
+    ]
 
 
 def test_run_vlm_sweep_traces_all_measured_repeats(monkeypatch):
-    """VLM sweep should trace all measured vision and LLM runs after warmup."""
+    """VLM sweep should trace measured vision and LLM phases separately after warmup."""
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
     events: list[str] = []
@@ -2790,17 +2810,20 @@ def test_run_vlm_sweep_traces_all_measured_repeats(monkeypatch):
 
     args = _trace_scope_args(task="image-text-to-text", image_resolutions=[224, 448], llm_resolution=224)
     assert tps_cli._run_vlm_sweep(args) == 0
-    assert events.count("start:trace.json") == 1
-    assert events.count("stop") == 1
+    assert events.count("start:trace.vision.json") == 1
+    assert events.count("start:trace.llm.json") == 1
+    assert events.count("stop") == 2
     assert events == [
         "vision:224",
         "vision:448",
+        "start:trace.vision.json",
+        "vision:224",
+        "vision:224",
+        "vision:448",
+        "vision:448",
+        "stop",
         "llm:224",
-        "start:trace.json",
-        "vision:224",
-        "vision:224",
-        "vision:448",
-        "vision:448",
+        "start:trace.llm.json",
         "llm:224",
         "llm:224",
         "stop",
