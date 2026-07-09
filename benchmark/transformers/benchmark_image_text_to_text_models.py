@@ -109,6 +109,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     SweepData,
     VLMTPSMeasurer,
     npu_latency_pct,
+    start_qbruntime_trace,
+    stop_qbruntime_trace,
 )
 
 _VLM_WARMUP_PREFILL = 128
@@ -157,6 +159,16 @@ class VLMBenchmarkTarget:
 
 def _safe_filename(text: str) -> str:
     return _safe_filename_common(text, replace_slash_only=True)
+
+
+def _trace_path_for_target(args: argparse.Namespace, *, base: str, benchmark_type: str) -> str | None:
+    """Return a per-target qbruntime trace path when trace collection is enabled."""
+    trace_dir = getattr(args, "trace_dir", None)
+    if not trace_dir:
+        return None
+    trace_root = Path(trace_dir).expanduser().resolve()
+    trace_root.mkdir(parents=True, exist_ok=True)
+    return str(trace_root / f"{_safe_filename(base)}_{benchmark_type}_trace.json")
 
 
 def _mean(values: list[float]) -> float:
@@ -457,7 +469,9 @@ def _revision_exists(model_id: str, revision: str) -> bool | None:
     return _revision_exists_shared(model_id, revision)
 
 
-def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _run_model(
+    args: argparse.Namespace, label: str, base: str, pipeline: Any
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
     _print_device_status(args, tracker)
@@ -507,157 +521,161 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
             progress_prefix=f"{label} warmup {warmup_idx + 1}/{args.warmup}",
         )
 
-    for resolution in args.image_resolutions:
-        runs = []
-        power_vals: list[float] = []
-        p99_power_vals: list[float] = []
-        util_vals: list[float] = []
-        p99_util_vals: list[float] = []
-        temp_vals: list[float] = []
-        p99_temp_vals: list[float] = []
-        mem_mb_vals: list[float] = []
-        p99_mem_mb_vals: list[float] = []
-        mem_pct_vals: list[float] = []
-        p99_mem_pct_vals: list[float] = []
-        energy_vals: list[float] = []
-        img_per_j_vals: list[float] = []
-        j_per_img_vals: list[float] = []
-        device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
-        for _ in tqdm(
-            range(args.repeat),
-            desc=f"{label} vision@{resolution} runs",
-            leave=False,
-        ):
-            if tracker is not None:
-                tracker.start()
-            try:
-                run = measurer.measure_vision(
-                    image_resolution=resolution,
-                    repeat=1,
-                    prompt=args.prompt,
-                    batch_size=args.batch_size,
-                    show_progress=False,
-                )[0]
-            finally:
-                _stop_tracker_safe(tracker)
-            runs.append(run)
-            if tracker is not None:
-                metric = _extract_device_metric(tracker)
-                device_time_series = _extract_device_time_series(tracker)
-                device_time_series_runs.append(device_time_series)
-                avg_power = metric.get("avg_power_w")
-                p99_power = metric.get("p99_power_w")
-                avg_util = metric.get("avg_utilization_pct")
-                p99_util = metric.get("p99_utilization_pct")
-                avg_temp = metric.get("avg_temperature_c")
-                p99_temp = metric.get("p99_temperature_c")
-                avg_mem = metric.get("avg_memory_used_mb")
-                p99_mem = metric.get("p99_memory_used_mb")
-                avg_mem_pct = metric.get("avg_memory_used_pct")
-                p99_mem_pct = metric.get("p99_memory_used_pct")
-                if avg_power is not None:
-                    power_vals.append(float(avg_power))
-                energy = _energy_from_device_time_series(device_time_series)
-                if energy is not None:
-                    energy_vals.append(energy)
-                    j_per_img = _safe_div(energy, float(args.batch_size))
-                    if j_per_img is not None:
-                        j_per_img_vals.append(j_per_img)
-                    tpj = _safe_div(float(args.batch_size), energy)
-                    if tpj is not None:
-                        img_per_j_vals.append(tpj)
-                if p99_power is not None:
-                    p99_power_vals.append(float(p99_power))
-                if avg_util is not None:
-                    util_vals.append(float(avg_util))
-                if p99_util is not None:
-                    p99_util_vals.append(float(p99_util))
-                if avg_temp is not None:
-                    temp_vals.append(float(avg_temp))
-                if p99_temp is not None:
-                    p99_temp_vals.append(float(p99_temp))
-                if avg_mem is not None:
-                    mem_mb_vals.append(float(avg_mem))
-                if p99_mem is not None:
-                    p99_mem_mb_vals.append(float(p99_mem))
-                if avg_mem_pct is not None:
-                    mem_pct_vals.append(float(avg_mem_pct))
-                if p99_mem_pct is not None:
-                    p99_mem_pct_vals.append(float(p99_mem_pct))
-        encode_ms = [float(lat * 1000.0) for lat, _ in runs]
-        fps = [float(v) for _, v in runs]
-        all_vision_encode_ms.extend(encode_ms)
-        all_vision_fps.extend(fps)
-        all_vision_avg_power_w.extend(power_vals)
-        all_vision_p99_power_w.extend(p99_power_vals)
-        all_vision_avg_utilization_pct.extend(util_vals)
-        all_vision_p99_utilization_pct.extend(p99_util_vals)
-        all_vision_avg_temperature_c.extend(temp_vals)
-        all_vision_p99_temperature_c.extend(p99_temp_vals)
-        all_vision_avg_memory_used_mb.extend(mem_mb_vals)
-        all_vision_p99_memory_used_mb.extend(p99_mem_mb_vals)
-        all_vision_avg_memory_used_pct.extend(mem_pct_vals)
-        all_vision_p99_memory_used_pct.extend(p99_mem_pct_vals)
-        all_vision_total_energy_j.extend(energy_vals)
-        all_vision_img_per_j.extend(img_per_j_vals)
-        all_vision_j_per_img.extend(j_per_img_vals)
-        vision_results.append(
-            {
-                "image_resolution": resolution,
-                "runs": runs,
-                "summary": {
-                    "vision_encode_ms": _summary(encode_ms),
-                    "vision_fps": _summary(fps),
-                    "avg_power_w": _summary(power_vals),
-                    "p99_power_w": _summary(p99_power_vals),
-                    "avg_utilization_pct": _summary(util_vals),
-                    "p99_utilization_pct": _summary(p99_util_vals),
-                    "avg_temperature_c": _summary(temp_vals),
-                    "p99_temperature_c": _summary(p99_temp_vals),
-                    "avg_memory_used_mb": _summary(mem_mb_vals),
-                    "p99_memory_used_mb": _summary(p99_mem_mb_vals),
-                    "avg_memory_used_pct": _summary(mem_pct_vals),
-                    "p99_memory_used_pct": _summary(p99_mem_pct_vals),
-                    "total_energy_j": _summary(energy_vals),
-                    "vision_img_per_j": _summary(img_per_j_vals),
-                    "vision_j_per_img": _summary(j_per_img_vals),
-                },
-                "device_time_series_runs": device_time_series_runs,
-            }
-        )
-        for idx, (lat, vfps) in enumerate(runs, start=1):
-            csv_rows.append(
+    trace_handle = start_qbruntime_trace(_trace_path_for_target(args, base=base, benchmark_type="sweep_vision"))
+    try:
+        for resolution in args.image_resolutions:
+            runs = []
+            power_vals: list[float] = []
+            p99_power_vals: list[float] = []
+            util_vals: list[float] = []
+            p99_util_vals: list[float] = []
+            temp_vals: list[float] = []
+            p99_temp_vals: list[float] = []
+            mem_mb_vals: list[float] = []
+            p99_mem_mb_vals: list[float] = []
+            mem_pct_vals: list[float] = []
+            p99_mem_pct_vals: list[float] = []
+            energy_vals: list[float] = []
+            img_per_j_vals: list[float] = []
+            j_per_img_vals: list[float] = []
+            device_time_series_runs: list[dict[str, list[dict[str, float]]]] = []
+            for _ in tqdm(
+                range(args.repeat),
+                desc=f"{label} vision@{resolution} runs",
+                leave=False,
+            ):
+                if tracker is not None:
+                    tracker.start()
+                try:
+                    run = measurer.measure_vision(
+                        image_resolution=resolution,
+                        repeat=1,
+                        prompt=args.prompt,
+                        batch_size=args.batch_size,
+                        show_progress=False,
+                    )[0]
+                finally:
+                    _stop_tracker_safe(tracker)
+                runs.append(run)
+                if tracker is not None:
+                    metric = _extract_device_metric(tracker)
+                    device_time_series = _extract_device_time_series(tracker)
+                    device_time_series_runs.append(device_time_series)
+                    avg_power = metric.get("avg_power_w")
+                    p99_power = metric.get("p99_power_w")
+                    avg_util = metric.get("avg_utilization_pct")
+                    p99_util = metric.get("p99_utilization_pct")
+                    avg_temp = metric.get("avg_temperature_c")
+                    p99_temp = metric.get("p99_temperature_c")
+                    avg_mem = metric.get("avg_memory_used_mb")
+                    p99_mem = metric.get("p99_memory_used_mb")
+                    avg_mem_pct = metric.get("avg_memory_used_pct")
+                    p99_mem_pct = metric.get("p99_memory_used_pct")
+                    if avg_power is not None:
+                        power_vals.append(float(avg_power))
+                    energy = _energy_from_device_time_series(device_time_series)
+                    if energy is not None:
+                        energy_vals.append(energy)
+                        j_per_img = _safe_div(energy, float(args.batch_size))
+                        if j_per_img is not None:
+                            j_per_img_vals.append(j_per_img)
+                        tpj = _safe_div(float(args.batch_size), energy)
+                        if tpj is not None:
+                            img_per_j_vals.append(tpj)
+                    if p99_power is not None:
+                        p99_power_vals.append(float(p99_power))
+                    if avg_util is not None:
+                        util_vals.append(float(avg_util))
+                    if p99_util is not None:
+                        p99_util_vals.append(float(p99_util))
+                    if avg_temp is not None:
+                        temp_vals.append(float(avg_temp))
+                    if p99_temp is not None:
+                        p99_temp_vals.append(float(p99_temp))
+                    if avg_mem is not None:
+                        mem_mb_vals.append(float(avg_mem))
+                    if p99_mem is not None:
+                        p99_mem_mb_vals.append(float(p99_mem))
+                    if avg_mem_pct is not None:
+                        mem_pct_vals.append(float(avg_mem_pct))
+                    if p99_mem_pct is not None:
+                        p99_mem_pct_vals.append(float(p99_mem_pct))
+            encode_ms = [float(lat * 1000.0) for lat, _ in runs]
+            fps = [float(v) for _, v in runs]
+            all_vision_encode_ms.extend(encode_ms)
+            all_vision_fps.extend(fps)
+            all_vision_avg_power_w.extend(power_vals)
+            all_vision_p99_power_w.extend(p99_power_vals)
+            all_vision_avg_utilization_pct.extend(util_vals)
+            all_vision_p99_utilization_pct.extend(p99_util_vals)
+            all_vision_avg_temperature_c.extend(temp_vals)
+            all_vision_p99_temperature_c.extend(p99_temp_vals)
+            all_vision_avg_memory_used_mb.extend(mem_mb_vals)
+            all_vision_p99_memory_used_mb.extend(p99_mem_mb_vals)
+            all_vision_avg_memory_used_pct.extend(mem_pct_vals)
+            all_vision_p99_memory_used_pct.extend(p99_mem_pct_vals)
+            all_vision_total_energy_j.extend(energy_vals)
+            all_vision_img_per_j.extend(img_per_j_vals)
+            all_vision_j_per_img.extend(j_per_img_vals)
+            vision_results.append(
                 {
-                    "type": "vision",
                     "image_resolution": resolution,
-                    "repeat_index": idx,
-                    "vision_encode_ms": lat * 1000.0,
-                    "vision_fps": vfps,
-                    "llm_prefill_tps": None,
-                    "llm_decode_tps": None,
-                    "llm_ttft_ms": None,
-                    "llm_prefill_npu_latency_pct": None,
-                    "llm_decode_npu_latency_pct": None,
-                    "avg_power_w": power_vals[idx - 1] if idx - 1 < len(power_vals) else None,
-                    "p99_power_w": p99_power_vals[idx - 1] if idx - 1 < len(p99_power_vals) else None,
-                    "avg_utilization_pct": util_vals[idx - 1] if idx - 1 < len(util_vals) else None,
-                    "p99_utilization_pct": p99_util_vals[idx - 1] if idx - 1 < len(p99_util_vals) else None,
-                    "avg_temperature_c": temp_vals[idx - 1] if idx - 1 < len(temp_vals) else None,
-                    "p99_temperature_c": p99_temp_vals[idx - 1] if idx - 1 < len(p99_temp_vals) else None,
-                    "avg_memory_used_mb": mem_mb_vals[idx - 1] if idx - 1 < len(mem_mb_vals) else None,
-                    "p99_memory_used_mb": p99_mem_mb_vals[idx - 1] if idx - 1 < len(p99_mem_mb_vals) else None,
-                    "avg_memory_used_pct": mem_pct_vals[idx - 1] if idx - 1 < len(mem_pct_vals) else None,
-                    "p99_memory_used_pct": p99_mem_pct_vals[idx - 1] if idx - 1 < len(p99_mem_pct_vals) else None,
-                    "total_energy_j": energy_vals[idx - 1] if idx - 1 < len(energy_vals) else None,
-                    "prefill_tps_per_w": None,
-                    "decode_tps_per_w": None,
-                    "prefill_j_per_tok": None,
-                    "decode_j_per_tok": None,
-                    "vision_img_per_j": img_per_j_vals[idx - 1] if idx - 1 < len(img_per_j_vals) else None,
-                    "vision_j_per_img": j_per_img_vals[idx - 1] if idx - 1 < len(j_per_img_vals) else None,
+                    "runs": runs,
+                    "summary": {
+                        "vision_encode_ms": _summary(encode_ms),
+                        "vision_fps": _summary(fps),
+                        "avg_power_w": _summary(power_vals),
+                        "p99_power_w": _summary(p99_power_vals),
+                        "avg_utilization_pct": _summary(util_vals),
+                        "p99_utilization_pct": _summary(p99_util_vals),
+                        "avg_temperature_c": _summary(temp_vals),
+                        "p99_temperature_c": _summary(p99_temp_vals),
+                        "avg_memory_used_mb": _summary(mem_mb_vals),
+                        "p99_memory_used_mb": _summary(p99_mem_mb_vals),
+                        "avg_memory_used_pct": _summary(mem_pct_vals),
+                        "p99_memory_used_pct": _summary(p99_mem_pct_vals),
+                        "total_energy_j": _summary(energy_vals),
+                        "vision_img_per_j": _summary(img_per_j_vals),
+                        "vision_j_per_img": _summary(j_per_img_vals),
+                    },
+                    "device_time_series_runs": device_time_series_runs,
                 }
             )
+            for idx, (lat, vfps) in enumerate(runs, start=1):
+                csv_rows.append(
+                    {
+                        "type": "vision",
+                        "image_resolution": resolution,
+                        "repeat_index": idx,
+                        "vision_encode_ms": lat * 1000.0,
+                        "vision_fps": vfps,
+                        "llm_prefill_tps": None,
+                        "llm_decode_tps": None,
+                        "llm_ttft_ms": None,
+                        "llm_prefill_npu_latency_pct": None,
+                        "llm_decode_npu_latency_pct": None,
+                        "avg_power_w": power_vals[idx - 1] if idx - 1 < len(power_vals) else None,
+                        "p99_power_w": p99_power_vals[idx - 1] if idx - 1 < len(p99_power_vals) else None,
+                        "avg_utilization_pct": util_vals[idx - 1] if idx - 1 < len(util_vals) else None,
+                        "p99_utilization_pct": p99_util_vals[idx - 1] if idx - 1 < len(p99_util_vals) else None,
+                        "avg_temperature_c": temp_vals[idx - 1] if idx - 1 < len(temp_vals) else None,
+                        "p99_temperature_c": p99_temp_vals[idx - 1] if idx - 1 < len(p99_temp_vals) else None,
+                        "avg_memory_used_mb": mem_mb_vals[idx - 1] if idx - 1 < len(mem_mb_vals) else None,
+                        "p99_memory_used_mb": p99_mem_mb_vals[idx - 1] if idx - 1 < len(p99_mem_mb_vals) else None,
+                        "avg_memory_used_pct": mem_pct_vals[idx - 1] if idx - 1 < len(mem_pct_vals) else None,
+                        "p99_memory_used_pct": p99_mem_pct_vals[idx - 1] if idx - 1 < len(p99_mem_pct_vals) else None,
+                        "total_energy_j": energy_vals[idx - 1] if idx - 1 < len(energy_vals) else None,
+                        "prefill_tps_per_w": None,
+                        "decode_tps_per_w": None,
+                        "prefill_j_per_tok": None,
+                        "decode_j_per_tok": None,
+                        "vision_img_per_j": img_per_j_vals[idx - 1] if idx - 1 < len(img_per_j_vals) else None,
+                        "vision_j_per_img": j_per_img_vals[idx - 1] if idx - 1 < len(j_per_img_vals) else None,
+                    }
+                )
 
+    finally:
+        stop_qbruntime_trace(trace_handle)
     llm_runs = []
     llm_avg_power_w: list[float] = []
     llm_p99_power_w: list[float] = []
@@ -678,134 +696,142 @@ def _run_model(args: argparse.Namespace, label: str, pipeline: Any) -> tuple[dic
     llm_prefill_j_per_tok: list[float] = []
     llm_decode_j_per_tok: list[float] = []
     llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
-    for repeat_idx in tqdm(
-        range(args.repeat),
-        desc=f"{label} llm@{llm_resolution} runs",
-        leave=False,
-    ):
-        llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
-        try:
-            run = measurer.measure_llm_full(
-                image_resolution=llm_resolution,
-                prompt=args.prompt,
-                prefill_range=args.prefill_range,
-                cache_lengths=args.cache_lengths,
-                decode_window=args.decode_window,
-                prefill_chunk_size=resolved_prefill_chunk_size,
-                batch_size=args.batch_size,
-                show_progress=True,
-                progress_prefix=f"{label} llm@{llm_resolution} run {repeat_idx + 1}/{args.repeat}",
-                on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
-                on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
-                on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
-                on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
-            )
-        finally:
-            _stop_tracker_safe(llm_tracker_prefill)
-            _stop_tracker_safe(llm_tracker_decode)
-        if llm_tracker_prefill is not None and llm_tracker_decode is not None:
-            prefill_metric = _extract_device_metric(llm_tracker_prefill)
-            decode_metric = _extract_device_metric(llm_tracker_decode)
-            prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
-            decode_time_series = _extract_device_time_series(llm_tracker_decode)
-            llm_device_time_series_runs.append({"prefill": prefill_time_series, "decode": decode_time_series})
-            prefill_duration = float(getattr(run, "prefill_phase_duration_s", 0.0) or 0.0)
-            decode_duration = float(getattr(run, "decode_phase_duration_s", 0.0) or 0.0)
-            run.avg_power_w = _weighted_two(
-                prefill_metric.get("avg_power_w"),
-                prefill_duration,
-                decode_metric.get("avg_power_w"),
-                decode_duration,
-            )
-            run.p99_power_w = max(
-                [v for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w")) if v is not None],
-                default=None,
-            )
-            run.avg_utilization_pct = _weighted_two(
-                prefill_metric.get("avg_utilization_pct"),
-                prefill_duration,
-                decode_metric.get("avg_utilization_pct"),
-                decode_duration,
-            )
-            run.p99_utilization_pct = max(
-                [
-                    v
-                    for v in (prefill_metric.get("p99_utilization_pct"), decode_metric.get("p99_utilization_pct"))
-                    if v is not None
-                ],
-                default=None,
-            )
-            run.avg_temperature_c = _weighted_two(
-                prefill_metric.get("avg_temperature_c"),
-                prefill_duration,
-                decode_metric.get("avg_temperature_c"),
-                decode_duration,
-            )
-            run.p99_temperature_c = max(
-                [
-                    v
-                    for v in (prefill_metric.get("p99_temperature_c"), decode_metric.get("p99_temperature_c"))
-                    if v is not None
-                ],
-                default=None,
-            )
-            run.avg_memory_used_mb = _weighted_two(
-                prefill_metric.get("avg_memory_used_mb"),
-                prefill_duration,
-                decode_metric.get("avg_memory_used_mb"),
-                decode_duration,
-            )
-            run.p99_memory_used_mb = max(
-                [
-                    v
-                    for v in (prefill_metric.get("p99_memory_used_mb"), decode_metric.get("p99_memory_used_mb"))
-                    if v is not None
-                ],
-                default=None,
-            )
-            run.avg_memory_used_pct = _weighted_two(
-                prefill_metric.get("avg_memory_used_pct"),
-                prefill_duration,
-                decode_metric.get("avg_memory_used_pct"),
-                decode_duration,
-            )
-            run.p99_memory_used_pct = max(
-                [
-                    v
-                    for v in (prefill_metric.get("p99_memory_used_pct"), decode_metric.get("p99_memory_used_pct"))
-                    if v is not None
-                ],
-                default=None,
-            )
-            prefill_energy = _energy_from_device_time_series(prefill_time_series)
-            decode_energy = _energy_from_device_time_series(decode_time_series)
-            total_energy = _sum_required_energies(prefill_energy, decode_energy)
-            run.llm_prefill_energy_j = prefill_energy
-            run.llm_decode_energy_j = decode_energy
-            run.llm_total_energy_j = total_energy
-            run.total_energy_j = total_energy
-            if prefill_energy is not None:
-                llm_prefill_energy_j.append(prefill_energy)
-            if decode_energy is not None:
-                llm_decode_energy_j.append(decode_energy)
-            if total_energy is not None:
-                llm_total_energy_j.append(total_energy)
-                prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
-                decode_tokens = _sweep_decode_token_count(
-                    run,
+    trace_handle = start_qbruntime_trace(_trace_path_for_target(args, base=base, benchmark_type="sweep_llm"))
+    try:
+        for repeat_idx in tqdm(
+            range(args.repeat),
+            desc=f"{label} llm@{llm_resolution} runs",
+            leave=False,
+        ):
+            llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
+            try:
+                run = measurer.measure_llm_full(
+                    image_resolution=llm_resolution,
+                    prompt=args.prompt,
+                    prefill_range=args.prefill_range,
+                    cache_lengths=args.cache_lengths,
                     decode_window=args.decode_window,
+                    prefill_chunk_size=resolved_prefill_chunk_size,
                     batch_size=args.batch_size,
+                    show_progress=True,
+                    progress_prefix=f"{label} llm@{llm_resolution} run {repeat_idx + 1}/{args.repeat}",
+                    on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
+                    on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
+                    on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
+                    on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
                 )
-                total_tokens = prefill_tokens + decode_tokens
-                run.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
-                run.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
-                run.prefill_j_per_token = (
-                    _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+            finally:
+                _stop_tracker_safe(llm_tracker_prefill)
+                _stop_tracker_safe(llm_tracker_decode)
+            if llm_tracker_prefill is not None and llm_tracker_decode is not None:
+                prefill_metric = _extract_device_metric(llm_tracker_prefill)
+                decode_metric = _extract_device_metric(llm_tracker_decode)
+                prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+                decode_time_series = _extract_device_time_series(llm_tracker_decode)
+                llm_device_time_series_runs.append({"prefill": prefill_time_series, "decode": decode_time_series})
+                prefill_duration = float(getattr(run, "prefill_phase_duration_s", 0.0) or 0.0)
+                decode_duration = float(getattr(run, "decode_phase_duration_s", 0.0) or 0.0)
+                run.avg_power_w = _weighted_two(
+                    prefill_metric.get("avg_power_w"),
+                    prefill_duration,
+                    decode_metric.get("avg_power_w"),
+                    decode_duration,
                 )
-                run.decode_j_per_token = _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
-                run.total_tps_per_w = _safe_div(float(total_tokens), total_energy)
-                run.total_j_per_token = _safe_div(total_energy, float(total_tokens)) if total_tokens > 0 else None
-        llm_runs.append(run)
+                run.p99_power_w = max(
+                    [v for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w")) if v is not None],
+                    default=None,
+                )
+                run.avg_utilization_pct = _weighted_two(
+                    prefill_metric.get("avg_utilization_pct"),
+                    prefill_duration,
+                    decode_metric.get("avg_utilization_pct"),
+                    decode_duration,
+                )
+                run.p99_utilization_pct = max(
+                    [
+                        v
+                        for v in (prefill_metric.get("p99_utilization_pct"), decode_metric.get("p99_utilization_pct"))
+                        if v is not None
+                    ],
+                    default=None,
+                )
+                run.avg_temperature_c = _weighted_two(
+                    prefill_metric.get("avg_temperature_c"),
+                    prefill_duration,
+                    decode_metric.get("avg_temperature_c"),
+                    decode_duration,
+                )
+                run.p99_temperature_c = max(
+                    [
+                        v
+                        for v in (prefill_metric.get("p99_temperature_c"), decode_metric.get("p99_temperature_c"))
+                        if v is not None
+                    ],
+                    default=None,
+                )
+                run.avg_memory_used_mb = _weighted_two(
+                    prefill_metric.get("avg_memory_used_mb"),
+                    prefill_duration,
+                    decode_metric.get("avg_memory_used_mb"),
+                    decode_duration,
+                )
+                run.p99_memory_used_mb = max(
+                    [
+                        v
+                        for v in (prefill_metric.get("p99_memory_used_mb"), decode_metric.get("p99_memory_used_mb"))
+                        if v is not None
+                    ],
+                    default=None,
+                )
+                run.avg_memory_used_pct = _weighted_two(
+                    prefill_metric.get("avg_memory_used_pct"),
+                    prefill_duration,
+                    decode_metric.get("avg_memory_used_pct"),
+                    decode_duration,
+                )
+                run.p99_memory_used_pct = max(
+                    [
+                        v
+                        for v in (prefill_metric.get("p99_memory_used_pct"), decode_metric.get("p99_memory_used_pct"))
+                        if v is not None
+                    ],
+                    default=None,
+                )
+                prefill_energy = _energy_from_device_time_series(prefill_time_series)
+                decode_energy = _energy_from_device_time_series(decode_time_series)
+                total_energy = _sum_required_energies(prefill_energy, decode_energy)
+                run.llm_prefill_energy_j = prefill_energy
+                run.llm_decode_energy_j = decode_energy
+                run.llm_total_energy_j = total_energy
+                run.total_energy_j = total_energy
+                if prefill_energy is not None:
+                    llm_prefill_energy_j.append(prefill_energy)
+                if decode_energy is not None:
+                    llm_decode_energy_j.append(decode_energy)
+                if total_energy is not None:
+                    llm_total_energy_j.append(total_energy)
+                    prefill_tokens = _sweep_prefill_token_count(run, args.batch_size)
+                    decode_tokens = _sweep_decode_token_count(
+                        run,
+                        decode_window=args.decode_window,
+                        batch_size=args.batch_size,
+                    )
+                    total_tokens = prefill_tokens + decode_tokens
+                    run.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
+                    run.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
+                    run.prefill_j_per_token = (
+                        _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+                    )
+                    run.decode_j_per_token = (
+                        _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
+                    )
+                    run.total_tps_per_w = _safe_div(float(total_tokens), total_energy)
+                    run.total_j_per_token = (
+                        _safe_div(total_energy, float(total_tokens)) if total_tokens > 0 else None
+                    )
+            llm_runs.append(run)
+    finally:
+        stop_qbruntime_trace(trace_handle)
     llm_prefill = [float(r.prefill_sweep.tps_values[-1]) for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode = [float(r.decode_sweep.tps_values[-1]) for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_values_ms = [
@@ -1403,6 +1429,11 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="output directory (default: benchmark/transformers/results/image_text_to_text)",
     )
+    parser.add_argument(
+        "--trace-dir",
+        default=None,
+        help="directory for per-target qbruntime trace JSON files covering measured runs only",
+    )
 
 
 def _add_measure_args(parser: argparse.ArgumentParser) -> None:
@@ -1708,7 +1739,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             target_args.batch_mode = batch_mode
             target_args.prefill_range = prefill_range
             target_args.cache_lengths = cache_lengths
-            payload, rows = _run_model(target_args, label, pipeline)
+            payload, rows = _run_model(target_args, label, base, pipeline)
             payload.update(_vlm_subconfig_core_mode_payload_fields(target_args, core_mode))
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
@@ -2101,132 +2132,136 @@ def _run_measure(args: argparse.Namespace) -> int:
             vlm_total_energy_j: list[float] = []
             llm_prefill_tps_per_w: list[float] = []
             llm_decode_tps_per_w: list[float] = []
-            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
-                current_vision_energy: float | None = None
-                if tracker is not None:
-                    tracker.start()
-                try:
-                    vision_latency_per_image, vision_fps = measurer.measure_vision(
-                        args.image_resolution,
-                        repeat=1,
-                        prompt=args.prompt,
-                        batch_size=batch_size,
-                        show_progress=False,
-                    )[0]
-                finally:
-                    _stop_tracker_safe(tracker)
-
-                vision_device_time_series: dict[str, list[dict[str, float]]] = {}
-                if tracker is not None:
-                    metric = _extract_device_metric(tracker)
-                    vision_device_time_series = _extract_device_time_series(tracker)
-                    power = metric.get("avg_power_w")
-                    temperature = metric.get("avg_temperature_c")
-                    utilization = metric.get("avg_utilization_pct")
-                    memory_used = metric.get("avg_memory_used_mb")
-                    if temperature is not None:
-                        avg_temperature_c.append(float(temperature))
-                    if utilization is not None:
-                        avg_utilization_pct.append(float(utilization))
-                    if memory_used is not None:
-                        avg_memory_used_mb.append(float(memory_used))
-                    if power is not None:
-                        avg_power_w.append(float(power))
-                    energy = _energy_from_device_time_series(vision_device_time_series)
-                    if energy is not None:
-                        current_vision_energy = energy
-                        vision_energy_j.append(energy)
-
-                llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
-                try:
-                    llm_result = measurer.measure_llm_full(
-                        image_resolution=args.image_resolution,
-                        prompt=args.prompt,
-                        prefill_range=(args.prefill, args.prefill, args.prefill),
-                        cache_lengths=[args.prefill],
-                        decode_window=args.decode,
-                        prefill_chunk_size=resolved_prefill_chunk_size,
-                        batch_size=batch_size,
-                        show_progress=True,
-                        progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
-                        on_prefill_start=(
-                            (lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None
-                        ),
-                        on_prefill_end=(
-                            (lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None
-                        ),
-                        on_decode_start=(
-                            (lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None
-                        ),
-                        on_decode_end=(
-                            (lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None
-                        ),
-                    )
-                finally:
-                    _stop_tracker_safe(llm_tracker_prefill)
-                    _stop_tracker_safe(llm_tracker_decode)
-
-                llm_device_time_series: dict[str, dict[str, list[dict[str, float]]]] = {}
-                if llm_tracker_prefill is not None and llm_tracker_decode is not None:
-                    prefill_metric = _extract_device_metric(llm_tracker_prefill)
-                    decode_metric = _extract_device_metric(llm_tracker_decode)
-                    prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
-                    decode_time_series = _extract_device_time_series(llm_tracker_decode)
-                    llm_device_time_series = {"prefill": prefill_time_series, "decode": decode_time_series}
-                    prefill_duration = float(getattr(llm_result, "prefill_phase_duration_s", 0.0) or 0.0)
-                    decode_duration = float(getattr(llm_result, "decode_phase_duration_s", 0.0) or 0.0)
-                    llm_result.avg_power_w = _weighted_two(
-                        prefill_metric.get("avg_power_w"),
-                        prefill_duration,
-                        decode_metric.get("avg_power_w"),
-                        decode_duration,
-                    )
-                    prefill_energy = _energy_from_device_time_series(prefill_time_series)
-                    decode_energy = _energy_from_device_time_series(decode_time_series)
-                    llm_energy = _sum_required_energies(prefill_energy, decode_energy)
-                    llm_result.llm_prefill_energy_j = prefill_energy
-                    llm_result.llm_decode_energy_j = decode_energy
-                    llm_result.llm_total_energy_j = llm_energy
-                    true_total_energy = _sum_required_energies(
-                        current_vision_energy,
-                        llm_energy,
-                    )
-                    llm_result.total_energy_j = true_total_energy
-                    if prefill_energy is not None:
-                        llm_prefill_energy_j.append(prefill_energy)
-                    if decode_energy is not None:
-                        llm_decode_energy_j.append(decode_energy)
-                    if llm_energy is not None:
-                        llm_total_energy_j.append(llm_energy)
-                        prefill_tokens = _sweep_prefill_token_count(llm_result, batch_size)
-                        decode_tokens = _sweep_decode_token_count(
-                            llm_result,
-                            decode_window=args.decode,
+            trace_handle = start_qbruntime_trace(_trace_path_for_target(args, base=base, benchmark_type="measure"))
+            try:
+                for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                    current_vision_energy: float | None = None
+                    if tracker is not None:
+                        tracker.start()
+                    try:
+                        vision_latency_per_image, vision_fps = measurer.measure_vision(
+                            args.image_resolution,
+                            repeat=1,
+                            prompt=args.prompt,
                             batch_size=batch_size,
-                        )
-                        total_tokens = prefill_tokens + decode_tokens
-                        llm_result.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
-                        llm_result.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
-                        llm_result.prefill_j_per_token = (
-                            _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
-                        )
-                        llm_result.decode_j_per_token = (
-                            _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
-                        )
-                        llm_result.total_tps_per_w = _safe_div(float(total_tokens), llm_energy)
-                        llm_result.total_j_per_token = (
-                            _safe_div(llm_energy, float(total_tokens)) if total_tokens > 0 else None
-                        )
-                        if llm_result.prefill_tps_per_w is not None:
-                            llm_prefill_tps_per_w.append(float(llm_result.prefill_tps_per_w))
-                        if llm_result.decode_tps_per_w is not None:
-                            llm_decode_tps_per_w.append(float(llm_result.decode_tps_per_w))
-                    if true_total_energy is not None:
-                        vlm_total_energy_j.append(true_total_energy)
+                            show_progress=False,
+                        )[0]
+                    finally:
+                        _stop_tracker_safe(tracker)
 
-                vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
-                llm_runs.append(_vlm_llm_run_payload(llm_result))
-                device_time_series_runs.append({"vision": vision_device_time_series, "llm": llm_device_time_series})
+                    vision_device_time_series: dict[str, list[dict[str, float]]] = {}
+                    if tracker is not None:
+                        metric = _extract_device_metric(tracker)
+                        vision_device_time_series = _extract_device_time_series(tracker)
+                        power = metric.get("avg_power_w")
+                        temperature = metric.get("avg_temperature_c")
+                        utilization = metric.get("avg_utilization_pct")
+                        memory_used = metric.get("avg_memory_used_mb")
+                        if temperature is not None:
+                            avg_temperature_c.append(float(temperature))
+                        if utilization is not None:
+                            avg_utilization_pct.append(float(utilization))
+                        if memory_used is not None:
+                            avg_memory_used_mb.append(float(memory_used))
+                        if power is not None:
+                            avg_power_w.append(float(power))
+                        energy = _energy_from_device_time_series(vision_device_time_series)
+                        if energy is not None:
+                            current_vision_energy = energy
+                            vision_energy_j.append(energy)
+
+                    llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(target_args, pipeline)
+                    try:
+                        llm_result = measurer.measure_llm_full(
+                            image_resolution=args.image_resolution,
+                            prompt=args.prompt,
+                            prefill_range=(args.prefill, args.prefill, args.prefill),
+                            cache_lengths=[args.prefill],
+                            decode_window=args.decode,
+                            prefill_chunk_size=resolved_prefill_chunk_size,
+                            batch_size=batch_size,
+                            show_progress=True,
+                            progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                            on_prefill_start=(
+                                (lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None
+                            ),
+                            on_prefill_end=(
+                                (lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None
+                            ),
+                            on_decode_start=(
+                                (lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None
+                            ),
+                            on_decode_end=(
+                                (lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None
+                            ),
+                        )
+                    finally:
+                        _stop_tracker_safe(llm_tracker_prefill)
+                        _stop_tracker_safe(llm_tracker_decode)
+
+                    llm_device_time_series: dict[str, dict[str, list[dict[str, float]]]] = {}
+                    if llm_tracker_prefill is not None and llm_tracker_decode is not None:
+                        prefill_metric = _extract_device_metric(llm_tracker_prefill)
+                        decode_metric = _extract_device_metric(llm_tracker_decode)
+                        prefill_time_series = _extract_device_time_series(llm_tracker_prefill)
+                        decode_time_series = _extract_device_time_series(llm_tracker_decode)
+                        llm_device_time_series = {"prefill": prefill_time_series, "decode": decode_time_series}
+                        prefill_duration = float(getattr(llm_result, "prefill_phase_duration_s", 0.0) or 0.0)
+                        decode_duration = float(getattr(llm_result, "decode_phase_duration_s", 0.0) or 0.0)
+                        llm_result.avg_power_w = _weighted_two(
+                            prefill_metric.get("avg_power_w"),
+                            prefill_duration,
+                            decode_metric.get("avg_power_w"),
+                            decode_duration,
+                        )
+                        prefill_energy = _energy_from_device_time_series(prefill_time_series)
+                        decode_energy = _energy_from_device_time_series(decode_time_series)
+                        llm_energy = _sum_required_energies(prefill_energy, decode_energy)
+                        llm_result.llm_prefill_energy_j = prefill_energy
+                        llm_result.llm_decode_energy_j = decode_energy
+                        llm_result.llm_total_energy_j = llm_energy
+                        true_total_energy = _sum_required_energies(
+                            current_vision_energy,
+                            llm_energy,
+                        )
+                        llm_result.total_energy_j = true_total_energy
+                        if prefill_energy is not None:
+                            llm_prefill_energy_j.append(prefill_energy)
+                        if decode_energy is not None:
+                            llm_decode_energy_j.append(decode_energy)
+                        if llm_energy is not None:
+                            llm_total_energy_j.append(llm_energy)
+                            prefill_tokens = _sweep_prefill_token_count(llm_result, batch_size)
+                            decode_tokens = _sweep_decode_token_count(
+                                llm_result,
+                                decode_window=args.decode,
+                                batch_size=batch_size,
+                            )
+                            total_tokens = prefill_tokens + decode_tokens
+                            llm_result.prefill_tps_per_w = _safe_div(float(prefill_tokens), prefill_energy)
+                            llm_result.decode_tps_per_w = _safe_div(float(decode_tokens), decode_energy)
+                            llm_result.prefill_j_per_token = (
+                                _safe_div(prefill_energy, float(prefill_tokens)) if prefill_tokens > 0 else None
+                            )
+                            llm_result.decode_j_per_token = (
+                                _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
+                            )
+                            llm_result.total_tps_per_w = _safe_div(float(total_tokens), llm_energy)
+                            llm_result.total_j_per_token = (
+                                _safe_div(llm_energy, float(total_tokens)) if total_tokens > 0 else None
+                            )
+                            if llm_result.prefill_tps_per_w is not None:
+                                llm_prefill_tps_per_w.append(float(llm_result.prefill_tps_per_w))
+                            if llm_result.decode_tps_per_w is not None:
+                                llm_decode_tps_per_w.append(float(llm_result.decode_tps_per_w))
+                        if true_total_energy is not None:
+                            vlm_total_energy_j.append(true_total_energy)
+
+                    vision_runs.append({"vision_encode_latency": vision_latency_per_image, "vision_fps": vision_fps})
+                    llm_runs.append(_vlm_llm_run_payload(llm_result))
+                    device_time_series_runs.append({"vision": vision_device_time_series, "llm": llm_device_time_series})
+            finally:
+                stop_qbruntime_trace(trace_handle)
             llm_prefill = [
                 float(r["prefill_sweep"]["tps_values"][-1]) for r in llm_runs if r["prefill_sweep"]["tps_values"]
             ]
