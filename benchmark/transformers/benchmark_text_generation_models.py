@@ -105,6 +105,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     SweepData,
     TPSMeasurer,
     npu_latency_pct,
+    start_qbruntime_trace,
+    stop_qbruntime_trace,
 )
 
 _BATCH_MODE_BATCH = "batch"
@@ -137,6 +139,16 @@ def _format_exception(exc: BaseException) -> str:
     if message:
         return f"{type(exc).__name__}: {message}"
     return f"{type(exc).__name__}: {exc!r}"
+
+
+def _trace_path_for_target(args: argparse.Namespace, *, base: str, benchmark_type: str) -> str | None:
+    """Return a per-target qbruntime trace path when trace collection is enabled."""
+    trace_dir = getattr(args, "trace_dir", None)
+    if not trace_dir:
+        return None
+    trace_root = Path(trace_dir).expanduser().resolve()
+    trace_root.mkdir(parents=True, exist_ok=True)
+    return str(trace_root / f"{_safe_filename(base)}_{benchmark_type}_trace.json")
 
 
 def _print_exception(message: str, exc: BaseException, *, debug_errors: bool) -> None:
@@ -975,6 +987,11 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         help="output directory (default: benchmark/transformers/results/text_generation)",
     )
     parser.add_argument(
+        "--trace-dir",
+        default=None,
+        help="directory for per-target qbruntime trace JSON files covering measured runs only",
+    )
+    parser.add_argument(
         "--debug-errors",
         action="store_true",
         help="print full tracebacks for per-target benchmark failures",
@@ -1367,26 +1384,37 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
                 )
             run_results: list[BenchmarkResult] = []
-            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
-                try:
-                    run_results.append(
-                        measurer.measure_full(
-                            prefill_range=prefill_range,
-                            cache_lengths=cache_lengths,
-                            decode_window=args.decode_window,
-                            batch_size=batch_size,
-                            prefill_chunk_size=resolved_prefill_chunk_size,
-                            show_progress=True,
-                            progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
-                            on_prefill_start=(lambda: tracker_prefill.start()) if tracker_prefill is not None else None,
-                            on_prefill_end=(lambda: tracker_prefill.stop()) if tracker_prefill is not None else None,
-                            on_decode_start=(lambda: tracker_decode.start()) if tracker_decode is not None else None,
-                            on_decode_end=(lambda: tracker_decode.stop()) if tracker_decode is not None else None,
+            trace_handle = start_qbruntime_trace(_trace_path_for_target(args, base=base, benchmark_type="sweep"))
+            try:
+                for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                    try:
+                        run_results.append(
+                            measurer.measure_full(
+                                prefill_range=prefill_range,
+                                cache_lengths=cache_lengths,
+                                decode_window=args.decode_window,
+                                batch_size=batch_size,
+                                prefill_chunk_size=resolved_prefill_chunk_size,
+                                trace_path=None,
+                                show_progress=True,
+                                progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                                on_prefill_start=(
+                                    (lambda: tracker_prefill.start()) if tracker_prefill is not None else None
+                                ),
+                                on_prefill_end=(
+                                    (lambda: tracker_prefill.stop()) if tracker_prefill is not None else None
+                                ),
+                                on_decode_start=(
+                                    (lambda: tracker_decode.start()) if tracker_decode is not None else None
+                                ),
+                                on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
+                            )
                         )
-                    )
-                finally:
-                    _stop_tracker_safe(tracker_prefill)
-                    _stop_tracker_safe(tracker_decode)
+                    finally:
+                        _stop_tracker_safe(tracker_prefill)
+                        _stop_tracker_safe(tracker_decode)
+            finally:
+                stop_qbruntime_trace(trace_handle)
             result = _aggregate_benchmark_results(run_results)
         except Exception as e:
             if _is_cuda_oom_error(e):
@@ -1917,97 +1945,94 @@ def _run_measure(args: argparse.Namespace) -> int:
                 )
             runs: list[dict[str, Any]] = []
             device_time_series_runs: list[dict[str, Any]] = []
-            for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
-                tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
-                try:
-                    run = measurer.measure(
-                        num_prefill=args.prefill,
-                        num_decode=args.decode,
-                        batch_size=batch_size,
-                        prefill_chunk_size=resolved_prefill_chunk_size,
-                        show_progress=True,
-                        progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",
-                        on_prefill_start=(
-                            (lambda: tracker_prefill.start()) if tracker_prefill is not None else None
-                        ),
-                        on_prefill_end=(
-                            (lambda: tracker_prefill.stop()) if tracker_prefill is not None else None
-                        ),
-                        on_decode_start=(
-                            (lambda: tracker_decode.start()) if tracker_decode is not None else None
-                        ),
-                        on_decode_end=(
-                            (lambda: tracker_decode.stop()) if tracker_decode is not None else None
-                        ),
-                    )
-                finally:
-                    _stop_tracker_safe(tracker_prefill)
-                    _stop_tracker_safe(tracker_decode)
-                row = asdict(run)
-                if tracker_prefill is not None and tracker_decode is not None:
-                    prefill_metric = _extract_device_metric(tracker_prefill)
-                    decode_metric = _extract_device_metric(tracker_decode)
-                    device_time_series = {
-                        "prefill": _extract_device_time_series(tracker_prefill),
-                        "decode": _extract_device_time_series(tracker_decode),
-                    }
-                    prefill_energy = _energy_from_device_time_series(device_time_series["prefill"])
-                    decode_energy = _energy_from_device_time_series(device_time_series["decode"])
-                    row["avg_power_w"] = _weighted_two(
-                        prefill_metric.get("avg_power_w"),
-                        run.prefill_latency,
-                        decode_metric.get("avg_power_w"),
-                        run.decode_duration,
-                    )
-                    row["p99_power_w"] = max(
-                        [
-                            v
-                            for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w"))
-                            if v is not None
-                        ],
-                        default=None,
-                    )
-                    row["avg_utilization_pct"] = _weighted_two(
-                        prefill_metric.get("avg_utilization_pct"),
-                        run.prefill_latency,
-                        decode_metric.get("avg_utilization_pct"),
-                        run.decode_duration,
-                    )
-                    row["avg_memory_used_mb"] = _weighted_two(
-                        prefill_metric.get("avg_memory_used_mb"),
-                        run.prefill_latency,
-                        decode_metric.get("avg_memory_used_mb"),
-                        run.decode_duration,
-                    )
-                    row["total_energy_j"] = (
-                        prefill_energy + decode_energy
-                        if prefill_energy is not None and decode_energy is not None
-                        else None
-                    )
-                    row["prefill_tps_per_w"] = (
-                        _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
-                        if prefill_energy is not None
-                        else None
-                    )
-                    row["decode_tps_per_w"] = (
-                        _safe_div(float(args.decode) * float(batch_size), decode_energy)
-                        if decode_energy is not None
-                        else None
-                    )
-                    row["prefill_j_per_token"] = (
-                        _safe_div(1.0, float(row["prefill_tps_per_w"]))
-                        if isinstance(row.get("prefill_tps_per_w"), (int, float))
-                        else None
-                    )
-                    row["decode_j_per_token"] = (
-                        _safe_div(1.0, float(row["decode_tps_per_w"]))
-                        if isinstance(row.get("decode_tps_per_w"), (int, float))
-                        else None
-                    )
-                    device_time_series_runs.append(
-                        device_time_series
-                    )
-                runs.append(row)
+            trace_handle = start_qbruntime_trace(_trace_path_for_target(args, base=base, benchmark_type="measure"))
+            try:
+                for repeat_idx in tqdm(range(args.repeat), desc=f"{label} measured runs", leave=False):
+                    tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
+                    try:
+                        run = measurer.measure(
+                            num_prefill=args.prefill,
+                            num_decode=args.decode,
+                            batch_size=batch_size,
+                            prefill_chunk_size=resolved_prefill_chunk_size,
+                            trace_path=None,
+                            show_progress=True,
+                            progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",
+                            on_prefill_start=(
+                                (lambda: tracker_prefill.start()) if tracker_prefill is not None else None
+                            ),
+                            on_prefill_end=((lambda: tracker_prefill.stop()) if tracker_prefill is not None else None),
+                            on_decode_start=((lambda: tracker_decode.start()) if tracker_decode is not None else None),
+                            on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
+                        )
+                    finally:
+                        _stop_tracker_safe(tracker_prefill)
+                        _stop_tracker_safe(tracker_decode)
+                    row = asdict(run)
+                    if tracker_prefill is not None and tracker_decode is not None:
+                        prefill_metric = _extract_device_metric(tracker_prefill)
+                        decode_metric = _extract_device_metric(tracker_decode)
+                        device_time_series = {
+                            "prefill": _extract_device_time_series(tracker_prefill),
+                            "decode": _extract_device_time_series(tracker_decode),
+                        }
+                        prefill_energy = _energy_from_device_time_series(device_time_series["prefill"])
+                        decode_energy = _energy_from_device_time_series(device_time_series["decode"])
+                        row["avg_power_w"] = _weighted_two(
+                            prefill_metric.get("avg_power_w"),
+                            run.prefill_latency,
+                            decode_metric.get("avg_power_w"),
+                            run.decode_duration,
+                        )
+                        row["p99_power_w"] = max(
+                            [
+                                v
+                                for v in (prefill_metric.get("p99_power_w"), decode_metric.get("p99_power_w"))
+                                if v is not None
+                            ],
+                            default=None,
+                        )
+                        row["avg_utilization_pct"] = _weighted_two(
+                            prefill_metric.get("avg_utilization_pct"),
+                            run.prefill_latency,
+                            decode_metric.get("avg_utilization_pct"),
+                            run.decode_duration,
+                        )
+                        row["avg_memory_used_mb"] = _weighted_two(
+                            prefill_metric.get("avg_memory_used_mb"),
+                            run.prefill_latency,
+                            decode_metric.get("avg_memory_used_mb"),
+                            run.decode_duration,
+                        )
+                        row["total_energy_j"] = (
+                            prefill_energy + decode_energy
+                            if prefill_energy is not None and decode_energy is not None
+                            else None
+                        )
+                        row["prefill_tps_per_w"] = (
+                            _safe_div(float(args.prefill) * float(batch_size), prefill_energy)
+                            if prefill_energy is not None
+                            else None
+                        )
+                        row["decode_tps_per_w"] = (
+                            _safe_div(float(args.decode) * float(batch_size), decode_energy)
+                            if decode_energy is not None
+                            else None
+                        )
+                        row["prefill_j_per_token"] = (
+                            _safe_div(1.0, float(row["prefill_tps_per_w"]))
+                            if isinstance(row.get("prefill_tps_per_w"), (int, float))
+                            else None
+                        )
+                        row["decode_j_per_token"] = (
+                            _safe_div(1.0, float(row["decode_tps_per_w"]))
+                            if isinstance(row.get("decode_tps_per_w"), (int, float))
+                            else None
+                        )
+                        device_time_series_runs.append(device_time_series)
+                    runs.append(row)
+            finally:
+                stop_qbruntime_trace(trace_handle)
             payload = {
                 "model": label,
                 "benchmark_type": "measure",

@@ -13,6 +13,45 @@ from .cache_utils import MobilintCache
 
 _NS_PER_SECOND = 1_000_000_000
 _SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
+_ACTIVE_QBRUNTIME_TRACE_HANDLE = None
+
+
+class _NestedQbruntimeTraceHandle:
+    """Marker for nested trace requests that must not stop the active trace."""
+
+    pass
+
+
+def start_qbruntime_trace(trace_path: str | None):
+    """Start qbruntime event tracing when a destination path is provided."""
+    global _ACTIVE_QBRUNTIME_TRACE_HANDLE
+
+    if not trace_path:
+        return None
+    if _ACTIVE_QBRUNTIME_TRACE_HANDLE is not None:
+        return _NestedQbruntimeTraceHandle()
+    try:
+        import qbruntime  # type: ignore
+    except Exception as e:
+        raise RuntimeError("Tracing requires qbruntime to be available.") from e
+    qbruntime.start_tracing_events(trace_path)
+    _ACTIVE_QBRUNTIME_TRACE_HANDLE = qbruntime
+    return qbruntime
+
+
+def stop_qbruntime_trace(handle) -> None:
+    """Stop a qbruntime event trace previously started by ``start_qbruntime_trace``."""
+    global _ACTIVE_QBRUNTIME_TRACE_HANDLE
+
+    if handle is None:
+        return
+    if isinstance(handle, _NestedQbruntimeTraceHandle):
+        return
+    try:
+        handle.stop_tracing_events()
+    finally:
+        if handle is _ACTIVE_QBRUNTIME_TRACE_HANDLE:
+            _ACTIVE_QBRUNTIME_TRACE_HANDLE = None
 
 
 class _GenerationPhaseCallbacks:
@@ -797,20 +836,11 @@ class TPSMeasurer:
 
     @staticmethod
     def _start_trace(trace_path: Union[str, None]):
-        if not trace_path:
-            return None
-        try:
-            import qbruntime  # type: ignore
-        except Exception as e:
-            raise RuntimeError("Tracing requires qbruntime to be available.") from e
-        qbruntime.start_tracing_events(trace_path)
-        return qbruntime
+        return start_qbruntime_trace(trace_path)
 
     @staticmethod
     def _stop_trace(handle):
-        if handle is None:
-            return
-        handle.stop_tracing_events()
+        stop_qbruntime_trace(handle)
 
     def _measure_batch_generate(
         self,

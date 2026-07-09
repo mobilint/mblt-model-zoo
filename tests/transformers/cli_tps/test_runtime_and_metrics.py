@@ -2539,3 +2539,292 @@ def test_cli_tps_positive_int_enforced(argv: list[str]):
     with pytest.raises(SystemExit) as excinfo:
         parser.parse_args(argv)
     assert excinfo.value.code == 2
+
+
+def _trace_scope_args(**overrides):
+    """Build a minimal TPS CLI namespace for trace-scope tests."""
+    defaults = dict(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=1,
+        warmup=1,
+        repeat=2,
+        prefill=8,
+        decode=2,
+        prefill_range=(8, 8, 1),
+        cache_lengths=[4],
+        decode_window=2,
+        prefill_chunk_size=None,
+        trace="trace.json",
+        device_metrics=False,
+        json=None,
+        csv=None,
+        plot=None,
+        device_backend="none",
+        input_mode="random",
+        prompt_text=None,
+        prompt_file=None,
+        prompt_file_strategy="first",
+        prompt_file_seed=0,
+        image_resolution=224,
+        image_resolutions=[224],
+        llm_resolution=224,
+        prompt="Describe.",
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _trace_single(num_prefill: int = 8, num_decode: int = 2) -> SingleMeasurement:
+    """Return a deterministic single measurement."""
+    return SingleMeasurement(
+        num_prefill=num_prefill,
+        num_decode=num_decode,
+        prefill_latency=1.0,
+        prefill_tps=float(num_prefill),
+        decode_duration=1.0,
+        decode_tps=float(num_decode),
+        total_time=2.0,
+        avg_total_prefill_token_latency=1.0 / num_prefill,
+        avg_npu_prefill_token_latency=None,
+        avg_total_decode_token_latency=1.0 / num_decode,
+        avg_npu_decode_token_latency=None,
+    )
+
+
+def _trace_result(prefill: int = 8, decode: int = 4) -> BenchmarkResult:
+    """Return a deterministic benchmark result."""
+    result = BenchmarkResult()
+    result.prefill_sweep.x_values.append(prefill)
+    result.prefill_sweep.tps_values.append(float(prefill))
+    result.prefill_sweep.time_values.append(1.0)
+    result.prefill_sweep.avg_total_token_latency_values.append(1.0 / prefill)
+    result.prefill_sweep.avg_npu_token_latency_values.append(None)
+    result.decode_sweep.x_values.append(decode)
+    result.decode_sweep.tps_values.append(float(decode))
+    result.decode_sweep.time_values.append(1.0)
+    result.decode_sweep.avg_total_token_latency_values.append(1.0 / decode)
+    result.decode_sweep.avg_npu_token_latency_values.append(None)
+    return result
+
+
+def test_phase_trace_path_preserves_cli_trace_shape() -> None:
+    """Phase trace paths should preserve the user-facing single --trace argument shape."""
+    assert tps_cli._phase_trace_path("trace.json", "vision") == "trace.vision.json"
+    assert tps_cli._phase_trace_path("outputs/trace.json", "llm").replace("\\", "/") == "outputs/trace.llm.json"
+    assert tps_cli._phase_trace_path("trace", "vision") == "trace.vision"
+    assert tps_cli._phase_trace_path(None, "vision") is None
+
+
+def test_qbruntime_trace_ignores_nested_start_to_preserve_outer_file(monkeypatch):
+    """Nested qbruntime trace requests should not overwrite the active outer trace file."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    calls: list[tuple[str, str | None]] = []
+    fake_qbruntime = SimpleNamespace(
+        start_tracing_events=lambda path: calls.append(("start", path)),
+        stop_tracing_events=lambda: calls.append(("stop", None)),
+    )
+
+    monkeypatch.setitem(sys.modules, "qbruntime", fake_qbruntime)
+    monkeypatch.setattr(benchmark_utils, "_ACTIVE_QBRUNTIME_TRACE_HANDLE", None)
+
+    outer_handle = benchmark_utils.start_qbruntime_trace("outer.json")
+    nested_handle = benchmark_utils.start_qbruntime_trace("nested.json")
+    benchmark_utils.stop_qbruntime_trace(nested_handle)
+    benchmark_utils.stop_qbruntime_trace(outer_handle)
+
+    assert calls == [("start", "outer.json"), ("stop", None)]
+    assert benchmark_utils._ACTIVE_QBRUNTIME_TRACE_HANDLE is None
+
+
+def test_run_text_measure_traces_all_measured_repeats(monkeypatch):
+    """Text measure should trace all measured repeats and exclude warmup."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    events: list[str] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            assert kwargs["trace_path"] is None
+            events.append(str(kwargs["progress_desc"]))
+            return _trace_single(kwargs["num_prefill"], kwargs["num_decode"])
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_start_qbruntime_trace", lambda path: events.append(f"start:{path}") or object())
+    monkeypatch.setattr(tps_cli, "_stop_qbruntime_trace", lambda handle: events.append("stop"))
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    assert tps_cli._run_text_measure(_trace_scope_args()) == 0
+    assert events.count("start:trace.json") == 1
+    assert events.count("stop") == 1
+    assert events == [
+        "warmup generate 1/1",
+        "start:trace.json",
+        "measure generate 1/2",
+        "measure generate 2/2",
+        "stop",
+    ]
+
+
+def test_run_text_sweep_traces_all_measured_repeats(monkeypatch):
+    """Text sweep should trace all measured repeats and exclude warmup."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    events: list[str] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            events.append(str(kwargs["progress_desc"]))
+            return _trace_single(kwargs["num_prefill"], kwargs["num_decode"])
+
+        def measure_full(self, **kwargs) -> BenchmarkResult:
+            assert kwargs["trace_path"] is None
+            events.append(str(kwargs["progress_prefix"]))
+            return _trace_result()
+
+        def plot_and_save(self, result, save_path) -> None:
+            del result, save_path
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_start_qbruntime_trace", lambda path: events.append(f"start:{path}") or object())
+    monkeypatch.setattr(tps_cli, "_stop_qbruntime_trace", lambda handle: events.append("stop"))
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+
+    assert tps_cli._run_text_sweep(_trace_scope_args()) == 0
+    assert events.count("start:trace.json") == 1
+    assert events.count("stop") == 1
+    assert events == ["warmup generate 1/1", "start:trace.json", "run 1/2", "run 2/2", "stop"]
+
+
+def test_run_vlm_measure_traces_all_measured_repeats(monkeypatch):
+    """VLM measure should trace measured vision and LLM phases separately after warmup."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    events: list[str] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            del kwargs
+            events.append("vision")
+            return [(1.0, 1.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            del kwargs
+            events.append("llm")
+            return _trace_result(prefill=8, decode=8)
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: None)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_start_qbruntime_trace", lambda path: events.append(f"start:{path}") or object())
+    monkeypatch.setattr(tps_cli, "_stop_qbruntime_trace", lambda handle: events.append("stop"))
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    assert tps_cli._run_vlm_measure(_trace_scope_args(task="image-text-to-text")) == 0
+    assert events.count("start:trace.vision.json") == 1
+    assert events.count("start:trace.llm.json") == 1
+    assert events.count("stop") == 2
+    assert events == [
+        "vision",
+        "start:trace.vision.json",
+        "vision",
+        "vision",
+        "stop",
+        "llm",
+        "start:trace.llm.json",
+        "llm",
+        "llm",
+        "stop",
+    ]
+
+
+def test_run_vlm_sweep_traces_all_measured_repeats(monkeypatch):
+    """VLM sweep should trace measured vision and LLM phases separately after warmup."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    events: list[str] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure_vision(self, **kwargs) -> list[tuple[float, float]]:
+            events.append(f"vision:{kwargs['image_resolution']}")
+            return [(1.0, 1.0)]
+
+        def measure_llm_full(self, **kwargs) -> BenchmarkResult:
+            events.append(f"llm:{kwargs['image_resolution']}")
+            return _trace_result()
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", lambda args, pipeline: None)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(tps_cli, "_start_qbruntime_trace", lambda path: events.append(f"start:{path}") or object())
+    monkeypatch.setattr(tps_cli, "_stop_qbruntime_trace", lambda handle: events.append("stop"))
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeVLMTPSMeasurer)
+
+    args = _trace_scope_args(task="image-text-to-text", image_resolutions=[224, 448], llm_resolution=224)
+    assert tps_cli._run_vlm_sweep(args) == 0
+    assert events.count("start:trace.vision.json") == 1
+    assert events.count("start:trace.llm.json") == 1
+    assert events.count("stop") == 2
+    assert events == [
+        "vision:224",
+        "vision:448",
+        "start:trace.vision.json",
+        "vision:224",
+        "vision:224",
+        "vision:448",
+        "vision:448",
+        "stop",
+        "llm:224",
+        "start:trace.llm.json",
+        "llm:224",
+        "llm:224",
+        "stop",
+    ]

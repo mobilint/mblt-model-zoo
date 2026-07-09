@@ -138,6 +138,10 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     stop_tracker_safe as _stop_tracker_safe_common,
 )
+from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
+    start_qbruntime_trace,
+    stop_qbruntime_trace,
+)
 
 _ASR_BENCHMARK_SCHEMA_VERSION = 1
 
@@ -156,6 +160,16 @@ class ASRBenchmarkTarget:
 
 def _safe_filename(model_id: str) -> str:
     return _safe_filename_common(model_id, replace_slash_only=True)
+
+
+def _trace_path_for_target(args: argparse.Namespace, *, base: str, benchmark_type: str) -> str | None:
+    """Return a per-target qbruntime trace path when trace collection is enabled."""
+    trace_dir = getattr(args, "trace_dir", None)
+    if not trace_dir:
+        return None
+    trace_root = Path(trace_dir).expanduser().resolve()
+    trace_root.mkdir(parents=True, exist_ok=True)
+    return str(trace_root / f"{_safe_filename(base)}_{benchmark_type}_trace.json")
 
 
 def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
@@ -437,6 +451,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-dir",
         default=str(Path(__file__).resolve().parent / "results" / "automatic_speech_recognition"),
         help="output directory",
+    )
+    parser.add_argument(
+        "--trace-dir",
+        default=None,
+        help="directory for per-target qbruntime trace JSON files covering measured runs only",
     )
     parser.add_argument(
         "--save-samples",
@@ -860,6 +879,7 @@ def _measure_target(
     *,
     native_language: str | None = None,
     max_measured_samples: int | None = None,
+    trace_path: str | None = None,
 ) -> tuple[list[SampleTiming], dict[str, float | None], dict[str, list[dict[str, float]]]]:
     tracker = _build_device_tracker_common(target_args, pipe)
     _print_device_status_common(target_args, tracker)
@@ -868,18 +888,22 @@ def _measure_target(
         if tracker is not None:
             tracker.start()
         total = int(max_measured_samples) if max_measured_samples is not None else None
-        with tqdm(total=total, desc="ASR samples", leave=False, unit="sample") as progress_bar:
-            for sample in samples:
-                if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
-                    break
-                if _should_skip_whisper_long_form_sample(model_id, sample):
-                    print(
-                        "Skipping sample (>30s Whisper limit): "
-                        f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
-                    )
-                    continue
-                timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
-                progress_bar.update(1)
+        trace_handle = start_qbruntime_trace(trace_path)
+        try:
+            with tqdm(total=total, desc="ASR samples", leave=False, unit="sample") as progress_bar:
+                for sample in samples:
+                    if max_measured_samples is not None and len(timings) >= int(max_measured_samples):
+                        break
+                    if _should_skip_whisper_long_form_sample(model_id, sample):
+                        print(
+                            "Skipping sample (>30s Whisper limit): "
+                            f"model={model_id} sample_id={sample['id']} duration_s={_sample_audio_duration_s(sample):.2f}"
+                        )
+                        continue
+                    timings.append(_run_one_sample(pipe, sample, generate_kwargs, native_language=native_language))
+                    progress_bar.update(1)
+        finally:
+            stop_qbruntime_trace(trace_handle)
     finally:
         _stop_tracker_safe_common(tracker)
     device_metric = _extract_device_metric_common(tracker) if tracker is not None else {}
@@ -1129,6 +1153,7 @@ def main(argv: list[str] | None = None) -> int:
                 generate_kwargs,
                 native_language=native_language,
                 max_measured_samples=args.num_samples,
+                trace_path=_trace_path_for_target(args, base=mode_base, benchmark_type="measure"),
             )
             if not timings:
                 reason = "No measured samples remained after warmup/skip filtering."
