@@ -1008,6 +1008,37 @@ def test_dflfree_segmentation_accepts_approximate_reducemax_scores() -> None:
     assert result[0][1].shape == (1, 64, 64)
 
 
+def test_dflfree_segmentation_excludes_reducemax_from_proto_candidates() -> None:
+    """Ignore unused reducemax tensors when ``n_extra == 1`` and selecting the proto tensor."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "n_extra": 1,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+    coeffs = torch.tensor([[[0.6], [0.1]]], dtype=torch.float32)
+    proto = torch.zeros((9, 9, 1), dtype=torch.float32)
+
+    result = postprocessor([coeffs, scores, reducemax, proto, boxes])
+
+    assert len(result) == 1
+    assert result[0][0].shape == (1, 7)
+    assert result[0][1].shape == (1, 64, 64)
+
+
 def test_non_e2e_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducemax() -> None:
     """Route 5-part decode-true segmentation outputs through the segmentation non-e2e path."""
 
@@ -1098,12 +1129,13 @@ def test_dflfree_pose_prefers_score_tensor_over_reducemax_duplicate() -> None:
     scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
     keypoints = torch.arange(102, dtype=torch.float32).reshape(1, 2, 51)
 
-    result = postprocessor([reducemax, scores, boxes, keypoints])
+    for output_order in ([reducemax, scores, boxes, keypoints], [scores, reducemax, boxes, keypoints]):
+        result = postprocessor(output_order)
 
-    assert len(result) == 1
-    assert result[0].shape == (1, 57)
-    assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
-    assert torch.equal(result[0][0, 6:], keypoints[0, 0])
+        assert len(result) == 1
+        assert result[0].shape == (1, 57)
+        assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
+        assert torch.equal(result[0][0, 6:], keypoints[0, 0])
 
 
 def test_non_e2e_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:

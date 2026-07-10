@@ -71,16 +71,18 @@ class YOLODFLFreePost(YOLOPostBase):
         if require_extra:
             required_parts.append(("extra", self.n_extra))
 
-        score_candidate_indices = [
-            idx for idx, xi in enumerate(x) if self._normalize_converted_part(xi, self.nc) is not None
+        score_candidates = [
+            (idx, cast(torch.Tensor, normalized))
+            for idx, xi in enumerate(x)
+            if (normalized := self._normalize_converted_part(xi, self.nc)) is not None
         ]
         reducemax_candidates = [
-            cast(torch.Tensor, normalized)
-            for xi in x
+            (idx, cast(torch.Tensor, normalized))
+            for idx, xi in enumerate(x)
             if (normalized := self._normalize_converted_part(xi, 1)) is not None
         ]
 
-        def _matches_reducemax(candidate: torch.Tensor) -> bool:
+        def _matches_reducemax(candidate_idx: int, candidate: torch.Tensor) -> bool:
             if candidate.shape[-1] != self.nc:
                 return False
             reduced = candidate.max(dim=-1, keepdim=True).values
@@ -92,8 +94,20 @@ class YOLODFLFreePost(YOLOPostBase):
                     rtol=self.reducemax_rtol,
                     atol=self.reducemax_atol,
                 )
-                for reducemax in reducemax_candidates
+                for reducemax_idx, reducemax in reducemax_candidates
+                if reducemax_idx != candidate_idx
             )
+
+        preferred_single_class_score_idx: int | None = None
+        if self.nc == 1 and len(score_candidates) > 1:
+            matched_score_candidates = [
+                (idx, candidate) for idx, candidate in score_candidates if _matches_reducemax(idx, candidate)
+            ]
+            if matched_score_candidates:
+                preferred_single_class_score_idx, _ = max(
+                    matched_score_candidates,
+                    key=lambda item: float(item[1].sum()),
+                )
 
         for idx, xi in enumerate(x):
             for role, channel_count in required_parts:
@@ -104,11 +118,11 @@ class YOLODFLFreePost(YOLOPostBase):
                     continue
 
                 if role == "scores":
-                    if self.nc == 1 and len(score_candidate_indices) > 1 and idx != score_candidate_indices[-1]:
+                    if preferred_single_class_score_idx is not None and idx != preferred_single_class_score_idx:
                         continue
-                    if not _matches_reducemax(normalized):
+                    if not _matches_reducemax(idx, normalized):
                         continue
-                elif channel_count == self.nc and self.nc == 4 and _matches_reducemax(normalized):
+                elif channel_count == self.nc and self.nc == 4 and _matches_reducemax(idx, normalized):
                     continue
 
                 part_by_role[role] = normalized
@@ -380,9 +394,17 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         converted_parts = self._collect_converted_parts(x, require_extra=True)
         if converted_parts is not None:
             converted, used_indices = converted_parts
+            batch_size, anchor_count = converted.shape[:2]
+            reducemax_candidate_indices = {
+                idx
+                for idx, xi in enumerate(x)
+                if (normalized := self._normalize_converted_part(xi, 1)) is not None
+                and normalized.shape[0] == batch_size
+                and normalized.shape[1] == anchor_count
+            }
             proto_candidates = []
             for idx, xi in enumerate(x):
-                if idx in used_indices:
+                if idx in used_indices or idx in reducemax_candidate_indices:
                     continue
                 proto = xi
                 if proto.ndim == 3:
