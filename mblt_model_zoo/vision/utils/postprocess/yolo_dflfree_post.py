@@ -34,6 +34,67 @@ class YOLODFLFreePost(YOLOPostBase):
         """
         super().__init__(pre_cfg, post_cfg, **kwargs)
 
+    def _normalize_converted_part(self, x: torch.Tensor, channel_count: int) -> torch.Tensor | None:
+        """Normalize a split decode-true part to ``(B, anchors, channels)``."""
+
+        while x.ndim > 3 and 1 in x.shape:
+            x = x.squeeze(next(idx for idx, size in enumerate(x.shape) if size == 1))
+
+        if x.ndim == 2:
+            if x.shape[-1] == channel_count:
+                return x.unsqueeze(0)
+            if x.shape[0] == channel_count:
+                return x.transpose(0, 1).unsqueeze(0)
+            return None
+
+        if x.ndim == 3 and x.shape[0] == 1:
+            if x.shape[-1] == channel_count:
+                return x
+            if x.shape[1] == channel_count:
+                return x.transpose(1, 2)
+
+        return None
+
+    def _collect_converted_parts(
+        self,
+        x: list[torch.Tensor],
+        *,
+        require_extra: bool,
+    ) -> tuple[torch.Tensor, set[int]] | None:
+        """Collect decode-true box/class/extra parts while ignoring reducemax."""
+
+        part_by_channels: dict[int, torch.Tensor] = {}
+        used_indices: set[int] = set()
+        required_channels = [4, self.nc]
+        if require_extra:
+            required_channels.append(self.n_extra)
+
+        for idx, xi in enumerate(x):
+            for channel_count in required_channels:
+                if channel_count in part_by_channels:
+                    continue
+                normalized = self._normalize_converted_part(xi, channel_count)
+                if normalized is None:
+                    continue
+                part_by_channels[channel_count] = normalized
+                used_indices.add(idx)
+                break
+
+        if any(channel_count not in part_by_channels for channel_count in required_channels):
+            return None
+
+        batch_size = part_by_channels[4].shape[0]
+        anchor_count = part_by_channels[4].shape[1]
+        for channel_count in required_channels[1:]:
+            part = part_by_channels[channel_count]
+            if part.shape[0] != batch_size or part.shape[1] != anchor_count:
+                return None
+
+        ordered_parts = [part_by_channels[4], part_by_channels[self.nc]]
+        if require_extra:
+            ordered_parts.append(part_by_channels[self.n_extra])
+        return torch.cat(ordered_parts, dim=-1), used_indices
+
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
         """Return the export-style output tensor for DFL-free YOLO models."""
         if len(x) == 2:
@@ -106,7 +167,7 @@ class YOLODFLFreePost(YOLOPostBase):
         Returns:
             tuple: (processed detections, None).
         """
-        if len(x) == 2:
+        if len(x) in {2, 3}:
             converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
         rearranged = self.rearrange(x)
@@ -124,6 +185,11 @@ class YOLODFLFreePost(YOLOPostBase):
             torch.Tensor:
                 Concatenated tensor of shape ``(batch, num_anchors, 4 + nc + n_extra)``.
         """
+        converted_parts = self._collect_converted_parts(x, require_extra=self.n_extra > 0)
+        if converted_parts is not None:
+            converted, _ = converted_parts
+            return converted
+
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         return torch.cat(x, dim=-1).squeeze(1)  # [b, 8400, 84]
@@ -250,7 +316,7 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         Returns:
             tuple: (decoded_detections, prototype_masks).
         """
-        if len(x) == 4:
+        if len(x) in {4, 5}:
             converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
             return self.filter_conversion(converted), proto_outs
         rearranged, proto_outs = self.rearrange(x)
@@ -265,6 +331,21 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         Returns:
             A tuple of processed detections and prototype masks.
         """
+
+        converted_parts = self._collect_converted_parts(x, require_extra=True)
+        if converted_parts is not None:
+            converted, used_indices = converted_parts
+            proto_candidates = []
+            for idx, xi in enumerate(x):
+                if idx in used_indices:
+                    continue
+                proto = xi
+                if proto.ndim == 3:
+                    proto = proto.unsqueeze(0)
+                if proto.ndim == 4 and (proto.shape[-1] == self.n_extra or proto.shape[1] == self.n_extra):
+                    proto_candidates.append(proto)
+            if len(proto_candidates) == 1:
+                return converted, proto_candidates[0]
 
         x = sorted(x, key=lambda x: x.size(), reverse=self.nc < 4)
         outputs: list[torch.Tensor] = []
@@ -333,7 +414,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         Returns:
             tuple: (processed_detections, None).
         """
-        if len(x) == 3:
+        if len(x) in {3, 4}:
             converted = cast(torch.Tensor, self.conversion(x))
             return self.filter_conversion(converted), None
         rearranged = self.rearrange(x)
@@ -346,6 +427,11 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         Returns:
             torch.Tensor: Converted tensor.
         """
+        converted_parts = self._collect_converted_parts(x, require_extra=True)
+        if converted_parts is not None:
+            converted, _ = converted_parts
+            return converted
+
         # sort by element number
         x = sorted(x, key=lambda x: x.size(), reverse=True)
         kpt: torch.Tensor = x.pop(0)
