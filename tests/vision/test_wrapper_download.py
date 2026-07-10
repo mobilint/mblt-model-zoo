@@ -838,6 +838,340 @@ def test_non_e2e_segmentation_uses_converted_detections_and_proto() -> None:
     assert result[1].shape == (1, 32, 16, 16)
 
 
+def test_dflfree_detection_accepts_decode_true_mxq_parts_with_reducemax() -> None:
+    """Accept split decode-true DFL-free detection outputs with an extra reducemax tensor."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+
+    result = postprocessor([scores, reducemax, boxes])
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 6)
+    assert torch.equal(result[0][0, :4], boxes[0, 0])
+    assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
+    assert torch.allclose(result[0][0, 5], torch.tensor(1.0))
+
+
+def test_dflfree_detection_accepts_batched_decode_true_mxq_parts_with_reducemax() -> None:
+    """Preserve batched split decode-true DFL-free detection outputs."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor(
+        [
+            [[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]],
+            [[50.0, 60.0, 70.0, 80.0], [51.0, 61.0, 71.0, 81.0]],
+        ],
+        dtype=torch.float32,
+    )
+    scores = torch.tensor(
+        [
+            [[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]],
+            [[0.8, 0.1, 0.2], [0.1, 0.2, 0.3]],
+        ],
+        dtype=torch.float32,
+    )
+    reducemax = scores.max(dim=-1, keepdim=True).values.unsqueeze(1)
+    batched_scores = scores.unsqueeze(1)
+    batched_boxes = boxes.unsqueeze(1)
+
+    result = postprocessor([batched_scores, reducemax, batched_boxes])
+
+    assert len(result) == 2
+    assert result[0].shape == (1, 6)
+    assert result[1].shape == (1, 6)
+    assert torch.equal(result[0][0, :4], boxes[0, 0])
+    assert torch.equal(result[1][0, :4], boxes[1, 0])
+    assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
+    assert torch.allclose(result[1][0, 4], torch.tensor(0.8))
+    assert torch.allclose(result[0][0, 5], torch.tensor(1.0))
+    assert torch.allclose(result[1][0, 5], torch.tensor(0.0))
+
+
+def test_dflfree_detection_distinguishes_equal_width_box_and_score_parts() -> None:
+    """Use reducemax to distinguish boxes from scores when ``nc == 4``."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 4,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2, 0.3], [0.2, 0.3, 0.4, 0.1]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+
+    result = postprocessor([boxes, reducemax, scores])
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 6)
+    assert torch.equal(result[0][0, :4], boxes[0, 0])
+    assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
+    assert torch.allclose(result[0][0, 5], torch.tensor(1.0))
+
+
+def test_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducemax() -> None:
+    """Accept split decode-true DFL-free segmentation outputs with reducemax and proto tensors."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "n_extra": 2,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+    coeffs = torch.tensor([[[0.4, 0.6], [0.2, 0.1]]], dtype=torch.float32)
+    proto = torch.zeros((9, 9, 2), dtype=torch.float32)
+
+    result = postprocessor([coeffs, scores, reducemax, proto, boxes])
+
+    assert len(result) == 1
+    assert result[0][0].shape == (1, 8)
+    assert result[0][1].shape == (1, 64, 64)
+
+
+def test_dflfree_segmentation_accepts_approximate_reducemax_scores() -> None:
+    """Match quantized reducemax tensors without appending them as mask coefficients."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "n_extra": 2,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values - 0.01
+    coeffs = torch.tensor([[[0.4, 0.6], [0.2, 0.1]]], dtype=torch.float32)
+    proto = torch.zeros((9, 9, 2), dtype=torch.float32)
+
+    result = postprocessor([coeffs, scores, reducemax, proto, boxes])
+
+    assert len(result) == 1
+    assert result[0][0].shape == (1, 8)
+    assert result[0][1].shape == (1, 64, 64)
+
+
+def test_dflfree_segmentation_excludes_reducemax_from_proto_candidates() -> None:
+    """Ignore unused reducemax tensors when ``n_extra == 1`` and selecting the proto tensor."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "n_extra": 1,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+    coeffs = torch.tensor([[[0.6], [0.1]]], dtype=torch.float32)
+    proto = torch.zeros((9, 9, 1), dtype=torch.float32)
+
+    result = postprocessor([coeffs, scores, reducemax, proto, boxes])
+
+    assert len(result) == 1
+    assert result[0][0].shape == (1, 7)
+    assert result[0][1].shape == (1, 64, 64)
+
+
+def test_non_e2e_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducemax() -> None:
+    """Route 5-part decode-true segmentation outputs through the segmentation non-e2e path."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 3,
+        "n_extra": 2,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+        "e2e": False,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
+    reducemax = scores.max(dim=-1, keepdim=True).values
+    coeffs = torch.tensor([[[0.4, 0.6], [0.2, 0.1]]], dtype=torch.float32)
+    proto = torch.zeros((1, 9, 9, 2), dtype=torch.float32)
+
+    result = postprocessor([coeffs, scores, reducemax, proto, boxes])
+
+    assert isinstance(result, list)
+    assert result[0].shape == (1, 300, 8)
+    assert result[1].shape == (1, 2, 9, 9)
+    assert torch.equal(result[0][0, 0, :4], boxes[0, 0])
+    assert torch.allclose(result[0][0, 0, 4], torch.tensor(0.9))
+    assert torch.allclose(result[0][0, 0, 5], torch.tensor(1.0))
+    assert torch.equal(result[0][0, 0, 6:], coeffs[0, 0])
+
+
+def test_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:
+    """Accept split decode-true DFL-free pose outputs with a duplicate score max tensor."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "pose_estimation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 1,
+        "n_extra": 51,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
+    reducemax = scores.clone()
+    keypoints = torch.arange(102, dtype=torch.float32).reshape(1, 2, 51)
+
+    result = postprocessor([reducemax, scores, boxes, keypoints])
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 57)
+    assert torch.equal(result[0][0, :4], boxes[0, 0])
+    assert torch.equal(result[0][0, 6:], keypoints[0, 0])
+
+
+def test_dflfree_pose_prefers_score_tensor_over_reducemax_duplicate() -> None:
+    """Use the actual score tensor when MXQ exports both reducemax and score parts."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "pose_estimation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 1,
+        "n_extra": 51,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    reducemax = torch.tensor([[[0.88], [0.39]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
+    keypoints = torch.arange(102, dtype=torch.float32).reshape(1, 2, 51)
+
+    for output_order in ([reducemax, scores, boxes, keypoints], [scores, reducemax, boxes, keypoints]):
+        result = postprocessor(output_order)
+
+        assert len(result) == 1
+        assert result[0].shape == (1, 57)
+        assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
+        assert torch.equal(result[0][0, 6:], keypoints[0, 0])
+
+
+def test_non_e2e_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:
+    """Route 4-part decode-true pose outputs through the pose non-e2e path."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "pose_estimation",
+        "nl": 3,
+        "dflfree": True,
+        "nc": 1,
+        "n_extra": 51,
+        "conf_thres": 0.5,
+        "iou_thres": 0.7,
+        "e2e": False,
+    }
+    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
+    scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
+    reducemax = scores.clone()
+    keypoints = torch.arange(102, dtype=torch.float32).reshape(1, 2, 51)
+
+    result = postprocessor([reducemax, scores, boxes, keypoints])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 300, 57)
+    assert torch.equal(result[0, 0, :4], boxes[0, 0])
+    assert torch.allclose(result[0, 0, 4], torch.tensor(0.9))
+    assert torch.allclose(result[0, 0, 5], torch.tensor(0.0))
+    assert torch.equal(result[0, 0, 6:], keypoints[0, 0])
+
+
 def test_non_e2e_dflfree_obb_preserves_canonical_row_width() -> None:
     """Pad non-e2e DFL-free OBB converted outputs using canonical pre-NMS row widths."""
 

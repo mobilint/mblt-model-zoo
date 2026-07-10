@@ -14,7 +14,6 @@ import torch
 from PIL import Image
 
 from .datasets import (
-    get_coco_class_num,
     get_coco_det_palette,
     get_coco_keypoint_palette,
     get_coco_label,
@@ -24,7 +23,7 @@ from .datasets import (
     get_imagenet_label,
 )
 from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks, scale_rboxes, xywhr2xyxyxyxy
-from .types import ListTensorLike, TensorLike
+from .types import ListTensorLike, NestedListTensorLike, TensorLike
 
 LW = 2  # line width
 RADIUS = 5  # circle radius
@@ -42,7 +41,7 @@ class Results:
         self,
         pre_cfg: dict,
         post_cfg: dict,
-        output: TensorLike | ListTensorLike,
+        output: TensorLike | ListTensorLike | NestedListTensorLike,
         **kwargs,
     ) -> None:
         """
@@ -50,7 +49,7 @@ class Results:
         Args:
             pre_cfg (dict): Preprocessing configuration.
             post_cfg (dict): Postprocessing configuration.
-            output (TensorLike | ListTensorLike): Raw model output.
+            output (TensorLike | ListTensorLike | NestedListTensorLike): Raw model output.
             **kwargs: Additional arguments.
         """
         self.pre_cfg = pre_cfg
@@ -60,7 +59,7 @@ class Results:
         self.acc: torch.Tensor | np.ndarray | None = None
         self.box_cls: torch.Tensor | np.ndarray | None = None
         self.mask: torch.Tensor | np.ndarray | None = None
-        self.output: TensorLike | ListTensorLike | None = None
+        self.output: TensorLike | ListTensorLike | NestedListTensorLike | None = None
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
         self.boxes: torch.Tensor | None = None
@@ -93,11 +92,11 @@ class Results:
             raise ValueError(f"Failed to read image from {type(source_path)}.")
         return source_img
 
-    def set_output(self, output: TensorLike | ListTensorLike) -> None:
+    def set_output(self, output: TensorLike | ListTensorLike | NestedListTensorLike) -> None:
         """
         Sets variables from the raw model output based on the task.
         Args:
-            output (TensorLike | ListTensorLike): Raw model output.
+            output (TensorLike | ListTensorLike | NestedListTensorLike): Raw model output.
         Raises:
             NotImplementedError: If the task is not supported.
         """
@@ -111,12 +110,13 @@ class Results:
         elif self.task.lower() in {"object_detection", "face_detection", "pose_estimation", "obb"}:
             if not isinstance(output, Sequence):
                 raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
-            self.box_cls = output[0]
+            self.box_cls = cast(TensorLike, output[0])
         elif self.task.lower() == "instance_segmentation":
             if not isinstance(output, Sequence) or not isinstance(output[0], Sequence):
                 raise TypeError(f"Expected nested list output for task {self.task}, got {type(output)}.")
-            self.box_cls = output[0][0]
-            self.mask = output[0][1]
+            seg_output = cast(ListTensorLike, output[0])
+            self.box_cls = cast(TensorLike, seg_output[0])
+            self.mask = cast(TensorLike, seg_output[1])
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
         self.output = output  # store raw output
@@ -231,8 +231,7 @@ class Results:
         boxes = self.boxes
         scores = self.scores
         labels = self.labels
-        contour_count = get_coco_class_num() if self.task.lower() == "object_detection" else 1
-        contours = {i: [] for i in range(contour_count)}
+        contours: dict[int, list[np.ndarray]] = {}
         for box, score, label in zip(boxes, scores, labels):
             label_idx = int(label.item())
             palette = self._get_detection_palette(label_idx)
@@ -246,7 +245,7 @@ class Results:
                 1,
                 cv2.LINE_AA,
             )
-            contours[label_idx].append(
+            contours.setdefault(label_idx, []).append(
                 np.array(
                     [
                         [int(box[0]), int(box[1])],

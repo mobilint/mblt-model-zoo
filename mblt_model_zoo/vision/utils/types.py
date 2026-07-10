@@ -12,3 +12,4 @@ import torch
 
 TensorLike: TypeAlias = torch.Tensor | np.ndarray
 ListTensorLike: TypeAlias = Sequence[TensorLike]
+NestedListTensorLike: TypeAlias = Sequence[TensorLike | ListTensorLike]
