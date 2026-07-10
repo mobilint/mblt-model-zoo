@@ -23,6 +23,8 @@ class YOLODFLFreePost(YOLOPostBase):
     """Postprocessing for YOLO DFL-free models."""
 
     max_det = 300
+    reducemax_rtol = 1e-3
+    reducemax_atol = 5e-2
 
     def __init__(self, pre_cfg: dict, post_cfg: dict, **kwargs: object) -> None:
         """Initialize the DFL-free YOLO postprocessor.
@@ -47,7 +49,7 @@ class YOLODFLFreePost(YOLOPostBase):
                 return x.transpose(0, 1).unsqueeze(0)
             return None
 
-        if x.ndim == 3 and x.shape[0] == 1:
+        if x.ndim == 3:
             if x.shape[-1] == channel_count:
                 return x
             if x.shape[1] == channel_count:
@@ -63,36 +65,69 @@ class YOLODFLFreePost(YOLOPostBase):
     ) -> tuple[torch.Tensor, set[int]] | None:
         """Collect decode-true box/class/extra parts while ignoring reducemax."""
 
-        part_by_channels: dict[int, torch.Tensor] = {}
+        part_by_role: dict[str, torch.Tensor] = {}
         used_indices: set[int] = set()
-        required_channels = [4, self.nc]
+        required_parts: list[tuple[str, int]] = [("boxes", 4), ("scores", self.nc)]
         if require_extra:
-            required_channels.append(self.n_extra)
+            required_parts.append(("extra", self.n_extra))
+
+        score_candidate_indices = [
+            idx for idx, xi in enumerate(x) if self._normalize_converted_part(xi, self.nc) is not None
+        ]
+        reducemax_candidates = [
+            cast(torch.Tensor, normalized)
+            for xi in x
+            if (normalized := self._normalize_converted_part(xi, 1)) is not None
+        ]
+
+        def _matches_reducemax(candidate: torch.Tensor) -> bool:
+            if candidate.shape[-1] != self.nc:
+                return False
+            reduced = candidate.max(dim=-1, keepdim=True).values
+            return any(
+                reduced.shape == reducemax.shape
+                and torch.allclose(
+                    reduced,
+                    reducemax,
+                    rtol=self.reducemax_rtol,
+                    atol=self.reducemax_atol,
+                )
+                for reducemax in reducemax_candidates
+            )
 
         for idx, xi in enumerate(x):
-            for channel_count in required_channels:
-                if channel_count in part_by_channels:
+            for role, channel_count in required_parts:
+                if role in part_by_role:
                     continue
                 normalized = self._normalize_converted_part(xi, channel_count)
                 if normalized is None:
                     continue
-                part_by_channels[channel_count] = normalized
+
+                if role == "scores":
+                    if self.nc == 1 and len(score_candidate_indices) > 1 and idx != score_candidate_indices[-1]:
+                        continue
+                    if not _matches_reducemax(normalized):
+                        continue
+                elif channel_count == self.nc and self.nc == 4 and _matches_reducemax(normalized):
+                    continue
+
+                part_by_role[role] = normalized
                 used_indices.add(idx)
                 break
 
-        if any(channel_count not in part_by_channels for channel_count in required_channels):
+        if any(role not in part_by_role for role, _ in required_parts):
             return None
 
-        batch_size = part_by_channels[4].shape[0]
-        anchor_count = part_by_channels[4].shape[1]
-        for channel_count in required_channels[1:]:
-            part = part_by_channels[channel_count]
+        batch_size = part_by_role["boxes"].shape[0]
+        anchor_count = part_by_role["boxes"].shape[1]
+        for role, _channel_count in required_parts[1:]:
+            part = part_by_role[role]
             if part.shape[0] != batch_size or part.shape[1] != anchor_count:
                 return None
 
-        ordered_parts = [part_by_channels[4], part_by_channels[self.nc]]
+        ordered_parts = [part_by_role["boxes"], part_by_role["scores"]]
         if require_extra:
-            ordered_parts.append(part_by_channels[self.n_extra])
+            ordered_parts.append(part_by_role["extra"])
         return torch.cat(ordered_parts, dim=-1), used_indices
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
@@ -307,6 +342,16 @@ class YOLODFLFreePost(YOLOPostBase):
 class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
     """Postprocessing for YOLO NMS-free segmentation models."""
 
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return export-style segmentation outputs for converted or raw split heads."""
+
+        if len(x) in {4, 5}:
+            converted, proto_outs = cast(tuple[torch.Tensor, torch.Tensor], self.conversion(x))
+            return [self._stack_topk_outputs(self.filter_conversion(converted)), self._proto_to_nchw(proto_outs)]
+
+        rearranged, proto_outs = self.rearrange(x)
+        return [self.decode_batch(rearranged), self._proto_to_nchw(proto_outs)]
+
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
@@ -404,6 +449,16 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
 
 class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
     """Postprocessing for YOLO NMS-free pose estimation models."""
+
+    def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
+        """Return export-style pose outputs for both converted and raw split heads."""
+
+        if len(x) in {3, 4}:
+            converted = cast(torch.Tensor, self.conversion(x))
+            return self._stack_topk_outputs(self.filter_conversion(converted))
+
+        rearranged = self.rearrange(x)
+        return self.decode_batch(rearranged)
 
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
         """Preprocesses inputs for pose estimation.
