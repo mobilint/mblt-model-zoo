@@ -457,6 +457,38 @@ def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) ->
         construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
 
 
+def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep the previous DOTAv1 layout when copying a staged archive fails."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0001.txt")
+
+    output_dir = tmp_path / "dotav1"
+    old_image = output_dir / "images" / "val" / "old.png"
+    old_image.parent.mkdir(parents=True)
+    old_image.write_bytes(b"old")
+    old_label = output_dir / "labels" / "val" / "old.txt"
+    old_label.parent.mkdir(parents=True)
+    old_label.write_text("0 0 0 0 0 0 0 0 plane 0\n", encoding="utf-8")
+    monkeypatch.setattr(organizer_module.shutil, "copy2", lambda *_: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
+
+    assert old_image.read_bytes() == b"old"
+    assert old_label.is_file()
+
+
 def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -507,6 +507,7 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
 
     Raises:
         ValueError: If the archives have no validation files or their image and label stems differ.
+        OSError: If staging or replacing the organized dataset files fails.
     """
 
     with TemporaryDirectory() as extract_dir:
@@ -536,23 +537,55 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
             raise ValueError(f"DOTAv1 archive stem mismatch ({'; '.join(details)}).")
         matching_ids = sorted(image_ids)
 
-        image_output_dir = os.path.join(output_dir, "images", "val")
-        label_output_dir = os.path.join(output_dir, "labels", "val")
-        original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
-        for directory in (image_output_dir, label_output_dir, original_label_output_dir):
-            if os.path.isdir(directory):
-                shutil.rmtree(directory)
-            elif os.path.exists(directory):
-                os.remove(directory)
-        os.makedirs(image_output_dir, exist_ok=True)
-        os.makedirs(original_label_output_dir, exist_ok=True)
+        output_dir = os.path.abspath(output_dir)
+        output_parent_dir = os.path.dirname(output_dir)
+        os.makedirs(output_parent_dir, exist_ok=True)
+        with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
+            staged_image_dir = os.path.join(staging_dir, "images", "val")
+            staged_original_label_dir = os.path.join(staging_dir, "labels", "val_original")
+            os.makedirs(staged_image_dir)
+            os.makedirs(staged_original_label_dir)
 
-        for image_id in matching_ids:
-            image_path = images[image_id]
-            shutil.copy2(image_path, os.path.join(image_output_dir, os.path.basename(image_path)))
+            for image_id in matching_ids:
+                image_path = images[image_id]
+                shutil.copy2(image_path, os.path.join(staged_image_dir, os.path.basename(image_path)))
 
-        for image_id in matching_ids:
-            shutil.copy2(labels[image_id], os.path.join(original_label_output_dir, f"{image_id}.txt"))
+            for image_id in matching_ids:
+                shutil.copy2(labels[image_id], os.path.join(staged_original_label_dir, f"{image_id}.txt"))
+
+            image_output_dir = os.path.join(output_dir, "images", "val")
+            label_output_dir = os.path.join(output_dir, "labels", "val")
+            original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
+            replacements = (
+                (staged_image_dir, image_output_dir),
+                (staged_original_label_dir, original_label_output_dir),
+            )
+            existing_dirs = (image_output_dir, label_output_dir, original_label_output_dir)
+            with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-backup-") as backup_dir:
+                backups: dict[str, str] = {}
+                installed_dirs: list[str] = []
+                try:
+                    for directory in existing_dirs:
+                        if os.path.lexists(directory):
+                            backup_path = os.path.join(backup_dir, os.path.relpath(directory, output_dir))
+                            os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                            os.replace(directory, backup_path)
+                            backups[directory] = backup_path
+
+                    for staged_dir, output_subdir in replacements:
+                        os.makedirs(os.path.dirname(output_subdir), exist_ok=True)
+                        os.replace(staged_dir, output_subdir)
+                        installed_dirs.append(output_subdir)
+                except OSError:
+                    for directory in installed_dirs:
+                        if os.path.isdir(directory) and not os.path.islink(directory):
+                            shutil.rmtree(directory)
+                        elif os.path.lexists(directory):
+                            os.remove(directory)
+                    for directory, backup_path in backups.items():
+                        os.makedirs(os.path.dirname(directory), exist_ok=True)
+                        os.replace(backup_path, directory)
+                    raise
 
     print(f"Constructed DOTAv1 validation dataset with {len(matching_ids)} images")
 
