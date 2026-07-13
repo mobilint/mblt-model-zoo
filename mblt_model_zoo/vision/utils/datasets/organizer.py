@@ -515,7 +515,7 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
         image_output_dir = os.path.join(output_dir, "images", "val")
         label_output_dir = os.path.join(output_dir, "labels", "val")
         original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
-        for directory in (label_output_dir, original_label_output_dir):
+        for directory in (image_output_dir, label_output_dir, original_label_output_dir):
             if os.path.isdir(directory):
                 shutil.rmtree(directory)
             elif os.path.exists(directory):

@@ -463,9 +463,13 @@ def test_google_drive_dotav1_archives_preserve_legacy_evaluation_layout(tmp_path
     stale_label_dir = output_dir / "labels" / "val"
     stale_label_dir.mkdir(parents=True)
     (stale_label_dir / "P0001.txt").write_text("0 0 0 0 0 0 0 0 plane 0\n", encoding="utf-8")
+    stale_image_path = output_dir / "images" / "val" / "stale.png"
+    stale_image_path.parent.mkdir(parents=True)
+    stale_image_path.write_bytes(b"stale")
     construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
 
     assert (output_dir / "images" / "val" / "P0001.png").is_file()
+    assert not stale_image_path.exists()
     assert not stale_label_dir.exists()
     assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
     ground_truths = _load_ground_truths(str(output_dir), CustomDOTAv1(str(output_dir)))
