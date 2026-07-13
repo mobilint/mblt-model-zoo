@@ -30,7 +30,7 @@ class PretrainedOnlyMixin(PreTrainedModel):
                 f"Please use `{cls_name}.from_pretrained(...)` to load the NPU model correctly."
             )
             
-        super().__init__(*args, **kwargs)
+        super().__init__(*args)
         self._ensure_transformers_5_runtime_attrs()
 
     @classmethod
