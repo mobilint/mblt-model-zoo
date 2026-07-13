@@ -74,6 +74,26 @@ def get_dataset_class_names(name: str) -> tuple[str, ...]:
     return tuple(names[index] for index in range(len(names)))
 
 
+@lru_cache(maxsize=None)
+def get_dataset_category_ids(name: str) -> tuple[int, ...]:
+    """Return immutable source category IDs from a dataset definition.
+
+    Args:
+        name: Dataset filename stem, such as ``coco``.
+
+    Returns:
+        Source category IDs ordered by contiguous model-output index.
+
+    Raises:
+        ValueError: If the dataset has no integer ``category_ids`` list.
+    """
+
+    category_ids = _load_dataset_config(name).get("category_ids")
+    if not isinstance(category_ids, list) or not all(isinstance(category_id, int) for category_id in category_ids):
+        raise ValueError(f"Vision dataset definition requires an integer-list `category_ids`: {name}")
+    return tuple(category_ids)
+
+
 def get_dataset_config_for_task(task: str) -> dict[str, Any]:
     """Return the validation dataset definition associated with a vision task.
 

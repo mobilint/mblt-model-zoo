@@ -4,7 +4,7 @@ COCO dataset constants and utilities.
 
 from __future__ import annotations
 
-from ...datasets import get_dataset_class_names, get_dataset_config
+from ...datasets import get_dataset_category_ids, get_dataset_class_names
 
 DET_PALETTE = [
     (220, 20, 60),
@@ -174,7 +174,7 @@ def get_coco_inv(idx: int) -> int:
     Returns:
         int: Original COCO category ID.
     """
-    return get_dataset_config("coco")["category_ids"][idx]
+    return get_dataset_category_ids("coco")[idx]
 
 
 def get_coco_det_palette(idx: int) -> tuple[int, int, int]:

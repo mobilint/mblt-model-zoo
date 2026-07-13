@@ -16,7 +16,12 @@ import torch
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
-from mblt_model_zoo.vision.datasets import get_dataset_class_names, get_dataset_config, get_dataset_config_for_task
+from mblt_model_zoo.vision.datasets import (
+    get_dataset_category_ids,
+    get_dataset_class_names,
+    get_dataset_config,
+    get_dataset_config_for_task,
+)
 from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
@@ -79,6 +84,7 @@ def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
     """Serve legacy class helper values from the YAML dataset definitions."""
 
     assert get_dataset_class_names("coco")[0] == "person"
+    assert get_dataset_category_ids("coco") is get_dataset_category_ids("coco")
     assert get_coco_label(79) == "toothbrush"
     assert get_coco_inv(11) == 13
     assert get_dotav1_label(2) == "storage-tank"
