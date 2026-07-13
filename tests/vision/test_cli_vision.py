@@ -23,6 +23,7 @@ from mblt_model_zoo.vision.datasets import (
     get_dataset_config_for_task,
 )
 from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
+from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
@@ -454,6 +455,74 @@ def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="DOTAv1 archive stem mismatch"):
         construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+
+def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Organize the configured archives when gdown paths include the Drive root."""
+
+    class _DriveEntry:
+        """Minimal gdown folder-listing entry."""
+
+        def __init__(self, file_id: str, path: str) -> None:
+            self.id = file_id
+            self.path = path
+
+    downloads: list[tuple[str, str]] = []
+    constructed: list[tuple[str, str, str]] = []
+
+    def _download_folder(**kwargs: object) -> list[_DriveEntry]:
+        assert kwargs["skip_download"] is True
+        return [
+            _DriveEntry("image-id", "DOTAv1/images/part1.zip"),
+            _DriveEntry("label-id", "DOTAv1/labelTxt-v1.0/labelTxt.zip"),
+        ]
+
+    def _download(**kwargs: object) -> str:
+        file_id = cast(str, kwargs["id"])
+        output = cast(str, kwargs["output"])
+        downloads.append((file_id, output))
+        return output
+
+    def _construct(image_archive: str, label_archive: str, output_dir: str) -> None:
+        constructed.append((image_archive, label_archive, output_dir))
+
+    monkeypatch.setattr(organizer_module, "download_folder", _download_folder)
+    monkeypatch.setattr(organizer_module, "download", _download)
+    monkeypatch.setattr(organizer_module, "construct_dotav1_from_archives", _construct)
+
+    output_dir = tmp_path / "dotav1"
+    organizer_module.organize_dotav1("https://drive.google.com/drive/u/0/folders/dataset-id", str(output_dir))
+
+    assert [file_id for file_id, _ in downloads] == ["image-id", "label-id"]
+    assert constructed == [(downloads[0][1], downloads[1][1], str(output_dir))]
+
+
+def test_google_drive_dotav1_organizer_rejects_missing_folder_listing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Raise a contextual error when gdown cannot list the DOTAv1 Drive folder."""
+
+    monkeypatch.setattr(organizer_module, "download_folder", lambda **_: None)
+
+    with pytest.raises(RuntimeError, match="https://drive.google.com/drive/folders/dataset-id"):
+        organizer_module._download_dotav1_google_drive_archives(
+            "https://drive.google.com/drive/folders/dataset-id", str(tmp_path)
+        )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://drive.google.com/drive/folders/dataset-id",
+        "https://drive.google.com/drive/u/0/folders/dataset-id",
+    ],
+)
+def test_google_drive_dotav1_organizer_recognizes_folder_url_variants(url: str) -> None:
+    """Recognize both standard and account-scoped Google Drive folder URLs."""
+
+    assert organizer_module._is_google_drive_folder_url(url)
 
 
 def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:

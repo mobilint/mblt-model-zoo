@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import re
 import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
@@ -428,7 +429,9 @@ def _is_google_drive_folder_url(path_or_url: str) -> bool:
     """Returns whether a URL points to a Google Drive folder."""
 
     parsed = urlparse(path_or_url)
-    return parsed.netloc == "drive.google.com" and "/drive/folders/" in parsed.path
+    return parsed.hostname == "drive.google.com" and bool(
+        re.fullmatch(r"/drive(?:/u/[^/]+)?/folders/[^/]+/?", parsed.path)
+    )
 
 
 def _download_dotav1_google_drive_archives(folder_url: str, download_dir: str) -> tuple[str, str]:
@@ -448,13 +451,25 @@ def _download_dotav1_google_drive_archives(folder_url: str, download_dir: str) -
 
     print(f"Retrieving DOTAv1 archive list from {folder_url}...")
     folder_entries = download_folder(url=folder_url, output=download_dir, quiet=True, skip_download=True)
+    if folder_entries is None:
+        raise RuntimeError(f"Failed to retrieve the DOTAv1 Google Drive folder listing: {folder_url}")
     files = [entry for entry in folder_entries if _is_google_drive_download_entry(entry)]
-    archives = {drive_file.path: drive_file for drive_file in files if drive_file.path in DOTAV1_GOOGLE_DRIVE_ARCHIVES}
-    missing_archives = DOTAV1_GOOGLE_DRIVE_ARCHIVES - archives.keys()
-    if missing_archives:
+    archives: dict[str, _GoogleDriveDownloadEntry] = {}
+    for archive_path in DOTAV1_GOOGLE_DRIVE_ARCHIVES:
+        matches = [
+            drive_file
+            for drive_file in files
+            if drive_file.path == archive_path or drive_file.path.endswith(f"/{archive_path}")
+        ]
+        if len(matches) == 1:
+            archives[archive_path] = matches[0]
+            continue
+
         available = ", ".join(sorted(drive_file.path for drive_file in files)) or "none"
-        missing = ", ".join(sorted(missing_archives))
-        raise ValueError(f"DOTAv1 Drive folder is missing {missing}. Available files: {available}.")
+        if not matches:
+            raise ValueError(f"DOTAv1 Drive folder is missing {archive_path}. Available files: {available}.")
+        ambiguous = ", ".join(sorted(drive_file.path for drive_file in matches))
+        raise ValueError(f"DOTAv1 Drive folder has ambiguous matches for {archive_path}: {ambiguous}.")
 
     local_archives: dict[str, str] = {}
     for archive_path in sorted(DOTAV1_GOOGLE_DRIVE_ARCHIVES):
