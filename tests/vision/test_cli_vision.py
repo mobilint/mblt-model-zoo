@@ -57,6 +57,29 @@ def test_cli_val_defaults_to_model_thresholds() -> None:
     assert args.core_mode == "global8"
     assert args.conf_thres is None
     assert args.iou_thres is None
+    assert args.e2e is None
+
+
+@pytest.mark.parametrize(
+    ("command", "option", "expected"),
+    [
+        ("predict", "--e2e", True),
+        ("predict", "--e2e false", False),
+        ("val", "--e2e", True),
+        ("val", "--e2e false", False),
+    ],
+)
+def test_cli_vision_commands_parse_e2e_option(command: str, option: str, expected: bool) -> None:
+    """Parse the optional YOLO end-to-end postprocessing override."""
+
+    parser = build_parser()
+    command_args = [command, "--model", "yolo11m", *option.split()]
+    if command == "predict":
+        command_args.extend(["--source", "./cat.png"])
+
+    args = parser.parse_args(command_args)
+
+    assert args.e2e is expected
 
 
 def test_cli_predict_parses_onnx_framework_and_model_path() -> None:
@@ -200,11 +223,13 @@ def test_cli_predict_applies_face_detection_thresholds(monkeypatch: pytest.Monke
         topk=5,
         conf_thres=0.25,
         iou_thres=0.6,
+        e2e=True,
     )
 
     run_vision_inference(args, command="predict")
 
     assert calls["thresholds"] == (0.25, 0.6)
+    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
     assert calls["disposed"] is True
 
 
@@ -416,6 +441,7 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
         def __init__(self, **kwargs: object) -> None:
             calls["engine_kwargs"] = kwargs
             self.post_cfg = {"task": "obb"}
+            self.postprocessor = Namespace(e2e=True)
 
         def dispose(self) -> None:
             calls["disposed"] = True
@@ -451,6 +477,7 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
         batch_size=8,
         conf_thres=None,
         iou_thres=None,
+        e2e=True,
         force_organize=False,
         image_dir=None,
         xml_dir=None,
@@ -462,9 +489,42 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
     assert score == 0.123
     assert calls["engine_kwargs"]["model_cls"] == "yolov8m-obb"
     assert calls["engine_kwargs"]["framework"] == "onnx"
+    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
     assert calls["eval_kwargs"]["data_path"] == str(data_path)
     assert calls["eval_kwargs"]["batch_size"] == 8
     assert calls["disposed"] is True
+
+
+def test_cli_val_rejects_non_e2e_postprocessing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject export-style YOLO outputs, which validation cannot evaluate."""
+
+    class _FakeEngine:
+        def __init__(self, **kwargs: object) -> None:
+            self.post_cfg = {"task": "object_detection"}
+            self.postprocessor = Namespace(e2e=False)
+
+        def dispose(self) -> None:
+            pass
+
+    import mblt_model_zoo.vision as vision_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    args = Namespace(
+        model="yolo11m",
+        model_type="DEFAULT",
+        framework=None,
+        model_path="",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        e2e=False,
+    )
+
+    with pytest.raises(SystemExit, match="Validation requires end-to-end YOLO postprocessing"):
+        _run_validation(args)
 
 
 def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

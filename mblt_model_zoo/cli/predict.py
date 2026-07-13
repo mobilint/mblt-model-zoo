@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from ._vision import add_threshold_args, add_vision_parser, run_vision_inference
+from ._vision import add_e2e_arg, add_threshold_args, add_vision_parser, run_vision_inference
 
 
 def _cmd_predict(args: argparse.Namespace) -> int:
@@ -27,4 +27,9 @@ def add_predict_parser(
         handler=_cmd_predict,
     )
     parser.add_argument("--topk", type=int, default=5, help="Number of classification labels to show.")
+    parser.add_argument(
+        "--raw-output",
+        help="Path to save raw export-style output with `--e2e false`.",
+    )
     add_threshold_args(parser, conf_default=0.25, iou_default=None)
+    add_e2e_arg(parser)

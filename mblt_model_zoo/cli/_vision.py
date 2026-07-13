@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import torch
+
 DEFAULT_OUTPUT_DIR = Path("runs") / "vision"
 
 
@@ -94,6 +96,43 @@ def add_threshold_args(
     parser.add_argument("--iou-thres", type=float, default=iou_default, help="IoU threshold.")
 
 
+def parse_bool(value: str) -> bool:
+    """Parses a case-insensitive boolean CLI value.
+
+    Args:
+        value: Boolean text to parse.
+
+    Returns:
+        Parsed boolean value.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a supported boolean spelling.
+    """
+
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected a boolean value: true or false")
+
+
+def add_e2e_arg(parser: argparse.ArgumentParser) -> None:
+    """Adds an optional YOLO end-to-end postprocessing mode override.
+
+    Leaving the option unset preserves the model configuration's default.
+    """
+
+    parser.add_argument(
+        "--e2e",
+        nargs="?",
+        const=True,
+        type=parse_bool,
+        default=None,
+        help="Enable or disable YOLO end-to-end postprocessing (true/false). Bare `--e2e` means true.",
+    )
+
+
 def add_vision_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
@@ -150,6 +189,10 @@ def run_vision_inference(
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    postprocess_kwargs: dict[str, Any] = {}
+    if getattr(args, "e2e", None) is not None:
+        postprocess_kwargs["e2e"] = args.e2e
+
     model = MBLT_Engine(
         model_cls=args.model,
         model_type=args.model_type,
@@ -161,6 +204,7 @@ def run_vision_inference(
         core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        postprocess_kwargs=postprocess_kwargs,
     )
     try:
         actual_task = str(model.post_cfg.get("task", "")).lower()
@@ -173,6 +217,21 @@ def run_vision_inference(
 
         input_img = model.preprocess(args.source)
         output = model(input_img)
+        if not getattr(getattr(model, "postprocessor", None), "e2e", True):
+            if args.output:
+                raise SystemExit("`--output` is unavailable with `--e2e false`; use `--raw-output` instead.")
+
+            raw_output = model.postprocessor(output)
+            raw_output_path = getattr(args, "raw_output", None)
+            if raw_output_path:
+                output_path = Path(raw_output_path).expanduser()
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(raw_output, output_path)
+                print(f"Saved raw postprocess output to {output_path}")
+            else:
+                print("Generated raw export-style postprocess output. Use `--raw-output` to save it.")
+            return raw_output
+
         result = model.postprocess(output, **postprocess_kwargs)
 
         save_path = resolve_output_path(args.output, command, args.source, args.model)
