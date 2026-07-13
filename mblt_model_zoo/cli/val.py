@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from ._vision import add_threshold_args, parse_target_clusters, parse_target_cores
+from ._vision import add_e2e_arg, add_threshold_args, parse_target_clusters, parse_target_cores
 
 DEFAULT_IMAGENET_IMAGE_SOURCE = "https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar"
 DEFAULT_IMAGENET_XML_SOURCE = "https://www.image-net.org/data/ILSVRC/2012/ILSVRC2012_bbox_val_v3.tgz"
@@ -218,6 +218,10 @@ def _run_validation(args: argparse.Namespace) -> float:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    postprocess_kwargs: dict[str, bool] = {}
+    if getattr(args, "e2e", None) is not None:
+        postprocess_kwargs["e2e"] = args.e2e
+
     model = MBLT_Engine(
         model_cls=args.model,
         model_type=args.model_type,
@@ -229,8 +233,12 @@ def _run_validation(args: argparse.Namespace) -> float:
         core_mode=normalize_core_mode(args.core_mode),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
+        postprocess_kwargs=postprocess_kwargs,
     )
     try:
+        if not getattr(getattr(model, "postprocessor", None), "e2e", True):
+            raise SystemExit("Validation requires end-to-end YOLO postprocessing. Use `--e2e true` or omit the option.")
+
         task = str(model.post_cfg.get("task", "")).lower()
         data_path = _ensure_dataset(args, task)
 
@@ -370,3 +378,4 @@ def add_val_parser(
         help="Local archive path or download URL for dataset annotations used by automatic organization.",
     )
     add_threshold_args(parser, conf_default=None, iou_default=None)
+    add_e2e_arg(parser)
