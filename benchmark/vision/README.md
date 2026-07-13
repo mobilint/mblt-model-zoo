@@ -213,8 +213,9 @@ Pending
 
 ### Download the DOTAv1 Dataset
 
-The organizer uses the official DOTAv1 archive by default. If you already downloaded the archive
-or extracted it locally, you can pass that local path instead.
+The organizer reads the default source from `mblt_model_zoo/vision/datasets/dotav1.yaml` and
+downloads the DOTAv1 validation images and original v1.0 labels from its Google Drive folder. If
+you already downloaded the archive or extracted it locally, you can pass that local path instead.
 
 ### Organize the DOTAv1 Dataset
 

@@ -82,6 +82,18 @@ because they are the most consistently structured.
   `mblt_model_zoo.vision.list_models()` continues to discover them, and keep
   `mblt_model_zoo.vision.__init__` lazy compatibility exports in sync.
 
+### Vision Datasets
+
+- Keep validation dataset definitions in `mblt_model_zoo/vision/datasets/*.yaml`; use the
+  Ultralytics-style `path`, `val`, and optional `names` fields, plus this repository's `tasks` and
+  `download` metadata.
+- Keep dataset class names and category-ID mappings in those YAML files. Preserve the compatibility
+  helpers in `mblt_model_zoo/vision/utils/datasets` by loading their values from the registry.
+- Use `mblt_model_zoo.vision.datasets.get_dataset_config_for_task()` for task-to-dataset defaults
+  instead of duplicating download URLs or cache paths in CLI and benchmark code.
+- Preserve the organizer output layouts consumed by the evaluators. In particular, DOTAv1 accepts
+  original labels in `labels/val_original` and must retain difficult-object filtering.
+
 ### Tests and Benchmarks
 
 - Many tests depend on Mobilint hardware, downloaded model artifacts, or optional extras.

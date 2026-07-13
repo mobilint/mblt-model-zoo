@@ -8,17 +8,27 @@ import concurrent.futures
 import os
 import shutil
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from tempfile import TemporaryDirectory
 from time import sleep
 from urllib.parse import urlparse
 
 import requests
+from gdown.download import GoogleDriveFileToDownload, download
+from gdown.download_folder import download_folder
 from tqdm import tqdm
+
+from ...datasets import get_dataset_config
 
 DOWNLOAD_CHUNK_SIZE = 1 * 1024 * 1024
 DOWNLOAD_RETRY_LIMIT = 4
 DOWNLOAD_RETRY_BACKOFF_SECONDS = 2.0
 DOWNLOAD_TIMEOUT = (10, 30)
+DOTAV1_DOWNLOAD_CONFIG = get_dataset_config("dotav1")["download"]
+DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
+    DOTAV1_DOWNLOAD_CONFIG["images_archive"],
+    DOTAV1_DOWNLOAD_CONFIG["labels_archive"],
+}
 
 
 def _is_url(path_or_url: str) -> bool:
@@ -36,6 +46,9 @@ def _download_url(url: str, local_path: str) -> str:
 
     Returns:
         The local destination path.
+
+    Raises:
+        RuntimeError: If all download attempts fail.
     """
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
@@ -83,6 +96,8 @@ def _download_url(url: str, local_path: str) -> str:
                 f"retrying from {resumed_size} bytes (attempt {attempt + 1}/{DOWNLOAD_RETRY_LIMIT})..."
             )
             sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError(f"Failed to download {url} after {DOWNLOAD_RETRY_LIMIT} attempts.")
 
 
 def _should_download_serially(path_or_urls: list[str]) -> bool:
@@ -395,6 +410,109 @@ def _resolve_dotav1_root(dataset_dir: str) -> str:
     return dataset_dir
 
 
+def _is_google_drive_folder_url(path_or_url: str) -> bool:
+    """Returns whether a URL points to a Google Drive folder."""
+
+    parsed = urlparse(path_or_url)
+    return parsed.netloc == "drive.google.com" and "/drive/folders/" in parsed.path
+
+
+def _download_dotav1_google_drive_archives(folder_url: str, download_dir: str) -> tuple[str, str]:
+    """Downloads the DOTAv1 image and v1.0-label archives from a Google Drive folder.
+
+    Args:
+        folder_url: Public Google Drive folder URL containing the DOTAv1 archives.
+        download_dir: Directory where the selected archives will be stored.
+
+    Returns:
+        Paths to the image archive and original v1.0-label archive.
+
+    Raises:
+        ValueError: If the required archives are absent from the Drive folder.
+        RuntimeError: If gdown fails to download a required archive.
+    """
+
+    print(f"Retrieving DOTAv1 archive list from {folder_url}...")
+    folder_entries = download_folder(url=folder_url, output=download_dir, quiet=True, skip_download=True)
+    files = [entry for entry in folder_entries if isinstance(entry, GoogleDriveFileToDownload)]
+    archives = {drive_file.path: drive_file for drive_file in files if drive_file.path in DOTAV1_GOOGLE_DRIVE_ARCHIVES}
+    missing_archives = DOTAV1_GOOGLE_DRIVE_ARCHIVES - archives.keys()
+    if missing_archives:
+        available = ", ".join(sorted(drive_file.path for drive_file in files)) or "none"
+        missing = ", ".join(sorted(missing_archives))
+        raise ValueError(f"DOTAv1 Drive folder is missing {missing}. Available files: {available}.")
+
+    local_archives: dict[str, str] = {}
+    for archive_path in sorted(DOTAV1_GOOGLE_DRIVE_ARCHIVES):
+        drive_file = archives[archive_path]
+        local_path = os.path.join(download_dir, os.path.basename(archive_path))
+        print(f"Downloading DOTAv1 {archive_path}...")
+        downloaded_path = download(id=drive_file.id, output=local_path, quiet=False, resume=True)
+        if not isinstance(downloaded_path, str):
+            raise RuntimeError(f"Failed to download DOTAv1 archive {archive_path} from {folder_url}.")
+        local_archives[archive_path] = downloaded_path
+
+    return (
+        local_archives[DOTAV1_DOWNLOAD_CONFIG["images_archive"]],
+        local_archives[DOTAV1_DOWNLOAD_CONFIG["labels_archive"]],
+    )
+
+
+def _iter_files(root: str, extensions: Iterable[str]) -> Iterable[str]:
+    """Yields files below a directory with one of the requested suffixes."""
+
+    suffixes = tuple(extension.lower() for extension in extensions)
+    for current_root, _, file_names in os.walk(root):
+        for file_name in file_names:
+            if file_name.lower().endswith(suffixes):
+                yield os.path.join(current_root, file_name)
+
+
+def construct_dotav1_from_archives(image_archive: str, label_archive: str, output_dir: str) -> None:
+    """Constructs the legacy DOTAv1 validation layout from the Google Drive archives.
+
+    Args:
+        image_archive: Path to the DOTAv1 validation-image archive.
+        label_archive: Path to the original DOTAv1 v1.0 label archive.
+        output_dir: Directory where the organized validation dataset will be stored.
+
+    Raises:
+        ValueError: If the image or label archive has no compatible validation files.
+    """
+
+    with TemporaryDirectory() as extract_dir:
+        image_dir = os.path.join(extract_dir, "images")
+        label_dir = os.path.join(extract_dir, "labels")
+        shutil.unpack_archive(image_archive, image_dir)
+        shutil.unpack_archive(label_archive, label_dir)
+
+        labels = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(label_dir, [".txt"])}
+        if not labels:
+            raise ValueError(f"No DOTAv1 label files found in {label_archive}.")
+
+        image_output_dir = os.path.join(output_dir, "images", "val")
+        original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
+        os.makedirs(image_output_dir, exist_ok=True)
+        os.makedirs(original_label_output_dir, exist_ok=True)
+
+        images = {
+            os.path.splitext(os.path.basename(path))[0]: path
+            for path in _iter_files(image_dir, [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"])
+        }
+        matching_ids = sorted(images.keys() & labels.keys())
+        if not matching_ids:
+            raise ValueError(f"No DOTAv1 validation images matching labels in {image_archive}.")
+
+        for image_id in matching_ids:
+            image_path = images[image_id]
+            shutil.copy2(image_path, os.path.join(image_output_dir, os.path.basename(image_path)))
+
+        for image_id in matching_ids:
+            shutil.copy2(labels[image_id], os.path.join(original_label_output_dir, f"{image_id}.txt"))
+
+    print(f"Constructed DOTAv1 validation dataset with {len(matching_ids)} images")
+
+
 def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
     """Constructs a validation-only DOTAv1 dataset.
 
@@ -452,6 +570,11 @@ def organize_dotav1(
         output_dir: Directory to store the organized dataset.
     """
     with TemporaryDirectory() as temp_dir:
+        if _is_google_drive_folder_url(dataset_path):
+            image_archive, label_archive = _download_dotav1_google_drive_archives(dataset_path, temp_dir)
+            construct_dotav1_from_archives(image_archive, label_archive, output_dir)
+            return
+
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
 
         if local_dataset_path.endswith(".zip"):

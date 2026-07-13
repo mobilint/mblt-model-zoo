@@ -7,17 +7,17 @@ import os
 import sys
 from pathlib import Path
 
+from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
+
 from ._vision import add_e2e_arg, add_threshold_args, parse_target_clusters, parse_target_cores
 
-DEFAULT_IMAGENET_IMAGE_SOURCE = "https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar"
-DEFAULT_IMAGENET_XML_SOURCE = "https://www.image-net.org/data/ILSVRC/2012/ILSVRC2012_bbox_val_v3.tgz"
-DEFAULT_COCO_IMAGE_SOURCE = "http://images.cocodataset.org/zips/val2017.zip"
-DEFAULT_COCO_ANNOTATION_SOURCE = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
-DEFAULT_WIDERFACE_IMAGE_SOURCE = "https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/WIDER_val.zip"
-DEFAULT_WIDERFACE_ANNOTATION_SOURCE = (
-    "https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/wider_face_split.zip"
-)
-DEFAULT_DOTAV1_SOURCE = "https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip"
+DEFAULT_IMAGENET_IMAGE_SOURCE = get_dataset_config("imagenet")["download"]["images"]
+DEFAULT_IMAGENET_XML_SOURCE = get_dataset_config("imagenet")["download"]["annotations"]
+DEFAULT_COCO_IMAGE_SOURCE = get_dataset_config("coco")["download"]["images"]
+DEFAULT_COCO_ANNOTATION_SOURCE = get_dataset_config("coco")["download"]["annotations"]
+DEFAULT_WIDERFACE_IMAGE_SOURCE = get_dataset_config("widerface")["download"]["images"]
+DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"]["annotations"]
+DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -119,15 +119,10 @@ def _resolve_dotav1_source(args: argparse.Namespace, data_path: str) -> str:
 def _default_data_path_for_task(task: str) -> str:
     """Returns the default organized dataset path for a vision task."""
 
-    if task == "image_classification":
-        return os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet")
-    if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
-        return os.path.expanduser("~/.mblt_model_zoo/datasets/coco")
-    if task == "face_detection":
-        return os.path.expanduser("~/.mblt_model_zoo/datasets/widerface")
-    if task == "obb":
-        return os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1")
-    raise SystemExit(f"Unsupported vision task for validation: {task}")
+    try:
+        return str(get_dataset_config_for_task(task)["path"])
+    except ValueError as exc:
+        raise SystemExit(f"Unsupported vision task for validation: {task}") from exc
 
 
 def _dataset_ready(task: str, data_path: str) -> bool:

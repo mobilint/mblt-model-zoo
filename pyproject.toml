@@ -25,6 +25,7 @@ dependencies = [
     "huggingface-hub",
     "scipy",
     "requests>=2.32.0",
+    "gdown>=5.2.0",
     "tqdm",
     "mblt-tracker>=1.0.1",
     "PyYAML",
@@ -100,6 +101,7 @@ version = { attr = "mblt_model_zoo.__version__" }
     "MeloTTS/text/cmudict.rep",
     "MeloTTS/text/cmudict_cache.pickle",
     "vision/models/*.yaml",
+    "vision/datasets/*.yaml",
 ]
 
 [dependency-groups]

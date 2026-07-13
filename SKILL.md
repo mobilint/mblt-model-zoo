@@ -1,8 +1,6 @@
 ---
 name: mblt-model-zoo
 description: Use this skill when working in the Mobilint Model Zoo repository. It covers the repo layout, common edit patterns for vision model wrappers, transformers and MeloTTS extras, CLI entry points, and safe validation strategies when Mobilint NPU hardware or downloaded models may be unavailable.
-paths:
-  - "**"
 ---
 
 # Mobilint Model Zoo
@@ -90,6 +88,16 @@ Preserve behavior for the current dual-runtime contract unless the task explicit
 - Preserve behavior for both local artifacts and Hugging Face downloads. For ONNX models, the
   wrapper may resolve a sibling `.onnx` file next to a local `.mxq` artifact or download the
   configured ONNX artifact from Hugging Face when needed.
+
+### Vision Dataset Work
+
+Store validation dataset definitions in `mblt_model_zoo/vision/datasets/*.yaml`. Follow the
+Ultralytics-style `path` and `val` convention, and use repository-specific `tasks` and `download`
+metadata for validation routing and organizer sources. Resolve defaults through
+`get_dataset_config_for_task()` rather than duplicating paths or URLs. Preserve the organized
+layouts expected by `Custom*` datasets and evaluators; DOTAv1 original labels belong in
+`labels/val_original` so difficult-object filtering remains active. Keep dataset `names` and
+category-ID mappings in YAML, with existing utility label helpers reading from the registry.
 
 ### Transformers and MeloTTS Work
 

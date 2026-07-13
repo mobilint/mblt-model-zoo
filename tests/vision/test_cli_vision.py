@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib
+import zipfile
 from argparse import Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -14,6 +16,10 @@ import torch
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
+from mblt_model_zoo.vision.datasets import get_dataset_class_names, get_dataset_config, get_dataset_config_for_task
+from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
+from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
+from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -22,7 +28,6 @@ from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
 from mblt_model_zoo.vision.utils.evaluation.eval_widerface import WiderFaceResult, eval_widerface
 
 if TYPE_CHECKING:
-    from mblt_model_zoo.vision.utils.datasets import CustomDOTAv1
     from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
@@ -58,6 +63,26 @@ def test_cli_val_defaults_to_model_thresholds() -> None:
     assert args.conf_thres is None
     assert args.iou_thres is None
     assert args.e2e is None
+
+
+def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
+    """Load DOTAv1 defaults and task routing from the YAML dataset registry."""
+
+    config = get_dataset_config("dotav1")
+
+    assert config["val"] == "images/val"
+    assert config["download"]["type"] == "google_drive_folder"
+    assert get_dataset_config_for_task("obb")["name"] == config["name"]
+
+
+def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
+    """Serve legacy class helper values from the YAML dataset definitions."""
+
+    assert get_dataset_class_names("coco")[0] == "person"
+    assert get_coco_label(79) == "toothbrush"
+    assert get_coco_inv(11) == 13
+    assert get_dotav1_label(2) == "storage-tank"
+    assert get_imagenet_label(0) == "tench"
 
 
 @pytest.mark.parametrize(
@@ -228,8 +253,9 @@ def test_cli_predict_applies_face_detection_thresholds(monkeypatch: pytest.Monke
 
     run_vision_inference(args, command="predict")
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     assert calls["thresholds"] == (0.25, 0.6)
-    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
+    assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
     assert calls["disposed"] is True
 
 
@@ -416,6 +442,32 @@ def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     assert _dataset_ready("obb", str(data_path))
 
 
+def test_google_drive_dotav1_archives_preserve_legacy_evaluation_layout(tmp_path: Path) -> None:
+    """Organize Drive archives into the original-label layout used by DOTAv1 evaluation."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text(
+        "0 0 10 0 10 10 0 10 plane 0\n0 1 10 1 10 11 0 11 ship 2\n",
+        encoding="utf-8",
+    )
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0001.txt")
+
+    output_dir = tmp_path / "dotav1"
+    construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
+
+    assert (output_dir / "images" / "val" / "P0001.png").is_file()
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
+    ground_truths = _load_ground_truths(str(output_dir), CustomDOTAv1(str(output_dir)))
+    assert ground_truths["P0001"]["cls"].tolist() == [0]
+
+
 def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:
     """Recognize an organized WiderFace validation layout."""
 
@@ -486,12 +538,14 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
 
     score = _run_validation(args)
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
+    eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == 0.123
-    assert calls["engine_kwargs"]["model_cls"] == "yolov8m-obb"
-    assert calls["engine_kwargs"]["framework"] == "onnx"
-    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
-    assert calls["eval_kwargs"]["data_path"] == str(data_path)
-    assert calls["eval_kwargs"]["batch_size"] == 8
+    assert engine_kwargs["model_cls"] == "yolov8m-obb"
+    assert engine_kwargs["framework"] == "onnx"
+    assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
+    assert eval_kwargs["data_path"] == str(data_path)
+    assert eval_kwargs["batch_size"] == 8
     assert calls["disposed"] is True
 
 
@@ -577,12 +631,14 @@ def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPa
 
     score = _run_validation(args)
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
+    eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == pytest.approx((0.8 + 0.7 + 0.6) / 3)
-    assert calls["engine_kwargs"]["model_cls"] == "yolo11m-face"
-    assert calls["eval_kwargs"]["data_path"] == str(data_path)
-    assert calls["eval_kwargs"]["batch_size"] == 4
-    assert calls["eval_kwargs"]["conf_thres"] == 0.3
-    assert calls["eval_kwargs"]["iou_thres"] == 0.6
+    assert engine_kwargs["model_cls"] == "yolo11m-face"
+    assert eval_kwargs["data_path"] == str(data_path)
+    assert eval_kwargs["batch_size"] == 4
+    assert eval_kwargs["conf_thres"] == 0.3
+    assert eval_kwargs["iou_thres"] == 0.6
     assert calls["disposed"] is True
 
 
