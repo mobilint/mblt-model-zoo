@@ -1,0 +1,9 @@
+# WiderFace validation dataset. Paths are relative to `path` unless absolute.
+name: widerface
+path: ~/.mblt_model_zoo/datasets/widerface
+tasks:
+  - face_detection
+val: images
+download:
+  images: https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/WIDER_val.zip
+  annotations: https://huggingface.co/datasets/CUHK-CSE/wider_face/resolve/main/data/wider_face_split.zip

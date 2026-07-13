@@ -4,23 +4,7 @@ DOTAv1 dataset constants and utilities.
 
 from __future__ import annotations
 
-CLASSES = (
-    "plane",
-    "ship",
-    "storage-tank",
-    "baseball-diamond",
-    "tennis-court",
-    "basketball-court",
-    "ground-track-field",
-    "harbor",
-    "bridge",
-    "large-vehicle",
-    "small-vehicle",
-    "helicopter",
-    "roundabout",
-    "soccer-ball-field",
-    "swimming-pool",
-)
+from ...datasets import get_dataset_class_names
 
 
 def get_dotav1_class_num() -> int:
@@ -29,7 +13,7 @@ def get_dotav1_class_num() -> int:
     Returns:
         Number of DOTAv1 classes.
     """
-    return len(CLASSES)
+    return len(get_dataset_class_names("dotav1"))
 
 
 def get_dotav1_label(index: int) -> str:
@@ -41,4 +25,4 @@ def get_dotav1_label(index: int) -> str:
     Returns:
         DOTAv1 class name.
     """
-    return CLASSES[index]
+    return get_dataset_class_names("dotav1")[index]

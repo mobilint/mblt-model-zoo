@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib
+import zipfile
 from argparse import Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -14,6 +16,16 @@ import torch
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
 from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
+from mblt_model_zoo.vision.datasets import (
+    get_dataset_category_ids,
+    get_dataset_class_names,
+    get_dataset_config,
+    get_dataset_config_for_task,
+)
+from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
+from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
+from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
+from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -22,7 +34,6 @@ from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
 from mblt_model_zoo.vision.utils.evaluation.eval_widerface import WiderFaceResult, eval_widerface
 
 if TYPE_CHECKING:
-    from mblt_model_zoo.vision.utils.datasets import CustomDOTAv1
     from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
@@ -58,6 +69,27 @@ def test_cli_val_defaults_to_model_thresholds() -> None:
     assert args.conf_thres is None
     assert args.iou_thres is None
     assert args.e2e is None
+
+
+def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
+    """Load DOTAv1 defaults and task routing from the YAML dataset registry."""
+
+    config = get_dataset_config("dotav1")
+
+    assert config["val"] == "images/val"
+    assert config["download"]["type"] == "google_drive_folder"
+    assert get_dataset_config_for_task("obb")["name"] == config["name"]
+
+
+def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
+    """Serve legacy class helper values from the YAML dataset definitions."""
+
+    assert get_dataset_class_names("coco")[0] == "person"
+    assert get_dataset_category_ids("coco") is get_dataset_category_ids("coco")
+    assert get_coco_label(79) == "toothbrush"
+    assert get_coco_inv(11) == 13
+    assert get_dotav1_label(2) == "storage-tank"
+    assert get_imagenet_label(0) == "tench"
 
 
 @pytest.mark.parametrize(
@@ -228,8 +260,9 @@ def test_cli_predict_applies_face_detection_thresholds(monkeypatch: pytest.Monke
 
     run_vision_inference(args, command="predict")
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     assert calls["thresholds"] == (0.25, 0.6)
-    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
+    assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
     assert calls["disposed"] is True
 
 
@@ -396,16 +429,6 @@ def test_cli_val_supports_face_detection_defaults() -> None:
     assert _default_data_path_for_task("face_detection").endswith(".mblt_model_zoo/datasets/widerface")
 
 
-def test_cli_val_detects_organized_dotav1(tmp_path: Path) -> None:
-    """Recognize an organized DOTAv1 validation layout."""
-
-    data_path = tmp_path / "dotav1"
-    (data_path / "images" / "val").mkdir(parents=True)
-    (data_path / "labels" / "val").mkdir(parents=True)
-
-    assert _dataset_ready("obb", str(data_path))
-
-
 def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
@@ -414,6 +437,124 @@ def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     (data_path / "labels" / "val_original").mkdir(parents=True)
 
     assert _dataset_ready("obb", str(data_path))
+
+
+def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) -> None:
+    """Reject archive pairs that would silently omit DOTAv1 validation images."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0002.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0002.txt")
+
+    with pytest.raises(ValueError, match="DOTAv1 archive stem mismatch"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+
+def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep the previous DOTAv1 layout when copying a staged archive fails."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0001.txt")
+
+    output_dir = tmp_path / "dotav1"
+    old_image = output_dir / "images" / "val" / "old.png"
+    old_image.parent.mkdir(parents=True)
+    old_image.write_bytes(b"old")
+    old_label = output_dir / "labels" / "val" / "old.txt"
+    old_label.parent.mkdir(parents=True)
+    old_label.write_text("0 0 0 0 0 0 0 0 plane 0\n", encoding="utf-8")
+    monkeypatch.setattr(organizer_module.shutil, "copy2", lambda *_: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
+
+    assert old_image.read_bytes() == b"old"
+    assert old_label.is_file()
+
+
+def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Organize the configured archives when gdown paths include the Drive root."""
+
+    class _DriveEntry:
+        """Minimal gdown folder-listing entry."""
+
+        def __init__(self, file_id: str, path: str) -> None:
+            self.id = file_id
+            self.path = path
+
+    downloads: list[tuple[str, str]] = []
+    constructed: list[tuple[str, str, str]] = []
+
+    def _download_folder(**kwargs: object) -> list[_DriveEntry]:
+        assert kwargs["skip_download"] is True
+        return [
+            _DriveEntry("image-id", "DOTAv1/images/part1.zip"),
+            _DriveEntry("label-id", "DOTAv1/labelTxt-v1.0/labelTxt.zip"),
+        ]
+
+    def _download(**kwargs: object) -> str:
+        file_id = cast(str, kwargs["id"])
+        output = cast(str, kwargs["output"])
+        downloads.append((file_id, output))
+        return output
+
+    def _construct(image_archive: str, label_archive: str, output_dir: str) -> None:
+        constructed.append((image_archive, label_archive, output_dir))
+
+    monkeypatch.setattr(organizer_module, "download_folder", _download_folder)
+    monkeypatch.setattr(organizer_module, "download", _download)
+    monkeypatch.setattr(organizer_module, "construct_dotav1_from_archives", _construct)
+
+    output_dir = tmp_path / "dotav1"
+    organizer_module.organize_dotav1("https://drive.google.com/drive/u/0/folders/dataset-id", str(output_dir))
+
+    assert [file_id for file_id, _ in downloads] == ["image-id", "label-id"]
+    assert constructed == [(downloads[0][1], downloads[1][1], str(output_dir))]
+
+
+def test_google_drive_dotav1_organizer_rejects_missing_folder_listing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Raise a contextual error when gdown cannot list the DOTAv1 Drive folder."""
+
+    monkeypatch.setattr(organizer_module, "download_folder", lambda **_: None)
+
+    with pytest.raises(RuntimeError, match="https://drive.google.com/drive/folders/dataset-id"):
+        organizer_module._download_dotav1_google_drive_archives(
+            "https://drive.google.com/drive/folders/dataset-id", str(tmp_path)
+        )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://drive.google.com/drive/folders/dataset-id",
+        "https://drive.google.com/drive/u/0/folders/dataset-id",
+    ],
+)
+def test_google_drive_dotav1_organizer_recognizes_folder_url_variants(url: str) -> None:
+    """Recognize both standard and account-scoped Google Drive folder URLs."""
+
+    assert organizer_module._is_google_drive_folder_url(url)
 
 
 def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:
@@ -486,12 +627,14 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
 
     score = _run_validation(args)
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
+    eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == 0.123
-    assert calls["engine_kwargs"]["model_cls"] == "yolov8m-obb"
-    assert calls["engine_kwargs"]["framework"] == "onnx"
-    assert calls["engine_kwargs"]["postprocess_kwargs"] == {"e2e": True}
-    assert calls["eval_kwargs"]["data_path"] == str(data_path)
-    assert calls["eval_kwargs"]["batch_size"] == 8
+    assert engine_kwargs["model_cls"] == "yolov8m-obb"
+    assert engine_kwargs["framework"] == "onnx"
+    assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
+    assert eval_kwargs["data_path"] == str(data_path)
+    assert eval_kwargs["batch_size"] == 8
     assert calls["disposed"] is True
 
 
@@ -577,12 +720,14 @@ def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPa
 
     score = _run_validation(args)
 
+    engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
+    eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == pytest.approx((0.8 + 0.7 + 0.6) / 3)
-    assert calls["engine_kwargs"]["model_cls"] == "yolo11m-face"
-    assert calls["eval_kwargs"]["data_path"] == str(data_path)
-    assert calls["eval_kwargs"]["batch_size"] == 4
-    assert calls["eval_kwargs"]["conf_thres"] == 0.3
-    assert calls["eval_kwargs"]["iou_thres"] == 0.6
+    assert engine_kwargs["model_cls"] == "yolo11m-face"
+    assert eval_kwargs["data_path"] == str(data_path)
+    assert eval_kwargs["batch_size"] == 4
+    assert eval_kwargs["conf_thres"] == 0.3
+    assert eval_kwargs["iou_thres"] == 0.6
     assert calls["disposed"] is True
 
 
@@ -733,7 +878,7 @@ def test_dota_matching_uses_one_to_one_duplicates() -> None:
 
 
 def test_dota_ground_truth_loader_skips_difficult_original_labels(tmp_path: Path) -> None:
-    """Ignore difficulty-2 objects from original-layout DOTAv1 labels."""
+    """Ignore difficult objects from original-layout DOTAv1 labels."""
 
     data_path = tmp_path / "dotav1"
     label_dir = data_path / "labels" / "val_original"
@@ -742,7 +887,8 @@ def test_dota_ground_truth_loader_skips_difficult_original_labels(tmp_path: Path
         "\n".join(
             [
                 "10 10 20 10 20 20 10 20 plane 0",
-                "30 30 40 30 40 40 30 40 ship 2",
+                "30 30 40 30 40 40 30 40 ship 1",
+                "45 45 55 45 55 55 45 55 storage-tank 2",
             ]
         ),
         encoding="utf-8",

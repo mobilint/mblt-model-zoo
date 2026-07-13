@@ -9,9 +9,10 @@ the model zoo.
 import argparse
 import os
 
+from mblt_model_zoo.vision.datasets import get_dataset_config
 from mblt_model_zoo.vision.utils.datasets import organize_dotav1
 
-DEFAULT_DOTAV1_SOURCE = "https://github.com/ultralytics/assets/releases/download/v0.0.0/DOTAv1.zip"
+DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize DOTAv1 validation dataset")
@@ -19,7 +20,7 @@ if __name__ == "__main__":
         "--dataset-path",
         type=str,
         default=DEFAULT_DOTAV1_SOURCE,
-        help="Local path or download URL for the DOTAv1 zip file or directory",
+        help="Local path, archive URL, or Google Drive folder URL for DOTAv1",
     )
     parser.add_argument(
         "--output-dir",
