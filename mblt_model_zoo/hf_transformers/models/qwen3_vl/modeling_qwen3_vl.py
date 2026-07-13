@@ -252,6 +252,21 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected Qwen3-VL vision output shape: {tuple(np.asarray(output).shape)}")
         return torch.tensor(output_array, dtype=torch.float32, device=device)
 
+    def _split_video_into_frames(
+        self,
+        chunk: torch.Tensor,
+        grid: torch.Tensor,
+    ) -> list[np.ndarray]:
+        """Split a video chunk (gt > 1) into per-frame NPU inputs."""
+        gt, gh, gw = grid.tolist()
+        tokens_per_frame = int(gh * gw)
+        frame_grid = torch.tensor([1, gh, gw], dtype=grid.dtype, device=grid.device)
+        frames = []
+        for f in range(int(gt)):
+            frame_chunk = chunk[f * tokens_per_frame : (f + 1) * tokens_per_frame]
+            frames.append(self._prepare_npu_inputs(frame_chunk, frame_grid))
+        return frames
+
     def _encode_images(
         self,
         hidden_states: torch.Tensor,
@@ -259,7 +274,13 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
-        npu_inputs = [self._prepare_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        npu_inputs: list[np.ndarray] = []
+        for chunk, grid in zip(chunks, grid_thw):
+            gt = grid[0].item()
+            if gt > 1:
+                npu_inputs.extend(self._split_video_into_frames(chunk, grid))
+            else:
+                npu_inputs.append(self._prepare_npu_inputs(chunk, grid))
         npu_backend = getattr(self, "npu_backend", None)
         core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
         mxq_model = self.get_mxq_model()
@@ -285,6 +306,135 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return torch.cat(image_embeds, dim=0), [torch.cat(layer_embeds, dim=0) for layer_embeds in deepstack_by_layer]
 
 
+class MobilintQwen3VLRotaryEmbedding(nn.Module):
+    """Pre-computed MRoPE for Qwen3-VL on MXQ.
+
+    Builds a 1-D ``position_table[max_pos, peSize]`` at init (rotateTensor
+    format, same as ``LlamaRotaryEmbedding`` in draftMXQ) and three
+    dimension masks derived from ``mrope_section``.  At forward time the
+    table is indexed by the per-dimension position ids and merged via the
+    masks — no matmul, cos/sin, or interleave at runtime.
+    """
+
+    def __init__(self, config, device=None):
+        super().__init__()
+        self.head_dim = config.head_dim
+        self.max_seq_len = config.max_position_embeddings
+        self.rope_theta = config.rope_theta
+
+        rope_scaling = getattr(config, "rope_scaling", None) or {}
+        self.mrope_section = rope_scaling.get("mrope_section", [24, 20, 20])
+
+        dim = self.head_dim
+        inv_freq = 1.0 / (
+            self.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
+        )
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+        chSize = dim
+        tgt_half = ((chSize + 63) // 64) * 64
+        self.peSize = 2 * tgt_half
+
+        self._build_dim_masks()
+        self._build_position_table(device=device)
+
+    def _build_dim_masks(self):
+        """Build boolean masks mapping each peSize entry to T / H / W."""
+        dim = self.head_dim
+        halfDim = dim // 2
+
+        freq_dim = np.full(dim // 2, 0, dtype=np.int32)  # default: T
+        for dim_idx, offset in enumerate((1, 2), start=1):
+            length = self.mrope_section[dim_idx] * 3
+            indices = np.arange(offset, length, 3)
+            freq_dim[indices] = dim_idx
+
+        pe_dim = np.full(self.peSize, -1, dtype=np.int32)
+        for fi in range(halfDim):
+            d = freq_dim[fi]
+            pe_dim[2 * fi] = d       # cos slot (first half)
+            pe_dim[2 * fi + 1] = d   # -sin slot (first half)
+        for fi in range(halfDim):
+            d = freq_dim[fi]
+            base = dim + 2 * fi
+            if base < self.peSize:
+                pe_dim[base] = d      # sin slot (second half)
+            if base + 1 < self.peSize:
+                pe_dim[base + 1] = d  # cos slot (second half)
+
+        self.mask_t = pe_dim == 0
+        self.mask_h = pe_dim == 1
+        self.mask_w = pe_dim == 2
+
+    def _build_position_table(self, device=None):
+        """Pre-compute rotateTensor rows for positions 0..max_seq_len-1."""
+        if device is None:
+            device = self.inv_freq.device
+
+        with torch.no_grad():
+            T = self.max_seq_len
+            t = torch.arange(T, device=device, dtype=self.inv_freq.dtype)
+            freqs = torch.einsum("i,j->ij", t, self.inv_freq)  # [T, dim/2]
+            emb = torch.cat((freqs, freqs), dim=-1)             # [T, dim]
+
+            cos_val = emb.cos()
+            sin_val = emb.sin()
+
+            dim = self.head_dim
+            halfDim = dim // 2
+
+            cos_ = cos_val.unsqueeze(0).unsqueeze(0)  # [1, 1, T, dim]
+            sin_ = sin_val.unsqueeze(0).unsqueeze(0)
+
+            rotateTensor = torch.zeros(1, 1, T, 2 * dim, device=device, dtype=torch.float32)
+            rotateTensor[..., 0:dim:2] = cos_[..., :halfDim]
+            rotateTensor[..., 1:dim:2] = -sin_[..., :halfDim]
+            rotateTensor[..., dim:2 * dim:2] = sin_[..., halfDim:dim]
+            rotateTensor[..., dim + 1:2 * dim:2] = cos_[..., halfDim:dim]
+
+            if rotateTensor.shape[-1] != self.peSize:
+                pad = self.peSize - rotateTensor.shape[-1]
+                if pad > 0:
+                    rotateTensor = torch.nn.functional.pad(rotateTensor, (0, pad))
+
+            self.position_table = rotateTensor.cpu().numpy()[0, 0]  # [T, peSize]
+
+    @torch.no_grad()
+    def forward(self, x, position_ids):
+        """Index pre-computed table by 3-D position ids.
+
+        Args:
+            x: unused (API compat with upstream rotary_emb).
+            position_ids: ``(3, batch, seq_len)`` or ``(batch, seq_len)``.
+
+        Returns:
+            numpy array of shape ``(batch, seq_len, peSize)``.
+        """
+        if position_ids.ndim == 2:
+            position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+
+        pos_np = position_ids.cpu().numpy()  # (3, B, S)
+        batch_size = pos_np.shape[1]
+        seq_len = pos_np.shape[2]
+
+        max_pos = int(pos_np.max()) + 1
+        if max_pos > self.max_seq_len:
+            self.max_seq_len = max_pos
+            self._build_position_table(device=self.inv_freq.device)
+
+        result = np.empty((batch_size, seq_len, self.peSize), dtype=np.float32)
+        for b in range(batch_size):
+            rows_t = self.position_table[pos_np[0, b]]  # (S, peSize)
+            rows_h = self.position_table[pos_np[1, b]]
+            rows_w = self.position_table[pos_np[2, b]]
+            buf = result[b]
+            buf[:, self.mask_t] = rows_t[:, self.mask_t]
+            buf[:, self.mask_h] = rows_h[:, self.mask_h]
+            buf[:, self.mask_w] = rows_w[:, self.mask_w]
+
+        return result
+
+
 class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen3VLPreTrainedModel):
     config: MobilintQwen3VLTextConfig
     input_modalities = ("text",)
@@ -299,6 +449,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         super().__init__(config, *args, **kwargs)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        self.rotary_emb = MobilintQwen3VLRotaryEmbedding(config)
         self.num_deepstack_layers = 0
 
     def get_input_embeddings(self) -> nn.Module:
@@ -367,6 +518,17 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 torch.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device),
             )
 
+        # the hard coded `3` is for temporal, height and width.
+        if position_ids is None:
+            position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
+        elif position_ids.ndim == 2:
+            position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+
+        if position_ids.ndim == 3 and position_ids.shape[0] == 4:
+            position_ids = position_ids[1:]
+
+        position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+
         logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
@@ -376,6 +538,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             deepstack_visual_embeds=deepstack_visual_embeds,
             visual_pos_masks=visual_pos_masks,
             logits_to_keep=logits_to_keep,
+            position_embeddings=position_embeddings,
         )
 
         return BaseModelOutputWithPast(
@@ -393,6 +556,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        position_embeddings: Optional[np.ndarray] = None,
     ) -> torch.Tensor:
         """Run the dual-input MXQ decoder with HF-style ``logits_to_keep``.
 
@@ -411,6 +575,9 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             count_npu_time: Whether to accumulate NPU time.
             logits_to_keep: HF-style position selector; see the shared
                 :meth:`MobilintModelMixin.llm_forward` for details.
+            position_embeddings: Pre-computed RoPE numpy array of shape
+                ``(batch, seq_len, peSize)`` from
+                :class:`MobilintQwen3VLRotaryEmbedding`.
 
         Returns:
             Decoder logits for the requested token positions.
@@ -458,15 +625,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                     dtype=torch.float32,
                 ).cpu().numpy()
 
+            rope_chunk = position_embeddings[:, start_index:end_index, :] if position_embeddings is not None else None
+            infer_inputs = [inputs_chunk, deepstack_chunk] + ([rope_chunk] if rope_chunk is not None else [])
+
             if count_npu_time:
                 import time
 
                 t1 = time.perf_counter()
-                result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
                 assert self.npu_time is not None
                 self.npu_time += time.perf_counter() - t1
             else:
-                result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
 
             if result is None:
                 raise RuntimeError("Text MXQ inference returned None.")

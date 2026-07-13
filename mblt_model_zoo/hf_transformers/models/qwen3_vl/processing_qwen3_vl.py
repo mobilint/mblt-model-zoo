@@ -19,8 +19,60 @@ from transformers.video_utils import VideoInput
 
 from .configuration_qwen3_vl import MobilintQwen3VLConfig
 
+# NPU vision model fixed input shape: (H_npu, W_npu, C_npu) = (1024, 64, 6)
+_NPU_H, _NPU_W = 1024, 64
+
+
+def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]:
+    """Derive the pixel resolution that produces the NPU-compatible grid."""
+    pw = _NPU_W // (merge_size ** 2)
+    gh_merged = int((_NPU_H // pw) ** 0.5)
+    side = gh_merged * merge_size * patch_size
+    return (side, side)
+
 
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
+    @staticmethod
+    def _resize_one(img, size=(224, 224)):
+        if isinstance(img, str):
+            img = load_image(img)
+        if isinstance(img, Image.Image):
+            return img.resize(size)
+        if isinstance(img, np.ndarray):
+            return cast(np.ndarray, cv2_resize(img, size[::-1], interpolation=INTER_CUBIC))
+        if torch.is_tensor(img):
+            if img.ndim == 2:
+                img = img.unsqueeze(0).unsqueeze(0)
+            elif img.ndim == 3:
+                img = img.unsqueeze(0)
+            return F.interpolate(img.float(), size=size, mode="bicubic", align_corners=False)
+        raise TypeError(f"Unsupported image type: {type(img)}")
+
+    @classmethod
+    def _resize_images(cls, images):
+        if isinstance(images, list):
+            return [cls._resize_images(item) for item in images]
+        return cls._resize_one(images)
+
+    def _install_video_resize_hook(self) -> None:
+        """Override video_processor._preprocess to force NPU-compatible frame size."""
+        vp = self.video_processor
+        if getattr(vp, "_mobilint_hooked", False):
+            return
+
+        target = _compute_npu_frame_size(vp.patch_size, vp.merge_size)
+        orig_preprocess = vp._preprocess
+
+        def _hooked_preprocess(videos, do_resize=True, size=None, **kw):
+            resized = []
+            for v in videos:
+                T, C, H, W = v.shape
+                resized.append(F.interpolate(v.float(), size=target, mode="bicubic", align_corners=False))
+            return orig_preprocess(resized, do_resize=False, size=size, **kw)
+
+        vp._preprocess = _hooked_preprocess
+        vp._mobilint_hooked = True
+
     def __call__(
         self,
         images: Optional[ImageInput] = None,
@@ -30,42 +82,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     ) -> BatchFeature:
         assert text is not None, "text is None!"
 
-        while isinstance(images, list):
-            if len(images) > 1:
-                raise NotImplementedError("Only one image input is supported")
-            images = images[0]
-
-        if isinstance(images, str):
-            images = load_image(images)
-
-        size = (224, 224)
-
-        if isinstance(images, Image.Image):
-            images = images.resize(size)
-        elif isinstance(images, np.ndarray):
-            if images.ndim == 2:
-                images = cast(BatchFeature, cv2_resize(images, size[::-1], interpolation=INTER_CUBIC))
-            elif images.ndim == 3:
-                images = cast(BatchFeature, cv2_resize(images, size[::-1], interpolation=INTER_CUBIC))
-            else:
-                raise ValueError(f"Unsupported ndarray shape: {images.shape}")
-        elif torch.is_tensor(images):
-            if images.ndim == 3:
-                images = images.unsqueeze(0).float()
-                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
-            elif images.ndim == 4:
-                images = images.float()
-                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
-            elif images.ndim == 2:
-                images = images.unsqueeze(0).unsqueeze(0).float()
-                images = F.interpolate(images, size=size, mode="bicubic", align_corners=False)
-            else:
-                raise ValueError(f"Unsupported tensor shape: {tuple(images.shape)}")
-        elif images is not None:
-            raise TypeError(f"Unsupported type of image: {type(images)}")
+        if images is not None:
+            images = self._resize_images(images)
 
         if videos is not None:
-            raise NotImplementedError("Video inputs are not supported")
+            self._install_video_resize_hook()
 
         return super().__call__(images, text, videos, **kwargs)
 
