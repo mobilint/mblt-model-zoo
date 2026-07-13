@@ -428,16 +428,6 @@ def test_cli_val_supports_face_detection_defaults() -> None:
     assert _default_data_path_for_task("face_detection").endswith(".mblt_model_zoo/datasets/widerface")
 
 
-def test_cli_val_detects_organized_dotav1(tmp_path: Path) -> None:
-    """Recognize an organized DOTAv1 validation layout."""
-
-    data_path = tmp_path / "dotav1"
-    (data_path / "images" / "val").mkdir(parents=True)
-    (data_path / "labels" / "val").mkdir(parents=True)
-
-    assert _dataset_ready("obb", str(data_path))
-
-
 def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
@@ -448,38 +438,22 @@ def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     assert _dataset_ready("obb", str(data_path))
 
 
-def test_google_drive_dotav1_archives_preserve_legacy_evaluation_layout(tmp_path: Path) -> None:
-    """Organize Drive archives into the original-label layout used by DOTAv1 evaluation."""
+def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) -> None:
+    """Reject archive pairs that would silently omit DOTAv1 validation images."""
 
     image_source = tmp_path / "P0001.png"
     assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
-    label_source = tmp_path / "P0001.txt"
-    label_source.write_text(
-        "0 0 10 0 10 10 0 10 plane 0\n0 1 10 1 10 11 0 11 ship 2\n",
-        encoding="utf-8",
-    )
+    label_source = tmp_path / "P0002.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
     image_archive = tmp_path / "part1.zip"
     label_archive = tmp_path / "labelTxt.zip"
     with zipfile.ZipFile(image_archive, "w") as archive:
         archive.write(image_source, "images/P0001.png")
     with zipfile.ZipFile(label_archive, "w") as archive:
-        archive.write(label_source, "labelTxt/P0001.txt")
+        archive.write(label_source, "labelTxt/P0002.txt")
 
-    output_dir = tmp_path / "dotav1"
-    stale_label_dir = output_dir / "labels" / "val"
-    stale_label_dir.mkdir(parents=True)
-    (stale_label_dir / "P0001.txt").write_text("0 0 0 0 0 0 0 0 plane 0\n", encoding="utf-8")
-    stale_image_path = output_dir / "images" / "val" / "stale.png"
-    stale_image_path.parent.mkdir(parents=True)
-    stale_image_path.write_bytes(b"stale")
-    construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
-
-    assert (output_dir / "images" / "val" / "P0001.png").is_file()
-    assert not stale_image_path.exists()
-    assert not stale_label_dir.exists()
-    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
-    ground_truths = _load_ground_truths(str(output_dir), CustomDOTAv1(str(output_dir)))
-    assert ground_truths["P0001"]["cls"].tolist() == [0]
+    with pytest.raises(ValueError, match="DOTAv1 archive stem mismatch"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
 
 
 def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:

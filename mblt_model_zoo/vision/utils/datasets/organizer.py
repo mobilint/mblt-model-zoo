@@ -491,7 +491,7 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
         output_dir: Directory where the organized validation dataset will be stored.
 
     Raises:
-        ValueError: If the image or label archive has no compatible validation files.
+        ValueError: If the archives have no validation files or their image and label stems differ.
     """
 
     with TemporaryDirectory() as extract_dir:
@@ -508,9 +508,18 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
             os.path.splitext(os.path.basename(path))[0]: path
             for path in _iter_files(image_dir, [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"])
         }
-        matching_ids = sorted(images.keys() & labels.keys())
-        if not matching_ids:
-            raise ValueError(f"No DOTAv1 validation images matching labels in {image_archive}.")
+        image_ids = set(images)
+        label_ids = set(labels)
+        missing_labels = sorted(image_ids - label_ids)
+        missing_images = sorted(label_ids - image_ids)
+        if missing_labels or missing_images:
+            details = []
+            if missing_labels:
+                details.append(f"images without labels: {', '.join(missing_labels[:5])}")
+            if missing_images:
+                details.append(f"labels without images: {', '.join(missing_images[:5])}")
+            raise ValueError(f"DOTAv1 archive stem mismatch ({'; '.join(details)}).")
+        matching_ids = sorted(image_ids)
 
         image_output_dir = os.path.join(output_dir, "images", "val")
         label_output_dir = os.path.join(output_dir, "labels", "val")
