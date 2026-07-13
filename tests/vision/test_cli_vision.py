@@ -460,9 +460,13 @@ def test_google_drive_dotav1_archives_preserve_legacy_evaluation_layout(tmp_path
         archive.write(label_source, "labelTxt/P0001.txt")
 
     output_dir = tmp_path / "dotav1"
+    stale_label_dir = output_dir / "labels" / "val"
+    stale_label_dir.mkdir(parents=True)
+    (stale_label_dir / "P0001.txt").write_text("0 0 0 0 0 0 0 0 plane 0\n", encoding="utf-8")
     construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
 
     assert (output_dir / "images" / "val" / "P0001.png").is_file()
+    assert not stale_label_dir.exists()
     assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
     ground_truths = _load_ground_truths(str(output_dir), CustomDOTAv1(str(output_dir)))
     assert ground_truths["P0001"]["cls"].tolist() == [0]
@@ -789,7 +793,7 @@ def test_dota_matching_uses_one_to_one_duplicates() -> None:
 
 
 def test_dota_ground_truth_loader_skips_difficult_original_labels(tmp_path: Path) -> None:
-    """Ignore difficulty-2 objects from original-layout DOTAv1 labels."""
+    """Ignore difficult objects from original-layout DOTAv1 labels."""
 
     data_path = tmp_path / "dotav1"
     label_dir = data_path / "labels" / "val_original"
@@ -798,7 +802,8 @@ def test_dota_ground_truth_loader_skips_difficult_original_labels(tmp_path: Path
         "\n".join(
             [
                 "10 10 20 10 20 20 10 20 plane 0",
-                "30 30 40 30 40 40 30 40 ship 2",
+                "30 30 40 30 40 40 30 40 ship 1",
+                "45 45 55 45 55 55 45 55 storage-tank 2",
             ]
         ),
         encoding="utf-8",

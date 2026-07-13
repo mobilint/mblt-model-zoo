@@ -11,10 +11,11 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from tempfile import TemporaryDirectory
 from time import sleep
+from typing import Protocol, TypeGuard
 from urllib.parse import urlparse
 
 import requests
-from gdown.download import GoogleDriveFileToDownload, download
+from gdown.download import download
 from gdown.download_folder import download_folder
 from tqdm import tqdm
 
@@ -29,6 +30,19 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
     DOTAV1_DOWNLOAD_CONFIG["images_archive"],
     DOTAV1_DOWNLOAD_CONFIG["labels_archive"],
 }
+
+
+class _GoogleDriveDownloadEntry(Protocol):
+    """The public attributes needed from a gdown folder-listing entry."""
+
+    id: str
+    path: str
+
+
+def _is_google_drive_download_entry(value: object) -> TypeGuard[_GoogleDriveDownloadEntry]:
+    """Returns whether a folder-listing value has the Google Drive file attributes needed here."""
+
+    return isinstance(getattr(value, "id", None), str) and isinstance(getattr(value, "path", None), str)
 
 
 def _is_url(path_or_url: str) -> bool:
@@ -434,7 +448,7 @@ def _download_dotav1_google_drive_archives(folder_url: str, download_dir: str) -
 
     print(f"Retrieving DOTAv1 archive list from {folder_url}...")
     folder_entries = download_folder(url=folder_url, output=download_dir, quiet=True, skip_download=True)
-    files = [entry for entry in folder_entries if isinstance(entry, GoogleDriveFileToDownload)]
+    files = [entry for entry in folder_entries if _is_google_drive_download_entry(entry)]
     archives = {drive_file.path: drive_file for drive_file in files if drive_file.path in DOTAV1_GOOGLE_DRIVE_ARCHIVES}
     missing_archives = DOTAV1_GOOGLE_DRIVE_ARCHIVES - archives.keys()
     if missing_archives:
@@ -490,11 +504,6 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
         if not labels:
             raise ValueError(f"No DOTAv1 label files found in {label_archive}.")
 
-        image_output_dir = os.path.join(output_dir, "images", "val")
-        original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
-        os.makedirs(image_output_dir, exist_ok=True)
-        os.makedirs(original_label_output_dir, exist_ok=True)
-
         images = {
             os.path.splitext(os.path.basename(path))[0]: path
             for path in _iter_files(image_dir, [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"])
@@ -502,6 +511,17 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
         matching_ids = sorted(images.keys() & labels.keys())
         if not matching_ids:
             raise ValueError(f"No DOTAv1 validation images matching labels in {image_archive}.")
+
+        image_output_dir = os.path.join(output_dir, "images", "val")
+        label_output_dir = os.path.join(output_dir, "labels", "val")
+        original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
+        for directory in (label_output_dir, original_label_output_dir):
+            if os.path.isdir(directory):
+                shutil.rmtree(directory)
+            elif os.path.exists(directory):
+                os.remove(directory)
+        os.makedirs(image_output_dir, exist_ok=True)
+        os.makedirs(original_label_output_dir, exist_ok=True)
 
         for image_id in matching_ids:
             image_path = images[image_id]

@@ -78,7 +78,9 @@ def _load_ground_truths(data_path: str, dataset: CustomDOTAv1) -> dict[str, dict
                 parts = line.split()
                 if len(parts) < 9:
                     continue
-                if len(parts) >= 10 and parts[9] == "2":
+                # Official DOTAv1 labels use ``1`` for difficult objects. Keep ``2``
+                # ignored for compatibility with previously supported label exports.
+                if len(parts) >= 10 and parts[9] in {"1", "2"}:
                     continue
                 cls = _label_to_index(parts[8])
                 if cls >= get_dotav1_class_num():
@@ -156,7 +158,7 @@ def _compute_ap(recall: np.ndarray, precision: np.ndarray) -> tuple[float, np.nd
     mpre = np.concatenate(([1.0], precision, [0.0], [0.0]))
     mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
     grid = np.linspace(0, 1, 101)
-    integrate = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+    integrate = getattr(np, "trapezoid", np.trapz)
     return float(integrate(np.interp(grid, mrec, mpre), grid)), mpre, mrec
 
 
