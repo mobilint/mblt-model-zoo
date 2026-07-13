@@ -158,7 +158,9 @@ def _compute_ap(recall: np.ndarray, precision: np.ndarray) -> tuple[float, np.nd
     mpre = np.concatenate(([1.0], precision, [0.0], [0.0]))
     mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
     grid = np.linspace(0, 1, 101)
-    integrate = getattr(np, "trapezoid", np.trapz)
+    integrate = getattr(np, "trapezoid", None)
+    if integrate is None:
+        integrate = np.trapz
     return float(integrate(np.interp(grid, mrec, mpre), grid)), mpre, mrec
 
 
