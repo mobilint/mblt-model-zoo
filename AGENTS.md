@@ -17,6 +17,8 @@ because they are the most consistently structured.
 - `mblt_model_zoo/vision`: Vision public API, model wrappers, preprocess and postprocess helpers,
   evaluation, datasets, result types, and task subpackages including face detection, OCR, and
   oriented bounding boxes
+- `mblt_model_zoo/compile`: Installable compilation APIs, including the optional qbcompiler-backed
+  vision pipeline
 - `mblt_model_zoo/hf_transformers`: Hugging Face model integrations and utilities
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization
 - `mblt_model_zoo/cli`: CLI entry points and command registration
@@ -93,6 +95,30 @@ because they are the most consistently structured.
   instead of duplicating download URLs or cache paths in CLI and benchmark code.
 - Preserve the organizer output layouts consumed by the evaluators. In particular, DOTAv1 accepts
   original labels in `labels/val_original` and must retain difficult-object filtering.
+- Any vision API, CLI, benchmark, or compatibility helper that uses randomness must expose a
+  deterministic seed whose default is `0`. Preserve an explicitly supplied seed.
+
+### Vision Compilation
+
+- Treat qbcompiler as an optional, compilation-only dependency. Importing `mblt_model_zoo`,
+  `mblt_model_zoo.vision`, `mblt_model_zoo.compile.vision`, or the main CLI must continue to work
+  when qbcompiler is not installed.
+- Keep qbcompiler imports inside the function that starts compilation. Do not add module-level
+  qbcompiler imports to packaged compilation or CLI modules.
+- A missing qbcompiler installation should fail only when `compile_vision_model()` or
+  `mblt-model-zoo compile` is invoked, with a concise installation message. Non-compile CLI
+  commands must remain unaffected.
+- Keep qbcompiler and the ONNX Runtime dependency needed by the preprocessing engine in the
+  `qbcompiler` optional dependency extra rather than the base package dependencies.
+- Preserve the three mutually exclusive compilation data levels: `data_path` is the original
+  organized image dataset, `subset_path` is an already-sampled image set, and `calib_data_path` is
+  a ready directory of preprocessed `.npy` tensors.
+- Begin processing at the supplied level. A subset must skip dataset organization and sampling; a
+  calibration dataset must skip organization, sampling, and preprocessing and be passed directly
+  to qbcompiler after validation.
+- Keep compilation defaults independent of the checkout: downloaded and compiled models belong
+  under `~/.mblt_model_zoo`, and registry-backed datasets belong under
+  `~/.mblt_model_zoo/datasets` unless the user supplies an explicit path.
 
 ### Tests and Benchmarks
 
@@ -170,6 +196,7 @@ pip install -e ".[MeloTTS]" --group dev
 pip install -e ".[onnxruntime]" --group dev
 pip install -e ".[onnxruntime-gpu]" --group dev
 pip install -e ".[qwen-asr]" --group dev
+pip install -e ".[qbcompiler]" --group dev
 ```
 
 If validation fails with `ImportError` or `ModuleNotFoundError`, install the relevant optional

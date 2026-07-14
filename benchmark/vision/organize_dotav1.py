@@ -13,7 +13,6 @@ from mblt_model_zoo.vision.datasets import get_dataset_config
 from mblt_model_zoo.vision.utils.datasets import organize_dotav1
 
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize DOTAv1 validation dataset")
     parser.add_argument(

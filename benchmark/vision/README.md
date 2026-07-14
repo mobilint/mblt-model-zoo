@@ -1,4 +1,62 @@
-# Measuring the Performance of Vision Models
+# Vision Benchmark Guide
+
+The vision benchmark follows the same artifact-oriented workflow as
+[`benchmark/transformers/`](../transformers/README.md): run one or more targets, then keep the
+generated JSON, CSV, Markdown summary, and chart together in a results directory. The legacy
+task-specific scripts have been replaced by the standard runner below.
+
+## Quick CLI Validation
+
+Use `mblt-model-zoo val` when you want to validate one vision model without manually selecting a
+dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, or DOTAv1 as
+appropriate, and organizes the default dataset cache if it is missing.
+
+```bash
+mblt-model-zoo val --help
+
+mblt-model-zoo val \
+  --model resnet50 \
+  --model-path ./resnet50.mxq \
+  --core-mode global8 \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet
+
+mblt-model-zoo val \
+  --model yolo11m \
+  --batch-size 8 \
+  --conf-thres 0.001 \
+  --iou-thres 0.7 \
+  --data-path ~/.mblt_model_zoo/datasets/coco
+```
+
+Image classification validation displays Top-1 and Top-5 accuracy. Other tasks report their
+task-specific score, such as COCO mAP, WiderFace AP, or DOTAv1 rotated mAP. For a local ONNX model,
+use `--model-path ./model.onnx`; pass `--framework onnx` only when an explicit override is needed.
+
+## Standard Multi-Model Runner
+
+Use `benchmark_vision_models.py` for reproducible multi-model and core-mode sweeps. All models in
+one invocation must use the same task and organized validation dataset. `--core-mode all` runs
+`single`, `multi`, `global4`, and `global8` and writes one result row for each model/mode pair.
+
+```bash
+python benchmark/vision/benchmark_vision_models.py \
+  --models resnet18 resnet50 \
+  --task image_classification \
+  --core-mode all \
+  --batch-size 8 \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet \
+  --results-dir benchmark/vision/results/imagenet_core_modes
+```
+
+The runner writes the following reproducible artifacts:
+
+- `results.json`: Schema-versioned machine-readable benchmark results.
+- `results.csv`: Flat result rows for comparisons and spreadsheets.
+- `results.md` and `summary.md`: Human-readable summary table and report.
+- `accuracy.png`: Accuracy chart, unless `--no-plot` is provided.
+
+Use `--collect-host-info` to include `mblt-tracker collect` output in the summary. A local
+`--model-path`, `--mxq-path`, or `--onnx-path` applies to exactly one model target.
 
 You can run the benchmark as the following steps:
 
@@ -62,28 +120,19 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the ImageNet Benchmark
 
-You can run the ImageNet benchmark with the following command:
+Use the standard runner. It reports Top-1 and Top-5 accuracy during ImageNet evaluation and records the Top-1
+score in the result artifacts.
 
 ```bash
-python benchmark/vision/benchmark_imagenet.py \
-  --model-cls {model class(optional). Default is resnet50} \
-  --mxq-path {path to local mxq(optional)} \
-  --model-type {model type(optional). Default is DEFAULT} \
-  --core-mode {single, multi, global4, global8(optional). Default is global8} \
-  --batch-size {batch size(optional). Default is 1} \
-  --data-path {path to the ImageNet data(optional). Default is ~/.mblt_model_zoo/datasets/imagenet}
-```
-
-Example:
-
-```bash
-python benchmark/vision/benchmark_imagenet.py \
-  --model-cls resnet50 \
+python benchmark/vision/benchmark_vision_models.py \
+  --models resnet50 \
+  --task image_classification \
   --mxq-path ./resnet50_IMAGENET1K_V1.mxq \
   --model-type IMAGENET1K_V1 \
-  --core-mode multi \
+  --core-mode global8 \
   --batch-size 8 \
-  --data-path ~/.mblt_model_zoo/datasets/imagenet
+  --data-path ~/.mblt_model_zoo/datasets/imagenet \
+  --results-dir benchmark/vision/results/resnet50_imagenet
 ```
 
 ## Benchmark with COCO Dataset
@@ -132,30 +181,18 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the COCO Benchmark
 
-You can run the COCO benchmark with the following command:
+Use `object_detection`, `instance_segmentation`, or `pose_estimation` as appropriate for the selected model.
 
 ```bash
-python benchmark/vision/benchmark_coco.py \
-  --model-cls {model class(optional). Default is YOLOv5m} \
-  --mxq-path {path to local mxq(optional)} \
-  --model-type {model type(optional). Default is DEFAULT} \
-  --core-mode {single, multi, global4, global8(optional). Default is global8} \
-  --batch-size {batch size(optional). Default is 1} \
-  --data-path {path to the COCO data(optional). Default is ~/.mblt_model_zoo/datasets/coco} \
-  --conf-thres {confidence threshold for object detection(optional). Default is 0.001} \
-  --iou-thres {IOU threshold for object detection(optional). Default is 0.7}
-```
-
-Example:
-
-```bash
-python benchmark/vision/benchmark_coco.py \
-  --model-cls YOLOv5m \
+python benchmark/vision/benchmark_vision_models.py \
+  --models YOLOv5m \
+  --task object_detection \
   --core-mode single \
   --batch-size 8 \
   --data-path ~/.mblt_model_zoo/datasets/coco \
   --conf-thres 0.001 \
-  --iou-thres 0.7
+  --iou-thres 0.7 \
+  --results-dir benchmark/vision/results/yolov5m_coco
 ```
 
 ## Benchmark with WiderFace Dataset
@@ -207,7 +244,14 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the WiderFace Benchmark
 
-Pending
+```bash
+python benchmark/vision/benchmark_vision_models.py \
+  --models yolo11n-face \
+  --task face_detection \
+  --batch-size 1 \
+  --data-path ~/.mblt_model_zoo/datasets/widerface \
+  --results-dir benchmark/vision/results/yolo11n_face_widerface
+```
 
 ## Benchmark with DOTAv1 Dataset
 
@@ -256,37 +300,37 @@ This keeps only the validation split and organizes the dataset into the followin
 
 ### Run the DOTAv1 Benchmark
 
-You can run the DOTAv1 benchmark with the following command:
-
 ```bash
-python benchmark/vision/benchmark_dota.py \
-  --model-cls YOLOv8s-obb \
+python benchmark/vision/benchmark_vision_models.py \
+  --models YOLOv8s-obb \
+  --task obb \
   --framework onnx \
   --batch-size 1 \
   --data-path ~/.mblt_model_zoo/datasets/dotav1 \
   --conf-thres 0.01 \
-  --iou-thres 0.7
+  --iou-thres 0.7 \
+  --results-dir benchmark/vision/results/yolov8s_obb_dotav1
 ```
 
-The benchmark reports local rotated `mAP test 50` and `mAP test 50-95`, and writes DOTA Task1
-prediction text files under `benchmark/vision/results/dota`.
+The benchmark records local rotated `mAP test 50` and `mAP test 50-95`; DOTA Task1 prediction files are
+stored under the corresponding `runs/` directory.
 
 ## Compare Vision Benchmark Results
 
 You can compare multiple vision benchmark CSV files and generate model-wise charts:
 
 ```bash
-python benchmark/vision/plot_compare_benchmark_results.py \
-  ./results/results_a4000.csv \
-  ./results/results_a5000.csv \
-  ./results/results_mla100.csv
+python benchmark/vision/compare_benchmark_results.py \
+  ./results/a4000 \
+  ./results/a5000 \
+  ./results/mla100
 ```
 
 Output charts are saved under:
 
 ```text
-benchmark/vision/results/charts/<input1_input2_...>/
+benchmark/vision/results/charts/input1_input2_.../
 ```
 
-You can also pass directories instead of explicit CSV files when each directory contains a single benchmark CSV
-or a `results.csv` file.
+Pass result directories or their `results.csv` files. Inputs must contain the same benchmark metric, and the
+comparison chart includes only model/core-mode targets present in every source.

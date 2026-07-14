@@ -12,7 +12,6 @@ from mblt_model_zoo.vision.utils.datasets import organize_imagenet
 
 DEFAULT_IMAGENET_IMAGE_SOURCE = "https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar"
 DEFAULT_IMAGENET_XML_SOURCE = "https://www.image-net.org/data/ILSVRC/2012/ILSVRC2012_bbox_val_v3.tgz"
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize ImageNet dataset")
     parser.add_argument(

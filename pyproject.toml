@@ -88,6 +88,10 @@ onnxruntime-gpu = [
 qwen-asr = [
     "qwen-asr",
 ]
+qbcompiler = [
+    "qbcompiler>=1.2.0",
+    "onnxruntime",
+]
 
 # Tools setting -----------------------------------------
 [tool.setuptools]
