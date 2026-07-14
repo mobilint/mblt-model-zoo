@@ -206,6 +206,7 @@ Currently, these optional functions are only available on environment equipped w
 |onnxruntime-gpu|For running vision models with `framework="onnx"` with GPU-enabled ONNX Runtime|Install with `pip install mblt-model-zoo[onnxruntime-gpu]`|
 |transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
+|qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
 
 For the `transformers` extra, the repository also includes:
 

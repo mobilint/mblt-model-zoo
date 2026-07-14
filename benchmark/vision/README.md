@@ -41,24 +41,6 @@ python benchmark/vision/organize_imagenet.py \
   --output-dir ~/.mblt_model_zoo/datasets/imagenet
 ```
 
-To create a reproducible calibration subset, add `--subset-dir`, an optional per-category
-`--subset-size`, and an optional `--seed`. The organizer reuses a complete `--output-dir` when it
-is available; otherwise it organizes the supplied archives (or downloads the defaults) first:
-
-```bash
-python benchmark/vision/organize_imagenet.py \
-  --image-dir {path_to_ILSVRC2012_img_val.tar} \
-  --xml-dir {path_to_ILSVRC2012_bbox_val_v3.tgz} \
-  --output-dir ~/.mblt_model_zoo/datasets/imagenet \
-  --subset-dir /workspace/calib_imagenet \
-  --subset-size 1 \
-  --seed 0
-```
-
-`--subset-size` defaults to 1. ImageNet has 1,000 validation categories, so the default subset
-contains 1,000 images total. The subset directory contains only those images directly below
-`--subset-dir`; reusing the same seed produces the same selection.
-
 This will organize the dataset into the following structure:
 
 ```text
@@ -128,23 +110,6 @@ python benchmark/vision/organize_coco.py \
   --ann-dir {path_to_annotations_trainval2017.zip} \
   --output-dir ~/.mblt_model_zoo/datasets/coco
 ```
-
-To create a reproducible calibration subset, the organizer first reuses the complete dataset in
-`--output-dir` when it is available. Otherwise, it organizes the supplied archives (or downloads
-the defaults) before creating the subset:
-
-```bash
-python benchmark/vision/organize_coco.py \
-  --image-dir {path_to_val2017.zip} \
-  --ann-dir {path_to_annotations_trainval2017.zip} \
-  --output-dir ~/.mblt_model_zoo/datasets/coco \
-  --subset-dir /workspace/calib_coco \
-  --subset-size 100 \
-  --seed 0
-```
-
-The subset directory contains only the selected images, directly below `--subset-dir`.
-`--subset-size` defaults to 100, and reusing the same seed produces the same selection.
 
 This will organize the dataset into the following structure:
 
@@ -268,22 +233,6 @@ python benchmark/vision/organize_dotav1.py \
   --dataset-path {path_to_DOTAv1.zip_or_directory} \
   --output-dir ~/.mblt_model_zoo/datasets/dotav1
 ```
-
-To create a reproducible calibration subset, add `--subset-dir`, an optional `--subset-size`, and
-an optional `--seed`. The organizer reuses a complete `--output-dir` when possible; otherwise it
-first organizes the supplied source or downloads the default archives:
-
-```bash
-python benchmark/vision/organize_dotav1.py \
-  --dataset-path {path_to_DOTAv1.zip_or_directory} \
-  --output-dir ~/.mblt_model_zoo/datasets/dotav1 \
-  --subset-dir /workspace/calib_dotav1 \
-  --subset-size 100 \
-  --seed 0
-```
-
-The subset directory contains only the selected images, directly below `--subset-dir`.
-`--subset-size` defaults to 100.
 
 This keeps only the validation split and organizes the dataset into the following structure:
 
