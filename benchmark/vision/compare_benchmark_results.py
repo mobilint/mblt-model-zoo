@@ -18,6 +18,7 @@ from benchmark.common.summary_utils import read_csv_rows
 class BenchmarkScore(NamedTuple):
     """One successful standardized vision benchmark score."""
 
+    task: str
     metric: str
     value: float
 
@@ -60,14 +61,15 @@ def _collect_scores(path: Path) -> dict[str, BenchmarkScore]:
             continue
         model = (row.get("model") or "").strip()
         core_mode = (row.get("core_mode") or "").strip()
+        task = (row.get("task") or "").strip()
         metric = (row.get("score_name") or "").strip()
-        if not model or not core_mode or not metric:
-            raise ValueError(f"Missing model, core_mode, or score_name in {path}.")
+        if not model or not core_mode or not task or not metric:
+            raise ValueError(f"Missing model, core_mode, task, or score_name in {path}.")
         try:
             score = float(row["score"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Invalid score for {model}@{core_mode} in {path}.") from exc
-        scores.setdefault(f"{model}@{core_mode}", BenchmarkScore(metric=metric, value=score))
+        scores.setdefault(f"{model}@{core_mode}", BenchmarkScore(task=task, metric=metric, value=score))
     return scores
 
 
@@ -106,6 +108,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    task_names = {score.task for scores in scores_by_source for score in scores.values()}
+    if len(task_names) != 1:
+        raise SystemExit(f"Inputs contain incompatible benchmark tasks: {', '.join(sorted(task_names))}.")
     targets = _common_targets(scores_by_source)
     if not targets:
         raise SystemExit("No successful model/core-mode target is shared by all input sources.")

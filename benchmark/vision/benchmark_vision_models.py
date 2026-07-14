@@ -175,7 +175,7 @@ def _run_target(model_name: str, core_mode: CoreMode, args: argparse.Namespace, 
         )
         score, score_name, metrics = _evaluate(model, args, run_dir)
         row.update({"status": "ok", "score": score, "score_name": score_name, **metrics})
-    except (ImportError, OSError, RuntimeError, ValueError, NotImplementedError) as exc:
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError, NotImplementedError) as exc:
         row["error"] = f"{type(exc).__name__}: {exc}"
     finally:
         row["elapsed_s"] = round(time.perf_counter() - started, 6)
