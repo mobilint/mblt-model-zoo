@@ -7,7 +7,7 @@ DEFAULT:
     Reader:
       style: pil
     Resize:
-      size: 235
+      size: 236
       interpolation: bicubic
     CenterCrop:
       size:
