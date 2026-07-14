@@ -596,6 +596,45 @@ def _configured_onnx_filename(file_cfg: dict[str, Any]) -> str | None:
     return None
 
 
+def _resolve_compile_onnx_path(file_cfg: dict[str, Any], model_path: str | Path | None) -> Path:
+    """Resolve an ONNX artifact for compilation without constructing an inference runtime.
+
+    Args:
+        file_cfg: Resolved model file configuration.
+        model_path: Optional caller-provided ONNX path.
+
+    Returns:
+        Existing local or downloaded ONNX artifact path.
+
+    Raises:
+        FileNotFoundError: If no ONNX artifact can be resolved.
+    """
+
+    if model_path is not None:
+        local_path = Path(model_path).expanduser()
+        if local_path.is_file():
+            return local_path.resolve()
+    configured_path = Path(str(file_cfg.get("onnx_path", ""))).expanduser()
+    if configured_path.is_file():
+        return configured_path.resolve()
+    repo_id = file_cfg.get("repo_id")
+    revision = file_cfg.get("revision")
+    filename = _configured_onnx_filename(file_cfg)
+    if isinstance(repo_id, str) and isinstance(revision, str) and filename:
+        downloaded_path = Path(
+            hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                revision=revision,
+                local_dir=MOBILINT_CACHE_DIR,
+            )
+        )
+        if downloaded_path.is_file():
+            return downloaded_path.resolve()
+    configured_name = filename or "the configured ONNX artifact"
+    raise FileNotFoundError(f"Unable to resolve {configured_name} for compilation.")
+
+
 def compile_vision_model(
     model_cls: str,
     *,
@@ -648,6 +687,31 @@ def compile_vision_model(
 
     task = _normalize_task(str(post_cfg.get("task", "")))
     selected_local_path = model_path if model_path is not None else onnx_path
+    if calib_data_path is not None:
+        resolved_onnx = _resolve_compile_onnx_path(file_cfg, selected_local_path)
+        output_path = (
+            Path(save_path).expanduser() if save_path is not None else DEFAULT_MODEL_DIR / f"{resolved_onnx.stem}.mxq"
+        ).resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_percentile, resolved_topk = resolve_quantization_values(file_cfg, percentile, topk_ratio)
+        calibration_config = calibration_config_class(
+            method=1,
+            output=0 if task == "image_classification" else 1,
+            mode=1,
+            max_percentile={"percentile": resolved_percentile, "topk_ratio": resolved_topk},
+        )
+        mxq_compile(
+            model=str(resolved_onnx),
+            calib_data_path=str(validate_calibration_dataset(calib_data_path)),
+            save_path=str(output_path),
+            image_channels=3,
+            backend="onnx",
+            device="gpu",
+            target_device="aries-rb",
+            inference_scheme="all",
+            calibration_config=calibration_config,
+        )
+        return output_path
     engine_kwargs: dict[str, Any] = {
         "model_cls": model_cls,
         "model_type": model_type,
@@ -693,10 +757,6 @@ def compile_vision_model(
                 inference_scheme="all",
                 calibration_config=calibration_config,
             )
-
-        if calib_data_path is not None:
-            _compile(validate_calibration_dataset(calib_data_path))
-            return output_path
 
         with TemporaryDirectory(prefix="mblt-vision-calibration-") as temporary_root:
             temporary_path = Path(temporary_root)

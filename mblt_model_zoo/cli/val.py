@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
 
-from ._vision import add_e2e_arg, add_threshold_args, parse_target_clusters, parse_target_cores
+from ._vision import add_e2e_arg, add_threshold_args, create_vision_engine, parse_target_clusters, parse_target_cores
 
 DEFAULT_IMAGENET_IMAGE_SOURCE = get_dataset_config("imagenet")["download"]["images"]
 DEFAULT_IMAGENET_XML_SOURCE = get_dataset_config("imagenet")["download"]["annotations"]
@@ -206,30 +206,12 @@ def _run_validation(args: argparse.Namespace) -> float:
     """Runs model validation on the dataset associated with the model task."""
 
     try:
-        from mblt_model_zoo.vision import MBLT_Engine
         from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
-        from mblt_model_zoo.vision.wrapper import normalize_core_mode
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
-    postprocess_kwargs: dict[str, bool] = {}
-    if getattr(args, "e2e", None) is not None:
-        postprocess_kwargs["e2e"] = args.e2e
-
-    model = MBLT_Engine(
-        model_cls=args.model,
-        model_type=args.model_type,
-        framework=args.framework,
-        model_path=args.model_path,
-        mxq_path=args.mxq_path,
-        onnx_path=args.onnx_path,
-        dev_no=args.dev_no,
-        core_mode=normalize_core_mode(args.core_mode),
-        target_cores=args.target_cores,
-        target_clusters=args.target_clusters,
-        postprocess_kwargs=postprocess_kwargs,
-    )
+    model = create_vision_engine(args)
     try:
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             raise SystemExit("Validation requires end-to-end YOLO postprocessing. Use `--e2e true` or omit the option.")

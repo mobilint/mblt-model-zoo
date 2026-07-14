@@ -361,6 +361,7 @@ def _run_fake_compile(
                 "repo_id": "owner/model",
                 "revision": "main",
                 "filename": "hosted-model.mxq",
+                "onnx_path": str(hosted_onnx),
             },
             "post_cfg": {"task": task},
         },
@@ -481,6 +482,7 @@ def test_compile_uses_provided_calibration_dataset_directly(monkeypatch: pytest.
 
     calibration_path = tmp_path / "provided-calibration"
     assert "ensure_dataset" not in calls
+    assert "engine_kwargs" not in calls
     assert "preprocessed" not in calls
     assert calls["compile_kwargs"]["calib_data_path"] == str(calibration_path)
     assert (calibration_path / "selected.npy").is_file()

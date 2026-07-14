@@ -173,14 +173,18 @@ def require_source_file(source: str) -> None:
         raise SystemExit(f"Source image not found: {source}")
 
 
-def run_vision_inference(
-    args: argparse.Namespace,
-    *,
-    command: str,
-) -> Any:
-    """Runs a complete vision inference pipeline for a CLI command."""
+def create_vision_engine(args: argparse.Namespace) -> Any:
+    """Create a vision engine from the shared CLI model options.
 
-    require_source_file(args.source)
+    Args:
+        args: Parsed command options containing common vision model arguments.
+
+    Returns:
+        Initialized vision inference engine.
+
+    Raises:
+        SystemExit: If the vision runtime dependencies are unavailable.
+    """
 
     try:
         from mblt_model_zoo.vision import MBLT_Engine
@@ -192,8 +196,7 @@ def run_vision_inference(
     postprocess_kwargs: dict[str, Any] = {}
     if getattr(args, "e2e", None) is not None:
         postprocess_kwargs["e2e"] = args.e2e
-
-    model = MBLT_Engine(
+    return MBLT_Engine(
         model_cls=args.model,
         model_type=args.model_type,
         framework=args.framework,
@@ -206,6 +209,18 @@ def run_vision_inference(
         target_clusters=args.target_clusters,
         postprocess_kwargs=postprocess_kwargs,
     )
+
+
+def run_vision_inference(
+    args: argparse.Namespace,
+    *,
+    command: str,
+) -> Any:
+    """Runs a complete vision inference pipeline for a CLI command."""
+
+    require_source_file(args.source)
+
+    model = create_vision_engine(args)
     try:
         actual_task = str(model.post_cfg.get("task", "")).lower()
         postprocess_kwargs: dict[str, Any] = {}
