@@ -33,7 +33,7 @@ for _task_module in _TASK_MODULES:
             raise RuntimeError(f"Duplicate vision export detected for '{_export_name}'.")
         _LEGACY_MODEL_EXPORTS[_export_name] = _task_module
 
-__all__: list[str] = [
+_PUBLIC_EXPORTS = [
     "MBLT_Engine",
     "list_models",
     "list_tasks",
@@ -44,6 +44,8 @@ __all__: list[str] = [
     "oriented_bounding_boxes",
     "pose_estimation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)
+# Keep legacy compatibility exports synchronized with their task packages.
+__all__: list[str] = _PUBLIC_EXPORTS  # pyright: ignore[reportUnsupportedDunderAll]
 
 
 def __getattr__(name: str) -> object:

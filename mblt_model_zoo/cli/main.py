@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from .compile import add_compile_parser
 from .melo import add_melo_parser
 from .melo_ui import add_melo_ui_parser
 from .predict import add_predict_parser
@@ -23,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_predict_parser(commands_parser)
     add_val_parser(commands_parser)
+    add_compile_parser(commands_parser)
     add_tps_parser(commands_parser)
     add_melo_parser(commands_parser)
     add_melo_ui_parser(commands_parser)

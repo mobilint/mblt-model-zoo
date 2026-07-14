@@ -28,6 +28,33 @@ family-specific guide for setup, supported commands, and examples:
 - [Vision benchmarks](vision/README.md)
 - [Transformers benchmarks](transformers/README.md)
 
+## Quick Vision CLI Validation
+
+Use `mblt-model-zoo val` for a single-model, task-aware validation run. The command loads the
+model, infers its task, selects the matching benchmark dataset, and reports the task metric. It
+also prepares the default dataset layout automatically when needed.
+
+```bash
+mblt-model-zoo val --help
+mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
+mblt-model-zoo val --model yolo11m --batch-size 8 --data-path ~/.mblt_model_zoo/datasets/coco
+```
+
+Use `--model-path` for a local MXQ or ONNX artifact, with `--framework` when the file extension
+does not provide the desired framework explicitly:
+
+```bash
+mblt-model-zoo val \
+  --model resnet50 \
+  --model-path ./resnet50.mxq \
+  --core-mode global8 \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet
+```
+
+For reproducible multi-model or core-mode sweeps, use the
+[vision benchmark runner](vision/README.md#standard-multi-model-runner), which writes JSON, CSV,
+Markdown, and chart artifacts.
+
 ## Dataset and Result Handling
 
 Benchmark datasets and model artifacts can be large. Keep downloaded datasets outside the

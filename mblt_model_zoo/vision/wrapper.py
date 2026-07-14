@@ -34,7 +34,7 @@ ONNXRUNTIME_INSTALL_GUIDE = (
     "pip install mblt-model-zoo[onnxruntime]\n"
     + ("or\npip install mblt-model-zoo[onnxruntime-gpu]" if sys.platform != "darwin" else "")
 )
-__all__ = ["CoreMode", "normalize_core_mode", "MBLT_Engine"]
+__all__ = ["CoreMode", "normalize_core_mode", "resolve_model_config", "MBLT_Engine"]
 
 
 def _default_cache_dir() -> str:
@@ -101,7 +101,7 @@ def _resolve_onnx_providers(ort_module: Any, requested_providers: Sequence[str] 
     if not callable(get_available):
         return ["CPUExecutionProvider"]
 
-    available_providers = set(get_available())
+    available_providers = set(cast(Sequence[str], get_available()))
     preferred_providers = [
         "TensorrtExecutionProvider",
         "CUDAExecutionProvider",
@@ -168,6 +168,108 @@ def _split_model_paths(
     return resolved_mxq_path, resolved_onnx_path
 
 
+def _model_name_aliasing(model_name: str) -> str:
+    """Find the YAML filename matching a model name.
+
+    Args:
+        model_name: Model identifier provided by the caller.
+
+    Returns:
+        Exact YAML filename stored in ``MODEL_CONFIG_DIR``.
+
+    Raises:
+        ValueError: If no YAML file matches or the normalized name is ambiguous.
+    """
+
+    def _stem(name: str) -> str:
+        return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
+
+    def _normalize_separators(name: str) -> str:
+        return "_".join(part for part in _stem(name).replace("-", "_").replace(" ", "_").lower().split("_") if part)
+
+    requested = _normalize_separators(model_name)
+    config_names = sorted(path.name for path in MODEL_CONFIG_DIR.glob("*.yaml"))
+    separator_matches = [name for name in config_names if _normalize_separators(name) == requested]
+    if len(separator_matches) == 1:
+        return separator_matches[0]
+    if len(separator_matches) > 1:
+        raise ValueError(f"Ambiguous model name '{model_name}'. Matches: {separator_matches}.")
+
+    compact_requested = requested.replace("_", "")
+    compact_matches = [
+        name for name in config_names if _normalize_separators(name).replace("_", "") == compact_requested
+    ]
+    if len(compact_matches) == 1:
+        return compact_matches[0]
+    if len(compact_matches) > 1:
+        raise ValueError(f"Ambiguous model name '{model_name}'. Matches: {compact_matches}.")
+    raise ValueError(f"Model name '{model_name}' is not supported.")
+
+
+def resolve_model_config(model_cls: str | dict[str, Any], model_type: str = "DEFAULT") -> dict[str, Any]:
+    """Resolve a vision model configuration without constructing a runtime.
+
+    Args:
+        model_cls: Model name, YAML path, or direct model configuration.
+        model_type: Variant key within a YAML model definition.
+
+    Returns:
+        A deep copy of the resolved ``file_cfg``, ``pre_cfg``, and ``post_cfg`` mapping.
+
+    Raises:
+        TypeError: If the YAML or resolved configuration is not a mapping.
+        ValueError: If a requested variant, alias, or update base is unavailable.
+    """
+
+    if isinstance(model_cls, dict):
+        return copy.deepcopy(model_cls)
+
+    config_path = Path(model_cls)
+    if not config_path.is_file():
+        config_path = MODEL_CONFIG_DIR / _model_name_aliasing(model_cls)
+
+    with config_path.open(encoding="utf-8") as config_file:
+        full_config = yaml.safe_load(config_file)
+    if not isinstance(full_config, dict):
+        raise TypeError(f"Model configuration '{config_path}' should define a dictionary.")
+
+    resolving: set[str] = set()
+
+    def _resolve_variant(variant: str) -> dict[str, Any]:
+        if variant in resolving:
+            raise ValueError(f"Circular model configuration reference detected for '{variant}'.")
+        resolving.add(variant)
+        try:
+            model_config_part = full_config.get(variant)
+            if model_config_part is None:
+                raise ValueError(f"Model type '{variant}' not found in configuration.")
+            if isinstance(model_config_part, str):
+                if model_config_part not in full_config:
+                    raise ValueError(f"Model alias '{model_config_part}' not found in configuration.")
+                return _resolve_variant(model_config_part)
+            if not isinstance(model_config_part, dict):
+                raise TypeError(f"Resolved model configuration for '{variant}' is not a dictionary.")
+
+            resolved = copy.deepcopy(model_config_part)
+            base_config_key = resolved.pop("update", None)
+            if base_config_key is None:
+                return resolved
+            if not isinstance(base_config_key, str) or base_config_key not in full_config:
+                raise ValueError(f"Base configuration '{base_config_key}' not found for update.")
+
+            merged_config = _resolve_variant(base_config_key)
+            for key, value in resolved.items():
+                if key in merged_config and isinstance(merged_config[key], dict) and isinstance(value, dict):
+                    merged_config[key].update(value)
+                else:
+                    merged_config[key] = value
+            return merged_config
+        finally:
+            resolving.remove(variant)
+
+    return copy.deepcopy(_resolve_variant(model_type))
+
+
 class MBLT_Engine:
     """Main engine class for running vision models from the MBLT zoo.
 
@@ -217,45 +319,7 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
-        if isinstance(model_cls, dict):  # direct setting
-            model_config_part = copy.deepcopy(model_cls)
-        else:  # setting via yaml file path or model name
-            config_path = model_cls
-            if not os.path.isfile(config_path):
-                config_path = self.model_name_aliasing(config_path)
-                config_path = os.path.join(MODEL_CONFIG_DIR, config_path)
-
-            with open(config_path, "r", encoding="utf-8") as f:
-                full_config = yaml.safe_load(f)
-            if not isinstance(full_config, dict):
-                raise TypeError(f"Model configuration '{config_path}' should define a dictionary.")
-
-            model_config_part = full_config.get(model_type)
-            if model_config_part is None:
-                raise ValueError(f"Model type '{model_type}' not found in configuration.")
-
-            if isinstance(model_config_part, str):  # Resolve alias
-                resolved_config = full_config.get(model_config_part)
-                if resolved_config is None:
-                    raise ValueError(f"Model alias '{model_config_part}' not found in configuration.")
-                model_config_part = resolved_config
-
-            if not isinstance(model_config_part, dict):
-                raise TypeError(f"Resolved model configuration for '{model_type}' is not a dictionary.")
-
-            if "update" in model_config_part:
-                base_config_key = model_config_part.pop("update")
-                base_config = full_config.get(base_config_key)
-                if base_config is None:
-                    raise ValueError(f"Base configuration '{base_config_key}' not found for update.")
-
-                merged_config = copy.deepcopy(base_config)
-                for key, value in model_config_part.items():
-                    if key in merged_config and isinstance(merged_config[key], dict) and isinstance(value, dict):
-                        merged_config[key].update(value)
-                    else:
-                        merged_config[key] = value
-                model_config_part = merged_config
+        model_config_part = resolve_model_config(model_cls, model_type)
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
         framework_model_path = model_path or file_cfg_model_path
@@ -755,44 +819,4 @@ class MBLT_Engine:
                 (i.e., multiple files match after normalization).
         """
 
-        def _stem(name: str) -> str:
-            """Returns a YAML filename stem when a YAML suffix is present."""
-            return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
-
-        def _normalize_separators(name: str) -> str:
-            """Normalizes separator style while preserving separator boundaries."""
-            return "_".join(part for part in _stem(name).replace("-", "_").replace(" ", "_").lower().split("_") if part)
-
-        def _normalize_compact(name: str) -> str:
-            """Strips separators and lowercases a model name for fallback matching."""
-            return _stem(name).replace("_", "").replace("-", "").replace(" ", "").lower()
-
-        candidates = [p.name for p in MODEL_CONFIG_DIR.glob("*.yaml")]
-        candidate_stems = {name: name[: -len(".yaml")] for name in candidates}
-
-        normalized_separator_input = _normalize_separators(model_name)
-        separator_matches = [
-            name for name, stem in candidate_stems.items() if _normalize_separators(stem) == normalized_separator_input
-        ]
-        if len(separator_matches) == 1:
-            return separator_matches[0]
-
-        normalized_compact_input = _normalize_compact(model_name)
-        matches = [
-            name for name, stem in candidate_stems.items() if _normalize_compact(stem) == normalized_compact_input
-        ]
-
-        if len(matches) == 1:
-            return matches[0]
-
-        if len(matches) > 1:
-            raise ValueError(
-                f"Model name '{model_name}' is ambiguous. "
-                f"It matches multiple configurations: {sorted(matches)}. "
-                "Please use a more specific name."
-            )
-        raise ValueError(
-            f"No model configuration found for '{model_name}'. "
-            f"Available models are located in '{MODEL_CONFIG_DIR}'. "
-            "Check spelling or use the exact YAML filename."
-        )
+        return _model_name_aliasing(model_name)

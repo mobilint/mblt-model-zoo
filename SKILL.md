@@ -32,6 +32,8 @@ Start with the smallest set of files that anchor the task:
 - `mblt_model_zoo/vision`: Vision public API, model wrappers, preprocessing, postprocessing,
   datasets, evaluation, result objects, and task subpackages including face detection, OCR, and
   oriented bounding boxes
+- `mblt_model_zoo/compile`: Installable compilation APIs. Vision compilation uses qbcompiler as an
+  optional dependency loaded only when compilation starts.
 - `mblt_model_zoo/hf_transformers`: Custom model, config, and proxy integrations for Transformers
 - `mblt_model_zoo/MeloTTS`: MeloTTS runtime, API, CLI glue, and text normalization utilities
 - `mblt_model_zoo/cli`: Installed CLI entry points. `mblt-model-zoo` is defined in
@@ -99,6 +101,27 @@ layouts expected by `Custom*` datasets and evaluators; DOTAv1 original labels be
 `labels/val_original` so difficult-object filtering remains active. Keep dataset `names` and
 category-ID mappings in YAML, with existing utility label helpers reading from the registry.
 
+### Vision Compilation Work
+
+Preserve the optional-dependency isolation around `mblt_model_zoo.compile.vision`:
+
+- Keep qbcompiler imports lazy and inside the actual compilation path.
+- Verify ordinary package imports, `mblt_model_zoo.compile.vision` imports, and non-compile CLI
+  commands without qbcompiler installed or importable.
+- Raise the concise qbcompiler installation error only when `compile_vision_model()` or
+  `mblt-model-zoo compile` is invoked.
+- Keep qbcompiler and the required ONNX Runtime package in the `qbcompiler` optional extra. Do not
+  move them into base dependencies merely to simplify compilation imports.
+- Preserve three mutually exclusive entry levels: use `data_path` for the original organized image
+  dataset, `subset_path` for sampled images, and `calib_data_path` for preprocessed `.npy` tensors.
+- Start at the supplied level. Skip organization and sampling for `subset_path`; skip organization,
+  sampling, and preprocessing for `calib_data_path`, passing validated tensors directly to
+  qbcompiler.
+- Keep default downloaded and compiled model paths under `~/.mblt_model_zoo` and default datasets
+  under `~/.mblt_model_zoo/datasets`; never derive those defaults from the checkout directory.
+- Use `tests/vision/test_compile_vision.py` for compilation API, CLI, cleanup, dataset sampling,
+  and missing-dependency regressions.
+
 ### Transformers and MeloTTS Work
 
 These areas have optional dependencies and heavier runtime assumptions.
@@ -143,6 +166,7 @@ pip install -e ".[MeloTTS]" --group dev
 pip install -e ".[onnxruntime]" --group dev
 pip install -e ".[onnxruntime-gpu]" --group dev
 pip install -e ".[qwen-asr]" --group dev
+pip install -e ".[qbcompiler]" --group dev
 ```
 
 ### Lint and Format Python
@@ -161,6 +185,7 @@ pytest tests/transformers/text_generation/non_batch/test_qwen2.py -k "0.5B"
 pytest tests/MeloTTS/test_melo.py -k "KR"
 pytest tests/vision/test_cli_vision.py
 pytest tests/vision/test_wrapper_download.py
+pytest tests/vision/test_compile_vision.py
 ```
 
 For the recent vision runtime and CLI path-resolution work, these targeted tests are especially

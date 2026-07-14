@@ -5,6 +5,33 @@ The vision benchmark follows the same artifact-oriented workflow as
 generated JSON, CSV, Markdown summary, and chart together in a results directory. The legacy
 task-specific scripts have been replaced by the standard runner below.
 
+## Quick CLI Validation
+
+Use `mblt-model-zoo val` when you want to validate one vision model without manually selecting a
+dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, or DOTAv1 as
+appropriate, and organizes the default dataset cache if it is missing.
+
+```bash
+mblt-model-zoo val --help
+
+mblt-model-zoo val \
+  --model resnet50 \
+  --model-path ./resnet50.mxq \
+  --core-mode global8 \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet
+
+mblt-model-zoo val \
+  --model yolo11m \
+  --batch-size 8 \
+  --conf-thres 0.001 \
+  --iou-thres 0.7 \
+  --data-path ~/.mblt_model_zoo/datasets/coco
+```
+
+Image classification validation displays Top-1 and Top-5 accuracy. Other tasks report their
+task-specific score, such as COCO mAP, WiderFace AP, or DOTAv1 rotated mAP. For a local ONNX model,
+use `--model-path ./model.onnx`; pass `--framework onnx` only when an explicit override is needed.
+
 ## Standard Multi-Model Runner
 
 Use `benchmark_vision_models.py` for reproducible multi-model and core-mode sweeps. All models in
@@ -302,7 +329,7 @@ python benchmark/vision/compare_benchmark_results.py \
 Output charts are saved under:
 
 ```text
-benchmark/vision/results/charts/<input1_input2_...>/
+benchmark/vision/results/charts/input1_input2_.../
 ```
 
 Pass result directories or their `results.csv` files. Inputs must contain the same benchmark metric, and the

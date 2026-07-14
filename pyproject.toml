@@ -89,7 +89,8 @@ qwen-asr = [
     "qwen-asr",
 ]
 qbcompiler = [
-    "qbcompiler>=1.3.0",
+    "qbcompiler>=1.2.0",
+    "onnxruntime",
 ]
 
 # Tools setting -----------------------------------------

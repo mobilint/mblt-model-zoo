@@ -1,5 +1,6 @@
 # Mobilint Model Zoo
 
+<!-- markdownlint-disable MD033 -->
 <div align="center">
 <p>
 <a href="https://www.mobilint.com/" target="_blank">
@@ -7,6 +8,7 @@
 </a>
 </p>
 </div>
+<!-- markdownlint-enable MD033 -->
 
 **mblt-model-zoo** is a curated collection of AI models optimized by [Mobilint](https://www.mobilint.com/)’s Neural Processing Units (NPUs).
 
@@ -208,6 +210,11 @@ Currently, these optional functions are only available on environment equipped w
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 |qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
 
+The `qbcompiler` extra is strictly isolated from ordinary package use. qbcompiler is loaded only
+when `compile_vision_model()` or `mblt-model-zoo compile` actually starts compilation. The base
+package, vision APIs, compilation module import, and non-compile CLI commands continue to work
+without qbcompiler installed; only a compilation request reports the installation error.
+
 For the `transformers` extra, the repository also includes:
 
 - functional test instructions in [tests/transformers/TEST.md](tests/transformers/TEST.md)
@@ -225,6 +232,24 @@ mblt-model-zoo --help
 
 The CLI provides Mobilint-specific helper commands and delegates selected upstream Hugging Face
 Transformers commands to the installed `transformers` package.
+
+Compile a configured vision ONNX model with the optional compiler dependency:
+
+```bash
+mblt-model-zoo compile --model-cls alexnet
+```
+
+The matching Python API is `mblt_model_zoo.compile.vision.compile_vision_model`. See the
+[vision compilation guide](compile/vision/README.md) for calibration datasets and options.
+Invoking this API or command is the only point where qbcompiler is imported.
+
+When paths are omitted, compilation stores downloaded ONNX models and compiled MXQ outputs under
+`~/.mblt_model_zoo`, and uses registry datasets under `~/.mblt_model_zoo/datasets`. It does not
+derive these defaults from the current checkout or working directory.
+
+Compilation accepts one of three data entry levels: `--data-path` for a full organized image
+dataset, `--subset-path` for already-sampled images, or `--calib-data-path` for ready preprocessed
+`.npy` tensors. Later-stage input skips all earlier preparation stages.
 
 ### Vision Prediction And Validation
 
