@@ -9,7 +9,7 @@ from mblt_model_zoo.compile.vision import make_calibration_subset
 DEFAULT_DATA_DIR = "~/.mblt_model_zoo/datasets/coco"
 
 
-def make_coco_subset(data_dir: str, output_dir: str, subset_size: int, seed: int) -> None:
+def make_coco_subset(data_dir: str, output_dir: str, subset_size: int, seed: int = 0) -> None:
     """Create a deterministic COCO calibration subset.
 
     Args:

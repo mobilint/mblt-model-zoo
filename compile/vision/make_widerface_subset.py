@@ -9,7 +9,7 @@ from mblt_model_zoo.compile.vision import make_calibration_subset
 DEFAULT_DATA_DIR = "~/.mblt_model_zoo/datasets/widerface"
 
 
-def make_widerface_subset(data_dir: str, output_dir: str, subset_size: int, seed: int) -> None:
+def make_widerface_subset(data_dir: str, output_dir: str, subset_size: int, seed: int = 0) -> None:
     """Create a deterministic WiderFace calibration subset.
 
     Args:

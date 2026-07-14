@@ -9,7 +9,7 @@ from mblt_model_zoo.compile.vision import make_calibration_subset
 DEFAULT_DATA_DIR = "~/.mblt_model_zoo/datasets/dotav1"
 
 
-def make_dotav1_subset(data_dir: str, output_dir: str, subset_size: int, seed: int) -> None:
+def make_dotav1_subset(data_dir: str, output_dir: str, subset_size: int, seed: int = 0) -> None:
     """Create a deterministic DOTAv1 calibration subset.
 
     Args:

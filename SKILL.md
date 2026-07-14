@@ -119,6 +119,8 @@ Preserve the optional-dependency isolation around `mblt_model_zoo.compile.vision
   qbcompiler.
 - Keep default downloaded and compiled model paths under `~/.mblt_model_zoo` and default datasets
   under `~/.mblt_model_zoo/datasets`; never derive those defaults from the checkout directory.
+- Give every vision path that uses randomness an explicit seed default of `0`, including packaged
+  APIs, CLIs, benchmarks, and compatibility helpers. Preserve caller-provided seeds.
 - Use `tests/vision/test_compile_vision.py` for compilation API, CLI, cleanup, dataset sampling,
   and missing-dependency regressions.
 

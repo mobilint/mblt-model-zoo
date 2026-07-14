@@ -95,6 +95,8 @@ because they are the most consistently structured.
   instead of duplicating download URLs or cache paths in CLI and benchmark code.
 - Preserve the organizer output layouts consumed by the evaluators. In particular, DOTAv1 accepts
   original labels in `labels/val_original` and must retain difficult-object filtering.
+- Any vision API, CLI, benchmark, or compatibility helper that uses randomness must expose a
+  deterministic seed whose default is `0`. Preserve an explicitly supplied seed.
 
 ### Vision Compilation
 

@@ -71,6 +71,28 @@ def test_non_imagenet_selection_is_deterministic(task: str, relative_dir: str, t
     assert len(first) == 3
 
 
+@pytest.mark.parametrize(
+    ("task", "relative_dir"),
+    [
+        ("object_detection", "val2017"),
+        ("instance_segmentation", "val2017"),
+        ("pose_estimation", "val2017"),
+        ("obb", "images/val"),
+    ],
+)
+def test_selection_defaults_to_seed_zero(task: str, relative_dir: str, tmp_path: Path) -> None:
+    """Use seed zero whenever callers omit the vision sampling seed."""
+
+    _write_images(tmp_path / relative_dir, [f"image-{index}.jpg" for index in range(5)])
+
+    assert select_calibration_images(task, tmp_path, subset_size=3) == select_calibration_images(
+        task,
+        tmp_path,
+        subset_size=3,
+        seed=0,
+    )
+
+
 def test_widerface_selection_uses_per_category_size(tmp_path: Path) -> None:
     """Select the requested number of images from every WiderFace category."""
 
@@ -79,11 +101,13 @@ def test_widerface_selection_uses_per_category_size(tmp_path: Path) -> None:
 
     first = select_calibration_images("face_detection", tmp_path, subset_size=2, seed=7)
     second = select_calibration_images("face_detection", tmp_path, subset_size=2, seed=7)
-    default = select_calibration_images("face_detection", tmp_path, seed=0)
+    default = select_calibration_images("face_detection", tmp_path)
+    seed_zero = select_calibration_images("face_detection", tmp_path, seed=0)
 
     assert first == second
     assert len(first) == 4
     assert len(default) == 2
+    assert default == seed_zero
     assert {path.parent.name for path in first} == {"0--Parade", "1--Handshaking"}
 
 
@@ -93,9 +117,11 @@ def test_imagenet_selection_uses_per_class_size(tmp_path: Path) -> None:
     _write_images(tmp_path / "class-a", ["same.jpg", "a.jpg"])
     _write_images(tmp_path / "class-b", ["same.jpg", "b.jpg"])
 
-    selected = select_calibration_images("image_classification", tmp_path, subset_size=1, seed=0)
+    selected = select_calibration_images("image_classification", tmp_path, subset_size=1)
+    seed_zero = select_calibration_images("image_classification", tmp_path, subset_size=1, seed=0)
 
     assert len(selected) == 2
+    assert selected == seed_zero
     assert {path.parent.name for path in selected} == {"class-a", "class-b"}
 
 
