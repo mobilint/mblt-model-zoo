@@ -74,15 +74,18 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _core_modes(core_mode: str) -> tuple[CoreMode, ...]:
+def _core_modes(core_mode: str, framework: str | None = None) -> tuple[str, ...]:
     """Expand the multi-run core-mode shorthand.
 
     Args:
         core_mode: Requested core mode.
+        framework: Explicit inference framework, when provided.
 
     Returns:
         One or more concrete core modes.
     """
+    if framework == "onnx":
+        return ("onnx",)
     return CORE_MODES if core_mode == "all" else (normalize_core_mode(core_mode),)
 
 
@@ -136,12 +139,12 @@ def _evaluate(model: Any, args: argparse.Namespace, run_dir: Path) -> tuple[floa
     raise ValueError(f"Unsupported vision benchmark task: {args.task}")
 
 
-def _run_target(model_name: str, core_mode: CoreMode, args: argparse.Namespace, results_dir: Path) -> dict[str, Any]:
+def _run_target(model_name: str, core_mode: str, args: argparse.Namespace, results_dir: Path) -> dict[str, Any]:
     """Run and record one model/core-mode benchmark target.
 
     Args:
         model_name: Vision model class name.
-        core_mode: Concrete NPU core mode.
+        core_mode: Concrete NPU core mode or the neutral ONNX runtime label.
         args: Parsed benchmark options.
         results_dir: Root directory for benchmark artifacts.
 
@@ -163,15 +166,19 @@ def _run_target(model_name: str, core_mode: CoreMode, args: argparse.Namespace, 
     model = None
     started = time.perf_counter()
     try:
+        engine_kwargs: dict[str, Any] = {
+            "model_cls": model_name,
+            "model_type": args.model_type,
+            "model_path": args.model_path,
+            "mxq_path": args.mxq_path,
+            "onnx_path": args.onnx_path,
+            "framework": args.framework,
+            "dev_no": args.dev_no,
+        }
+        if core_mode != "onnx":
+            engine_kwargs["core_mode"] = core_mode
         model = MBLT_Engine(
-            model_cls=model_name,
-            model_type=args.model_type,
-            model_path=args.model_path,
-            mxq_path=args.mxq_path,
-            onnx_path=args.onnx_path,
-            framework=args.framework,
-            dev_no=args.dev_no,
-            core_mode=core_mode,
+            **engine_kwargs,
         )
         score, score_name, metrics = _evaluate(model, args, run_dir)
         row.update({"status": "ok", "score": score, "score_name": score_name, **metrics})
@@ -251,7 +258,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     results_dir = args.results_dir.expanduser().resolve()
     rows: list[dict[str, Any]] = []
     for model_name in args.models:
-        for core_mode in _core_modes(args.core_mode):
+        for core_mode in _core_modes(args.core_mode, args.framework):
             print(f"Benchmarking {model_name} with core mode {core_mode}...")
             row = _run_target(model_name, core_mode, args, results_dir)
             rows.append(row)

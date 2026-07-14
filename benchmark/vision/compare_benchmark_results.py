@@ -120,15 +120,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     metric_name = next(iter(metric_names))
     from benchmark.common.chart_utils import default_charts_dir, plot_grouped_scalar_barh, source_labels
 
+    source_dirs = [source.parent for source in sources]
     output_dir = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
-        else default_charts_dir(Path(__file__).resolve().parent, sources, use_stem=False)
+        else default_charts_dir(Path(__file__).resolve().parent, source_dirs, use_stem=False)
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_grouped_scalar_barh(
         models=targets,
-        group_labels=source_labels(sources, use_stem=False),
+        group_labels=source_labels(source_dirs, use_stem=False),
         grouped_values=[{target: scores[target].value for target in targets} for scores in scores_by_source],
         x_label=metric_name,
         y_label="model@core_mode",
