@@ -33,7 +33,7 @@ def _has_organized_dotav1_dataset(output_dir: Path) -> bool:
 
 
 def make_dotav1_subset(output_dir: str, subset_dir: str, subset_size: int, seed: int) -> None:
-    """Creates a deterministic DOTAv1 validation subset with matching labels.
+    """Creates a flat deterministic DOTAv1 validation-image subset.
 
     Args:
         output_dir: Root of the organized DOTAv1 dataset.
@@ -47,8 +47,6 @@ def make_dotav1_subset(output_dir: str, subset_dir: str, subset_size: int, seed:
     source_dir = Path(output_dir).expanduser()
     destination_dir = Path(subset_dir).expanduser()
     image_dir = source_dir / "images" / "val"
-    original_label_dir = source_dir / "labels" / "val_original"
-    label_dir = source_dir / "labels" / "val"
     image_paths = (
         sorted(path for path in image_dir.iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
         if image_dir.is_dir()
@@ -70,24 +68,8 @@ def make_dotav1_subset(output_dir: str, subset_dir: str, subset_size: int, seed:
 
     with TemporaryDirectory(dir=destination_parent, prefix=".dotav1-subset-") as staging_root:
         staging_dir = Path(staging_root)
-        staging_image_dir = staging_dir / "images" / "val"
-        staging_original_label_dir = staging_dir / "labels" / "val_original"
-        staging_image_dir.mkdir(parents=True)
-        staging_original_label_dir.mkdir(parents=True)
-        staging_label_dir = staging_dir / "labels" / "val"
-        if label_dir.is_dir():
-            staging_label_dir.mkdir(parents=True)
-
         for image_path in selected_images:
-            image_id = image_path.stem
-            original_label_path = original_label_dir / f"{image_id}.txt"
-            if not original_label_path.is_file():
-                raise ValueError(f"Missing DOTAv1 original label for {image_path.name}.")
-            shutil.copy2(image_path, staging_image_dir / image_path.name)
-            shutil.copy2(original_label_path, staging_original_label_dir / original_label_path.name)
-            label_path = label_dir / f"{image_id}.txt"
-            if staging_label_dir.is_dir() and label_path.is_file():
-                shutil.copy2(label_path, staging_label_dir / label_path.name)
+            shutil.copy2(image_path, staging_dir / image_path.name)
 
         if destination_dir.exists():
             shutil.rmtree(destination_dir)

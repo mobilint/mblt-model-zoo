@@ -56,7 +56,8 @@ python benchmark/vision/organize_imagenet.py \
 ```
 
 `--subset-size` defaults to 1. ImageNet has 1,000 validation categories, so the default subset
-contains 1,000 images total. Reusing the same seed produces the same selection.
+contains 1,000 images total. The subset directory contains only those images directly below
+`--subset-dir`; reusing the same seed produces the same selection.
 
 This will organize the dataset into the following structure:
 
@@ -142,8 +143,8 @@ python benchmark/vision/organize_coco.py \
   --seed 0
 ```
 
-The subset includes the selected images and filtered `*_val2017.json` annotations. `--subset-size`
-defaults to 100, and reusing the same seed produces the same selection.
+The subset directory contains only the selected images, directly below `--subset-dir`.
+`--subset-size` defaults to 100, and reusing the same seed produces the same selection.
 
 This will organize the dataset into the following structure:
 
@@ -281,8 +282,8 @@ python benchmark/vision/organize_dotav1.py \
   --seed 0
 ```
 
-The subset includes each selected validation image and its original label, plus converted labels
-when they already exist in the full dataset. `--subset-size` defaults to 100.
+The subset directory contains only the selected images, directly below `--subset-dir`.
+`--subset-size` defaults to 100.
 
 This keeps only the validation split and organizes the dataset into the following structure:
 

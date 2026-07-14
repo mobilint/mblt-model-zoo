@@ -37,7 +37,7 @@ def _has_organized_imagenet_dataset(output_dir: Path) -> bool:
 
 
 def make_imagenet_subset(output_dir: str, subset_dir: str, subset_size: int, seed: int) -> None:
-    """Creates a deterministic ImageNet subset with a fixed sample count per class.
+    """Creates a flat deterministic ImageNet subset with a fixed sample count per class.
 
     Args:
         output_dir: Root of the organized ImageNet dataset.
@@ -73,11 +73,9 @@ def make_imagenet_subset(output_dir: str, subset_dir: str, subset_size: int, see
     destination_parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=destination_parent, prefix=".imagenet-subset-") as staging_root:
         staging_dir = Path(staging_root)
-        for category_dir, images in category_images.items():
-            staging_category_dir = staging_dir / category_dir.name
-            staging_category_dir.mkdir()
+        for images in category_images.values():
             for image_path in random_generator.sample(images, subset_size):
-                shutil.copy2(image_path, staging_category_dir / image_path.name)
+                shutil.copy2(image_path, staging_dir / image_path.name)
 
         if destination_dir.exists():
             shutil.rmtree(destination_dir)

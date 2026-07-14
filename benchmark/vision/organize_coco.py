@@ -6,7 +6,6 @@ and organizes them into a structure suitable for the model zoo.
 """
 
 import argparse
-import json
 import os
 import random
 import shutil
@@ -32,7 +31,7 @@ def _has_organized_coco_dataset(output_dir: Path) -> bool:
 
 
 def make_coco_subset(output_dir: str, subset_dir: str, subset_size: int, seed: int) -> None:
-    """Creates a deterministic COCO validation subset with matching annotations.
+    """Creates a flat deterministic COCO validation-image subset.
 
     Args:
         output_dir: Root of the organized COCO dataset.
@@ -46,7 +45,6 @@ def make_coco_subset(output_dir: str, subset_dir: str, subset_size: int, seed: i
     source_dir = Path(output_dir).expanduser()
     destination_dir = Path(subset_dir).expanduser()
     image_dir = source_dir / "val2017"
-    annotation_paths = sorted(source_dir.glob("*_val2017.json"))
     image_paths = sorted(path for path in image_dir.iterdir() if path.is_file()) if image_dir.is_dir() else []
 
     if source_dir.resolve() == destination_dir.resolve():
@@ -59,33 +57,13 @@ def make_coco_subset(output_dir: str, subset_dir: str, subset_size: int, seed: i
         raise ValueError(f"subset_size ({subset_size}) exceeds the {len(image_paths)} available COCO images.")
 
     selected_images = random.Random(seed).sample(image_paths, subset_size)
-    selected_names = {image_path.name for image_path in selected_images}
     destination_parent = destination_dir.parent
     destination_parent.mkdir(parents=True, exist_ok=True)
 
     with TemporaryDirectory(dir=destination_parent, prefix=".coco-subset-") as staging_root:
         staging_dir = Path(staging_root)
-        staging_image_dir = staging_dir / "val2017"
-        staging_image_dir.mkdir()
         for image_path in selected_images:
-            shutil.copy2(image_path, staging_image_dir / image_path.name)
-
-        for annotation_path in annotation_paths:
-            with annotation_path.open(encoding="utf-8") as file:
-                annotation_data = json.load(file)
-            selected_ids = {
-                image["id"] for image in annotation_data.get("images", []) if image.get("file_name") in selected_names
-            }
-            annotation_data["images"] = [
-                image for image in annotation_data.get("images", []) if image.get("id") in selected_ids
-            ]
-            annotation_data["annotations"] = [
-                annotation
-                for annotation in annotation_data.get("annotations", [])
-                if annotation.get("image_id") in selected_ids
-            ]
-            with (staging_dir / annotation_path.name).open("w", encoding="utf-8") as file:
-                json.dump(annotation_data, file)
+            shutil.copy2(image_path, staging_dir / image_path.name)
 
         if destination_dir.exists():
             shutil.rmtree(destination_dir)
