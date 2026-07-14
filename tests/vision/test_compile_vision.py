@@ -147,15 +147,40 @@ def test_flat_subset_names_are_collision_safe(tmp_path: Path) -> None:
     assert all(path.is_file() for path in copied)
 
 
-def test_subset_rejects_dataset_root_as_output(tmp_path: Path) -> None:
+@pytest.mark.parametrize("output_name", [".", "parent-output", "val2017/subset"])
+def test_subset_rejects_overlapping_output_paths(tmp_path: Path, output_name: str) -> None:
     """Protect the organized source dataset from destructive replacement."""
 
-    _write_images(tmp_path / "val2017", ["one.jpg"])
+    data_path = tmp_path / "dataset"
+    image_path = _write_images(data_path / "val2017", ["one.jpg"])[0]
+    output_path = tmp_path if output_name == "." else data_path / output_name
 
-    with pytest.raises(ValueError, match="different from data_path"):
-        compile_module.make_calibration_subset("object_detection", tmp_path, tmp_path, subset_size=1)
+    with pytest.raises(ValueError, match="must not overlap"):
+        compile_module.make_calibration_subset("object_detection", data_path, output_path, subset_size=1)
 
-    assert (tmp_path / "val2017" / "one.jpg").is_file()
+    assert image_path.is_file()
+
+
+def test_subset_keeps_existing_output_when_selection_fails(tmp_path: Path) -> None:
+    """Leave an existing subset untouched when a replacement cannot be selected."""
+
+    data_path = tmp_path / "dataset"
+    output_path = tmp_path / "subset"
+    _write_images(data_path / "val2017", ["one.jpg"])
+    existing = _write_images(output_path, ["existing.jpg"])[0]
+
+    with pytest.raises(ValueError, match="subset_size"):
+        compile_module.make_calibration_subset("object_detection", data_path, output_path, subset_size=2)
+
+    assert existing.read_bytes() == b"existing.jpg"
+
+
+def test_imagenet_readiness_rejects_partial_class_tree(tmp_path: Path) -> None:
+    """Organize ImageNet again when the existing class layout is incomplete."""
+
+    _write_images(tmp_path / "class-a", ["image.jpg"])
+
+    assert not compile_module._dataset_ready("image_classification", tmp_path)
 
 
 def test_prepare_calibration_arrays_preserves_preprocess_output(tmp_path: Path) -> None:

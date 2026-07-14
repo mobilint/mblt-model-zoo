@@ -9,7 +9,7 @@ import shutil
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from typing import Any
 
 import numpy as np
@@ -68,8 +68,10 @@ def _dataset_ready(task: str, data_path: Path) -> bool:
     """
 
     if task == "image_classification":
-        return data_path.is_dir() and any(
-            child.is_dir() and any(path.is_file() for path in child.iterdir()) for child in data_path.iterdir()
+        class_dirs = [child for child in data_path.iterdir() if child.is_dir()] if data_path.is_dir() else []
+        return len(class_dirs) == 1000 and all(
+            sum(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in class_dir.iterdir()) == 50
+            for class_dir in class_dirs
         )
     image_dir = {
         "object_detection": data_path / "val2017",
@@ -284,13 +286,31 @@ def make_calibration_subset(
     """
 
     source_root = Path(data_path).expanduser().resolve()
-    destination = Path(output_dir).expanduser()
-    if destination.resolve() == source_root:
-        raise ValueError("output_dir must be different from data_path.")
-    if destination.exists():
-        shutil.rmtree(destination)
+    destination = Path(output_dir).expanduser().resolve()
+    if source_root.is_relative_to(destination) or destination.is_relative_to(source_root):
+        raise ValueError("output_dir must not overlap data_path.")
     images = select_calibration_images(task, data_path, subset_size, seed)
-    return copy_calibration_subset(images, data_path, destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_destination = Path(mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
+    try:
+        copied = copy_calibration_subset(images, data_path, temporary_destination)
+        backup_destination: Path | None = None
+        if destination.exists():
+            backup_destination = Path(mkdtemp(prefix=f".{destination.name}-backup-", dir=destination.parent))
+            backup_destination.rmdir()
+            destination.replace(backup_destination)
+        try:
+            temporary_destination.replace(destination)
+        except BaseException:
+            if backup_destination is not None and not destination.exists():
+                backup_destination.replace(destination)
+            raise
+        if backup_destination is not None:
+            shutil.rmtree(backup_destination)
+        return [destination / path.name for path in copied]
+    finally:
+        if temporary_destination.exists():
+            shutil.rmtree(temporary_destination)
 
 
 def _as_hwc_float32(value: Any, image_path: Path) -> np.ndarray:
