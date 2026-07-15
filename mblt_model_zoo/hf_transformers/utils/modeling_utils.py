@@ -1572,9 +1572,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         return self._DEFAULT_PREFILL_CHUNK_SIZE
 
     def _get_config_npu_prefill_chunk_size(self) -> Any:
-        config_value = getattr(self.config, "npu_prefill_chunk_size", None)
+        config = getattr(self, "config", None)
+        if config is None:
+            return None
+        config_value = getattr(config, "npu_prefill_chunk_size", None)
         if isinstance(config_value, dict):
-            core_mode = getattr(self.npu_backend, "core_mode", None)
+            core_mode = getattr(getattr(self, "npu_backend", None), "core_mode", None)
             if core_mode is None:
                 return None
             return config_value.get(core_mode)

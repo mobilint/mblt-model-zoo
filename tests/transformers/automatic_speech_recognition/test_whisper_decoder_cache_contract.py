@@ -191,8 +191,9 @@ def test_whisper_embeds_only_decoder_does_not_create_default_cache() -> None:
         cache_position: torch.Tensor,
         *,
         input_ids: torch.Tensor | None = None,
+        npu_prefill_chunk_size: int | None = None,
     ) -> torch.Tensor:
-        del self, encoder_hidden_states, cache_position
+        del self, encoder_hidden_states, cache_position, npu_prefill_chunk_size
         assert past_key_values is None
         assert input_ids is None
         return torch.zeros(
