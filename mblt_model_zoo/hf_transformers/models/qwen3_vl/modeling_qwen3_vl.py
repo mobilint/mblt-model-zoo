@@ -344,7 +344,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
@@ -371,7 +371,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
             cache_position=cache_position,
-            prefill_chunk_size=prefill_chunk_size,
+            npu_prefill_chunk_size=npu_prefill_chunk_size,
             count_npu_time=count_npu_time,
             deepstack_visual_embeds=deepstack_visual_embeds,
             visual_pos_masks=visual_pos_masks,
@@ -390,7 +390,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         visual_pos_masks: Optional[torch.Tensor],
         past_key_values: Optional[MobilintDeepStackCache],
         cache_position: torch.Tensor,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
     ) -> torch.Tensor:
@@ -407,7 +407,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             visual_pos_masks: Optional visual token mask.
             past_key_values: Mobilint deepstack KV cache.
             cache_position: Cache position range.
-            prefill_chunk_size: Optional chunk size.
+            npu_prefill_chunk_size: Optional chunk size.
             count_npu_time: Whether to accumulate NPU time.
             logits_to_keep: HF-style position selector; see the shared
                 :meth:`MobilintModelMixin.llm_forward` for details.
@@ -433,7 +433,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         inputs_np = inputs_embeds.type(torch.float32).cpu().numpy()
         seq_len = int(inputs_np.shape[1])
 
-        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
 
         mxq_model = self.get_mxq_model()
         self.npu_time = 0.0 if count_npu_time else None
@@ -481,7 +481,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         return self._run_chunked_logits_to_keep(
             do_infer=_do_infer,
             seq_len=seq_len,
-            prefill_chunk_size=resolved_prefill_chunk_size,
+            npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
             logits_to_keep=logits_to_keep,
             dtype=inputs_embeds.dtype,
             device=inputs_embeds.device,
@@ -565,13 +565,13 @@ class MobilintQwen3VLForConditionalGeneration(
     @with_mobilint_generation_signature(
         Qwen3VLForConditionalGeneration.prepare_inputs_for_generation,
         "count_npu_time",
-        "prefill_chunk_size",
+        "npu_prefill_chunk_size",
     )
     def prepare_inputs_for_generation(
         self,
         *args: Any,
         count_npu_time: bool = False,
-        prefill_chunk_size: int | None = None,
+        npu_prefill_chunk_size: int | None = None,
         **kwargs: Any,
     ):
         """Prepare generation inputs while preserving Mobilint timing kwargs.
@@ -579,7 +579,7 @@ class MobilintQwen3VLForConditionalGeneration(
         Args:
             *args: Positional arguments forwarded to the upstream Qwen3-VL generation helper.
             count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
-            prefill_chunk_size: Optional prefill chunk size forwarded to Mobilint generation.
+            npu_prefill_chunk_size: Optional prefill chunk size forwarded to Mobilint generation.
             **kwargs: Keyword arguments forwarded to the upstream Qwen3-VL generation helper.
 
         Returns:
@@ -587,8 +587,8 @@ class MobilintQwen3VLForConditionalGeneration(
         """
         model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
         model_inputs["count_npu_time"] = count_npu_time
-        if prefill_chunk_size is not None:
-            model_inputs["prefill_chunk_size"] = prefill_chunk_size
+        if npu_prefill_chunk_size is not None:
+            model_inputs["npu_prefill_chunk_size"] = npu_prefill_chunk_size
         return model_inputs
 
     @with_mobilint_generation_signature(Qwen3VLForConditionalGeneration.forward, "count_npu_time")

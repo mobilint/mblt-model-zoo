@@ -585,14 +585,14 @@ class MobilintWhisperForConditionalGeneration(
         self,
         *args: Any,
         count_npu_time: bool = False,
-        prefill_chunk_size: Union[int, None] = None,
+        npu_prefill_chunk_size: Union[int, None] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Prepare Whisper generation inputs while preserving Mobilint kwargs."""
         return super().prepare_inputs_for_generation(
             *args,
             count_npu_time=count_npu_time,
-            prefill_chunk_size=prefill_chunk_size,
+            npu_prefill_chunk_size=npu_prefill_chunk_size,
             **kwargs,
         )
 

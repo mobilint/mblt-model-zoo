@@ -128,7 +128,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         seq_len: int,
         hidden_size: int = 3,
         logits_to_keep,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
     ):
         model = _BareQwen3VLTextModel(mxq, hidden_size=hidden_size)
         inputs_embeds = torch.arange(seq_len * hidden_size, dtype=torch.float32).reshape(
@@ -141,14 +141,14 @@ class TestQwen3VLTextDecoderLogitsToKeep:
             visual_pos_masks=None,
             past_key_values=None,
             cache_position=cache_position,
-            prefill_chunk_size=prefill_chunk_size,
+            npu_prefill_chunk_size=npu_prefill_chunk_size,
             logits_to_keep=logits_to_keep,
         )
         return model, logits
 
     def test_default_keep_returns_last_token_logits(self) -> None:
         mxq = _StaticLastOnlyMxq(vocab_size=5)
-        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=1, prefill_chunk_size=3)
+        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=1, npu_prefill_chunk_size=3)
 
         chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
         assert chunk_seqs == [3, 3]
@@ -157,12 +157,12 @@ class TestQwen3VLTextDecoderLogitsToKeep:
 
     def test_dynamic_axis_keep_all_returns_every_position(self) -> None:
         mxq = _DynamicAxisMxq(vocab_size=5)
-        model, logits = self._run(mxq, seq_len=6, logits_to_keep=0, prefill_chunk_size=3)
+        model, logits = self._run(mxq, seq_len=6, logits_to_keep=0, npu_prefill_chunk_size=3)
 
         assert model._mxq_supports_all_logits() is True
         assert logits.shape == (1, 6, mxq.vocab_size)
 
-        # Concatenation should be in call order, one chunk per prefill_chunk_size window.
+        # Concatenation should be in call order, one chunk per npu_prefill_chunk_size window.
         # Without a caller cache, ``_do_infer`` uses ``start_index`` as cache_size so
         # the NPU sees prior chunks' KV state — the fake mirrors that by offsetting.
         expected_chunks = []
@@ -180,14 +180,14 @@ class TestQwen3VLTextDecoderLogitsToKeep:
 
     def test_dynamic_axis_last_n_slices_kept_positions(self) -> None:
         mxq = _DynamicAxisMxq(vocab_size=5)
-        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=2, prefill_chunk_size=3)
+        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=2, npu_prefill_chunk_size=3)
         assert logits.shape == (1, 2, mxq.vocab_size)
 
     def test_dynamic_axis_tensor_indices_pick_out_positions(self) -> None:
         mxq = _DynamicAxisMxq(vocab_size=5)
         indices = torch.tensor([0, 3])
         _model, logits = self._run(
-            mxq, seq_len=6, logits_to_keep=indices, prefill_chunk_size=3
+            mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=3
         )
         assert logits.shape == (1, 2, mxq.vocab_size)
 
@@ -195,7 +195,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         mxq = _StaticLastOnlyMxq(vocab_size=5)
         indices = torch.tensor([2, 5])
         _model, logits = self._run(
-            mxq, seq_len=6, logits_to_keep=indices, prefill_chunk_size=4
+            mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=4
         )
 
         chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
@@ -211,7 +211,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
             mxq,
             seq_len=6,
             logits_to_keep=torch.tensor([], dtype=torch.long),
-            prefill_chunk_size=4,
+            npu_prefill_chunk_size=4,
         )
         # KV prefix still walks the whole sequence in normal-sized chunks.
         chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
@@ -229,7 +229,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
                 mxq,
                 seq_len=6,
                 logits_to_keep=torch.tensor([100, -100]),
-                prefill_chunk_size=4,
+                npu_prefill_chunk_size=4,
             )
 
     def test_deepstack_chunk_shape_matches_input_chunk(self) -> None:
@@ -247,7 +247,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
             visual_pos_masks=None,
             past_key_values=None,
             cache_position=cache_position,
-            prefill_chunk_size=2,
+            npu_prefill_chunk_size=2,
             logits_to_keep=1,
         )
         # Deepstack chunk is built from a zero tensor of shape (num_layers, seq, hidden)

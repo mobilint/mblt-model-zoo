@@ -1,6 +1,6 @@
 """Update Hugging Face config.json files with npu_prefill_chunk_size values.
 
-This script reads `prefill_chunk_size.csv`, groups rows by `(model_id, revision)`,
+This script reads `npu_prefill_chunk_size.csv`, groups rows by `(model_id, revision)`,
 and writes an `npu_prefill_chunk_size` dict into each target branch's `config.json`.
 It also updates the `main` branch by inferring whether `main` currently points to
 the `W8` or `W4V8` mxq variant from `config.json.mxq_path`.
@@ -28,7 +28,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Update HF config.json npu_prefill_chunk_size entries.")
     parser.add_argument(
         "--csv",
-        default=Path(__file__).with_name("prefill_chunk_size.csv"),
+        default=Path(__file__).with_name("npu_prefill_chunk_size.csv"),
         help="CSV path with columns core_mode,revision,model_id,best_chunk_size",
     )
     parser.add_argument(
@@ -66,7 +66,7 @@ def _coerce_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
-def _load_prefill_chunk_sizes(csv_path: Path) -> dict[tuple[str, str], dict[str, int]]:
+def _load_npu_prefill_chunk_sizes(csv_path: Path) -> dict[tuple[str, str], dict[str, int]]:
     """Load per-model per-revision chunk sizes from CSV.
 
     Args:
@@ -145,7 +145,7 @@ def _update_branch(
     *,
     model_id: str,
     revision: str | None,
-    prefill_chunk_size: dict[str, int],
+    npu_prefill_chunk_size: dict[str, int],
     apply_changes: bool,
     token: str | None,
 ) -> bool:
@@ -155,19 +155,19 @@ def _update_branch(
         api: Hugging Face Hub API client.
         model_id: Target model repository.
         revision: Target branch or tag.
-        prefill_chunk_size: Chunk-size mapping to write.
+        npu_prefill_chunk_size: Chunk-size mapping to write.
         apply_changes: Whether to push the update.
 
     Returns:
         `True` when a change is needed, otherwise `False`.
     """
     config, _ = _download_config(api, model_id, revision, token)
-    if config.get("npu_prefill_chunk_size") == prefill_chunk_size:
+    if config.get("npu_prefill_chunk_size") == npu_prefill_chunk_size:
         print(f"[skip] {model_id}@{revision or 'main'} already up to date")
         return False
 
-    config["npu_prefill_chunk_size"] = prefill_chunk_size
-    print(f"[plan] {model_id}@{revision or 'main'} -> {prefill_chunk_size}")
+    config["npu_prefill_chunk_size"] = npu_prefill_chunk_size
+    print(f"[plan] {model_id}@{revision or 'main'} -> {npu_prefill_chunk_size}")
     if not apply_changes:
         return True
 
@@ -197,7 +197,7 @@ def main() -> int:
     if not csv_path.is_file():
         raise SystemExit(f"CSV not found: {csv_path}")
     api = HfApi(token=args.token)
-    grouped = _load_prefill_chunk_sizes(csv_path)
+    grouped = _load_npu_prefill_chunk_sizes(csv_path)
     if args.model:
         allowed = set(args.model)
         grouped = {key: value for key, value in grouped.items() if key[0] in allowed}
@@ -213,7 +213,7 @@ def main() -> int:
                 api,
                 model_id=model_id,
                 revision=revision,
-                prefill_chunk_size=mapping,
+                npu_prefill_chunk_size=mapping,
                 apply_changes=args.apply,
                 token=args.token,
             ):
@@ -237,7 +237,7 @@ def main() -> int:
             api,
             model_id=model_id,
             revision=None,
-            prefill_chunk_size=main_mapping,
+            npu_prefill_chunk_size=main_mapping,
             apply_changes=args.apply,
             token=args.token,
         ):

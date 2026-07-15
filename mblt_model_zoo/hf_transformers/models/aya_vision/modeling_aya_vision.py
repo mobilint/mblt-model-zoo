@@ -89,7 +89,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
         cache_position: Union[torch.LongTensor, None] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         image_sizes: Union[torch.Tensor, None] = None,
-        prefill_chunk_size: Union[int, None] = None,
+        npu_prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, AyaVisionCausalLMOutputWithPast]:
@@ -135,7 +135,7 @@ class MobilintAyaVisionForConditionalGeneration(PretrainedOnlyMixin, MobilintGen
             cache_position=cache_position,
             logits_to_keep=logits_to_keep,
             image_sizes=image_sizes,
-            prefill_chunk_size=prefill_chunk_size,
+            npu_prefill_chunk_size=npu_prefill_chunk_size,
             count_npu_time=count_npu_time,
             **kwargs,
         )

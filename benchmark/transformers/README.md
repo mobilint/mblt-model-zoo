@@ -175,7 +175,7 @@ mblt-model-zoo tps measure \
 
 ### Fix Prefill Chunk Size
 
-Use `--prefill-chunk-size` to compare a fixed prefill chunk size across measurements.
+Use `--npu-prefill-chunk-size` to compare a fixed prefill chunk size across measurements.
 
 ```bash
 mblt-model-zoo tps sweep \
@@ -183,7 +183,7 @@ mblt-model-zoo tps sweep \
   --revision W8 \
   --device cpu \
   --core-mode global8 \
-  --prefill-chunk-size 512 \
+  --npu-prefill-chunk-size 512 \
   --prefill-range 512:2048:512 \
   --cache-lengths 1024,2048,4096 \
   --decode-window 128 \
@@ -548,7 +548,7 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --revision W8 \
   --core-mode global8 \
   --image-resolutions 224,384,512 \
-  --prefill-chunk-size 512 \
+  --npu-prefill-chunk-size 512 \
   --prefill-range 1024:4096:1024 \
   --cache-lengths 1024,2048,4096 \
   --skip-existing
@@ -650,11 +650,11 @@ If `--output-dir` is omitted, comparison outputs are saved under
 
 ## Search Prefill Chunk Size
 
-`search_prefill_chunk_size.py` searches candidate chunk sizes and selects the best value by prefill
+`search_npu_prefill_chunk_size.py` searches candidate chunk sizes and selects the best value by prefill
 TPS.
 
 ```bash
-python benchmark/transformers/search_prefill_chunk_size.py \
+python benchmark/transformers/search_npu_prefill_chunk_size.py \
   --mxq-dir ./local_mxq \
   --core-modes single,global4,global8 \
   --prefill-lengths 1024,2048 \
@@ -671,7 +671,7 @@ and `W8` revisions. Default output directory: `benchmark/transformers/results/pr
 Use `--model` to limit the search to one or more model ids:
 
 ```bash
-python benchmark/transformers/search_prefill_chunk_size.py \
+python benchmark/transformers/search_npu_prefill_chunk_size.py \
   --model mobilint/Qwen2.5-1.5B-Instruct \
   --core-modes global8
 ```
@@ -686,33 +686,33 @@ python benchmark/transformers/search_prefill_chunk_size.py \
 Rebuild CSV and chart outputs from existing records without model loading:
 
 ```bash
-python benchmark/transformers/search_prefill_chunk_size.py \
+python benchmark/transformers/search_npu_prefill_chunk_size.py \
   --rebuild-charts
 ```
 
 ## Update Prefill Chunk-Size Configs
 
-`update_prefill_chunk_size_configs.py` reads a CSV file and updates `npu_prefill_chunk_size` values in
+`update_npu_prefill_chunk_size_configs.py` reads a CSV file and updates `npu_prefill_chunk_size` values in
 Hugging Face `config.json` files. It runs in dry-run mode by default.
 
 ```bash
-python benchmark/transformers/update_prefill_chunk_size_configs.py \
-  --csv benchmark/transformers/prefill_chunk_size.csv
+python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/npu_prefill_chunk_size.csv
 ```
 
 Limit the dry run to one model:
 
 ```bash
-python benchmark/transformers/update_prefill_chunk_size_configs.py \
-  --csv benchmark/transformers/prefill_chunk_size.csv \
+python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/npu_prefill_chunk_size.csv \
   --model mobilint/Qwen2.5-1.5B-Instruct
 ```
 
 Use `--apply` only when you intend to push config updates:
 
 ```bash
-python benchmark/transformers/update_prefill_chunk_size_configs.py \
-  --csv benchmark/transformers/prefill_chunk_size.csv \
+python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
+  --csv benchmark/transformers/npu_prefill_chunk_size.csv \
   --apply
 ```
 
@@ -790,9 +790,9 @@ uv run python -m py_compile \
   benchmark/common/math_utils.py \
   benchmark/transformers/benchmark_text_generation_models.py \
   benchmark/transformers/benchmark_image_text_to_text_models.py \
-  benchmark/transformers/search_prefill_chunk_size.py \
+  benchmark/transformers/search_npu_prefill_chunk_size.py \
   benchmark/transformers/compare_benchmark_results.py \
-  benchmark/transformers/update_prefill_chunk_size_configs.py \
+  benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
   benchmark/transformers/chart_utils.py
 ```
 
@@ -803,9 +803,9 @@ uv run python benchmark/transformers/benchmark_text_generation_models.py sweep -
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py --help
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py measure --help
 uv run python benchmark/transformers/benchmark_image_text_to_text_models.py sweep --help
-uv run python benchmark/transformers/search_prefill_chunk_size.py --help
+uv run python benchmark/transformers/search_npu_prefill_chunk_size.py --help
 uv run python benchmark/transformers/compare_benchmark_results.py --help
-uv run python benchmark/transformers/update_prefill_chunk_size_configs.py --help
+uv run python benchmark/transformers/update_npu_prefill_chunk_size_configs.py --help
 uv run mblt-model-zoo tps measure --help
 uv run mblt-model-zoo tps sweep --help
 ```

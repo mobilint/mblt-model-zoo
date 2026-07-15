@@ -280,9 +280,9 @@ To make it easier to test custom compiled models, we support overriding the inpu
   The tensor must match the model's input-embedding shape exactly; otherwise, loading will fail.
   The weights are copied into `model.get_input_embeddings().weight` (device/dtype are preserved).
 
-#### prefill_chunk_size
+#### npu_prefill_chunk_size
 
-- `prefill_chunk_size` (`int`)
+- `npu_prefill_chunk_size` (`int`)
 
   Overrides the prefill chunk size used by Mobilint text-generation backends.
   If omitted or set to `None`, the runtime reads `npu_prefill_chunk_size` from the model's `config.json`
@@ -299,7 +299,7 @@ generation options.
 
 |Category|Arguments|Behavior|
 |---|---|---|
-|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `prefill_chunk_size`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
+|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `npu_prefill_chunk_size`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
 |Hard error (`NotImplementedError`)|`num_beams != 1`, `assistant_model`, `use_cache=False`, custom `logits_processor`, `negative_prompt_ids`, `negative_prompt_attention_mask`|The call fails immediately to prevent ambiguous runtime behavior.|
 
 Examples:

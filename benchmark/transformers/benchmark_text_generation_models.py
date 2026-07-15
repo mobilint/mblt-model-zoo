@@ -939,10 +939,10 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--prefill-chunk-size",
+        "--npu-prefill-chunk-size",
         type=_parse_positive_int_optional,
         default=None,
-        help="optional prefill_chunk_size forwarded to model.generate/model.forward",
+        help="optional npu_prefill_chunk_size forwarded to model.generate/model.forward",
     )
     parser.add_argument(
         "--core-mode",
@@ -1197,7 +1197,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
 
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
@@ -1316,7 +1316,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
             f"revision={revision or 'main'} "
             f"device={target_args.device} device_backend={target_args.device_backend} "
-            f"prefill_chunk_size={args.prefill_chunk_size if args.prefill_chunk_size is not None else 'auto'}"
+            f"npu_prefill_chunk_size={args.npu_prefill_chunk_size if args.npu_prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
@@ -1372,13 +1372,13 @@ def _run_sweep(args: argparse.Namespace) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
             _print_device_status(target_args, tracker_prefill)
-            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=_SWEEP_WARMUP_PREFILL,
                     num_decode=_SWEEP_WARMUP_DECODE,
                     batch_size=batch_size,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                     trace_path=None,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
@@ -1394,7 +1394,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                                 cache_lengths=cache_lengths,
                                 decode_window=args.decode_window,
                                 batch_size=batch_size,
-                                prefill_chunk_size=resolved_prefill_chunk_size,
+                                npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                                 trace_path=None,
                                 show_progress=True,
                                 progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",
@@ -1889,7 +1889,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     if not run_targets:
         return 0
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
     _collect_host_pc_info(output_dir)
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
@@ -1933,13 +1933,13 @@ def _run_measure(args: argparse.Namespace) -> int:
                 default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
             )
             measurer = TPSMeasurer(pipeline)
-            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.prefill,
                     num_decode=args.decode,
                     batch_size=batch_size,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                     show_progress=True,
                     progress_desc=f"{label} warmup generate {i + 1}/{args.warmup}",
                 )
@@ -1954,7 +1954,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                             num_prefill=args.prefill,
                             num_decode=args.decode,
                             batch_size=batch_size,
-                            prefill_chunk_size=resolved_prefill_chunk_size,
+                            npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                             trace_path=None,
                             show_progress=True,
                             progress_desc=f"{label} run {repeat_idx + 1}/{args.repeat}",

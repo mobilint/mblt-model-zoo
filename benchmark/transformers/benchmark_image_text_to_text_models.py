@@ -496,7 +496,7 @@ def _run_model(
     all_vision_j_per_img: list[float] = []
 
     llm_resolution = args.llm_resolution if args.llm_resolution is not None else args.image_resolutions[0]
-    resolved_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.prefill_chunk_size
+    resolved_npu_prefill_chunk_size = None if args.original_models and not args.mxq_dir else args.npu_prefill_chunk_size
     warmup_resolution = llm_resolution
     warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
     for warmup_idx in tqdm(
@@ -515,7 +515,7 @@ def _run_model(
             image_resolution=warmup_resolution,
             prompt=args.prompt,
             **warmup_llm_kwargs,
-            prefill_chunk_size=resolved_prefill_chunk_size,
+            npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
             batch_size=args.batch_size,
             show_progress=True,
             progress_prefix=f"{label} warmup {warmup_idx + 1}/{args.warmup}",
@@ -711,7 +711,7 @@ def _run_model(
                     prefill_range=args.prefill_range,
                     cache_lengths=args.cache_lengths,
                     decode_window=args.decode_window,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                     batch_size=args.batch_size,
                     show_progress=True,
                     progress_prefix=f"{label} llm@{llm_resolution} run {repeat_idx + 1}/{args.repeat}",
@@ -1400,10 +1400,10 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--repeat", type=_parse_positive_int, default=1, help="number of repeated runs")
     parser.add_argument(
-        "--prefill-chunk-size",
+        "--npu-prefill-chunk-size",
         type=_parse_positive_int_optional,
         default=None,
-        help="optional prefill_chunk_size forwarded to the VLM LLM benchmark",
+        help="optional npu_prefill_chunk_size forwarded to the VLM LLM benchmark",
     )
     parser.add_argument(
         "--original-models",
@@ -1581,7 +1581,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/prefill_chunk_size).")
+        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
     script_dir = Path(__file__).resolve().parent
     output_dir = (
         Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
@@ -2099,7 +2099,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
             _print_device_status(target_args, tracker)
-            resolved_prefill_chunk_size = None if disable_npu_specific_args else args.prefill_chunk_size
+            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
             warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
             for warmup_idx in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure_vision(
@@ -2113,7 +2113,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     image_resolution=args.image_resolution,
                     prompt=args.prompt,
                     **warmup_llm_kwargs,
-                    prefill_chunk_size=resolved_prefill_chunk_size,
+                    npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                     batch_size=batch_size,
                     show_progress=True,
                     progress_prefix=f"{label} warmup {warmup_idx + 1}/{args.warmup}",
@@ -2178,7 +2178,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                             prefill_range=(args.prefill, args.prefill, args.prefill),
                             cache_lengths=[args.prefill],
                             decode_window=args.decode,
-                            prefill_chunk_size=resolved_prefill_chunk_size,
+                            npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
                             batch_size=batch_size,
                             show_progress=True,
                             progress_prefix=f"{label} run {repeat_idx + 1}/{args.repeat}",

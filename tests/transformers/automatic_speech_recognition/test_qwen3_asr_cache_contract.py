@@ -47,7 +47,7 @@ class _InputsEmbedAwareMxqModel:
         # Dynamic token axis: matches the ``per-token logits`` shape this
         # stub returns from ``infer``, so ``_mxq_supports_all_logits`` picks
         # the ``supports_all`` branch of ``_beam_llm_forward`` and the
-        # caller's ``prefill_chunk_size`` is preserved.
+        # caller's ``npu_prefill_chunk_size`` is preserved.
         return [(1, -1, 8)]
 
     def infer(self, inputs: list[object], output_buffer: object, cache_size: int) -> list[object]:
@@ -150,13 +150,13 @@ class _DummyQwen3ASRTextModel(MobilintQwen3ASRTextModel):
         inputs_embeds: torch.Tensor,
         past_key_values: object | None,
         cache_position: torch.Tensor,
-        prefill_chunk_size: int | None = None,
+        npu_prefill_chunk_size: int | None = None,
         count_npu_time: bool = False,
         attention_mask: torch.Tensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
     ) -> torch.Tensor:
         """Return deterministic logits while exposing forward-time cache state."""
-        del cache_position, prefill_chunk_size, count_npu_time, attention_mask, logits_to_keep
+        del cache_position, npu_prefill_chunk_size, count_npu_time, attention_mask, logits_to_keep
         self.forward_past_key_values = past_key_values
         return torch.zeros(
             inputs_embeds.shape[0],
@@ -181,9 +181,9 @@ class _DummyQwen3ASRBeamTextModel(MobilintQwen3ASRTextModel):
         self.npu_backend = SimpleNamespace(mxq_model=mxq_model)
         self.npu_time = None
 
-    def resolve_prefill_chunk_size(self, prefill_chunk_size: int | None) -> int:
+    def resolve_npu_prefill_chunk_size(self, npu_prefill_chunk_size: int | None) -> int:
         """Use one chunk per test sequence unless explicitly overridden."""
-        return prefill_chunk_size or 16
+        return npu_prefill_chunk_size or 16
 
 
 class _DummyQwen3ASRThinkerTextModel(torch.nn.Module):
@@ -491,13 +491,13 @@ def test_qwen3_asr_beam_forward_out_of_range_selector_raises() -> None:
 # Beam-path chunk-boundary contract
 #
 # When the suffix crosses a prefill-chunk boundary (``suffix_length >
-# resolved_prefill_chunk_size``), the beam loop must accumulate every chunk's
+# resolved_npu_prefill_chunk_size``), the beam loop must accumulate every chunk's
 # logits — not just the final chunk's — before the ``logits_to_keep`` selector
 # runs. Without that, keep-all silently returns ``(batch, final_chunk_len,
 # vocab)`` instead of ``(batch, input_ids.shape[1], vocab)`` and any tensor
 # selector referencing a position outside the final chunk either raises
 # ``IndexError`` or picks the wrong row. The shape-only tests above miss this
-# because ``_DummyQwen3ASRBeamTextModel.resolve_prefill_chunk_size`` defaults
+# because ``_DummyQwen3ASRBeamTextModel.resolve_npu_prefill_chunk_size`` defaults
 # to 16, well above the window sizes they use.
 # ---------------------------------------------------------------------------
 
@@ -505,7 +505,7 @@ def test_qwen3_asr_beam_forward_out_of_range_selector_raises() -> None:
 def test_qwen3_asr_beam_forward_multi_chunk_keeps_full_window() -> None:
     """Default keep-all across a chunk boundary must return the full window.
 
-    With ``prefill_chunk_size=2`` and a 4-token window the suffix decodes over
+    With ``npu_prefill_chunk_size=2`` and a 4-token window the suffix decodes over
     two chunks; the position-aware stub tags each row with its absolute cache
     position so the returned tensor reveals whether every chunk survived.
     """
@@ -523,7 +523,7 @@ def test_qwen3_asr_beam_forward_multi_chunk_keeps_full_window() -> None:
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(4, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
     )
 
     assert mxq_model.infer_calls == 2
@@ -552,7 +552,7 @@ def test_qwen3_asr_beam_forward_multi_chunk_selector_picks_early_position() -> N
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(4, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
         logits_to_keep=selector,
     )
 
@@ -577,7 +577,7 @@ def test_qwen3_asr_beam_forward_multi_chunk_empty_selector() -> None:
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(4, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
         logits_to_keep=torch.tensor([], dtype=torch.long),
     )
 
@@ -606,7 +606,7 @@ def test_qwen3_asr_beam_forward_uneven_final_chunk_keeps_full_window() -> None:
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(3, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
     )
 
     assert mxq_model.infer_calls == 2
@@ -879,8 +879,8 @@ def test_beam_forward_prefix_reuse_heterogeneous_beams_align() -> None:
 # the fix in place:
 #
 # * ``logits_to_keep=1`` hits the last-token fast path and preserves the
-#   caller's ``prefill_chunk_size`` — only ``ceil(suffix_length /
-#   prefill_chunk_size)`` infer calls, and the returned row is the last
+#   caller's ``npu_prefill_chunk_size`` — only ``ceil(suffix_length /
+#   npu_prefill_chunk_size)`` infer calls, and the returned row is the last
 #   window position on both static and dynamic backends.
 # * ``logits_to_keep=0`` (and any non-default selector) hits the size-1
 #   fallback so each infer emits one row per suffix position, matching
@@ -891,7 +891,7 @@ def test_beam_forward_prefix_reuse_heterogeneous_beams_align() -> None:
 
 def test_beam_forward_last_only_backend_logits_to_keep_1_uses_fast_path() -> None:
     """``logits_to_keep=1`` on a last-only MXQ preserves the caller's
-    ``prefill_chunk_size`` (no size-1 override) and returns the last-token
+    ``npu_prefill_chunk_size`` (no size-1 override) and returns the last-token
     logit. Pre-fix code either raised ``IndexError`` on the outer
     ``index_select`` or picked from the wrong shortened axis when the
     suffix crossed a chunk boundary."""
@@ -909,11 +909,11 @@ def test_beam_forward_last_only_backend_logits_to_keep_1_uses_fast_path() -> Non
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(4, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
         logits_to_keep=1,
     )
 
-    # Fast path: 2 chunks of the caller's ``prefill_chunk_size=2``.
+    # Fast path: 2 chunks of the caller's ``npu_prefill_chunk_size=2``.
     assert mxq_model.infer_calls == 2
     assert logits.shape == (1, 1, 8)
     # Last window position is index 3 (``cache_size + chunk_len - 1`` for
@@ -942,7 +942,7 @@ def test_beam_forward_last_only_backend_keep_all_uses_size_1_fallback() -> None:
             inputs_embeds=inputs_embeds,
             past_key_values=cache,
             cache_position=torch.arange(4, dtype=torch.long),
-            prefill_chunk_size=2,
+            npu_prefill_chunk_size=2,
             logits_to_keep=0,
         )
 
@@ -972,7 +972,7 @@ def test_beam_forward_last_only_backend_tensor_selector_picks_absolute_positions
         inputs_embeds=inputs_embeds,
         past_key_values=cache,
         cache_position=torch.arange(4, dtype=torch.long),
-        prefill_chunk_size=2,
+        npu_prefill_chunk_size=2,
         logits_to_keep=selector,
     )
 
@@ -1004,7 +1004,7 @@ def test_beam_forward_last_only_backend_last_only_selector_does_not_warn() -> No
             inputs_embeds=inputs_embeds,
             past_key_values=cache,
             cache_position=torch.arange(4, dtype=torch.long),
-            prefill_chunk_size=2,
+            npu_prefill_chunk_size=2,
             logits_to_keep=1,
         )
 
@@ -1027,7 +1027,7 @@ def test_beam_forward_last_only_backend_warns_only_once_per_instance() -> None:
             inputs_embeds=inputs_embeds,
             past_key_values=MobilintBeamCache(mxq_model, batch_size=1),
             cache_position=torch.arange(2, dtype=torch.long),
-            prefill_chunk_size=2,
+            npu_prefill_chunk_size=2,
             logits_to_keep=0,
         )
         # Second call — same instance — must not re-emit it.
@@ -1036,7 +1036,7 @@ def test_beam_forward_last_only_backend_warns_only_once_per_instance() -> None:
             inputs_embeds=inputs_embeds,
             past_key_values=MobilintBeamCache(mxq_model, batch_size=1),
             cache_position=torch.arange(2, dtype=torch.long),
-            prefill_chunk_size=2,
+            npu_prefill_chunk_size=2,
             logits_to_keep=0,
         )
 

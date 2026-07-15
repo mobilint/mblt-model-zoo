@@ -40,7 +40,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         output_hidden_states: Union[bool, None] = None,
         cache_position: Union[torch.LongTensor, None] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        prefill_chunk_size: Union[int, None] = None,
+        npu_prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs], # type: ignore
     ) -> CausalLMOutputWithPast:
@@ -78,7 +78,7 @@ class MobilintCohere2ForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds,
             past_key_values,
             cache_position,
-            prefill_chunk_size,
+            npu_prefill_chunk_size,
             count_npu_time=count_npu_time,
             attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,

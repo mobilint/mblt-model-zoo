@@ -325,12 +325,12 @@ class _DummyVisionLatencyVLMTPSMeasurer(_DummyVLMTPSMeasurer):
         self,
         inputs_embeds: torch.Tensor,
         num_decode: int,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         show_progress: bool = False,
         progress_desc=None,
     ) -> SingleMeasurement:
         """Return a lightweight LLM measurement without running generation."""
-        del inputs_embeds, prefill_chunk_size, show_progress, progress_desc
+        del inputs_embeds, npu_prefill_chunk_size, show_progress, progress_desc
         return SingleMeasurement(
             num_prefill=2,
             num_decode=int(num_decode),
@@ -357,7 +357,7 @@ class _RoutingTPSMeasurer(TPSMeasurer):
         self,
         num_prefill=512,
         num_decode=128,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace_path=None,
         show_progress: bool = False,
         progress_desc=None,
@@ -565,7 +565,7 @@ def test_run_text_measure_forwards_resolved_batch_size(monkeypatch):
         repeat=1,
         prefill=8,
         decode=2,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace=None,
         device_metrics=False,
         json=None,
@@ -661,7 +661,7 @@ def test_run_text_sweep_forwards_resolved_batch_size(monkeypatch):
         prefill_range=(8, 8, 1),
         cache_lengths=[4],
         decode_window=2,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace=None,
         device_metrics=False,
         json=None,
@@ -794,7 +794,7 @@ def test_run_text_sweep_repeat_aggregates_trace_energy_scope(monkeypatch, tmp_pa
         prefill_range=(8, 16, 8),
         cache_lengths=[4, 8],
         decode_window=2,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace=None,
         device_metrics=True,
         json=str(json_path),
@@ -1402,7 +1402,7 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
         repeat=1,
         prefill=8,
         decode=2,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace=None,
         device_metrics=True,
         json=str(json_path),
@@ -1419,7 +1419,7 @@ def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, 
     ]
 
 
-def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
+def test_run_vlm_measure_forwards_npu_prefill_chunk_size(monkeypatch):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 
     calls: list[dict[str, object]] = []
@@ -1488,7 +1488,7 @@ def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
         prefill=8,
         decode=2,
         prompt="Describe the image.",
-        prefill_chunk_size=64,
+        npu_prefill_chunk_size=64,
         device_metrics=False,
         json=None,
         device_backend="none",
@@ -1496,7 +1496,7 @@ def test_run_vlm_measure_forwards_prefill_chunk_size(monkeypatch):
 
     assert tps_cli._run_vlm_measure(args) == 0
     llm_calls = [call for call in calls if call["phase"] == "llm"]
-    assert [call["prefill_chunk_size"] for call in llm_calls] == [64, 64]
+    assert [call["npu_prefill_chunk_size"] for call in llm_calls] == [64, 64]
     assert [call["batch_size"] for call in llm_calls] == [2, 2]
     assert [call["prefill_range"] for call in llm_calls] == [(8, 8, 8), (8, 8, 8)]
     assert [call["cache_lengths"] for call in llm_calls] == [[8], [8]]
@@ -1569,7 +1569,7 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
         prefill=8,
         decode=2,
         prompt="Describe the image.",
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         device_metrics=False,
         json=str(json_path),
         device_backend="none",
@@ -1669,7 +1669,7 @@ def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, t
         prefill=8,
         decode=2,
         prompt="Describe the image.",
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         device_metrics=True,
         json=str(json_path),
         device_backend="npu",
@@ -1768,7 +1768,7 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
         prefill=8,
         decode=2,
         prompt="Describe the image.",
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         device_metrics=False,
         json=None,
         device_backend="npu",
@@ -1927,21 +1927,21 @@ def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytes
     model_inputs = _DummyGenerationModel().prepare_inputs_for_generation(
         torch.tensor([[1]]),
         count_npu_time=True,
-        prefill_chunk_size=64,
+        npu_prefill_chunk_size=64,
     )
 
     assert model_inputs["count_npu_time"] is True
-    assert model_inputs["prefill_chunk_size"] == 64
+    assert model_inputs["npu_prefill_chunk_size"] == 64
 
 
-def test_text_model_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+def test_text_model_prepare_inputs_preserves_npu_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
     """Verify text-only model MRO preserves TPS prefill chunk kwargs for generation."""
     from mblt_model_zoo.hf_transformers.models.llama.modeling_llama import MobilintLlamaForCausalLM
 
     signature = inspect.signature(MobilintLlamaForCausalLM.prepare_inputs_for_generation)
 
     assert "count_npu_time" in signature.parameters
-    assert "prefill_chunk_size" in signature.parameters
+    assert "npu_prefill_chunk_size" in signature.parameters
 
     def _base_prepare_inputs_for_generation(*args, **kwargs):
         del args, kwargs
@@ -1957,17 +1957,17 @@ def test_text_model_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pyt
     model_inputs = model.prepare_inputs_for_generation(
         torch.tensor([[1]]),
         count_npu_time=True,
-        prefill_chunk_size=64,
+        npu_prefill_chunk_size=64,
     )
 
     assert model_inputs["count_npu_time"] is True
-    assert model_inputs["prefill_chunk_size"] == 64
+    assert model_inputs["npu_prefill_chunk_size"] == 64
 
 
-def test_qwen2_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+def test_qwen2_vl_prepare_inputs_preserves_npu_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
     signature = inspect.signature(MobilintQwen2VLForConditionalGeneration.prepare_inputs_for_generation)
 
-    assert "prefill_chunk_size" in signature.parameters
+    assert "npu_prefill_chunk_size" in signature.parameters
 
     def _base_prepare_inputs_for_generation(*args, **kwargs):
         del args, kwargs
@@ -1983,11 +1983,11 @@ def test_qwen2_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytes
     model_inputs = model.prepare_inputs_for_generation(
         torch.tensor([[1]]),
         count_npu_time=True,
-        prefill_chunk_size=64,
+        npu_prefill_chunk_size=64,
     )
 
     assert model_inputs["count_npu_time"] is True
-    assert model_inputs["prefill_chunk_size"] == 64
+    assert model_inputs["npu_prefill_chunk_size"] == 64
 
 
 @pytest.mark.parametrize("spec", ["", "1", "1:2", "1:2:0", "2:1:1", "a:b:c"])
@@ -2609,7 +2609,7 @@ def _trace_scope_args(**overrides):
         prefill_range=(8, 8, 1),
         cache_lengths=[4],
         decode_window=2,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         trace="trace.json",
         device_metrics=False,
         json=None,

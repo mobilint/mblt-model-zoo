@@ -42,7 +42,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        prefill_chunk_size: Union[int, None] = None,
+        npu_prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
     ) -> Union[Tuple[Union[torch.Tensor, MobilintCache], ...], CausalLMOutputWithPast]:
         """Run the Exaone causal LM with HF-style ``logits_to_keep``.
@@ -88,7 +88,7 @@ class MobilintExaoneForCausalLM(MobilintModelMixin, MobilintGenerationMixin):
             inputs_embeds,
             past_key_values,
             cache_position,
-            prefill_chunk_size,
+            npu_prefill_chunk_size,
             count_npu_time=count_npu_time,
             attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,
