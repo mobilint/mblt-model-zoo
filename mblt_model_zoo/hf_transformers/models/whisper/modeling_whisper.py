@@ -191,6 +191,53 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             return None
         return source_indices
 
+    def _decoder_forward_no_cache(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        cache_position: torch.Tensor,
+        *,
+        npu_prefill_chunk_size: Union[int, None],
+    ) -> torch.Tensor:
+        """Chunked ``decoder_forward`` for the cache-disabled path.
+
+        Whisper decoder prefills are typically tiny (a few special tokens plus
+        optional prompt conditioning), so chunking rarely engages. It exists
+        to honor ``npu_prefill_chunk_size`` on the ``use_cache=False`` path
+        instead of silently ignoring the requested limit.
+        """
+        resolved_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
+        # Whisper wraps hidden_states as ``(batch, 1, seq, dim)``; the sequence
+        # axis is second-to-last regardless of the exact rank.
+        seq_axis = hidden_states.ndim - 2
+        seq_length = int(hidden_states.shape[seq_axis])
+        if seq_length <= resolved_chunk_size:
+            return super().decoder_forward(hidden_states, encoder_hidden_states, None, cache_position)
+
+        mxq_model = self.npu_backend.mxq_model
+        encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
+        chunk_tensors: list[torch.Tensor] = []
+        cursor = 0
+        while cursor < seq_length:
+            chunk_end = min(cursor + resolved_chunk_size, seq_length)
+            slicer = [slice(None)] * hidden_states.ndim
+            slicer[seq_axis] = slice(cursor, chunk_end)
+            chunk_hidden = hidden_states[tuple(slicer)]
+            chunk_numpy = chunk_hidden.type(torch.float32).cpu().numpy()
+            chunk_result = mxq_model.infer(
+                [chunk_numpy, encoder_hidden_states_numpy], None, cursor
+            )
+            assert chunk_result is not None, "mxq infer result is None!"
+            chunk_tensor = torch.tensor(
+                chunk_result[0], dtype=hidden_states.dtype, device=hidden_states.device
+            )
+            chunk_tensor = self._normalize_decoder_logits(
+                chunk_tensor, sequence_length=chunk_end - cursor
+            )
+            chunk_tensors.append(chunk_tensor)
+            cursor = chunk_end
+        return torch.cat(chunk_tensors, dim=2)
+
     def decoder_forward(
         self,
         hidden_states: torch.Tensor,
@@ -203,7 +250,12 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         """Run Whisper decoder MXQ by replaying only beam suffixes missing from active cache."""
         batch_size = int(hidden_states.shape[0])
         if past_key_values is None:
-            return super().decoder_forward(hidden_states, encoder_hidden_states, past_key_values, cache_position)
+            return self._decoder_forward_no_cache(
+                hidden_states,
+                encoder_hidden_states,
+                cache_position,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
+            )
 
         if input_ids is None:
             raise ValueError("MobilintWhisperCache requires input_ids to track beam token histories.")

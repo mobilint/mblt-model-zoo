@@ -102,6 +102,53 @@ def test_decoder_forward_without_chunk_size_uses_single_infer() -> None:
     assert mxq_model.calls[0]["suffix_length"] == 5
 
 
+def test_decoder_forward_no_cache_honors_chunk_size() -> None:
+    """With past_key_values=None, chunk_size should still split the pre-embedded sequence."""
+    mxq_model = _ChunkTrackingMxqModel()
+    decoder = object.__new__(MobilintWhisperDecoder)
+    decoder.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+
+    # Whisper wraps the decoder input as (batch=1, extra_dim=1, seq, dim).
+    seq_length = 5
+    hidden_states = torch.ones((1, 1, seq_length, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.ones((1, 1, 1, 2), dtype=torch.float32)
+
+    decoder.decoder_forward(
+        hidden_states,
+        encoder_hidden_states,
+        past_key_values=None,
+        cache_position=torch.arange(seq_length, dtype=torch.long),
+        input_ids=torch.tensor([[10, 20, 30, 40, 50]], dtype=torch.long),
+        npu_prefill_chunk_size=2,
+    )
+
+    assert [call["suffix_length"] for call in mxq_model.calls] == [2, 2, 1]
+    assert [call["prefix_length"] for call in mxq_model.calls] == [0, 2, 4]
+
+
+def test_decoder_forward_no_cache_short_input_uses_single_infer() -> None:
+    """No-cache path with seq <= chunk_size stays on the single-shot super().decoder_forward call."""
+    mxq_model = _ChunkTrackingMxqModel()
+    decoder = object.__new__(MobilintWhisperDecoder)
+    decoder.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+
+    hidden_states = torch.ones((1, 1, 3, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.ones((1, 1, 1, 2), dtype=torch.float32)
+
+    decoder.decoder_forward(
+        hidden_states,
+        encoder_hidden_states,
+        past_key_values=None,
+        cache_position=torch.arange(3, dtype=torch.long),
+        input_ids=torch.tensor([[10, 20, 30]], dtype=torch.long),
+        npu_prefill_chunk_size=4,
+    )
+
+    assert len(mxq_model.calls) == 1
+    assert mxq_model.calls[0]["suffix_length"] == 3
+    assert mxq_model.calls[0]["prefix_length"] == 0
+
+
 def test_decoder_forward_signature_declares_npu_prefill_chunk_size() -> None:
     """MobilintWhisperDecoder.forward must accept the kwarg so callers below can pass it down."""
     import inspect
