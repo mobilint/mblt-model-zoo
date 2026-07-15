@@ -223,9 +223,6 @@ def run_vision_inference(
     model = create_vision_engine(args)
     try:
         actual_task = str(model.post_cfg.get("task", "")).lower()
-        postprocess_kwargs: dict[str, Any] = {}
-        if getattr(args, "e2e", None) is not None:
-            postprocess_kwargs["e2e"] = args.e2e
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk
@@ -249,7 +246,7 @@ def run_vision_inference(
                 print("Generated raw export-style postprocess output. Use `--raw-output` to save it.")
             return raw_output
 
-        result = model.postprocess(output, **postprocess_kwargs)
+        result = model.postprocess(output)
 
         save_path = resolve_output_path(args.output, command, args.source, args.model)
         result.plot(source_path=args.source, save_path=save_path, **plot_kwargs)
