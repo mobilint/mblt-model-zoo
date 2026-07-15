@@ -95,23 +95,7 @@ def _resolve_onnx_providers(ort_module: Any, requested_providers: Sequence[str] 
         The provider list passed to ``InferenceSession``.
     """
 
-    if requested_providers is not None:
-        return list(requested_providers)
-
-    get_available = getattr(ort_module, "get_available_providers", None)
-    if not callable(get_available):
-        return ["CPUExecutionProvider"]
-
-    available_providers = set(cast(Sequence[str], get_available()))
-    preferred_providers = [
-        "TensorrtExecutionProvider",
-        "CUDAExecutionProvider",
-        "ROCMExecutionProvider",
-        "DmlExecutionProvider",
-        "CPUExecutionProvider",
-    ]
-    resolved_providers = [provider for provider in preferred_providers if provider in available_providers]
-    return resolved_providers or ["CPUExecutionProvider"]
+    return list(requested_providers) if requested_providers is not None else ["CPUExecutionProvider"]
 
 
 def _model_name_aliasing(model_name: str) -> str:
@@ -139,7 +123,7 @@ def _model_name_aliasing(model_name: str) -> str:
     if len(separator_matches) == 1:
         return separator_matches[0]
     if len(separator_matches) > 1:
-        raise ValueError(f"ambiguous model name '{model_name}'. Matches: {separator_matches}.")
+        raise ValueError(f"Ambiguous model name '{model_name}'. Matches: {separator_matches}.")
 
     compact_requested = requested.replace("_", "")
     compact_matches = [
@@ -148,7 +132,7 @@ def _model_name_aliasing(model_name: str) -> str:
     if len(compact_matches) == 1:
         return compact_matches[0]
     if len(compact_matches) > 1:
-        raise ValueError(f"ambiguous model name '{model_name}'. Matches: {compact_matches}.")
+        raise ValueError(f"Ambiguous model name '{model_name}'. Matches: {compact_matches}.")
     raise ValueError(f"Model name '{model_name}' is not supported.")
 
 

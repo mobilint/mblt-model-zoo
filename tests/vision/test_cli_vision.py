@@ -263,6 +263,7 @@ def test_cli_predict_applies_face_detection_thresholds(monkeypatch: pytest.Monke
     engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     assert calls["thresholds"] == (0.25, 0.6)
     assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
+    assert calls["postprocess"] == {"output": "raw-output", "kwargs": {}}
     assert calls["disposed"] is True
 
 

@@ -91,7 +91,7 @@ model = MBLT_Engine(
 - `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` or `file_cfg.model_path` and otherwise falls back to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
 - `model_path`: Local MXQ or ONNX path. Use `""` to download and cache the published artifact automatically for the selected framework.
 - `mxq_path` and `onnx_path`: Backward-compatible explicit path aliases.
-- `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine prefers available GPU providers such as CUDA and falls back to CPU.
+- `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine uses `CPUExecutionProvider`; pass this option to select another provider order explicitly.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
 Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
@@ -268,6 +268,10 @@ MXQ. If the explicit framework conflicts with the local file suffix, the command
 clear error. The compatibility flags `--mxq-path` and `--onnx-path` stay separate from
 `--model-path`, so framework-specific resolution still works when both a local MXQ artifact and an
 explicit ONNX runtime are involved.
+
+ONNX inference uses ONNX Runtime's `CPUExecutionProvider` by default. This avoids probing TensorRT,
+CUDA, or other accelerators during normal package use. Python callers that intentionally need another
+provider can pass its ordered provider list through `MBLT_Engine(onnx_providers=...)`.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
