@@ -28,9 +28,9 @@ from mblt_model_zoo.vision import MBLT_Engine
 model = MBLT_Engine(model_cls="alexnet", framework="onnx")
 ```
 
-When `framework="onnx"` is selected, the engine prefers available GPU-capable ONNX Runtime
-providers such as `CUDAExecutionProvider` and keeps CPU as a fallback. Pass `onnx_providers` to
-override the provider order explicitly when needed. If `model_path` or `file_cfg.model_path` ends
+When `framework="onnx"` is selected, the engine uses ONNX Runtime's `CPUExecutionProvider` by
+default. Pass `onnx_providers` to select another provider order explicitly when needed. If
+`model_path` or `file_cfg.model_path` ends
 with `.mxq` or `.onnx`, the engine auto-detects the framework from that suffix when `framework` is
 omitted.
 
