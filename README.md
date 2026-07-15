@@ -269,6 +269,10 @@ clear error. The compatibility flags `--mxq-path` and `--onnx-path` stay separat
 `--model-path`, so framework-specific resolution still works when both a local MXQ artifact and an
 explicit ONNX runtime are involved.
 
+ONNX inference uses ONNX Runtime's `CPUExecutionProvider` by default. This avoids probing TensorRT,
+CUDA, or other accelerators during normal package use. Python callers that intentionally need another
+provider can pass its ordered provider list through `MBLT_Engine(onnx_providers=...)`.
+
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.mxq
 mblt-model-zoo predict --source ./cat.png --model resnet50 --model-path ./resnet50.onnx

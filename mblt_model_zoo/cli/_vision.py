@@ -174,7 +174,7 @@ def require_source_file(source: str) -> None:
 
 
 def create_vision_engine(args: argparse.Namespace) -> Any:
-    """Create a vision engine from the shared CLI model options.
+    """Creates a vision engine from shared CLI model options.
 
     Args:
         args: Parsed command options containing common vision model arguments.
@@ -196,6 +196,7 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
     postprocess_kwargs: dict[str, Any] = {}
     if getattr(args, "e2e", None) is not None:
         postprocess_kwargs["e2e"] = args.e2e
+
     return MBLT_Engine(
         model_cls=args.model,
         model_type=args.model_type,
@@ -219,11 +220,12 @@ def run_vision_inference(
     """Runs a complete vision inference pipeline for a CLI command."""
 
     require_source_file(args.source)
-
     model = create_vision_engine(args)
     try:
         actual_task = str(model.post_cfg.get("task", "")).lower()
         postprocess_kwargs: dict[str, Any] = {}
+        if getattr(args, "e2e", None) is not None:
+            postprocess_kwargs["e2e"] = args.e2e
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk

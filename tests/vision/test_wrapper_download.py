@@ -21,6 +21,18 @@ from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
+def test_onnx_runtime_defaults_to_cpu_provider() -> None:
+    """Avoid accelerator provider probing unless callers explicitly opt in."""
+
+    class _FakeOrt:
+        @staticmethod
+        def get_available_providers() -> list[str]:
+            return ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+
+    assert wrapper._resolve_onnx_providers(_FakeOrt()) == ["CPUExecutionProvider"]
+    assert wrapper._resolve_onnx_providers(_FakeOrt(), ["CUDAExecutionProvider"]) == ["CUDAExecutionProvider"]
+
+
 def test_file_config_cleansing_prefers_existing_mxq_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1166,10 +1178,11 @@ def test_non_e2e_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> 
 
     assert isinstance(result, torch.Tensor)
     assert result.shape == (1, 300, 57)
-    assert torch.equal(result[0, 0, :4], boxes[0, 0])
-    assert torch.allclose(result[0, 0, 4], torch.tensor(0.9))
-    assert torch.allclose(result[0, 0, 5], torch.tensor(0.0))
-    assert torch.equal(result[0, 0, 6:], keypoints[0, 0])
+    first_detection = result[0][0]
+    assert torch.equal(first_detection[:4], boxes[0, 0])
+    assert torch.allclose(first_detection[4], torch.tensor(0.9))
+    assert torch.allclose(first_detection[5], torch.tensor(0.0))
+    assert torch.equal(first_detection[6:], keypoints[0, 0])
 
 
 def test_non_e2e_dflfree_obb_preserves_canonical_row_width() -> None:

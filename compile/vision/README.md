@@ -56,6 +56,10 @@ supplies the ONNX artifact. Downloaded ONNX files and compiled outputs use
 `~/.mblt_model_zoo`; without `--save-path`, the compiler writes
 `~/.mblt_model_zoo/<onnx-stem>.mxq`.
 
+The ONNX preprocessing engine uses ONNX Runtime's CPU provider by default, so compilation does not
+probe TensorRT, CUDA, or other accelerators. Callers that construct `MBLT_Engine` directly can opt
+into another provider order with `onnx_providers`.
+
 ## Calibration Data
 
 The compilation data pipeline has three levels:
