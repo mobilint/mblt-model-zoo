@@ -143,50 +143,6 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     def launch(self):
         self.npu_backend.launch()
 
-    def prepare_inputs_for_generation(
-        self,
-        input_ids: torch.LongTensor,
-        past_key_values: Optional[Any] = None,
-        attention_mask: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        *,
-        count_npu_time: bool = False,
-        npu_prefill_chunk_size: Optional[int] = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Prepare generation inputs while preserving Mobilint benchmark kwargs.
-
-        Text-only Mobilint causal LM classes list :class:`MobilintModelMixin` before
-        :class:`MobilintGenerationMixin` in their MRO, so this hook must live on the model mixin
-        to ensure Hugging Face generation forwards benchmark-only kwargs to ``forward``.
-
-        Args:
-            input_ids: Token ids forwarded to the upstream generation helper.
-            past_key_values: Optional generation cache.
-            attention_mask: Optional attention mask.
-            inputs_embeds: Optional input embeddings.
-            cache_position: Optional cache positions.
-            count_npu_time: Whether Mobilint NPU timing should be accumulated.
-            npu_prefill_chunk_size: Optional Mobilint prefill chunk size.
-            **kwargs: Additional keyword arguments forwarded to the upstream generation helper.
-
-        Returns:
-            Prepared model inputs for the next generation step.
-        """
-        model_inputs = super().prepare_inputs_for_generation(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            inputs_embeds=inputs_embeds,
-            cache_position=cache_position,
-            **kwargs,
-        )
-        model_inputs["count_npu_time"] = count_npu_time
-        if npu_prefill_chunk_size is not None:
-            model_inputs["npu_prefill_chunk_size"] = npu_prefill_chunk_size
-        return model_inputs
-
     def dispose(self):
         self.npu_backend.dispose()
 

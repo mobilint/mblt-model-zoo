@@ -1990,6 +1990,47 @@ def test_qwen2_vl_prepare_inputs_preserves_npu_prefill_chunk_size(monkeypatch: p
     assert model_inputs["npu_prefill_chunk_size"] == 64
 
 
+def test_non_generative_models_do_not_expose_generation_hook(caplog: pytest.LogCaptureFixture):
+    """Regression: MobilintModelMixin must not leak `prepare_inputs_for_generation`
+    onto non-generative subclasses. Otherwise `PreTrainedModel.can_generate()` warns
+    about generative capabilities on BERT / SigLIP / Whisper encoders / VLM vision
+    towers when they are initialized.
+    """
+    from mblt_model_zoo.hf_transformers.models.bert.modeling_bert import MobilintBertModel
+    from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import (
+        MobilintQwen2VisionTransformerPretrainedModel,
+    )
+    from mblt_model_zoo.hf_transformers.models.siglip.modeling_siglip import MobilintSiglipVisionModel
+    from mblt_model_zoo.hf_transformers.models.whisper.modeling_whisper import (
+        MobilintWhisperDecoder,
+        MobilintWhisperEncoder,
+    )
+
+    non_generative_classes = (
+        MobilintModelMixin,
+        MobilintBertModel,
+        MobilintSiglipVisionModel,
+        MobilintWhisperEncoder,
+        MobilintWhisperDecoder,
+        MobilintQwen2VisionTransformerPretrainedModel,
+    )
+
+    with caplog.at_level("WARNING", logger="transformers.modeling_utils"):
+        for cls in non_generative_classes:
+            assert cls.can_generate() is False, f"{cls.__name__}.can_generate() must be False"
+            assert not hasattr(cls, "prepare_inputs_for_generation"), (
+                f"{cls.__name__} must not expose prepare_inputs_for_generation"
+            )
+
+    generative_warnings = [
+        record for record in caplog.records if "has generative capabilities" in record.getMessage()
+    ]
+    assert not generative_warnings, (
+        "can_generate() emitted generative-capability warnings for non-generative classes: "
+        + "; ".join(record.getMessage().splitlines()[0] for record in generative_warnings)
+    )
+
+
 @pytest.mark.parametrize("spec", ["", "1", "1:2", "1:2:0", "2:1:1", "a:b:c"])
 def test_cli_tps_invalid_range_exits(spec: str):
     parser = build_parser()
