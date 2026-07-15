@@ -481,7 +481,7 @@ class MobilintEagle3BaseModelMixin:
 
         hidden_states_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
-        chunk_size = self.resolve_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        chunk_size = self.resolve_npu_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
         timing_phase = "prefill" if past_key_values_length == 0 else "decode"
         for chunk_index in range(math.ceil(seq_length / chunk_size)):
             seq_start = chunk_index * chunk_size
@@ -640,7 +640,7 @@ class MobilintEagle3DraftModelMixin:
             if hidden_states_numpy.ndim == 3:
                 hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
 
-        chunk_size = self.resolve_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        chunk_size = self.resolve_npu_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
         hidden_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
         base_cache_position = cache.get_draft_seq_length() + add_cache_position

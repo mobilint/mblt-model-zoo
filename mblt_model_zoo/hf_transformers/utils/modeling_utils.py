@@ -501,7 +501,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         *,
         do_infer: Callable[[int, int], np.ndarray],
         seq_len: int,
-        prefill_chunk_size: int,
+        npu_prefill_chunk_size: int,
         logits_to_keep: Union[int, torch.Tensor],
         dtype: torch.dtype,
         device: torch.device,
@@ -564,14 +564,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         is_default_keep = self._is_last_only_selector(logits_to_keep, seq_len)
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
-        # Path 1 & 2: chunked pass with caller's prefill_chunk_size. Path 2
+        # Path 1 & 2: chunked pass with caller's npu_prefill_chunk_size. Path 2
         # extracts kept-position rows on the fly and drops each chunk right
         # after, so peak memory stays at (kept_positions * vocab) instead of
         # spiking to (num_of_chunks * chunk_len * vocab) at concat time.
         # logits_to_keep=1 dominates in practice; keep-all only shows up in
         # perplexity eval — kept_positions << seq_len for the common case.
         if is_default_keep or supports_all:
-            num_of_chunks = math.ceil(seq_len / prefill_chunk_size)
+            num_of_chunks = math.ceil(seq_len / npu_prefill_chunk_size)
             assert num_of_chunks > 0, "num_of_chunks is not positive! num_of_chunks: %d" % num_of_chunks
 
             if supports_all:
@@ -582,8 +582,8 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
             logits_ndarray: Optional[np.ndarray] = None
             for i in range(num_of_chunks):
-                start_index = i * prefill_chunk_size
-                end_index = min(start_index + prefill_chunk_size, seq_len)
+                start_index = i * npu_prefill_chunk_size
+                end_index = min(start_index + npu_prefill_chunk_size, seq_len)
                 logits_ndarray = do_infer(start_index, end_index)
                 if supports_all:
                     token_axis = logits_ndarray.ndim - 2
@@ -640,13 +640,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         cursor = 0
         for p in walk_positions:
             while cursor < p:
-                end_index = min(cursor + prefill_chunk_size, p)
+                end_index = min(cursor + npu_prefill_chunk_size, p)
                 do_infer(cursor, end_index)
                 cursor = end_index
             per_position_logits[p] = do_infer(cursor, cursor + 1)
             cursor += 1
         while cursor < seq_len:
-            end_index = min(cursor + prefill_chunk_size, seq_len)
+            end_index = min(cursor + npu_prefill_chunk_size, seq_len)
             do_infer(cursor, end_index)
             cursor = end_index
 
@@ -670,7 +670,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         inputs_embeds: torch.Tensor,
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         attention_mask: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 1,
@@ -701,7 +701,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         last-only compiled models. A runtime WARNING fires once per model
         instance on the first Path 3 entry to surface the cost.
         """
-        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
         self.npu_time = 0.0 if count_npu_time else None
 
         if attention_mask is not None:
@@ -710,7 +710,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 inputs_embeds,
                 attention_mask,
                 past_key_values,
-                resolved_prefill_chunk_size,
+                resolved_npu_prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 logits_to_keep=logits_to_keep,
             )
@@ -754,7 +754,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         logits = self._run_chunked_logits_to_keep(
             do_infer=_do_infer,
             seq_len=seq_len,
-            prefill_chunk_size=resolved_prefill_chunk_size,
+            npu_prefill_chunk_size=resolved_npu_prefill_chunk_size,
             logits_to_keep=logits_to_keep,
             dtype=inputs_embeds.dtype,
             device=inputs_embeds.device,
@@ -801,7 +801,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         ``chunk_size`` is a per-call argument (not a fixed attribute) because
         Path 3 sizes each chunk dynamically based on the smallest next-needed
         walk position across still-active items, while Paths 1 and 2 pass the
-        caller's ``prefill_chunk_size`` unchanged.
+        caller's ``npu_prefill_chunk_size`` unchanged.
         """
         sequence_lengths_chunks: list[int] = []
         cache_sizes_chunks: list[int] = []
@@ -844,7 +844,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         inputs_embeds: torch.Tensor,
         attention_mask: torch.Tensor,
         past_key_values: Optional[MobilintCache],
-        prefill_chunk_size: int = 0,
+        npu_prefill_chunk_size: int = 0,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
     ):
@@ -904,10 +904,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
         max_sequence_length = max(sequence_lengths)
         mxq_model = self.npu_backend.mxq_model
-        if prefill_chunk_size == 0:
-            prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
-        assert prefill_chunk_size > 0, (
-            "prefill_chunk_size should be a positive number! prefill_chunk_size: %d" % prefill_chunk_size
+        if npu_prefill_chunk_size == 0:
+            npu_prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
+        assert npu_prefill_chunk_size > 0, (
+            "npu_prefill_chunk_size should be a positive number! npu_prefill_chunk_size: %d" % npu_prefill_chunk_size
         )
 
         # int==1 always hits Path 1 (the existing per-item cursor code handles
@@ -1012,11 +1012,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # contract regressions stay visible.
         # ------------------------------------------------------------------
         if is_default_keep:
-            num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
+            num_of_chunks = math.ceil(max_sequence_length / npu_prefill_chunk_size)
             logits_dict: dict[int, torch.Tensor] = {}
 
             for i in range(num_of_chunks):
-                start_index = i * prefill_chunk_size
+                start_index = i * npu_prefill_chunk_size
 
                 (
                     sequence_lengths_chunks,
@@ -1030,7 +1030,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     sequence_lengths,
                     inputs_embeds_masked,
                     start_index,
-                    prefill_chunk_size,
+                    npu_prefill_chunk_size,
                     past_key_values,
                     include_prefill_masks=True,
                 )
@@ -1236,12 +1236,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # caller order and duplicates survive.
         # ------------------------------------------------------------------
         if supports_all:
-            num_of_chunks = math.ceil(max_sequence_length / prefill_chunk_size)
+            num_of_chunks = math.ceil(max_sequence_length / npu_prefill_chunk_size)
             kept_by_item: dict[int, dict[int, np.ndarray]] = {j: {} for j in range(batch_size)}
             walk_ptr_by_item: dict[int, int] = {j: 0 for j in range(batch_size)}
 
             for i in range(num_of_chunks):
-                start_index = i * prefill_chunk_size
+                start_index = i * npu_prefill_chunk_size
 
                 (
                     sequence_lengths_chunks,
@@ -1255,7 +1255,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     sequence_lengths,
                     inputs_embeds_masked,
                     start_index,
-                    prefill_chunk_size,
+                    npu_prefill_chunk_size,
                     past_key_values,
                 )
 
@@ -1381,11 +1381,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                         min_next_needed = nn
 
             if min_next_needed is None:
-                chunk = prefill_chunk_size
+                chunk = npu_prefill_chunk_size
             elif min_next_needed == cursor:
                 chunk = 1
             else:
-                chunk = min(prefill_chunk_size, min_next_needed - cursor)
+                chunk = min(npu_prefill_chunk_size, min_next_needed - cursor)
 
             # Every item still within its sequence gets an infer call at this
             # cursor so its KV cache advances monotonically through all positions;
@@ -1515,22 +1515,25 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 "Create MobilintCache with a batch size greater than or equal to the batched request."
             )
 
-    def resolve_prefill_chunk_size(self, prefill_chunk_size: Optional[int]) -> int:
-        explicit_prefill_chunk_size = self._coerce_positive_int(prefill_chunk_size)
-        if explicit_prefill_chunk_size is not None:
-            return explicit_prefill_chunk_size
+    def resolve_npu_prefill_chunk_size(self, npu_prefill_chunk_size: Optional[int]) -> int:
+        explicit_npu_prefill_chunk_size = self._coerce_positive_int(npu_prefill_chunk_size)
+        if explicit_npu_prefill_chunk_size is not None:
+            return explicit_npu_prefill_chunk_size
 
-        config_value = self._get_config_prefill_chunk_size()
-        config_prefill_chunk_size = self._coerce_positive_int(config_value)
-        if config_prefill_chunk_size is not None:
-            return config_prefill_chunk_size
+        config_value = self._get_config_npu_prefill_chunk_size()
+        config_npu_prefill_chunk_size = self._coerce_positive_int(config_value)
+        if config_npu_prefill_chunk_size is not None:
+            return config_npu_prefill_chunk_size
 
         return self._DEFAULT_PREFILL_CHUNK_SIZE
 
-    def _get_config_prefill_chunk_size(self) -> Any:
-        config_value = getattr(self.config, "npu_prefill_chunk_size", None)
+    def _get_config_npu_prefill_chunk_size(self) -> Any:
+        config = getattr(self, "config", None)
+        if config is None:
+            return None
+        config_value = getattr(config, "npu_prefill_chunk_size", None)
         if isinstance(config_value, dict):
-            core_mode = getattr(self.npu_backend, "core_mode", None)
+            core_mode = getattr(getattr(self, "npu_backend", None), "core_mode", None)
             if core_mode is None:
                 return None
             return config_value.get(core_mode)

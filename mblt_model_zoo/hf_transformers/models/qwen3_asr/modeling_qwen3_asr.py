@@ -202,7 +202,7 @@ class MobilintQwen3ASRTextModel(
         inputs_embeds: torch.Tensor,
         past_key_values: MobilintBeamCache,
         cache_position: torch.Tensor,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 0,
     ) -> torch.Tensor:
@@ -234,7 +234,7 @@ class MobilintQwen3ASRTextModel(
             raise ValueError("Qwen3-ASR beam decode received an empty token sequence.")
 
         past_key_values.ensure_batch_size(batch_size)
-        resolved_prefill_chunk_size = self.resolve_prefill_chunk_size(prefill_chunk_size)
+        resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
         mxq_model = self.npu_backend.mxq_model
         # Mirror the 3-path dispatch in ``_run_chunked_logits_to_keep``: on a
         # last-only MXQ each ``mxq_model.infer`` returns a single row instead
@@ -251,7 +251,7 @@ class MobilintQwen3ASRTextModel(
         last_only_slow = not is_default_keep and not supports_all
         if last_only_slow:
             self._warn_last_only_slow_path_once()
-        effective_chunk_size = 1 if last_only_slow else resolved_prefill_chunk_size
+        effective_chunk_size = 1 if last_only_slow else resolved_npu_prefill_chunk_size
         logits_list: list[torch.Tensor] = []
         beam_offsets: list[int] = []
         logits_by_target_tokens: dict[tuple[int, tuple[int, ...]], tuple[torch.Tensor, int]] = {}
@@ -434,7 +434,7 @@ class MobilintQwen3ASRTextModel(
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
@@ -482,7 +482,7 @@ class MobilintQwen3ASRTextModel(
                 inputs_embeds=inputs_embeds,
                 past_key_values=past_key_values,
                 cache_position=cache_position,
-                prefill_chunk_size=prefill_chunk_size,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 logits_to_keep=logits_to_keep,
             )
@@ -491,7 +491,7 @@ class MobilintQwen3ASRTextModel(
                 inputs_embeds=inputs_embeds,
                 past_key_values=past_key_values,
                 cache_position=cache_position,
-                prefill_chunk_size=prefill_chunk_size,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 attention_mask=None,
                 logits_to_keep=logits_to_keep,

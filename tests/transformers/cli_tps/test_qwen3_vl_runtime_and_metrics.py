@@ -42,10 +42,10 @@ def test_mobilint_qwen3_vl_generation_hooks_expose_inputs_embeds(model_path: str
     assert "inputs_embeds" in prepare_signature.parameters
 
 
-def test_qwen3_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+def test_qwen3_vl_prepare_inputs_preserves_npu_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
     signature = inspect.signature(MobilintQwen3VLForConditionalGeneration.prepare_inputs_for_generation)
 
-    assert "prefill_chunk_size" in signature.parameters
+    assert "npu_prefill_chunk_size" in signature.parameters
 
     def _base_prepare_inputs_for_generation(*args, **kwargs):
         del args, kwargs
@@ -61,8 +61,8 @@ def test_qwen3_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytes
     model_inputs = model.prepare_inputs_for_generation(
         torch.tensor([[1]]),
         count_npu_time=True,
-        prefill_chunk_size=64,
+        npu_prefill_chunk_size=64,
     )
 
     assert model_inputs["count_npu_time"] is True
-    assert model_inputs["prefill_chunk_size"] == 64
+    assert model_inputs["npu_prefill_chunk_size"] == 64

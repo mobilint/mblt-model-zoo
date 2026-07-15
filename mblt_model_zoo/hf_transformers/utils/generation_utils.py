@@ -22,7 +22,7 @@ _EAGLE3_GENERATE_IGNORED_ARGS_MSG = {
     "attention_mask": "attention_mask is not supported and will be ignored.",
     "min_new_tokens": "min_new_tokens is not supported and will be ignored.",
     "pad_token_id": "pad_token_id is not supported and will be ignored.",
-    "prefill_chunk_size": "prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored.",
+    "npu_prefill_chunk_size": "npu_prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored.",
     "cache_position": "cache_position is not supported and will be ignored.",
 }
 
@@ -390,13 +390,13 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     @with_mobilint_generation_signature(
         GenerationMixin.prepare_inputs_for_generation,
         "count_npu_time",
-        "prefill_chunk_size",
+        "npu_prefill_chunk_size",
     )
     def prepare_inputs_for_generation(
         self,
         *args: Any,
         count_npu_time: bool = False,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Prepare generation inputs while preserving Mobilint benchmark kwargs.
@@ -404,7 +404,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         Args:
             *args: Positional arguments forwarded to the upstream generation helper.
             count_npu_time: Whether Mobilint decoder NPU time should be accumulated.
-            prefill_chunk_size: Optional Mobilint prefill chunk size.
+            npu_prefill_chunk_size: Optional Mobilint prefill chunk size.
             **kwargs: Keyword arguments forwarded to the upstream generation helper.
 
         Returns:
@@ -412,7 +412,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         """
         model_inputs = super().prepare_inputs_for_generation(*args, **kwargs)
         model_inputs["count_npu_time"] = count_npu_time
-        model_inputs["prefill_chunk_size"] = prefill_chunk_size
+        model_inputs["npu_prefill_chunk_size"] = npu_prefill_chunk_size
         return model_inputs
 
     def get_cache_mxq_model(self) -> qbruntime.Model:
@@ -984,7 +984,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
     @with_mobilint_generation_signature(
         GenerationMixin.generate,
         "count_npu_time",
-        "prefill_chunk_size",
+        "npu_prefill_chunk_size",
     )
     def generate(
         self,
@@ -1013,14 +1013,14 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         pad_token_id: Optional[int] = None,
         eos_token_id: Optional[int | list[int]] = None,
         count_npu_time: bool = False,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop.
 
         Compatibility policy:
         - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
-          ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``,
+          ``pad_token_id``, ``npu_prefill_chunk_size``, ``cache_position``,
           unknown kwargs.
         - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
           custom ``logits_processor``, negative prompts.
@@ -1031,8 +1031,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["min_new_tokens"])
         if pad_token_id is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["pad_token_id"])
-        if prefill_chunk_size is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["prefill_chunk_size"])
+        if npu_prefill_chunk_size is not None:
+            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["npu_prefill_chunk_size"])
         if cache_position is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["cache_position"])
 

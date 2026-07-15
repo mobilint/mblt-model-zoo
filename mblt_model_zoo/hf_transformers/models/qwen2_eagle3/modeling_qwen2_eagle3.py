@@ -94,7 +94,7 @@ class MobilintQwen2Eagle3ForCausalLM(
 
     Generation compatibility notes:
     - Ignored with warning: ``attention_mask``, ``min_new_tokens``,
-      ``pad_token_id``, ``prefill_chunk_size``, ``cache_position``,
+      ``pad_token_id``, ``npu_prefill_chunk_size``, ``cache_position``,
       and unknown ``generate`` kwargs.
     - Not supported (hard error): beam search, ``assistant_model``,
       ``use_cache=False``, custom ``logits_processor``, and negative prompts.

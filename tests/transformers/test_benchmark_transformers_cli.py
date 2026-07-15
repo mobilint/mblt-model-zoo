@@ -39,7 +39,7 @@ def test_text_benchmark_measure_defaults() -> None:
     assert args.repeat == 1
     assert args.warmup == 1
     assert args.core_mode == "global8"
-    assert args.prefill_chunk_size is None
+    assert args.npu_prefill_chunk_size is None
 
 
 def test_text_benchmark_sweep_defaults() -> None:
@@ -608,7 +608,7 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
         image_resolutions=[224],
         original_models=False,
         mxq_dir=None,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         warmup=0,
         repeat=1,
         prompt="prompt",
@@ -718,7 +718,7 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
         prefill_range=(128, 256, 128),
         cache_lengths=[128, 256, 512],
         decode_window=32,
-        prefill_chunk_size=None,
+        npu_prefill_chunk_size=None,
         device_metrics=True,
         json=str(tmp_path / "vlm.json"),
         csv=str(tmp_path / "vlm.csv"),

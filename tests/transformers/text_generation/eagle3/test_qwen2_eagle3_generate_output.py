@@ -552,7 +552,7 @@ def test_qwen2_eagle3_generate_signature_exposes_benchmark_kwargs() -> None:
 
     assert "stopping_criteria" in signature.parameters
     assert "count_npu_time" in signature.parameters
-    assert "prefill_chunk_size" in signature.parameters
+    assert "npu_prefill_chunk_size" in signature.parameters
 
 
 def test_qwen2_eagle3_generate_calls_stopping_criteria(monkeypatch) -> None:
@@ -1264,7 +1264,7 @@ def test_qwen2_eagle3_generate_ignored_args_emit_stable_warning_messages(monkeyp
             attention_mask=torch.ones((1, 2), dtype=torch.long),
             min_new_tokens=1,
             pad_token_id=0,
-            prefill_chunk_size=16,
+            npu_prefill_chunk_size=16,
             cache_position=torch.tensor([0], dtype=torch.long),
         )
 
@@ -1272,7 +1272,7 @@ def test_qwen2_eagle3_generate_ignored_args_emit_stable_warning_messages(monkeyp
     assert "attention_mask is not supported and will be ignored." in joined
     assert "min_new_tokens is not supported and will be ignored." in joined
     assert "pad_token_id is not supported and will be ignored." in joined
-    assert "prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored." in joined
+    assert "npu_prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored." in joined
     assert "cache_position is not supported and will be ignored." in joined
 
 

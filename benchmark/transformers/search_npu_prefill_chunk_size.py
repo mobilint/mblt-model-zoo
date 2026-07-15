@@ -208,7 +208,7 @@ def _measure_prefill_once(
     single = measurer.measure(
         num_prefill=prefill_length,
         num_decode=decode_length,
-        prefill_chunk_size=chunk_size,
+        npu_prefill_chunk_size=chunk_size,
         show_progress=False,
     )
     t1 = time.perf_counter()
@@ -885,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
                             measurer.measure(
                                 num_prefill=int(prefill_lengths[0]),
                                 num_decode=args.decode_length,
-                                prefill_chunk_size=int(chunk_candidates[0]),
+                                npu_prefill_chunk_size=int(chunk_candidates[0]),
                                 show_progress=False,
                             )
                     search_budget = max(1, len(prefill_lengths) * len(chunk_candidates))

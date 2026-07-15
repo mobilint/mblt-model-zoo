@@ -848,7 +848,7 @@ class TPSMeasurer:
         input_ids: torch.Tensor,
         num_prefill: int,
         num_decode: int,
-        prefill_chunk_size: Optional[int],
+        npu_prefill_chunk_size: Optional[int],
         npu_timing_target: object | None,
         past_key_values: object | None = None,
         fake_prefill: bool = False,
@@ -869,8 +869,8 @@ class TPSMeasurer:
         )
         if past_key_values is not None:
             gen_kwargs["past_key_values"] = past_key_values
-        if prefill_chunk_size is not None:
-            gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+        if npu_prefill_chunk_size is not None:
+            gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
@@ -977,7 +977,7 @@ class TPSMeasurer:
         num_prefill=512,
         num_decode=128,
         input_ids: Optional[torch.Tensor] = None,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
@@ -1017,7 +1017,7 @@ class TPSMeasurer:
                     input_ids=measure_input_ids,
                     num_prefill=num_prefill,
                     num_decode=num_decode,
-                    prefill_chunk_size=prefill_chunk_size,
+                    npu_prefill_chunk_size=npu_prefill_chunk_size,
                     npu_timing_target=_get_npu_timing_target(self.model),
                     on_prefill_start=on_prefill_start,
                     on_prefill_end=on_prefill_end,
@@ -1036,8 +1036,8 @@ class TPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-            if prefill_chunk_size is not None:
-                gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+            if npu_prefill_chunk_size is not None:
+                gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(self.model)
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
@@ -1225,7 +1225,7 @@ class TPSMeasurer:
                     input_ids=input_ids,
                     num_prefill=cache_len,
                     num_decode=num_decode,
-                    prefill_chunk_size=None,
+                    npu_prefill_chunk_size=None,
                     npu_timing_target=_get_npu_timing_target(self.model),
                     past_key_values=past_key_values,
                     fake_prefill=True,
@@ -1348,7 +1348,7 @@ class TPSMeasurer:
         prefill_range: Tuple[int, int, int] = (128, 2048, 128),
         cache_lengths: Optional[Iterable[int]] = None,
         decode_window: int = 128,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         trace_path: Union[str, None] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
@@ -1378,7 +1378,7 @@ class TPSMeasurer:
                 res = self.measure(
                     num_prefill=p_len,
                     num_decode=1,
-                    prefill_chunk_size=prefill_chunk_size,
+                    npu_prefill_chunk_size=npu_prefill_chunk_size,
                     batch_size=batch_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}prefill generate ({p_len})",
@@ -1416,7 +1416,7 @@ class TPSMeasurer:
                     res = self.measure(
                         num_prefill=cache_len,
                         num_decode=decode_window,
-                        prefill_chunk_size=prefill_chunk_size,
+                        npu_prefill_chunk_size=npu_prefill_chunk_size,
                         batch_size=batch_size,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
@@ -1704,7 +1704,7 @@ class VLMTPSMeasurer:
         self,
         inputs_embeds: torch.Tensor,
         num_decode: int,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
     ) -> SingleMeasurement:
@@ -1731,8 +1731,8 @@ class VLMTPSMeasurer:
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-            if prefill_chunk_size is not None:
-                gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+            if npu_prefill_chunk_size is not None:
+                gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
@@ -1823,8 +1823,8 @@ class VLMTPSMeasurer:
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
-        if prefill_chunk_size is not None:
-            gen_kwargs["prefill_chunk_size"] = int(prefill_chunk_size)
+        if npu_prefill_chunk_size is not None:
+            gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
         npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
@@ -2134,7 +2134,7 @@ class VLMTPSMeasurer:
         prefill_range: Tuple[int, int, int] = (128, 2048, 128),
         cache_lengths: Optional[Iterable[int]] = None,
         decode_window: int = 128,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_prefix: str = "",
         batch_size: int = 1,
@@ -2177,7 +2177,7 @@ class VLMTPSMeasurer:
                 res = self._measure_llm_once(
                     inputs_embeds=inputs_embeds,
                     num_decode=1,
-                    prefill_chunk_size=prefill_chunk_size,
+                    npu_prefill_chunk_size=npu_prefill_chunk_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
                 )
@@ -2230,7 +2230,7 @@ class VLMTPSMeasurer:
                     res = self._measure_llm_once(
                         inputs_embeds=inputs_embeds,
                         num_decode=decode_window,
-                        prefill_chunk_size=prefill_chunk_size,
+                        npu_prefill_chunk_size=npu_prefill_chunk_size,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
                     )
@@ -2294,7 +2294,7 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[SingleMeasurement]:
@@ -2314,7 +2314,7 @@ class VLMTPSMeasurer:
             llm = self._measure_llm_once(
                 inputs_embeds=inputs_embeds,
                 num_decode=num_decode,
-                prefill_chunk_size=prefill_chunk_size,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
             )
             results.append(llm)
             if show_progress:
@@ -2330,7 +2330,7 @@ class VLMTPSMeasurer:
         num_decode: int,
         repeat: int,
         prompt: str,
-        prefill_chunk_size: Optional[int] = None,
+        npu_prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
     ) -> list[VLMSingleMeasurement]:
@@ -2349,7 +2349,7 @@ class VLMTPSMeasurer:
             llm = self._measure_llm_once(
                 inputs_embeds=inputs_embeds,
                 num_decode=num_decode,
-                prefill_chunk_size=prefill_chunk_size,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
             )
             results.append(
                 VLMSingleMeasurement(

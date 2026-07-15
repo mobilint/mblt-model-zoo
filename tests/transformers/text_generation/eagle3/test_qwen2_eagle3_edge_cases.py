@@ -338,7 +338,7 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
                 dtype=np.float32,
             )
 
-        def resolve_prefill_chunk_size(self, chunk_size: int) -> int:
+        def resolve_npu_prefill_chunk_size(self, chunk_size: int) -> int:
             return chunk_size
 
         def get_mxq_model(self):
