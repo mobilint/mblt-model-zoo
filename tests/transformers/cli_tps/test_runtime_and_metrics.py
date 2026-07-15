@@ -1934,6 +1934,36 @@ def test_mobilint_generation_mixin_preserves_benchmark_kwargs(monkeypatch: pytes
     assert model_inputs["prefill_chunk_size"] == 64
 
 
+def test_text_model_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
+    """Verify text-only model MRO preserves TPS prefill chunk kwargs for generation."""
+    from mblt_model_zoo.hf_transformers.models.llama.modeling_llama import MobilintLlamaForCausalLM
+
+    signature = inspect.signature(MobilintLlamaForCausalLM.prepare_inputs_for_generation)
+
+    assert "count_npu_time" in signature.parameters
+    assert "prefill_chunk_size" in signature.parameters
+
+    def _base_prepare_inputs_for_generation(*args, **kwargs):
+        del args, kwargs
+        return {"input_ids": torch.tensor([[1]])}
+
+    monkeypatch.setattr(
+        GenerationMixin,
+        "prepare_inputs_for_generation",
+        _base_prepare_inputs_for_generation,
+    )
+    model = object.__new__(MobilintLlamaForCausalLM)
+
+    model_inputs = model.prepare_inputs_for_generation(
+        torch.tensor([[1]]),
+        count_npu_time=True,
+        prefill_chunk_size=64,
+    )
+
+    assert model_inputs["count_npu_time"] is True
+    assert model_inputs["prefill_chunk_size"] == 64
+
+
 def test_qwen2_vl_prepare_inputs_preserves_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch):
     signature = inspect.signature(MobilintQwen2VLForConditionalGeneration.prepare_inputs_for_generation)
 
