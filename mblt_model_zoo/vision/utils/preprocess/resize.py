@@ -25,7 +25,7 @@ PIL_INTERP_CODES = {
 class Resize(PreOps):
     """Resizes the image to a specified size using various interpolation modes.
 
-    Supports both PyTorch tensors (CHW) and PIL images.
+    Supports PyTorch tensors and NumPy arrays in CHW or BCHW format, and PIL images.
     """
 
     def __init__(
@@ -74,14 +74,15 @@ class Resize(PreOps):
         else:
             raise TypeError(f"Got unexpected type for x={type(x)}.")
 
-        assert tensor_x.ndim == 3, f"Got unexpected x.shape={tensor_x.shape}."
-        img_h, img_w = tensor_x.shape[:2]
+        if tensor_x.ndim not in (3, 4):
+            raise ValueError(f"Expected a CHW or BCHW tensor, but got x.shape={tensor_x.shape}.")
+        img_h, img_w = tensor_x.shape[-2:]
         new_h, new_w = self._compute_resized_output_size(img_h, img_w)
         if [img_h, img_w] == [new_h, new_w]:
             return tensor_x
         tensor_x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(tensor_x, [torch.float32, torch.float64])
         tensor_x = F.interpolate(
-            tensor_x[None],
+            tensor_x,
             size=(new_h, new_w),
             mode=self.interpolation,
             align_corners=(False if self.interpolation in ["bilinear", "bicubic"] else None),
@@ -93,9 +94,12 @@ class Resize(PreOps):
     def _compute_resized_output_size(self, img_h: int, img_w: int) -> list[int]:
         if isinstance(self.size, int):
             # to match the shortest side to self.size with the same ratio
-            ratio = max(self.size / img_h, self.size / img_w)
-            new_h = int(round(img_h * ratio))
-            new_w = int(round(img_w * ratio))
+            if img_w <= img_h:
+                new_w = self.size
+                new_h = int(self.size * img_h / img_w)
+            else:
+                new_h = self.size
+                new_w = int(self.size * img_w / img_h)
         elif isinstance(self.size, list) and len(self.size) == 2:
             new_h, new_w = self.size
         else:
