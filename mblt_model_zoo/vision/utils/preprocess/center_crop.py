@@ -57,7 +57,7 @@ class CenterCrop(PreOps):
                 (self.size[1] - W) // 2 if self.size[1] > W else 0,
                 (self.size[1] - W + 1) // 2 if self.size[1] > W else 0,
                 cv2.BORDER_CONSTANT,
-                value=0,
+                value=(0.0,),
             )
             H, W = image.shape[:2]
         crop_top = round((H - self.size[0]) / 2.0)
