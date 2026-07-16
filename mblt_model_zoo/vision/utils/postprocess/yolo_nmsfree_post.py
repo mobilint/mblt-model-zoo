@@ -47,10 +47,17 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
         anchors = self.anchors_as_tensor().unsqueeze(0)
         stride = self.stride_as_tensor().unsqueeze(0)
         dbox = dist2bbox(self.dfl(box), anchors, xywh=False, dim=1) * stride
-        decoded = torch.cat([dbox, scores.sigmoid()], dim=1).transpose(1, 2)
+        decoded = torch.cat([dbox, scores], dim=1).transpose(1, 2)
         return self._stack_topk_outputs(
             [
-                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                dual_topk(
+                    image,
+                    self.nc,
+                    self.n_extra,
+                    max_det=self.max_det,
+                    conf_thres=self.conf_thres,
+                    score_is_logits=True,
+                )
                 for image in decoded
             ]
         )
@@ -119,8 +126,8 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
             )
             * stride[:, ic]
         )
-        pre_topk = torch.cat([dbox, scores.sigmoid()], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
-        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
+        pre_topk = torch.cat([dbox, scores], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
+        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres, score_is_logits=True)
 
     def nms(
         self,

@@ -199,10 +199,17 @@ class YOLODFLFreePost(YOLOPostBase):
         anchors = self.anchors_as_tensor().unsqueeze(0)
         stride = self.stride_as_tensor().unsqueeze(0)
         dbox = dist2bbox(box, anchors, xywh=False, dim=1) * stride
-        decoded = torch.cat([dbox, scores.sigmoid(), extra], dim=1).transpose(1, 2)
+        decoded = torch.cat([dbox, scores, extra], dim=1).transpose(1, 2)
         return self._stack_topk_outputs(
             [
-                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                dual_topk(
+                    image,
+                    self.nc,
+                    self.n_extra,
+                    max_det=self.max_det,
+                    conf_thres=self.conf_thres,
+                    score_is_logits=True,
+                )
                 for image in decoded
             ]
         )
@@ -314,8 +321,8 @@ class YOLODFLFreePost(YOLOPostBase):
             )
             * stride[:, ic]
         )
-        pre_topk = torch.cat([dbox, scores.sigmoid(), extra], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
-        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
+        pre_topk = torch.cat([dbox, scores, extra], dim=1).squeeze(0).transpose(0, 1)  # (*, 84)
+        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres, score_is_logits=True)
 
     def filter_conversion(self, x: torch.Tensor) -> list[torch.Tensor]:
         """Filters out low-confidence detections from a single concatenated output tensor.
@@ -575,8 +582,8 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         key_coord, key_conf = torch.split(keypoints, [2, 1], dim=2)  # (1, 17, 2, 8400), (1, 17, 1, 8400)
         key_coord = (key_coord + anchors[:, ic]) * stride[:, ic]  # (1, 17, 2, *)
         keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(1, self.n_extra, -1)  # (1, 51, *)
-        pre_topk = torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).squeeze(0).transpose(0, 1)  # (*, 56)
-        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres)
+        pre_topk = torch.cat([dbox, scores, keypoints], dim=1).squeeze(0).transpose(0, 1)  # (*, 56)
+        return dual_topk(pre_topk, self.nc, self.n_extra, conf_thres=self.conf_thres, score_is_logits=True)
 
     def decode_batch(self, x: torch.Tensor) -> torch.Tensor:
         """Decode every anchor, then apply batched top-k selection for export-style pose output."""
@@ -588,10 +595,17 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         key_coord, key_conf = torch.split(keypoints, [2, 1], dim=2)
         key_coord = (key_coord + anchors.unsqueeze(1)) * stride.unsqueeze(1)
         keypoints = torch.cat([key_coord, key_conf.sigmoid()], dim=2).view(x.shape[0], self.n_extra, -1)
-        decoded = torch.cat([dbox, scores.sigmoid(), keypoints], dim=1).transpose(1, 2)
+        decoded = torch.cat([dbox, scores, keypoints], dim=1).transpose(1, 2)
         return self._stack_topk_outputs(
             [
-                dual_topk(image, self.nc, self.n_extra, max_det=self.max_det, conf_thres=self.conf_thres)
+                dual_topk(
+                    image,
+                    self.nc,
+                    self.n_extra,
+                    max_det=self.max_det,
+                    conf_thres=self.conf_thres,
+                    score_is_logits=True,
+                )
                 for image in decoded
             ]
         )

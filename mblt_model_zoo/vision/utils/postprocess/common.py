@@ -355,6 +355,7 @@ def dual_topk(
     n_extra: int,
     max_det: int = 300,
     conf_thres: float = 0.25,
+    score_is_logits: bool = False,
 ) -> torch.Tensor:
     """
     Perform dual-stage topk selection for NMS-free models.
@@ -364,13 +365,17 @@ def dual_topk(
         n_extra (int): Number of extra elements (e.g., masks, keypoints).
         max_det (int): Maximum detections to keep. Defaults to 300.
         conf_thres (float): Confidence threshold. Defaults to 0.25.
+        score_is_logits (bool): Whether class scores are logits. When true, apply
+            the confidence cutoff and both rankings before sigmoid, then convert
+            only selected scores to probabilities. Defaults to false.
     Returns:
         torch.Tensor: Filtered detections of shape (*, 6 + n_extra).
     """
     score_start = 4
     score_end = 4 + nc
     score_view = pre_topk[:, score_start:score_end]
-    ic = score_view.amax(dim=-1) > conf_thres
+    threshold = math.log(conf_thres / (1.0 - conf_thres)) if score_is_logits else conf_thres
+    ic = score_view.amax(dim=-1) > threshold
     pre_topk = pre_topk[ic]
 
     if pre_topk.shape[0] == 0:
@@ -380,7 +385,7 @@ def dual_topk(
     row_index = torch.topk(pre_topk[:, score_start:score_end].amax(dim=-1), max_det, dim=0).indices
     selected = pre_topk[row_index]
     top_scores, flat_index = torch.topk(selected[:, score_start:score_end].reshape(-1), max_det)
-    keep = top_scores > conf_thres
+    keep = top_scores > threshold
     if not torch.any(keep):
         return torch.zeros((0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device)
 
@@ -391,7 +396,7 @@ def dual_topk(
 
     output = torch.empty((top_scores.shape[0], 6 + n_extra), dtype=selected.dtype, device=selected.device)
     output[:, :4] = selected[box_index, :4]
-    output[:, 4] = top_scores
+    output[:, 4] = top_scores.sigmoid() if score_is_logits else top_scores
     output[:, 5:6] = labels
     if n_extra > 0:
         output[:, 6:] = selected[box_index, score_end:]
