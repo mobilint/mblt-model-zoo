@@ -25,7 +25,7 @@ PIL_INTERP_CODES = {
 class Resize(PreOps):
     """Resizes the image to a specified size using various interpolation modes.
 
-    Supports PyTorch tensors and NumPy arrays in CHW or BCHW format, and PIL images.
+    Supports PyTorch tensors in CHW or BCHW format, HWC NumPy arrays, and PIL images.
     """
 
     def __init__(
@@ -45,21 +45,41 @@ class Resize(PreOps):
         self.size = size  # h, w
         self.interpolation = interpolation
 
-    def __call__(self, x: TensorLike | Image.Image) -> torch.Tensor | Image.Image:
+    def __call__(self, x: TensorLike | Image.Image) -> np.ndarray | torch.Tensor | Image.Image:
         """Resizes the input image.
 
         Args:
             x (TensorLike | Image.Image): Image to be resized.
 
         Returns:
-            torch.Tensor | Image.Image: Resized image in the same format as input.
+            np.ndarray | torch.Tensor | Image.Image: Resized image in the same format as input.
 
         Raises:
             TypeError: If input type is not supported.
+            ValueError: If a NumPy input is not HWC or a tensor input is not CHW or BCHW.
         """
-        # result: np.ndarray (H, W, C)
         if isinstance(x, np.ndarray):
+            if x.ndim != 3:
+                raise ValueError(f"Expected an HWC NumPy array, but got x.shape={x.shape}.")
+            img_h, img_w = x.shape[:2]
+            new_h, new_w = self._compute_resized_output_size(img_h, img_w)
+            if [img_h, img_w] == [new_h, new_w]:
+                return x
+
             tensor_x = torch.from_numpy(x).to(self.device)
+            tensor_x = tensor_x.permute(2, 0, 1)
+            tensor_x, need_cast, need_squeeze, out_dtype = self._cast_squeeze_in(
+                tensor_x, [torch.float32, torch.float64]
+            )
+            tensor_x = F.interpolate(
+                tensor_x,
+                size=(new_h, new_w),
+                mode=self.interpolation,
+                align_corners=(False if self.interpolation in ["bilinear", "bicubic"] else None),
+                antialias=self.interpolation in ["bilinear", "bicubic"],
+            )
+            tensor_x = self._cast_squeeze_out(tensor_x, need_cast, need_squeeze, out_dtype)
+            return tensor_x.permute(1, 2, 0).cpu().numpy()
         elif isinstance(x, torch.Tensor):
             tensor_x = x.to(self.device)
         elif isinstance(x, Image.Image):
