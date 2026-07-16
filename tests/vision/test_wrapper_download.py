@@ -15,7 +15,13 @@ from mblt_model_zoo.vision._compat import create_model_class
 from mblt_model_zoo.vision.utils.datasets import CustomCocodata
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
 from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
-from mblt_model_zoo.vision.utils.postprocess.common import crop_mask, nmsout2eval, scale_coords, scale_masks
+from mblt_model_zoo.vision.utils.postprocess.common import (
+    crop_mask,
+    dual_topk,
+    nmsout2eval,
+    scale_coords,
+    scale_masks,
+)
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
@@ -31,6 +37,21 @@ def test_onnx_runtime_defaults_to_cpu_provider() -> None:
 
     assert wrapper._resolve_onnx_providers(_FakeOrt()) == ["CPUExecutionProvider"]
     assert wrapper._resolve_onnx_providers(_FakeOrt(), ["CUDAExecutionProvider"]) == ["CUDAExecutionProvider"]
+
+
+def test_dual_topk_logits_matches_sigmoid_scores() -> None:
+    """Select the same NMS-free detections before converting logits to probabilities."""
+    torch.manual_seed(0)
+    boxes = torch.rand(24, 4)
+    logits = torch.rand(24, 5).mul(10.0).sub(5.0)
+    extra = torch.rand(24, 2)
+    logits_input = torch.cat([boxes, logits, extra], dim=1)
+    probability_input = torch.cat([boxes, logits.sigmoid(), extra], dim=1)
+
+    actual = dual_topk(logits_input, nc=5, n_extra=2, max_det=8, conf_thres=0.25, score_is_logits=True)
+    expected = dual_topk(probability_input, nc=5, n_extra=2, max_det=8, conf_thres=0.25)
+
+    torch.testing.assert_close(actual, expected)
 
 
 def test_file_config_cleansing_prefers_existing_mxq_path(
