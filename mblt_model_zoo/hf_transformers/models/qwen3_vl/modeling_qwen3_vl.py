@@ -13,6 +13,7 @@ from transformers.models.qwen3_vl.modeling_qwen3_vl import (
     Qwen3VLForConditionalGeneration,
     Qwen3VLModel,
     Qwen3VLPreTrainedModel,
+    Qwen3VLVisionRotaryEmbedding,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
@@ -80,9 +81,22 @@ class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
     _can_record_outputs = {}
 
 
+def fold_pixel_values(pixel_values: torch.Tensor) -> torch.Tensor:
+    """Fused repreprocess + fold: HF pixel_values (N, fold_in) -> (1, fold_in, 1, N)."""
+    n, fold_in = pixel_values.shape
+    return pixel_values.transpose(0, 1).reshape(1, fold_in, 1, n).contiguous()
+
+
 class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedModel):
     config: MobilintQwen3VLVisionConfig
     input_modalities = ("image", "video")
+
+    def __init__(self, config: MobilintQwen3VLVisionConfig, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+        self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
+        self.num_grid_per_side = int(config.num_position_embeddings**0.5)
+        head_dim = config.hidden_size // config.num_heads
+        self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
@@ -139,6 +153,89 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 return structured_outputs.to_tuple()
             return structured_outputs
         return image_embeds, deepstack_embeds
+
+    def _rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        merge_size = int(self.config.spatial_merge_size)
+        max_hw = int(grid_thw[:, 1:].max().item())
+        freq_table = self.rotary_pos_emb(max_hw)
+        device = freq_table.device
+        total_tokens = int(torch.prod(grid_thw, dim=1).sum().item())
+        pos_ids = torch.empty((total_tokens, 2), dtype=torch.long, device=device)
+        offset = 0
+        for num_frames, height, width in grid_thw:
+            merged_h, merged_w = height // merge_size, width // merge_size
+            block_rows = torch.arange(merged_h, device=device)
+            block_cols = torch.arange(merged_w, device=device)
+            intra_row = torch.arange(merge_size, device=device)
+            intra_col = torch.arange(merge_size, device=device)
+            row_idx = block_rows[:, None, None, None] * merge_size + intra_row[None, None, :, None]
+            col_idx = block_cols[None, :, None, None] * merge_size + intra_col[None, None, None, :]
+            row_idx = row_idx.expand(merged_h, merged_w, merge_size, merge_size).reshape(-1)
+            col_idx = col_idx.expand(merged_h, merged_w, merge_size, merge_size).reshape(-1)
+            coords = torch.stack((row_idx, col_idx), dim=-1)
+            if num_frames > 1:
+                coords = coords.repeat(num_frames, 1)
+            num_tokens = coords.shape[0]
+            pos_ids[offset : offset + num_tokens] = coords
+            offset += num_tokens
+        embeddings = freq_table[pos_ids]
+        return embeddings.flatten(1)
+
+    def _fast_pos_embed_interpolate(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        grid_ts, grid_hs, grid_ws = grid_thw[:, 0], grid_thw[:, 1], grid_thw[:, 2]
+        idx_list: list[list] = [[] for _ in range(4)]
+        weight_list: list[list] = [[] for _ in range(4)]
+        for t, h, w in zip(grid_ts, grid_hs, grid_ws):
+            h_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(h))
+            w_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(w))
+            h_idxs_floor = h_idxs.int()
+            w_idxs_floor = w_idxs.int()
+            h_idxs_ceil = (h_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
+            w_idxs_ceil = (w_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
+            dh = h_idxs - h_idxs_floor
+            dw = w_idxs - w_idxs_floor
+            base_h = h_idxs_floor * self.num_grid_per_side
+            base_h_ceil = h_idxs_ceil * self.num_grid_per_side
+            indices = [
+                (base_h[None].T + w_idxs_floor[None]).flatten(),
+                (base_h[None].T + w_idxs_ceil[None]).flatten(),
+                (base_h_ceil[None].T + w_idxs_floor[None]).flatten(),
+                (base_h_ceil[None].T + w_idxs_ceil[None]).flatten(),
+            ]
+            weights = [
+                ((1 - dh)[None].T * (1 - dw)[None]).flatten(),
+                ((1 - dh)[None].T * dw[None]).flatten(),
+                (dh[None].T * (1 - dw)[None]).flatten(),
+                (dh[None].T * dw[None]).flatten(),
+            ]
+            for i in range(4):
+                idx_list[i].extend(indices[i].tolist())
+                weight_list[i].extend(weights[i].tolist())
+        device = self.pos_embed.weight.device
+        idx_tensor = torch.tensor(idx_list, dtype=torch.long, device=device)
+        weight_tensor = torch.tensor(weight_list, dtype=self.pos_embed.weight.dtype, device=device)
+        pos_embeds = self.pos_embed(idx_tensor) * weight_tensor[:, :, None]
+        patch_pos_embeds = pos_embeds[0] + pos_embeds[1] + pos_embeds[2] + pos_embeds[3]
+        patch_pos_embeds = patch_pos_embeds.split([int(h * w) for h, w in zip(grid_hs, grid_ws)])
+        merge_size = int(self.config.spatial_merge_size)
+        result = []
+        for pos_embed, t, h, w in zip(patch_pos_embeds, grid_ts, grid_hs, grid_ws):
+            pos_embed = pos_embed.repeat(int(t), 1)
+            pos_embed = (
+                pos_embed.view(int(t), int(h) // merge_size, merge_size, int(w) // merge_size, merge_size, -1)
+                .permute(0, 1, 3, 2, 4, 5)
+                .flatten(0, 4)
+            )
+            result.append(pos_embed)
+        return torch.cat(result)
+
+    @torch.no_grad()
+    def compute_side_inputs(self, grid_thw: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        pos_embeds = self._fast_pos_embed_interpolate(grid_thw)
+        rotary = self._rot_pos_emb(grid_thw)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        cos_sin = torch.cat([emb.cos(), emb.sin()], dim=-1)
+        return pos_embeds, cos_sin
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """Match the runtime `repreprocess_pixel_values` layout for one Qwen3-VL image input."""
@@ -198,6 +295,41 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         # `(1, 6, 1024, 64)` -> `(1024, 64, 6)`
         processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
         return processed.to(torch.float32).cpu().numpy()
+
+    def _prepare_dynamic_npu_inputs(
+        self, hidden_states: torch.Tensor, grid: torch.Tensor
+    ) -> list[np.ndarray]:
+        grid_thw = grid.unsqueeze(0) if grid.dim() == 1 else grid
+        folded = fold_pixel_values(hidden_states)
+        pos_embeds, _ = self.compute_side_inputs(grid_thw)
+        n = folded.shape[-1]
+
+        folded_np = folded.squeeze(2).permute(0, 2, 1).contiguous().to(torch.float32).cpu().numpy()
+        pos_np = pos_embeds.reshape(1, n, -1).to(torch.float32).cpu().numpy()
+        rope_np = self._build_vision_rotate_tensor(grid_thw)
+
+        return [rope_np, pos_np, folded_np]
+
+    def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
+        """Build rotateTensor-format rotary for the vision encoder (matches MXQ peSize layout)."""
+        rotary = self._rot_pos_emb(grid_thw)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        cos_val = emb.cos()
+        sin_val = emb.sin()
+
+        n = emb.shape[0]
+        dim = emb.shape[-1]
+        half_dim = dim // 2
+        tgt_half = ((dim + 63) // 64) * 64
+        pe_size = 2 * tgt_half
+
+        rt = torch.zeros(n, pe_size, dtype=torch.float32)
+        rt[:, 0:dim:2] = cos_val[:, :half_dim]
+        rt[:, 1:dim:2] = -sin_val[:, :half_dim]
+        rt[:, dim : 2 * dim : 2] = sin_val[:, half_dim:]
+        rt[:, dim + 1 : 2 * dim : 2] = cos_val[:, half_dim:]
+
+        return rt.reshape(1, n, pe_size).numpy()
 
     def _split_hidden_states_by_grid(
         self,
@@ -267,6 +399,18 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             frames.append(self._prepare_npu_inputs(frame_chunk, frame_grid))
         return frames
 
+    def _split_video_into_dynamic_frames(
+        self, chunk: torch.Tensor, grid: torch.Tensor
+    ) -> list[list[np.ndarray]]:
+        gt, gh, gw = (int(x) for x in grid.tolist())
+        tokens_per_frame = gh * gw
+        frame_grid = torch.tensor([1, gh, gw], dtype=grid.dtype, device=grid.device)
+        frames = []
+        for f in range(gt):
+            frame_chunk = chunk[f * tokens_per_frame : (f + 1) * tokens_per_frame]
+            frames.append(self._prepare_dynamic_npu_inputs(frame_chunk, frame_grid))
+        return frames
+
     def _encode_images(
         self,
         hidden_states: torch.Tensor,
@@ -274,17 +418,32 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
-        npu_inputs: list[np.ndarray] = []
+        is_dynamic = getattr(self.config, "dynamic_vision", False)
+
+        npu_inputs: list = []
         for chunk, grid in zip(chunks, grid_thw):
             gt = grid[0].item()
             if gt > 1:
-                npu_inputs.extend(self._split_video_into_frames(chunk, grid))
+                if is_dynamic:
+                    npu_inputs.extend(self._split_video_into_dynamic_frames(chunk, grid))
+                else:
+                    npu_inputs.extend(self._split_video_into_frames(chunk, grid))
             else:
-                npu_inputs.append(self._prepare_npu_inputs(chunk, grid))
+                if is_dynamic:
+                    npu_inputs.append(self._prepare_dynamic_npu_inputs(chunk, grid))
+                else:
+                    npu_inputs.append(self._prepare_npu_inputs(chunk, grid))
+
         npu_backend = getattr(self, "npu_backend", None)
         core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
         mxq_model = self.get_mxq_model()
-        if core_mode == "multi" and len(npu_inputs) > 1:
+        for i, inp in enumerate(npu_inputs):
+            if isinstance(inp, list):
+                shapes = [np.asarray(x).shape for x in inp]
+                print(f"[Vision] Input[{i}] (dynamic, {len(inp)} tensors): {shapes}")
+            else:
+                print(f"[Vision] Input[{i}] shape: {np.asarray(inp).shape}")
+        if not is_dynamic and core_mode == "multi" and len(npu_inputs) > 1:
             encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
             if encoder_outputs is None:
                 raise RuntimeError("Vision MXQ inference returned None.")

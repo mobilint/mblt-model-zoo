@@ -32,6 +32,8 @@ def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]
 
 
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
+    dynamic_vision = False
+
     @staticmethod
     def _resize_one(img, size=(224, 224)):
         if isinstance(img, str):
@@ -82,8 +84,10 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     ) -> BatchFeature:
         assert text is not None, "text is None!"
 
-        if images is not None:
+        if images is not None and not self.dynamic_vision:
             images = self._resize_images(images)
+        elif images is not None:
+            print("[dynamic-vision] skipping forced resize, using original image size")
 
         if videos is not None:
             self._install_video_resize_hook()

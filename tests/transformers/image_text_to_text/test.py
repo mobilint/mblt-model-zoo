@@ -18,17 +18,28 @@ def main():
     parser.add_argument("--embedding-path", type=str, default="", help="Embedding path")
     parser.add_argument("--model-name", type=str, default="mobilint/Qwen3-VL-8B-Instruct", help="Model name")
     parser.add_argument("--text-mxq-path", type=str, default="./example.mxq", help="Text MXQ path")
+    parser.add_argument("--image-mxq-path", dest="vision_mxq_path", type=str, default=None, help="Vision MXQ path")
+    parser.add_argument("--dynamic-vision", action="store_true", help="Use dynamic vision (variable image size)")
     args = parser.parse_args()
 
-    model = AutoModelForImageTextToText.from_pretrained(
-        args.model_name,
+    model_kwargs = dict(
         text_mxq_path=args.text_mxq_path,
         trust_remote_code=True,
     )
+
+    if args.vision_mxq_path:
+        model_kwargs["vision_mxq_path"] = args.vision_mxq_path
+
+    model = AutoModelForImageTextToText.from_pretrained(args.model_name, **model_kwargs)
     if args.inject_embedding:
         MobilintModelMixin._inject_custom_embeddings(model, args.embedding_path)
 
+    if args.dynamic_vision:
+        model.model.visual.config.dynamic_vision = True
+
     processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
+    if args.dynamic_vision:
+        processor.dynamic_vision = True
     streamer = TextStreamer(processor.tokenizer, skip_prompt=True)
 
     content = []
