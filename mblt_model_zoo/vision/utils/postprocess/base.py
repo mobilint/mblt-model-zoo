@@ -52,6 +52,14 @@ class PostBase(ABC):
 class YOLOPostBase(PostBase):
     """Base class for YOLO postprocessing."""
 
+    NC_BY_DATASET_TASK: dict[tuple[str, str], int] = {
+        ("coco", "object_detection"): 80,
+        ("coco", "instance_segmentation"): 80,
+        ("coco", "pose_estimation"): 1,
+        ("dotav1", "obb"): 15,
+        ("open-images-v7", "object_detection"): 601,
+        ("widerface", "face_detection"): 1,
+    }
     DEFAULT_NC_BY_TASK: dict[str, int] = {
         "object_detection": 80,
         "instance_segmentation": 80,
@@ -88,8 +96,17 @@ class YOLOPostBase(PostBase):
             raise ValueError("task should be provided in post_cfg")
         self.task: str = task
         task_key = self.task.lower()
-        default_nc = self.DEFAULT_NC_BY_TASK.get(task_key)
-        nc = kwargs.pop("nc", post_cfg.get("nc", default_nc))
+        dataset = post_cfg.get("dataset")
+        self.dataset = dataset.lower() if isinstance(dataset, str) else None
+        dataset_nc = self.NC_BY_DATASET_TASK.get((self.dataset, task_key)) if self.dataset is not None else None
+        configured_nc = kwargs.pop("nc", post_cfg.get("nc"))
+        if configured_nc is not None and dataset_nc is not None and int(configured_nc) != dataset_nc:
+            raise ValueError(
+                f"nc={configured_nc} conflicts with dataset '{self.dataset}' and task '{self.task}', "
+                f"which require nc={dataset_nc}."
+            )
+        default_nc = dataset_nc if dataset_nc is not None else self.DEFAULT_NC_BY_TASK.get(task_key)
+        nc = configured_nc if configured_nc is not None else default_nc
         if nc is None:
             raise ValueError(f"nc should be provided in post_cfg or kwargs for task '{self.task}'.")
         self.nc: int = int(nc)

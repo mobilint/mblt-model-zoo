@@ -20,3 +20,4 @@ IMAGENET1K_V1:
       style: tf
   post_cfg:
     task: image_classification
+    dataset: imagenet

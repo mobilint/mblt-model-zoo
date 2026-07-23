@@ -34,6 +34,16 @@ default. Pass `onnx_providers` to select another provider order explicitly when 
 with `.mxq` or `.onnx`, the engine auto-detects the framework from that suffix when `framework` is
 omitted.
 
+For Hub-backed models, `file_cfg.filename` is the canonical MXQ artifact name. The engine derives
+the corresponding ONNX artifact by replacing its `.mxq` suffix with `.onnx`, so every model uses
+the same ONNX loading path. Set `file_cfg.onnx_filename` only when a Hub repository uses a
+non-matching ONNX filename.
+
+Every model configuration also declares `post_cfg.dataset`. This identifies the output taxonomy,
+not merely the broad task: COCO detection uses 80 classes, Open Images V7 detection uses 601,
+Cityscapes semantic segmentation uses 19, and ADE20K semantic segmentation uses 150. YOLO
+postprocessing resolves shape-sensitive class counts from the dataset and task together.
+
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
 from mblt_model_zoo.vision.object_detection import YOLO11m

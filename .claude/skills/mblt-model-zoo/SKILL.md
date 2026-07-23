@@ -11,6 +11,8 @@ Read and follow the canonical skill at
 [`../../../.agents/skills/mblt-model-zoo/SKILL.md`](../../../.agents/skills/mblt-model-zoo/SKILL.md).
 Keep shared workflow content there so Codex and Claude Code stay synchronized.
 
+Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not inferred from task alone.
+
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
 

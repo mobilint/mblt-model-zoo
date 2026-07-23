@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: obb
+    dataset: dotav1
     nl: 3
     n_extra: 1
     reg_max: 16

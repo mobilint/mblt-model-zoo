@@ -52,6 +52,35 @@ def test_resolve_model_config_handles_alias_and_updated_variant() -> None:
     assert default_config["post_cfg"]["task"] == variant_config["post_cfg"]["task"]
 
 
+def test_resolve_model_config_derives_onnx_filename() -> None:
+    """Derive ONNX artifact names consistently from MXQ artifact names."""
+
+    hub_config = resolve_model_config("alexnet")
+    direct_config = resolve_model_config(
+        {
+            "file_cfg": {
+                "filename": "example.mxq",
+            },
+            "pre_cfg": {},
+            "post_cfg": {},
+        }
+    )
+    custom_config = resolve_model_config(
+        {
+            "file_cfg": {
+                "filename": "example.mxq",
+                "onnx_filename": "exported-model.onnx",
+            },
+            "pre_cfg": {},
+            "post_cfg": {},
+        }
+    )
+
+    assert hub_config["file_cfg"]["onnx_filename"] == "alexnet_IMAGENET1K_V1.onnx"
+    assert direct_config["file_cfg"]["onnx_filename"] == "example.onnx"
+    assert custom_config["file_cfg"]["onnx_filename"] == "exported-model.onnx"
+
+
 @pytest.mark.parametrize(
     ("task", "relative_dir"),
     [

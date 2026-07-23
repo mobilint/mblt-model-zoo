@@ -29,6 +29,10 @@ description: >-
   compatibility.
 - Preserve automatic `.mxq`/`.onnx` framework detection and errors for conflicting explicit
   framework selections.
+- Treat `file_cfg.filename` as the canonical MXQ Hub artifact and derive its same-stem ONNX
+  artifact. Use `onnx_filename` only when the published ONNX artifact has a different filename.
+- Require `post_cfg.dataset` in every model YAML and resolve class counts from the dataset-task
+  pair. Do not assume all models for one task share a taxonomy.
 - Use an explicit default seed of `0` for new vision randomness.
 - Keep qbcompiler optional and lazily imported; never add module-level qbcompiler imports or make
   it a base dependency.

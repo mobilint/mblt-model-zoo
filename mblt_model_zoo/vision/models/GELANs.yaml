@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: object_detection
+    dataset: coco
     nc: 80
     nl: 3
     reg_max: 16

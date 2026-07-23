@@ -74,6 +74,10 @@ truth when this snapshot becomes stale.
 - Prefer `model_path` in new APIs, tests, and docs. `mxq_path` and `onnx_path` are compatibility
   aliases. Framework inference recognizes local `.mxq` and `.onnx` suffixes; retain the fail-fast
   error for an explicit framework that conflicts with a local suffix.
+- In model YAML `file_cfg`, use `filename` as the canonical MXQ artifact and let the loader derive
+  the same-stem ONNX filename. Set `onnx_filename` only for a Hub artifact that has a different name.
+- Every model YAML `post_cfg` must declare `dataset` as the output taxonomy and validation-dataset
+  identifier. Dataset-aware postprocessing resolves class counts from the `(dataset, task)` pair.
 - The supported discovery tasks are `image_classification`, `depth_estimation`, `object_detection`,
   `instance_segmentation`, `oriented_bounding_boxes`, `obb`, `pose_estimation`, and
   `face_detection`. `obb` is an alias for `oriented_bounding_boxes`.

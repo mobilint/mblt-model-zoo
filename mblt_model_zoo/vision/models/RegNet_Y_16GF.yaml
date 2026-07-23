@@ -20,6 +20,7 @@ IMAGENET1K_V1:
       style: torch
   post_cfg:
     task: image_classification
+    dataset: imagenet
 IMAGENET1K_V2:
   update: IMAGENET1K_V1
   file_cfg:
@@ -50,6 +51,7 @@ IMAGENET1K_SWAG_E2E_V1:
       style: torch
   post_cfg:
     task: image_classification
+    dataset: imagenet
 IMAGENET1K_SWAG_LINEAR_V1:
   file_cfg:
     repo_id: mobilint/RegNet_Y_16GF.swag_linear_in1k
@@ -71,3 +73,4 @@ IMAGENET1K_SWAG_LINEAR_V1:
       style: torch
   post_cfg:
     task: image_classification
+    dataset: imagenet

@@ -2,7 +2,6 @@ DEFAULT:
   file_cfg:
     repo_id: mobilint/YOLO26m-depth
     filename: yolo26m-depth.mxq
-    onnx_filename: yolo26m-depth.onnx
     revision: main
   pre_cfg:
     Reader:
@@ -15,3 +14,4 @@ DEFAULT:
       style: cv
   post_cfg:
     task: depth_estimation
+    dataset: nyu-depth

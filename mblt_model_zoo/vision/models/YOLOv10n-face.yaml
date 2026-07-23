@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: face_detection
+    dataset: widerface
     nl: 3
     nmsfree: true
     reg_max: 16
