@@ -220,7 +220,7 @@ def select_calibration_images(
         "object_detection": root / "val2017",
         "instance_segmentation": root / "val2017",
         "pose_estimation": root / "val2017",
-        "obb": root / "images" / "val",
+        "obb": root / "images",
     }[normalized_task]
     images = (
         sorted(path for path in image_dir.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES)

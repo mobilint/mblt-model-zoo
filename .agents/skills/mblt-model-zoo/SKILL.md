@@ -26,6 +26,8 @@ description: >-
 - Update task package exports and the lazy top-level vision exports together when adding or
   renaming a vision model. Confirm `list_models()` discovery.
 - Use the YAML dataset registry and `get_dataset_config_for_task()` for vision dataset defaults.
+- Preserve the NYU Depth organizer's 654 validation pairs as `images/` and `depth/` at the output root.
+- Preserve DOTAv1's 458 validation images directly under `images/`, with both normalized and original labels.
 - Keep qbcompiler optional and lazily imported. Use `compile_vision_model()` or the `compile` CLI
   only after the `qbcompiler` extra is installed.
 - Use the installed `mblt-model-zoo` CLI for package behavior. Its native commands are `predict`,
@@ -41,8 +43,8 @@ description: >-
 - Preserve the compile entry-level rules: `data_path`, `subset_path`, and `calib_data_path` are
   mutually exclusive and each skips prior preparation stages.
 - Use an explicit default seed of `0` for new vision randomness.
-- When a package update changes a durable public fact or workflow, update `AGENTS.md` and this
-  skill in the same change. Keep the Claude entry point thin; shared content belongs here.
+- When a package update changes a durable public fact or workflow, update `AGENTS.md`, this skill,
+  `CLAUDE.md`, and the Claude skill entry point in the same change. Keep their shared guidance concise.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

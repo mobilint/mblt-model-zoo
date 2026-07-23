@@ -29,6 +29,7 @@ from .organizer import (
     organize_coco,
     organize_dotav1,
     organize_imagenet,
+    organize_nyu_depth,
     organize_widerface,
 )
 
@@ -54,5 +55,6 @@ __all__: list[str] = [
     "organize_coco",
     "organize_dotav1",
     "organize_imagenet",
+    "organize_nyu_depth",
     "organize_widerface",
 ]

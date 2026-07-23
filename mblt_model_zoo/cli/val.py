@@ -144,7 +144,7 @@ def _dataset_ready(task: str, data_path: str) -> bool:
         )
         return (root / "images").is_dir() and all((root / file_name).is_file() for file_name in required_files)
     if task == "obb":
-        return (root / "images" / "val").is_dir() and (
+        return (root / "images").is_dir() and (
             (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
         )
     return False

@@ -76,7 +76,7 @@ def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
 
     config = get_dataset_config("dotav1")
 
-    assert config["val"] == "images/val"
+    assert config["val"] == "images"
     assert config["download"]["type"] == "google_drive_folder"
     assert get_dataset_config_for_task("obb")["name"] == config["name"]
 
@@ -434,7 +434,7 @@ def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
     data_path = tmp_path / "dotav1"
-    (data_path / "images" / "val").mkdir(parents=True)
+    (data_path / "images").mkdir(parents=True)
     (data_path / "labels" / "val_original").mkdir(parents=True)
 
     assert _dataset_ready("obb", str(data_path))
@@ -467,6 +467,7 @@ def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
     assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
     label_source = tmp_path / "P0001.txt"
     label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
     image_archive = tmp_path / "part1.zip"
     label_archive = tmp_path / "labelTxt.zip"
     with zipfile.ZipFile(image_archive, "w") as archive:
@@ -488,6 +489,34 @@ def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
 
     assert old_image.read_bytes() == b"old"
     assert old_label.is_file()
+
+
+def test_google_drive_dotav1_archives_install_flat_validation_layout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Install matching DOTAv1 validation data in the flat reference layout."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0001.txt")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    output_dir = tmp_path / "dotav1"
+    construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
+
+    assert (output_dir / "images" / "P0001.png").is_file()
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
+    assert (output_dir / "labels" / "val" / "P0001.txt").read_text(encoding="utf-8") == (
+        "0 0 0 0.5 0 0.5 0.625 0 0.625\n"
+    )
+    assert not (output_dir / "images" / "val").exists()
 
 
 def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(

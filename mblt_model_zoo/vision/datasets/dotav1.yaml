@@ -3,7 +3,7 @@ name: dotav1
 path: ~/.mblt_model_zoo/datasets/dotav1
 tasks:
   - obb
-val: images/val
+val: images
 labels: labels/val_original
 names:
   0: plane

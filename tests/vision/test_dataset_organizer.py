@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import pytest
 import requests
@@ -107,3 +108,27 @@ def test_should_download_serially_for_same_host_urls() -> None:
             "https://example.com/data/annotations.tgz",
         ]
     )
+
+
+def test_organize_nyu_depth_extracts_only_validation_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Install only NYU Depth validation image/depth pairs from an archive."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    archive_path = tmp_path / "nyu-depth.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr("nyu-depth/images/train/nyu_train.jpg", b"training image")
+        archive.writestr("nyu-depth/depth/train/nyu_train.npy", b"training depth")
+        archive.writestr("nyu-depth/images/val/nyu_0000.jpg", b"validation image")
+        archive.writestr("nyu-depth/depth/val/nyu_0000.npy", b"validation depth")
+
+    output_dir = tmp_path / "organized"
+    organizer.organize_nyu_depth(str(archive_path), str(output_dir))
+
+    assert archive_path.is_file()
+    assert (output_dir / "images" / "nyu_0000.jpg").read_bytes() == b"validation image"
+    assert (output_dir / "depth" / "nyu_0000.npy").read_bytes() == b"validation depth"
+    assert not (output_dir / "images" / "train").exists()
+    assert not (output_dir / "depth" / "train").exists()

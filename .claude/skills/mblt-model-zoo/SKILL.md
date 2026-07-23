@@ -12,3 +12,8 @@ description: >-
 Read and follow the canonical skill at
 [`../../../.agents/skills/mblt-model-zoo/SKILL.md`](../../../.agents/skills/mblt-model-zoo/SKILL.md).
 Keep shared workflow content there so Codex and Claude Code stay synchronized.
+
+For NYU Depth dataset organization, preserve only its 654 validation image/depth pairs as `images/` and `depth/`
+directly under the output root.
+
+For DOTAv1 dataset organization, preserve its 458 validation images directly under `images/` with both label layouts.

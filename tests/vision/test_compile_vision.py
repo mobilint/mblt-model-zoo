@@ -56,7 +56,7 @@ def test_resolve_model_config_handles_alias_and_updated_variant() -> None:
     ("task", "relative_dir"),
     [
         ("object_detection", "val2017"),
-        ("obb", "images/val"),
+        ("obb", "images"),
     ],
 )
 def test_non_imagenet_selection_is_deterministic(task: str, relative_dir: str, tmp_path: Path) -> None:
@@ -77,7 +77,7 @@ def test_non_imagenet_selection_is_deterministic(task: str, relative_dir: str, t
         ("object_detection", "val2017"),
         ("instance_segmentation", "val2017"),
         ("pose_estimation", "val2017"),
-        ("obb", "images/val"),
+        ("obb", "images"),
     ],
 )
 def test_selection_defaults_to_seed_zero(task: str, relative_dir: str, tmp_path: Path) -> None:

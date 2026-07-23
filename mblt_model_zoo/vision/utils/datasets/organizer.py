@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import requests
 from gdown.download import download
 from gdown.download_folder import download_folder
+from PIL import Image
 from tqdm import tqdm
 
 from ...datasets import get_dataset_config
@@ -31,6 +32,10 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
     DOTAV1_DOWNLOAD_CONFIG["images_archive"],
     DOTAV1_DOWNLOAD_CONFIG["labels_archive"],
 }
+DOTAV1_CLASS_TO_IDX = {name: int(index) for index, name in get_dataset_config("dotav1")["names"].items()}
+DOTAV1_VALIDATION_SAMPLE_COUNT = 458
+NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
+NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -410,6 +415,134 @@ def organize_widerface(
         construct_widerface(local_image_dir, local_annotation_dir, output_dir)
 
 
+def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
+    """Resolves NYU Depth validation image and depth directories.
+
+    Args:
+        dataset_dir: Directory containing the NYU Depth root or its parent.
+
+    Returns:
+        Paths to the validation image and depth directories.
+
+    Raises:
+        ValueError: If the expected NYU Depth layout is not present.
+    """
+
+    roots = (os.path.join(dataset_dir, "nyu-depth"), dataset_dir)
+    for root in roots:
+        candidates = (
+            (os.path.join(root, "images", "val"), os.path.join(root, "depth", "val")),
+            (os.path.join(root, "val", "images"), os.path.join(root, "val", "depth")),
+            (os.path.join(root, "images"), os.path.join(root, "depth")),
+        )
+        for image_dir, depth_dir in candidates:
+            if os.path.isdir(image_dir) and os.path.isdir(depth_dir):
+                return image_dir, depth_dir
+    raise ValueError(f"NYU Depth dataset must contain matching images/ and depth/ directories: {dataset_dir}")
+
+
+def _collect_nyu_depth_validation_files(image_dir: str, depth_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Validates and returns matching NYU Depth validation image/depth pairs."""
+
+    images = {
+        os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
+    }
+    depths = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(depth_dir, [".npy"])}
+    missing_depths = sorted(set(images) - set(depths))
+    missing_images = sorted(set(depths) - set(images))
+    if missing_depths or missing_images:
+        details = []
+        if missing_depths:
+            details.append(f"images without depth maps: {', '.join(missing_depths[:5])}")
+        if missing_images:
+            details.append(f"depth maps without images: {', '.join(missing_images[:5])}")
+        raise ValueError(f"NYU Depth validation image/depth mismatch ({'; '.join(details)}).")
+    if len(images) != NYU_DEPTH_VALIDATION_SAMPLE_COUNT:
+        raise ValueError(
+            "NYU Depth validation dataset must contain "
+            f"{NYU_DEPTH_VALIDATION_SAMPLE_COUNT} matching image/depth pairs, found {len(images)}."
+        )
+    return images, depths
+
+
+def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
+    """Constructs the NYU Depth layout from an extracted dataset directory.
+
+    Args:
+        dataset_dir: Directory containing the NYU Depth root or its parent.
+        output_dir: Directory where the organized dataset will be stored.
+    """
+
+    image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
+    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir)
+    print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
+
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-staging-") as staging_dir:
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_depth_dir = os.path.join(staging_dir, "depth")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_depth_dir)
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, os.path.basename(images[sample_id])))
+            shutil.copy2(depths[sample_id], os.path.join(staged_depth_dir, os.path.basename(depths[sample_id])))
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_depth_dir, os.path.join(output_dir, "depth")),
+        )
+        with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-backup-") as backup_dir:
+            backups: dict[str, str] = {}
+            installed_dirs: list[str] = []
+            try:
+                for _, destination_dir in replacements:
+                    if os.path.lexists(destination_dir):
+                        backup_path = os.path.join(backup_dir, os.path.basename(destination_dir))
+                        os.replace(destination_dir, backup_path)
+                        backups[destination_dir] = backup_path
+
+                for staged_dir, destination_dir in replacements:
+                    os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
+                    os.replace(staged_dir, destination_dir)
+                    installed_dirs.append(destination_dir)
+            except OSError:
+                for directory in installed_dirs:
+                    if os.path.isdir(directory) and not os.path.islink(directory):
+                        shutil.rmtree(directory)
+                    elif os.path.lexists(directory):
+                        os.remove(directory)
+                for directory, backup_path in backups.items():
+                    os.makedirs(os.path.dirname(directory), exist_ok=True)
+                    os.replace(backup_path, directory)
+                raise
+    print(f"Constructed NYU Depth validation dataset with {len(images)} image/depth pairs")
+
+
+def organize_nyu_depth(
+    dataset_path: str = NYU_DEPTH_URL,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/nyu-depth"),
+) -> None:
+    """Organizes NYU Depth, downloading and unpacking an archive when necessary.
+
+    Args:
+        dataset_path: Path or URL to the NYU Depth zip file or extracted dataset directory.
+        output_dir: Directory to store the organized dataset.
+    """
+
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+        if local_dataset_path.endswith(".zip"):
+            print("Unpacking NYU Depth files to temporary directory...")
+            shutil.unpack_archive(local_dataset_path, temp_dir)
+            print("Unpacking completed")
+            construct_nyu_depth(temp_dir, output_dir)
+            return
+
+        construct_nyu_depth(local_dataset_path, output_dir)
+
+
 def _resolve_dotav1_root(dataset_dir: str) -> str:
     """Resolves a DOTAv1 dataset root from a directory path.
 
@@ -497,6 +630,33 @@ def _iter_files(root: str, extensions: Iterable[str]) -> Iterable[str]:
                 yield os.path.join(current_root, file_name)
 
 
+def _write_dotav1_yolo_labels(image_path: str, original_label_path: str, output_path: str) -> None:
+    """Converts one official DOTAv1 label file into normalized OBB label format."""
+
+    with Image.open(image_path) as image:
+        width, height = image.size
+    converted_lines: list[str] = []
+    with open(original_label_path, encoding="utf-8") as label_file:
+        for line in label_file:
+            fields = line.split()
+            if len(fields) < 10 or fields[0].startswith("imagesource:") or fields[0].startswith("gsd:"):
+                continue
+            class_name = fields[8]
+            if class_name not in DOTAV1_CLASS_TO_IDX:
+                raise ValueError(f"Unsupported DOTAv1 class in {original_label_path}: {class_name}")
+            coordinates = [float(value) for value in fields[:8]]
+            normalized = [
+                coordinate / (width if index % 2 == 0 else height) for index, coordinate in enumerate(coordinates)
+            ]
+            converted_lines.append(
+                f"{DOTAV1_CLASS_TO_IDX[class_name]} " + " ".join(f"{coordinate:.8g}" for coordinate in normalized)
+            )
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        output_file.write("\n".join(converted_lines))
+        if converted_lines:
+            output_file.write("\n")
+
+
 def construct_dotav1_from_archives(image_archive: str, label_archive: str, output_dir: str) -> None:
     """Constructs the legacy DOTAv1 validation layout from the Google Drive archives.
 
@@ -536,14 +696,21 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
                 details.append(f"labels without images: {', '.join(missing_images[:5])}")
             raise ValueError(f"DOTAv1 archive stem mismatch ({'; '.join(details)}).")
         matching_ids = sorted(image_ids)
+        if len(matching_ids) != DOTAV1_VALIDATION_SAMPLE_COUNT:
+            raise ValueError(
+                "DOTAv1 validation dataset must contain "
+                f"{DOTAV1_VALIDATION_SAMPLE_COUNT} matching image/label pairs, found {len(matching_ids)}."
+            )
 
         output_dir = os.path.abspath(output_dir)
         output_parent_dir = os.path.dirname(output_dir)
         os.makedirs(output_parent_dir, exist_ok=True)
         with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
             staged_image_dir = os.path.join(staging_dir, "images", "val")
+            staged_label_dir = os.path.join(staging_dir, "labels", "val")
             staged_original_label_dir = os.path.join(staging_dir, "labels", "val_original")
             os.makedirs(staged_image_dir)
+            os.makedirs(staged_label_dir)
             os.makedirs(staged_original_label_dir)
 
             for image_id in matching_ids:
@@ -552,12 +719,16 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
 
             for image_id in matching_ids:
                 shutil.copy2(labels[image_id], os.path.join(staged_original_label_dir, f"{image_id}.txt"))
+                _write_dotav1_yolo_labels(
+                    images[image_id], labels[image_id], os.path.join(staged_label_dir, f"{image_id}.txt")
+                )
 
-            image_output_dir = os.path.join(output_dir, "images", "val")
+            image_output_dir = os.path.join(output_dir, "images")
             label_output_dir = os.path.join(output_dir, "labels", "val")
             original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
             replacements = (
                 (staged_image_dir, image_output_dir),
+                (staged_label_dir, label_output_dir),
                 (staged_original_label_dir, original_label_output_dir),
             )
             existing_dirs = (image_output_dir, label_output_dir, original_label_output_dir)
@@ -602,6 +773,21 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
     """
     dataset_root = _resolve_dotav1_root(dataset_dir)
     print(f"Constructing DOTAv1 validation dataset from {dataset_root} to {output_dir}")
+    flat_image_dir = os.path.join(dataset_root, "images")
+    flat_label_dir = os.path.join(dataset_root, "labels")
+    has_flat_images = os.path.isdir(flat_image_dir) and any(
+        file_name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"))
+        for file_name in os.listdir(flat_image_dir)
+    )
+    if has_flat_images and os.path.isdir(os.path.join(flat_label_dir, "val_original")):
+        os.makedirs(output_dir, exist_ok=True)
+        if os.path.abspath(flat_image_dir) != os.path.abspath(os.path.join(output_dir, "images")):
+            shutil.copytree(flat_image_dir, os.path.join(output_dir, "images"), dirs_exist_ok=True)
+        for label_directory in ("val", "val_original"):
+            source_dir = os.path.join(flat_label_dir, label_directory)
+            if os.path.isdir(source_dir):
+                shutil.copytree(source_dir, os.path.join(output_dir, "labels", label_directory), dirs_exist_ok=True)
+        return
     os.makedirs(output_dir, exist_ok=True)
 
     copied_count = 0
@@ -612,7 +798,10 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
 
             src_dir = os.path.join(root, dir_name)
             relative_dir = os.path.relpath(src_dir, dataset_root)
-            dst_dir = os.path.join(output_dir, relative_dir)
+            if relative_dir == os.path.join("images", "val"):
+                dst_dir = os.path.join(output_dir, "images")
+            else:
+                dst_dir = os.path.join(output_dir, relative_dir)
             if os.path.abspath(src_dir) != os.path.abspath(dst_dir):
                 shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
             copied_count += 1

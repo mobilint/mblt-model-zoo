@@ -283,10 +283,9 @@ This keeps only the validation split and organizes the dataset into the followin
 ```text
 ~/.mblt_model_zoo/datasets/dotav1/
 ├── images/
-│   └── val/
-│       ├── P0003.png
-│       ├── P0006.png
-│       ├── ...
+│   ├── P0003.png
+│   ├── P0006.png
+│   └── ...
 ├── labels/
 │   ├── val/
 │   │   ├── P0003.txt
@@ -314,6 +313,27 @@ python benchmark/vision/benchmark_vision_models.py \
 
 The benchmark records local rotated `mAP test 50` and `mAP test 50-95`; DOTA Task1 prediction files are
 stored under the corresponding `runs/` directory.
+
+## Organize NYU Depth Dataset
+
+The NYU Depth organizer downloads the published archive by default and installs only its 654 validation image/depth
+pairs under `images/` and `depth/` in the selected output directory. You can also give it a local ZIP file or
+extracted dataset root; when `val` directories are present, training data is excluded.
+
+```bash
+python benchmark/vision/organize_nyu_depth.py \
+  --output-dir ~/.mblt_model_zoo/datasets/nyu-depth
+```
+
+```text
+~/.mblt_model_zoo/datasets/nyu-depth/
+├── images/
+│   ├── nyu_0000.jpg
+│   └── ...
+└── depth/
+    ├── nyu_0000.npy
+    └── ...
+```
 
 ## Compare Vision Benchmark Results
 

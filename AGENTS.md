@@ -13,6 +13,9 @@ same rules. The canonical reusable skill lives in `.agents/skills/mblt-model-zoo
 Code loads a small entry point from `.claude/skills/mblt-model-zoo`. Follow more-specific
 `AGENTS.md` files in a subdirectory when present. User and system instructions take precedence.
 
+Keep this guide and `CLAUDE.md` synchronized for shared repository guidance so Codex and Claude
+Code receive the same workflow requirements.
+
 Before editing, run `git status --short`; preserve unrelated changes in a dirty worktree.
 
 ## Current Package Snapshot
@@ -79,8 +82,10 @@ truth when this snapshot becomes stale.
 - Keep validation datasets in `mblt_model_zoo/vision/datasets/*.yaml`. Use `path`, `val`, optional
   `names`, and the repository `tasks` and `download` metadata; resolve defaults with
   `get_dataset_config_for_task()` rather than duplicating URLs or paths.
-- Preserve evaluator layouts. In particular, DOTAv1 may use `labels/val_original`, which retains
-  difficult-object filtering.
+- Keep the NYU Depth organizer validation-only: install its 654 paired samples as `images/` and `depth/` directly
+  under its output root.
+- Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
+  use `labels/val_original`, which retains difficult-object filtering.
 - Expose a seed with default `0` for vision APIs, CLIs, benchmarks, and compatibility helpers that
   sample or otherwise use randomness.
 - Keep qbcompiler imports inside the compilation path. Base imports, vision imports, the compile
@@ -107,8 +112,8 @@ truth when this snapshot becomes stale.
   `--model-path` option, and framework auto-detection.
 - When a package update changes a durable fact—such as version support, dependencies or extras,
   public APIs, CLI commands, repository layout, validation, or workflow—update this guide and the
-  applicable skill in the same change. Update `CLAUDE.md` only when Claude-specific behavior
-  changes; do not copy shared content into it.
+  applicable Codex and Claude skills in the same change. Reflect the change concisely in
+  `CLAUDE.md` as well.
 - Use ATX headings, one blank line between blocks, hyphen lists, language-tagged code fences, and
   concise paragraphs. Add `description` and `paths` YAML frontmatter to reusable agent rules or
   workflows.

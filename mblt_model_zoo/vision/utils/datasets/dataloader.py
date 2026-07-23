@@ -132,13 +132,13 @@ class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
         """Initializes the DOTAv1 validation dataset.
 
         Args:
-            root: DOTAv1 root containing ``images/val`` and ``labels/val``.
+            root: DOTAv1 root containing ``images/`` and ``labels/val``.
 
         Raises:
             FileNotFoundError: If the validation image directory is missing.
         """
         self.root = root
-        self.image_root = os.path.join(root, "images", "val")
+        self.image_root = os.path.join(root, "images")
         if not os.path.isdir(self.image_root):
             raise FileNotFoundError(f"DOTAv1 image directory not found: {self.image_root}")
         self.image_paths = [
