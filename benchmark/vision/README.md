@@ -28,9 +28,10 @@ mblt-model-zoo val \
   --data-path ~/.mblt_model_zoo/datasets/coco
 ```
 
-Image classification validation displays Top-1 and Top-5 accuracy. Other tasks report their
-task-specific score, such as COCO mAP, WiderFace AP, or DOTAv1 rotated mAP. For a local ONNX model,
-use `--model-path ./model.onnx`; pass `--framework onnx` only when an explicit override is needed.
+Image classification validation uses Top-1 accuracy as its primary score and Top-5 accuracy as its
+secondary metric. Other tasks report their task-specific score, such as COCO mAP, WiderFace AP, or
+DOTAv1 rotated mAP. For a local ONNX model, use `--model-path ./model.onnx`; pass `--framework onnx`
+only when an explicit override is needed.
 
 ## Standard Multi-Model Runner
 
@@ -120,8 +121,8 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the ImageNet Benchmark
 
-Use the standard runner. It reports Top-1 and Top-5 accuracy during ImageNet evaluation and records the Top-1
-score in the result artifacts.
+Use the standard runner. It records Top-1 as the primary score and Top-5 as the secondary metric in
+the result artifacts.
 
 ```bash
 python benchmark/vision/benchmark_vision_models.py \
@@ -311,8 +312,9 @@ python benchmark/vision/benchmark_vision_models.py \
   --results-dir benchmark/vision/results/yolov8s_obb_dotav1
 ```
 
-The benchmark records local rotated `mAP test 50` and `mAP test 50-95`; DOTA Task1 prediction files are
-stored under the corresponding `runs/` directory.
+The benchmark records rotated `mAP test 50-95` as the primary score and `mAP test 50` as the
+secondary metric; DOTA Task1 prediction files are stored under the corresponding `runs/`
+directory.
 
 ## Organize NYU Depth Dataset
 

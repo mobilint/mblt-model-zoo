@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from .base import PostBase
 from .cls_post import ClsPost
+from .depth_post import DepthPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
     YOLOAnchorlessOBBPost,
@@ -39,6 +40,8 @@ def build_postprocess(
     task_lower = post_cfg["task"].lower()
     if task_lower == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
+    if task_lower == "depth_estimation":
+        return DepthPost(pre_cfg, post_cfg)
     if task_lower in {"object_detection", "face_detection"}:
         if post_cfg.get("anchors", False):
             return YOLOAnchorPost(

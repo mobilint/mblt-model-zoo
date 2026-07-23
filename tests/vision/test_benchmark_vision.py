@@ -2,12 +2,45 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 from pathlib import Path
 
 import pytest
 
 from benchmark.vision import benchmark_vision_models, compare_benchmark_results
+from mblt_model_zoo.vision.utils.evaluation import ImageNetResult
+
+
+def test_benchmark_records_imagenet_metrics_in_primary_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Use Top-1 as the score while retaining Top-5 in benchmark metrics."""
+
+    class FakeModel:
+        """Minimal classification model double."""
+
+        post_cfg = {"task": "image_classification"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_imagenet",
+        lambda *args, **kwargs: ImageNetResult(top1=0.75, top5=0.95),
+    )
+    args = argparse.Namespace(
+        task="image_classification",
+        data_path=str(tmp_path),
+        batch_size=1,
+    )
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert score == 0.75
+    assert score_name == "top1_accuracy"
+    assert metrics == {"top1_accuracy": 0.75, "top5_accuracy": 0.95}
 
 
 def test_benchmark_continues_after_evaluator_type_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -139,5 +172,11 @@ def test_comparison_uses_result_directory_names(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(chart_utils, "plot_grouped_scalar_barh", lambda **kwargs: captured.update(kwargs))
 
     assert compare_benchmark_results.main([str(tmp_path / "baseline"), str(tmp_path / "candidate")]) == 0
-    assert [path.name for path in captured["sources"]] == ["baseline", "candidate"]
+    sources = captured["sources"]
+    assert isinstance(sources, list)
+    source_paths: list[Path] = []
+    for source in sources:
+        assert isinstance(source, Path)
+        source_paths.append(source)
+    assert [path.name for path in source_paths] == ["baseline", "candidate"]
     assert captured["group_labels"] == ["baseline", "candidate"]

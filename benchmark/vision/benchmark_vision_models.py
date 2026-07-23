@@ -109,8 +109,15 @@ def _evaluate(model: Any, args: argparse.Namespace, run_dir: Path) -> tuple[floa
     if model_task != args.task:
         raise ValueError(f"Model task '{model_task}' does not match requested task '{args.task}'.")
     if args.task == "image_classification":
-        score = float(eval_imagenet(model, args.data_path, args.batch_size))
-        return score, "top1_accuracy", {"top1_accuracy": score}
+        result = eval_imagenet(model, args.data_path, args.batch_size)
+        return (
+            float(result.primary_score),
+            "top1_accuracy",
+            {
+                "top1_accuracy": float(result.top1),
+                "top5_accuracy": float(result.top5),
+            },
+        )
     if args.task in {"object_detection", "instance_segmentation", "pose_estimation"}:
         score = float(eval_coco(model, args.data_path, args.batch_size, args.conf_thres, args.iou_thres))
         return score, "map50_95", {"map50_95": score}
@@ -123,7 +130,14 @@ def _evaluate(model: Any, args: argparse.Namespace, run_dir: Path) -> tuple[floa
             args.iou_thres,
             str(run_dir / "dota_task1"),
         )
-        return float(result.map5095), "map50_95", {"map50": float(result.map50), "map50_95": float(result.map5095)}
+        return (
+            float(result.primary_score),
+            "map50_95",
+            {
+                "map50_95": float(result.map5095),
+                "map50": float(result.map50),
+            },
+        )
     if args.task == "face_detection":
         result = eval_widerface(model, args.data_path, args.batch_size, args.conf_thres, args.iou_thres)
         return (

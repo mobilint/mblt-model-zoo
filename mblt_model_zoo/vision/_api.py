@@ -10,6 +10,7 @@ from .wrapper import MBLT_Engine
 
 TASKS = [
     "image_classification",
+    "depth_estimation",
     "object_detection",
     "instance_segmentation",
     "oriented_bounding_boxes",
@@ -20,6 +21,7 @@ TASKS = [
 
 _TASK_MODULES = {
     "image_classification": "image_classification",
+    "depth_estimation": "depth_estimation",
     "object_detection": "object_detection",
     "instance_segmentation": "instance_segmentation",
     "oriented_bounding_boxes": "oriented_bounding_boxes",
@@ -30,6 +32,7 @@ _TASK_MODULES = {
 
 _DEFAULT_TASKS = [
     "image_classification",
+    "depth_estimation",
     "object_detection",
     "instance_segmentation",
     "oriented_bounding_boxes",

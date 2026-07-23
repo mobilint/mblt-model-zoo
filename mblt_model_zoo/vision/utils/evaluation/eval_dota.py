@@ -24,10 +24,20 @@ DOTAV1_CLASS_TO_IDX = {get_dotav1_label(index): index for index in range(get_dot
 
 
 class DOTAResult(NamedTuple):
-    """DOTAv1 rotated detection metrics."""
+    """DOTAv1 rotated detection metrics ordered from primary to secondary."""
 
-    map50: float
     map5095: float
+    map50: float
+
+    @property
+    def primary_score(self) -> float:
+        """Return the primary DOTAv1 validation metric."""
+        return self.map5095
+
+    @property
+    def secondary_score(self) -> float:
+        """Return the secondary DOTAv1 validation metric."""
+        return self.map50
 
 
 def _label_to_index(label: str) -> int:
@@ -316,15 +326,15 @@ def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAR
     """Compute DOTAv1 mAP metrics from accumulated validator statistics."""
     target_cls = np.concatenate(stats["target_cls"], 0) if stats["target_cls"] else np.zeros(0, dtype=np.float64)
     if target_cls.size == 0:
-        return DOTAResult(map50=0.0, map5095=0.0)
+        return DOTAResult(map5095=0.0, map50=0.0)
 
     tp = np.concatenate(stats["tp"], 0) if stats["tp"] else np.zeros((0, niou), dtype=bool)
     conf = np.concatenate(stats["conf"], 0) if stats["conf"] else np.zeros(0, dtype=np.float64)
     pred_cls = np.concatenate(stats["pred_cls"], 0) if stats["pred_cls"] else np.zeros(0, dtype=np.float64)
     ap = _ap_per_class(tp, conf, pred_cls, target_cls)
     if ap.size == 0:
-        return DOTAResult(map50=0.0, map5095=0.0)
-    return DOTAResult(map50=float(ap[:, 0].mean()), map5095=float(ap.mean()))
+        return DOTAResult(map5095=0.0, map50=0.0)
+    return DOTAResult(map5095=float(ap.mean()), map50=float(ap[:, 0].mean()))
 
 
 def evaluate_dota_predictions(
@@ -338,7 +348,7 @@ def evaluate_dota_predictions(
         predictions: Formatted prediction dictionaries.
 
     Returns:
-        Rotated mAP at IoU ``0.50`` and averaged across ``0.50:0.95``.
+        Rotated mAP averaged across ``0.50:0.95`` followed by mAP at IoU ``0.50``.
     """
     iouv = torch.linspace(0.5, 0.95, 10)
     stats = _empty_stats()

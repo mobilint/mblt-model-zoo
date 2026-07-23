@@ -7,6 +7,7 @@ also supporting legacy top-level model imports such as
 
 from __future__ import annotations
 
+from . import depth_estimation as depth_estimation
 from . import face_detection as face_detection
 from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
@@ -19,6 +20,7 @@ from .wrapper import MBLT_Engine as MBLT_Engine
 
 _TASK_MODULES = (
     face_detection,
+    depth_estimation,
     image_classification,
     instance_segmentation,
     object_detection,
@@ -38,6 +40,7 @@ _PUBLIC_EXPORTS = [
     "list_models",
     "list_tasks",
     "face_detection",
+    "depth_estimation",
     "image_classification",
     "instance_segmentation",
     "object_detection",

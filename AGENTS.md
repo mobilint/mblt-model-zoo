@@ -9,12 +9,15 @@ paths:
 ## Purpose and Precedence
 
 This is the canonical repository guide. `CLAUDE.md` imports it so Codex and Claude Code use the
-same rules. The canonical reusable skill lives in `.agents/skills/mblt-model-zoo`, while Claude
-Code loads a small entry point from `.claude/skills/mblt-model-zoo`. Follow more-specific
-`AGENTS.md` files in a subdirectory when present. User and system instructions take precedence.
+same rules. Shared workflow lives in `.agents/skills/mblt-model-zoo`; focused Vision and
+Transformers skills live alongside it. Claude Code loads matching small entry points from
+`.claude/skills/`. Follow more-specific `AGENTS.md` files in a subdirectory when present. User and
+system instructions take precedence.
 
 Keep this guide and `CLAUDE.md` synchronized for shared repository guidance so Codex and Claude
-Code receive the same workflow requirements.
+Code receive the same workflow requirements. The focused reusable skills are
+`.agents/skills/mblt-vision` and `.agents/skills/mblt-transformers`; maintain matching Claude
+entry points in `.claude/skills/`.
 
 Before editing, run `git status --short`; preserve unrelated changes in a dirty worktree.
 
@@ -71,7 +74,7 @@ truth when this snapshot becomes stale.
 - Prefer `model_path` in new APIs, tests, and docs. `mxq_path` and `onnx_path` are compatibility
   aliases. Framework inference recognizes local `.mxq` and `.onnx` suffixes; retain the fail-fast
   error for an explicit framework that conflicts with a local suffix.
-- The supported discovery tasks are `image_classification`, `object_detection`,
+- The supported discovery tasks are `image_classification`, `depth_estimation`, `object_detection`,
   `instance_segmentation`, `oriented_bounding_boxes`, `obb`, `pose_estimation`, and
   `face_detection`. `obb` is an alias for `oriented_bounding_boxes`.
 - Keep model configuration shape (`model_cfg`, `pre_cfg`, and `post_cfg`) stable unless changing
@@ -84,6 +87,11 @@ truth when this snapshot becomes stale.
   `get_dataset_config_for_task()` rather than duplicating URLs or paths.
 - Keep the NYU Depth organizer validation-only: install its 654 paired samples as `images/` and `depth/` directly
   under its output root.
+- Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
+  prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
+  `abs_rel` and `rmse` as auxiliary metrics.
+- ImageNet validation reports Top-1 accuracy as the primary metric and Top-5 accuracy as the secondary metric.
+- DOTAv1 validation reports rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
   use `labels/val_original`, which retains difficult-object filtering.
 - Expose a seed with default `0` for vision APIs, CLIs, benchmarks, and compatibility helpers that

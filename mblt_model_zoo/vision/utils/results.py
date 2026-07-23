@@ -59,6 +59,7 @@ class Results:
         self.acc: torch.Tensor | np.ndarray | None = None
         self.box_cls: torch.Tensor | np.ndarray | None = None
         self.mask: torch.Tensor | np.ndarray | None = None
+        self.depth: torch.Tensor | np.ndarray | list[TensorLike] | None = None
         self.output: TensorLike | ListTensorLike | NestedListTensorLike | None = None
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
@@ -103,6 +104,7 @@ class Results:
         self.acc = None
         self.box_cls = None
         self.mask = None
+        self.depth = None
         if self.task.lower() == "image_classification":
             if isinstance(output, Sequence):
                 raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
@@ -117,6 +119,15 @@ class Results:
             seg_output = cast(ListTensorLike, output[0])
             self.box_cls = cast(TensorLike, seg_output[0])
             self.mask = cast(TensorLike, seg_output[1])
+        elif self.task.lower() == "depth_estimation":
+            if isinstance(output, Sequence) and not isinstance(output, (np.ndarray, torch.Tensor)):
+                if not all(isinstance(item, (np.ndarray, torch.Tensor)) for item in output):
+                    raise TypeError(f"Expected depth-map tensors for task {self.task}, got {type(output)}.")
+                self.depth = [cast(TensorLike, item) for item in output]
+            elif isinstance(output, (np.ndarray, torch.Tensor)):
+                self.depth = output
+            else:
+                raise TypeError(f"Expected tensor depth output for task {self.task}, got {type(output)}.")
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
         self.output = output  # store raw output
@@ -151,12 +162,70 @@ class Results:
             return self._plot_object_detection(source_path, save_path, **kwargs)
         elif self.task.lower() == "instance_segmentation":
             return self._plot_instance_segmentation(source_path, save_path, **kwargs)
+        elif self.task.lower() == "depth_estimation":
+            return self._plot_depth_estimation(source_path, save_path, **kwargs)
         elif self.task.lower() == "pose_estimation":
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
         elif self.task.lower() == "obb":
             return self._plot_obb(source_path, save_path, **kwargs)
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
+
+    def _plot_depth_estimation(
+        self,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        """Colorize the first depth map and blend it over the original image."""
+
+        del kwargs
+        if self.depth is None:
+            raise ValueError("No depth output found.")
+        depth_value = self.depth[0] if isinstance(self.depth, list) else self.depth
+        depth = depth_value.detach().cpu().numpy() if isinstance(depth_value, torch.Tensor) else depth_value
+        if depth.ndim == 3:
+            depth = depth[0]
+        if depth.ndim != 2:
+            raise ValueError(f"Expected a 2D depth map or [B, H, W], got {depth.shape}.")
+        image = self._read_image(source_path)
+        image_height, image_width = image.shape[:2]
+        depth = self._restore_depth_map(depth, (image_height, image_width))
+        finite = np.isfinite(depth)
+        if not finite.any():
+            raise ValueError("Depth output contains no finite values.")
+        lower, upper = np.percentile(depth[finite], (1, 99))
+        if upper <= lower:
+            upper = lower + 1.0
+        normalized = np.zeros(depth.shape, dtype=np.uint8)
+        normalized[finite] = np.clip((depth[finite] - lower) * 255 / (upper - lower), 0, 255).astype(np.uint8)
+        overlay = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)
+        result = cv2.addWeighted(image, 0.45, overlay, 0.55, 0)
+        if save_path is not None:
+            cv2.imwrite(save_path, result)
+        return result
+
+    def _restore_depth_map(self, depth: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
+        """Undo the configured letterbox transform and resize a depth map to an image."""
+
+        letterbox_cfg = self.pre_cfg.get("LetterBox", {})
+        input_shape = letterbox_cfg.get("img_size")
+        if not isinstance(input_shape, list) or len(input_shape) != 2:
+            return cv2.resize(depth, (image_shape[1], image_shape[0]), interpolation=cv2.INTER_LINEAR)
+        input_height, input_width = int(input_shape[0]), int(input_shape[1])
+        image_height, image_width = image_shape
+        ratio = min(input_height / image_height, input_width / image_width)
+        unpadded_width, unpadded_height = int(round(image_width * ratio)), int(round(image_height * ratio))
+        left = int(round((input_width - unpadded_width) / 2 - 0.1))
+        top = int(round((input_height - unpadded_height) / 2 - 0.1))
+        scale_x, scale_y = depth.shape[1] / input_width, depth.shape[0] / input_height
+        cropped = depth[
+            int(round(top * scale_y)) : int(round((top + unpadded_height) * scale_y)),
+            int(round(left * scale_x)) : int(round((left + unpadded_width) * scale_x)),
+        ]
+        if cropped.size == 0:
+            raise ValueError("Depth letterbox restoration produced an empty crop.")
+        return cv2.resize(cropped, (image_width, image_height), interpolation=cv2.INTER_LINEAR)
 
     def _plot_image_classification(
         self,

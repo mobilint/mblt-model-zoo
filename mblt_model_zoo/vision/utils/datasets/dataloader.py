@@ -4,6 +4,7 @@ Custom dataloaders for vision datasets.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Callable
 
@@ -115,6 +116,119 @@ def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Cal
         num_workers=0,
         collate_fn=loader,
     )
+
+
+class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """NYU Depth V2 validation dataset with paired RGB images and ``.npy`` depth maps."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's ``images/`` and ``depth/`` validation-only layout."""
+
+        self.root = root
+        image_root, depth_root = os.path.join(root, "images"), os.path.join(root, "depth")
+        if not os.path.isdir(image_root) or not os.path.isdir(depth_root):
+            raise FileNotFoundError(f"NYU Depth requires images/ and depth/ directories under: {root}")
+        images = {
+            os.path.splitext(name)[0]: os.path.join(image_root, name)
+            for name in os.listdir(image_root)
+            if name.lower().endswith(self.IMG_EXTENSIONS)
+        }
+        depths = {
+            os.path.splitext(name)[0]: os.path.join(depth_root, name)
+            for name in os.listdir(depth_root)
+            if name.lower().endswith(".npy")
+        }
+        missing_depths, missing_images = sorted(set(images) - set(depths)), sorted(set(depths) - set(images))
+        if missing_depths or missing_images:
+            details = []
+            if missing_depths:
+                details.append(f"images without depth maps: {', '.join(missing_depths[:5])}")
+            if missing_images:
+                details.append(f"depth maps without images: {', '.join(missing_images[:5])}")
+            raise ValueError(f"NYU Depth image/depth mismatch ({'; '.join(details)}).")
+        if not images:
+            raise ValueError(f"NYU Depth contains no image/depth pairs: {root}")
+        self.samples = [(images[stem], depths[stem], stem) for stem in sorted(images)]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load an RGB image and finite-safe depth target."""
+
+        image_path, depth_path, stem = self.samples[index]
+        image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"NYU Depth image not found: {image_path}")
+        depth = np.asarray(np.load(depth_path), dtype=np.float32)
+        if depth.ndim != 2:
+            raise ValueError(f"NYU Depth target must be two-dimensional, got {depth.shape}: {depth_path}")
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0), stem
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_nyu_depth_loader(
+    dataset: CustomNYUDepth,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int] | None = None,
+) -> torch.utils.data.DataLoader:
+    """Create a NYU Depth loader with optional stretch-to-size validation preprocessing.
+
+    Args:
+        dataset: Paired NYU Depth validation dataset.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Preprocessing applied after an optional validation resize.
+        image_size: Optional ``(height, width)`` used to stretch RGB inputs with bilinear
+            interpolation and depth targets with nearest-neighbor interpolation. This
+            matches the Ultralytics depth validation pipeline.
+
+    Returns:
+        Configured NYU Depth validation loader.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, list[np.ndarray], list[tuple[int, int]], list[Any], tuple[str, ...]]:
+        images, targets, stems = zip(*batch)
+        processed_images, shapes, ratio_pads = [], [], []
+        processed_targets = []
+        for image, target in zip(images, targets):
+            if image_size is not None:
+                height, width = image_size
+                source_height, source_width = image.shape[:2]
+                ratio = min(height / source_height, width / source_width)
+                resized_width = min(math.ceil(source_width * ratio), width)
+                resized_height = min(math.ceil(source_height * ratio), height)
+                if (resized_height, resized_width) != (source_height, source_width):
+                    image = cv2.resize(
+                        image,
+                        (resized_width, resized_height),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+                    target = cv2.resize(
+                        target,
+                        (resized_width, resized_height),
+                        interpolation=cv2.INTER_NEAREST,
+                    )
+                image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+                target = cv2.resize(target, (width, height), interpolation=cv2.INTER_NEAREST)
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if isinstance(processed, tuple) and len(processed) == 2 and isinstance(processed[1], dict):
+                processed_image, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_image = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_image)
+            processed_targets.append(target)
+        return np.stack(processed_images), processed_targets, shapes, ratio_pads, stems
+
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
 
 
 class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):

@@ -26,6 +26,7 @@ from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, g
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
+from mblt_model_zoo.vision.utils.evaluation import DOTAResult, ImageNetResult
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -598,7 +599,73 @@ def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:
     assert _dataset_ready("face_detection", str(data_path))
 
 
-def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_cli_val_routes_imagenet_metrics_in_primary_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Return Top-1 and report ImageNet metrics from primary to secondary."""
+
+    data_path = tmp_path / "imagenet"
+    (data_path / "class-0").mkdir(parents=True)
+    calls = {}
+
+    class _FakeEngine:
+        """Minimal engine double for ImageNet validation routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "image_classification"}
+            self.postprocessor = Namespace(e2e=True)
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_imagenet(**kwargs: object) -> ImageNetResult:
+        calls["eval_kwargs"] = kwargs
+        return ImageNetResult(top1=0.75, top5=0.95)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_imagenet", _fake_eval_imagenet)
+
+    args = Namespace(
+        model="resnet50",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=8,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=True,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    output = capsys.readouterr().out
+    assert score == 0.75
+    assert "Validation score (Top-1 accuracy): 0.75000, (Top-5 accuracy): 0.95000" in output
+    assert calls["disposed"] is True
+
+
+def test_cli_val_routes_obb_to_dota_evaluator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Route OBB validation through the DOTAv1 evaluator."""
 
     data_path = tmp_path / "dotav1"
@@ -617,15 +684,9 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
         def dispose(self) -> None:
             calls["disposed"] = True
 
-    class _FakeDOTAResult:
-        """Minimal DOTAv1 metric result."""
-
-        map50 = 0.234
-        map5095 = 0.123
-
-    def _fake_eval_dota(**kwargs: object) -> _FakeDOTAResult:
+    def _fake_eval_dota(**kwargs: object) -> DOTAResult:
         calls["eval_kwargs"] = kwargs
-        return _FakeDOTAResult()
+        return DOTAResult(map5095=0.123, map50=0.234)
 
     import mblt_model_zoo.vision as vision_module
     import mblt_model_zoo.vision.utils.evaluation as evaluation_module
@@ -660,6 +721,9 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
     engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == 0.123
+    assert (
+        "Validation score (rotated mAP test 50-95): 0.12300, (rotated mAP test 50): 0.23400" in capsys.readouterr().out
+    )
     assert engine_kwargs["model_cls"] == "yolov8m-obb"
     assert engine_kwargs["framework"] == "onnx"
     assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
@@ -871,7 +935,7 @@ def test_eval_widerface_formats_predictions_and_returns_metrics(
 
 
 def test_dota_evaluator_reports_map50_and_map5095() -> None:
-    """Return both DOTAv1 mAP50 and mAP50-95 metrics."""
+    """Return DOTAv1 metrics with mAP50-95 as the primary score."""
 
     ground_truths = {
         "P0001": {
@@ -892,6 +956,20 @@ def test_dota_evaluator_reports_map50_and_map5095() -> None:
 
     assert result.map50 > 0.99
     assert result.map5095 > 0.99
+    assert result.primary_score == result.map5095
+    assert result.secondary_score == result.map50
+
+
+def test_metric_results_order_primary_before_secondary() -> None:
+    """Keep tuple ordering aligned with public primary and secondary metrics."""
+
+    imagenet_result = ImageNetResult(top1=0.75, top5=0.95)
+    dota_result = DOTAResult(map5095=0.45, map50=0.7)
+
+    assert tuple(imagenet_result) == (0.75, 0.95)
+    assert imagenet_result.primary_score == imagenet_result.top1
+    assert imagenet_result.secondary_score == imagenet_result.top5
+    assert tuple(dota_result) == (0.45, 0.7)
 
 
 def test_dota_matching_uses_one_to_one_duplicates() -> None:

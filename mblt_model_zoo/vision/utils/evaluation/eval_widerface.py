@@ -5,13 +5,14 @@ from __future__ import annotations
 import math
 import os
 from time import time
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 from scipy.io import loadmat
 from tqdm import tqdm
 
 from ..datasets import CustomWiderface, get_widerface_loader
+from ..postprocess.base import YOLOPostBase
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -98,9 +99,10 @@ def eval_widerface(
         out_npu = model(input_npu)
         inference_time += time() - tic
         nms_outs = model.postprocess(out_npu)
-        input_shape = tuple(int(value) for value in input_npu.shape[1:-1])
+        input_shape = (int(input_npu.shape[1]), int(input_npu.shape[2]))
         img0_shapes = [(int(shape[0]), int(shape[1])) for shape in org_shape.tolist()]
-        _, boxes_list, scores_list = model.postprocessor.nmsout2eval(
+        postprocessor = cast(YOLOPostBase, model.postprocessor)
+        _, boxes_list, scores_list = postprocessor.nmsout2eval(
             nms_outs.output,
             input_shape,
             img0_shapes,

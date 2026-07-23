@@ -1,0 +1,17 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO26x-depth
+    filename: yolo26x-depth.mxq
+    onnx_filename: yolo26x-depth.onnx
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size: [768, 768]
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: depth_estimation

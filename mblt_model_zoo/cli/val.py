@@ -18,6 +18,7 @@ DEFAULT_COCO_ANNOTATION_SOURCE = get_dataset_config("coco")["download"]["annotat
 DEFAULT_WIDERFACE_IMAGE_SOURCE = get_dataset_config("widerface")["download"]["images"]
 DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"]["annotations"]
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
+DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -116,6 +117,15 @@ def _resolve_dotav1_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_DOTAV1_SOURCE
 
 
+def _resolve_nyu_depth_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolve a local archive or URL for NYU Depth organization."""
+
+    dataset_path = args.annotation_dir or args.image_dir
+    if not args.force_organize:
+        dataset_path = dataset_path or _find_existing_source(data_path, ["nyu-depth.zip", "nyu-depth"])
+    return dataset_path or DEFAULT_NYU_DEPTH_SOURCE
+
+
 def _default_data_path_for_task(task: str) -> str:
     """Returns the default organized dataset path for a vision task."""
 
@@ -147,6 +157,8 @@ def _dataset_ready(task: str, data_path: str) -> bool:
         return (root / "images").is_dir() and (
             (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
         )
+    if task == "depth_estimation":
+        return (root / "images").is_dir() and (root / "depth").is_dir()
     return False
 
 
@@ -163,6 +175,7 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             organize_coco,
             organize_dotav1,
             organize_imagenet,
+            organize_nyu_depth,
             organize_widerface,
         )
     except ImportError as exc:
@@ -196,6 +209,11 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             dataset_path=_resolve_dotav1_source(args, data_path),
             output_dir=data_path,
         )
+    elif task == "depth_estimation":
+        organize_nyu_depth(
+            dataset_path=_resolve_nyu_depth_source(args, data_path),
+            output_dir=data_path,
+        )
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
@@ -206,7 +224,13 @@ def _run_validation(args: argparse.Namespace) -> float:
     """Runs model validation on the dataset associated with the model task."""
 
     try:
-        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
+        from mblt_model_zoo.vision.utils.evaluation import (
+            eval_coco,
+            eval_dota,
+            eval_imagenet,
+            eval_nyu_depth,
+            eval_widerface,
+        )
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -220,9 +244,23 @@ def _run_validation(args: argparse.Namespace) -> float:
         data_path = _ensure_dataset(args, task)
 
         if task == "image_classification":
-            score = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
-            print(f"Validation score (Top-1 accuracy): {score:.5f}")
-            return score
+            imagenet_result = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
+            print(
+                "Validation score "
+                f"(Top-1 accuracy): {imagenet_result.top1:.5f}, "
+                f"(Top-5 accuracy): {imagenet_result.top5:.5f}"
+            )
+            return imagenet_result.primary_score
+
+        if task == "depth_estimation":
+            depth_result = eval_nyu_depth(model=model, data_path=data_path, batch_size=args.batch_size)
+            print(
+                "Validation score "
+                f"(delta1): {depth_result.delta1:.5f}, "
+                f"(abs_rel): {depth_result.abs_rel:.5f}, "
+                f"(rmse): {depth_result.rmse:.5f}"
+            )
+            return depth_result.delta1
 
         if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
             score = eval_coco(
@@ -245,10 +283,10 @@ def _run_validation(args: argparse.Namespace) -> float:
             )
             print(
                 "Validation score "
-                f"(rotated mAP test 50): {dota_result.map50:.5f}, "
-                f"(rotated mAP test 50-95): {dota_result.map5095:.5f}"
+                f"(rotated mAP test 50-95): {dota_result.map5095:.5f}, "
+                f"(rotated mAP test 50): {dota_result.map50:.5f}"
             )
-            return dota_result.map5095
+            return dota_result.primary_score
 
         if task == "face_detection":
             widerface_result = eval_widerface(
