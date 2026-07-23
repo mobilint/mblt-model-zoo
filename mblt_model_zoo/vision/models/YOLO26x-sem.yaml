@@ -1,0 +1,17 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO26x-sem
+    filename: yolo26x-sem.mxq
+    onnx_filename: yolo26x-sem.onnx
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size: [1024, 2048]
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: semantic_segmentation

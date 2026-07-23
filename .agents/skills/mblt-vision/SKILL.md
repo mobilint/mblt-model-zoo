@@ -46,6 +46,7 @@ description: >-
   secondary metric.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts.
+- Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - Do not duplicate dataset URLs, paths, or long test commands owned by the registry or local guide.
 
 ## Validate Proportionately

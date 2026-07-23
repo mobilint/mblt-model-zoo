@@ -11,6 +11,9 @@ Read and follow the canonical skill at
 [`../../../.agents/skills/mblt-model-zoo/SKILL.md`](../../../.agents/skills/mblt-model-zoo/SKILL.md).
 Keep shared workflow content there so Codex and Claude Code stay synchronized.
 
+ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
+directories.
+
 Use the focused entry points for Vision and Transformers work:
 
 - [`mblt-vision`](../mblt-vision/SKILL.md)

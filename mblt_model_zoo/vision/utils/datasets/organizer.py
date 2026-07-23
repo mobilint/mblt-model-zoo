@@ -36,6 +36,8 @@ DOTAV1_CLASS_TO_IDX = {name: int(index) for index, name in get_dataset_config("d
 DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
+ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
+ADE20K_VALIDATION_SAMPLE_COUNT = 2000
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -541,6 +543,109 @@ def organize_nyu_depth(
             return
 
         construct_nyu_depth(local_dataset_path, output_dir)
+
+
+def _resolve_ade20k_validation_dirs(dataset_dir: str) -> tuple[str, str, str]:
+    """Resolves the ADE20K root and validation image/mask directories."""
+
+    for root in (os.path.join(dataset_dir, "ADEChallengeData2016"), dataset_dir):
+        for image_dir, annotation_dir in (
+            (os.path.join(root, "images", "validation"), os.path.join(root, "annotations", "validation")),
+            (os.path.join(root, "images"), os.path.join(root, "annotations")),
+        ):
+            if os.path.isdir(image_dir) and os.path.isdir(annotation_dir):
+                return root, image_dir, annotation_dir
+    raise ValueError(f"ADE20K dataset must contain matching images/ and annotations/ directories: {dataset_dir}")
+
+
+def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
+    """Constructs the flat ADE20K validation layout from an extracted dataset.
+
+    Args:
+        dataset_dir: Directory containing the ADE20K root or its parent.
+        output_dir: Directory where the organized validation dataset will be stored.
+
+    Raises:
+        ValueError: If the source does not contain 2,000 matched validation image/mask pairs.
+    """
+
+    dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
+    images = {
+        os.path.splitext(file_name)[0]: os.path.join(image_dir, file_name)
+        for file_name in os.listdir(image_dir)
+        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
+    }
+    annotations = {
+        os.path.splitext(file_name)[0]: os.path.join(annotation_dir, file_name)
+        for file_name in os.listdir(annotation_dir)
+        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
+    }
+    if set(images) != set(annotations):
+        raise ValueError("ADE20K validation images and annotations must have matching file stems.")
+    if len(images) != ADE20K_VALIDATION_SAMPLE_COUNT:
+        raise ValueError(
+            f"ADE20K validation dataset must contain {ADE20K_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
+        )
+
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".ade20k-staging-") as staging_dir:
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_annotation_dir = os.path.join(staging_dir, "annotations")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_annotation_dir)
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, os.path.basename(images[sample_id])))
+            shutil.copy2(
+                annotations[sample_id], os.path.join(staged_annotation_dir, os.path.basename(annotations[sample_id]))
+            )
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_annotation_dir, os.path.join(output_dir, "annotations")),
+        )
+        os.makedirs(output_dir, exist_ok=True)
+        backups: dict[str, str] = {}
+        installed_dirs: list[str] = []
+        try:
+            for _, destination_dir in replacements:
+                if os.path.lexists(destination_dir):
+                    backup_dir = os.path.join(staging_dir, f"backup-{os.path.basename(destination_dir)}")
+                    os.replace(destination_dir, backup_dir)
+                    backups[destination_dir] = backup_dir
+            for staged_dir, destination_dir in replacements:
+                os.replace(staged_dir, destination_dir)
+                installed_dirs.append(destination_dir)
+        except OSError:
+            for directory in installed_dirs:
+                if os.path.isdir(directory) and not os.path.islink(directory):
+                    shutil.rmtree(directory)
+                elif os.path.lexists(directory):
+                    os.remove(directory)
+            for destination_dir, backup_dir in backups.items():
+                os.replace(backup_dir, destination_dir)
+            raise
+        for file_name in ("objectInfo150.txt", "sceneCategories.txt"):
+            source_path = os.path.join(dataset_root, file_name)
+            if os.path.isfile(source_path):
+                shutil.copy2(source_path, os.path.join(output_dir, file_name))
+    print(f"Constructed ADE20K validation dataset with {len(images)} image/mask pairs")
+
+
+def organize_ade20k(
+    dataset_path: str = ADE20K_URL,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/ADEChallengeData2016"),
+) -> None:
+    """Organizes ADE20K validation data, downloading and unpacking when necessary."""
+
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+        if local_dataset_path.endswith(".zip"):
+            shutil.unpack_archive(local_dataset_path, temp_dir)
+            construct_ade20k(temp_dir, output_dir)
+            return
+        construct_ade20k(local_dataset_path, output_dir)
 
 
 def _resolve_dotav1_root(dataset_dir: str) -> str:

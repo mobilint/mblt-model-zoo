@@ -28,6 +28,7 @@ from .dataloader import (
 from .dotav1 import get_dotav1_class_num, get_dotav1_label
 from .imagenet import get_imagenet_label
 from .organizer import (
+    organize_ade20k,
     organize_coco,
     organize_dotav1,
     organize_imagenet,
@@ -57,6 +58,7 @@ __all__: list[str] = [
     "get_widerface_loader",
     "get_imagenet_label",
     "organize_coco",
+    "organize_ade20k",
     "organize_dotav1",
     "organize_imagenet",
     "organize_nyu_depth",

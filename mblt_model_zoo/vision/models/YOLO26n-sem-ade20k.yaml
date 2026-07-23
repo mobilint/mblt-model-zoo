@@ -1,0 +1,17 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLO26n-sem-ade20k
+    filename: yolo26n-sem-ade20k.mxq
+    onnx_filename: yolo26n-sem-ade20k.onnx
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size: [640, 640]
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: semantic_segmentation

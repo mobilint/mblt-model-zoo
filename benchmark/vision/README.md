@@ -337,6 +337,29 @@ python benchmark/vision/organize_nyu_depth.py \
     └── ...
 ```
 
+## Organize ADE20K Dataset
+
+The ADE20K organizer downloads the official archive by default, then retains only the 2,000 validation image/mask
+pairs. It installs them as flat `images/` and `annotations/` directories and preserves `objectInfo150.txt` and
+`sceneCategories.txt` when supplied by the source.
+
+```bash
+python benchmark/vision/organize_ade20k.py \
+  --output-dir ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+```
+
+```text
+~/.mblt_model_zoo/datasets/ADEChallengeData2016/
+├── annotations/
+│   ├── ADE_val_00000001.png
+│   └── ...
+├── images/
+│   ├── ADE_val_00000001.jpg
+│   └── ...
+├── objectInfo150.txt
+└── sceneCategories.txt
+```
+
 ## Compare Vision Benchmark Results
 
 You can compare multiple vision benchmark CSV files and generate model-wise charts:

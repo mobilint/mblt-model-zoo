@@ -17,5 +17,6 @@
 - ImageNet validation uses Top-1 accuracy as its primary metric and Top-5 accuracy as its secondary metric.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
 - DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts.
+- ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

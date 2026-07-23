@@ -132,3 +132,24 @@ def test_organize_nyu_depth_extracts_only_validation_layout(
     assert (output_dir / "depth" / "nyu_0000.npy").read_bytes() == b"validation depth"
     assert not (output_dir / "images" / "train").exists()
     assert not (output_dir / "depth" / "train").exists()
+
+
+def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Install only ADE20K validation image/mask pairs in the reference layout."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    archive_path = tmp_path / "ADEChallengeData2016.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr("ADEChallengeData2016/images/training/ADE_train_00000001.jpg", b"training")
+        archive.writestr("ADEChallengeData2016/annotations/training/ADE_train_00000001.png", b"training")
+        archive.writestr("ADEChallengeData2016/images/validation/ADE_val_00000001.jpg", b"validation")
+        archive.writestr("ADEChallengeData2016/annotations/validation/ADE_val_00000001.png", b"validation")
+        archive.writestr("ADEChallengeData2016/objectInfo150.txt", b"labels")
+
+    output_dir = tmp_path / "organized"
+    organizer.organize_ade20k(str(archive_path), str(output_dir))
+
+    assert (output_dir / "images" / "ADE_val_00000001.jpg").read_bytes() == b"validation"
+    assert (output_dir / "annotations" / "ADE_val_00000001.png").read_bytes() == b"validation"
+    assert (output_dir / "objectInfo150.txt").read_bytes() == b"labels"
+    assert not (output_dir / "images" / "training").exists()

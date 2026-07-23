@@ -87,6 +87,8 @@ truth when this snapshot becomes stale.
   `get_dataset_config_for_task()` rather than duplicating URLs or paths.
 - Keep the NYU Depth organizer validation-only: install its 654 paired samples as `images/` and `depth/` directly
   under its output root.
+- Keep the ADE20K organizer validation-only: install its 2,000 paired samples as flat `images/` and `annotations/`
+  directories, along with its source metadata files.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
   `abs_rel` and `rmse` as auxiliary metrics.

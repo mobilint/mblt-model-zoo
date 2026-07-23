@@ -28,6 +28,7 @@ description: >-
 - When a package update changes a durable public fact or workflow, update `AGENTS.md`, this skill,
   the relevant area skill, `CLAUDE.md`, and the matching Claude skill entry point in the same change.
   Keep shared guidance concise.
+- Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately
