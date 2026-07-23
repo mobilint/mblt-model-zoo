@@ -14,6 +14,7 @@ from . import instance_segmentation as instance_segmentation
 from . import object_detection as object_detection
 from . import oriented_bounding_boxes as oriented_bounding_boxes
 from . import pose_estimation as pose_estimation
+from . import semantic_segmentation as semantic_segmentation
 from ._api import list_models as list_models
 from ._api import list_tasks as list_tasks
 from .wrapper import MBLT_Engine as MBLT_Engine
@@ -26,6 +27,7 @@ _TASK_MODULES = (
     object_detection,
     oriented_bounding_boxes,
     pose_estimation,
+    semantic_segmentation,
 )
 
 _LEGACY_MODEL_EXPORTS: dict[str, object] = {}
@@ -46,6 +48,7 @@ _PUBLIC_EXPORTS = [
     "object_detection",
     "oriented_bounding_boxes",
     "pose_estimation",
+    "semantic_segmentation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)
 # Keep legacy compatibility exports synchronized with their task packages.
 __all__: list[str] = _PUBLIC_EXPORTS  # pyright: ignore[reportUnsupportedDunderAll]

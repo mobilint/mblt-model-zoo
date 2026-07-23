@@ -60,6 +60,7 @@ class Results:
         self.box_cls: torch.Tensor | np.ndarray | None = None
         self.mask: torch.Tensor | np.ndarray | None = None
         self.depth: torch.Tensor | np.ndarray | list[TensorLike] | None = None
+        self.semantic_mask: torch.Tensor | np.ndarray | None = None
         self.output: TensorLike | ListTensorLike | NestedListTensorLike | None = None
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
@@ -105,6 +106,7 @@ class Results:
         self.box_cls = None
         self.mask = None
         self.depth = None
+        self.semantic_mask = None
         if self.task.lower() == "image_classification":
             if isinstance(output, Sequence):
                 raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
@@ -128,6 +130,10 @@ class Results:
                 self.depth = output
             else:
                 raise TypeError(f"Expected tensor depth output for task {self.task}, got {type(output)}.")
+        elif self.task.lower() == "semantic_segmentation":
+            if not isinstance(output, (np.ndarray, torch.Tensor)):
+                raise TypeError(f"Expected tensor semantic output for task {self.task}, got {type(output)}.")
+            self.semantic_mask = output
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
         self.output = output  # store raw output
@@ -164,6 +170,8 @@ class Results:
             return self._plot_instance_segmentation(source_path, save_path, **kwargs)
         elif self.task.lower() == "depth_estimation":
             return self._plot_depth_estimation(source_path, save_path, **kwargs)
+        elif self.task.lower() == "semantic_segmentation":
+            return self._plot_semantic_segmentation(source_path, save_path, **kwargs)
         elif self.task.lower() == "pose_estimation":
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
         elif self.task.lower() == "obb":
@@ -204,6 +212,71 @@ class Results:
         if save_path is not None:
             cv2.imwrite(save_path, result)
         return result
+
+    def _plot_semantic_segmentation(
+        self,
+        source_path: str | np.ndarray | Image.Image,
+        save_path: str | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        """Colorize a semantic class map and blend it over the original image."""
+
+        del kwargs
+        if self.semantic_mask is None:
+            raise ValueError("No semantic output found.")
+        class_map = (
+            self.semantic_mask.detach().cpu().numpy()
+            if isinstance(self.semantic_mask, torch.Tensor)
+            else self.semantic_mask
+        )
+        if class_map.ndim == 3:
+            class_map = class_map[0]
+        if class_map.ndim != 2:
+            raise ValueError(f"Expected a 2D semantic map or [B, H, W], got {class_map.shape}.")
+        image = self._read_image(source_path)
+        image_shape = (int(image.shape[0]), int(image.shape[1]))
+        class_map = self._restore_semantic_map(class_map, image_shape)
+        nc = int(self.post_cfg.get("nc", 150 if self.post_cfg.get("dataset") == "ade20k" else 19))
+        if class_map.size and (int(class_map.min()) < 0 or int(class_map.max()) >= nc):
+            raise ValueError(f"Semantic class-map values must be in [0, {nc - 1}].")
+        palette = np.array(
+            [
+                cv2.cvtColor(
+                    np.array([[[index * 37 % 180, 200, 255]]], dtype=np.uint8),
+                    cv2.COLOR_HSV2BGR,
+                )[0, 0]
+                for index in range(nc)
+            ],
+            dtype=np.uint8,
+        )
+        overlay = palette[class_map.astype(np.int64)]
+        result = cv2.addWeighted(image, 1.0 - ALPHA, overlay, ALPHA, 0)
+        if save_path is not None:
+            cv2.imwrite(save_path, result)
+        return result
+
+    def _restore_semantic_map(self, class_map: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
+        """Undo the configured letterbox transform using nearest-neighbor interpolation."""
+
+        letterbox_cfg = self.pre_cfg.get("LetterBox", {})
+        input_shape = letterbox_cfg.get("img_size")
+        if not isinstance(input_shape, list) or len(input_shape) != 2:
+            return cv2.resize(class_map, (image_shape[1], image_shape[0]), interpolation=cv2.INTER_NEAREST)
+        input_height, input_width = int(input_shape[0]), int(input_shape[1])
+        image_height, image_width = image_shape
+        ratio = min(input_height / image_height, input_width / image_width)
+        unpadded_width = int(round(image_width * ratio))
+        unpadded_height = int(round(image_height * ratio))
+        left = int(round((input_width - unpadded_width) / 2 - 0.1))
+        top = int(round((input_height - unpadded_height) / 2 - 0.1))
+        scale_x, scale_y = class_map.shape[1] / input_width, class_map.shape[0] / input_height
+        cropped = class_map[
+            int(round(top * scale_y)) : int(round((top + unpadded_height) * scale_y)),
+            int(round(left * scale_x)) : int(round((left + unpadded_width) * scale_x)),
+        ]
+        if cropped.size == 0:
+            raise ValueError("Semantic letterbox restoration produced an empty crop.")
+        return cv2.resize(cropped, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
 
     def _restore_depth_map(self, depth: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
         """Undo the configured letterbox transform and resize a depth map to an image."""

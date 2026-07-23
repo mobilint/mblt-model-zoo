@@ -19,3 +19,5 @@ Every model YAML declares `post_cfg.dataset`; dataset-aware postprocessing combi
 
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
+ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports
+mIoU before pixel accuracy.

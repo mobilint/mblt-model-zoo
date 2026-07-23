@@ -26,7 +26,7 @@ from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, g
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
-from mblt_model_zoo.vision.utils.evaluation import DOTAResult, ImageNetResult
+from mblt_model_zoo.vision.utils.evaluation import ADE20KResult, DOTAResult, ImageNetResult
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -431,6 +431,24 @@ def test_cli_val_supports_face_detection_defaults() -> None:
     assert _default_data_path_for_task("face_detection").endswith(".mblt_model_zoo/datasets/widerface")
 
 
+def test_cli_val_supports_semantic_segmentation_defaults() -> None:
+    """Use ADE20K as the default semantic-segmentation validation dataset."""
+
+    assert _default_data_path_for_task("semantic_segmentation").endswith(
+        ".mblt_model_zoo/datasets/ADEChallengeData2016"
+    )
+
+
+def test_cli_val_detects_organized_ade20k(tmp_path: Path) -> None:
+    """Recognize the flat ADE20K validation layout."""
+
+    data_path = tmp_path / "ADEChallengeData2016"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+
+    assert _dataset_ready("semantic_segmentation", str(data_path))
+
+
 def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
@@ -729,6 +747,69 @@ def test_cli_val_routes_obb_to_dota_evaluator(
     assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
     assert eval_kwargs["data_path"] == str(data_path)
     assert eval_kwargs["batch_size"] == 8
+    assert calls["disposed"] is True
+
+
+def test_cli_val_routes_semantic_segmentation_to_ade20k(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Route semantic validation through the ADE20K evaluator."""
+
+    data_path = tmp_path / "ADEChallengeData2016"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    calls = {}
+
+    class _FakeEngine:
+        """Minimal engine double for semantic validation routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "semantic_segmentation"}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_ade20k(**kwargs: object) -> ADE20KResult:
+        calls["eval_kwargs"] = kwargs
+        return ADE20KResult(miou=0.321, pixel_accuracy=0.765)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_ade20k", _fake_eval_ade20k)
+
+    args = Namespace(
+        model="yolo26n-sem-ade20k",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./yolo26n-sem-ade20k.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=2,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    assert score == 0.321
+    assert "Validation score (mIoU): 0.32100, (pixel accuracy): 0.76500" in capsys.readouterr().out
+    assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
     assert calls["disposed"] is True
 
 

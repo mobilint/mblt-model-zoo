@@ -8,8 +8,8 @@ task-specific scripts have been replaced by the standard runner below.
 ## Quick CLI Validation
 
 Use `mblt-model-zoo val` when you want to validate one vision model without manually selecting a
-dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, or DOTAv1 as
-appropriate, and organizes the default dataset cache if it is missing.
+dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, DOTAv1, NYU Depth, or ADE20K
+as appropriate, and organizes the default dataset cache if it is missing.
 
 ```bash
 mblt-model-zoo val --help
@@ -29,9 +29,9 @@ mblt-model-zoo val \
 ```
 
 Image classification validation uses Top-1 accuracy as its primary score and Top-5 accuracy as its
-secondary metric. Other tasks report their task-specific score, such as COCO mAP, WiderFace AP, or
-DOTAv1 rotated mAP. For a local ONNX model, use `--model-path ./model.onnx`; pass `--framework onnx`
-only when an explicit override is needed.
+secondary metric. Other tasks report their task-specific score, such as COCO mAP, WiderFace AP, DOTAv1 rotated mAP,
+or ADE20K mIoU and pixel accuracy. For a local ONNX model, use `--model-path ./model.onnx`; pass
+`--framework onnx` only when an explicit override is needed.
 
 ## Standard Multi-Model Runner
 
@@ -343,9 +343,19 @@ The ADE20K organizer downloads the official archive by default, then retains onl
 pairs. It installs them as flat `images/` and `annotations/` directories and preserves `objectInfo150.txt` and
 `sceneCategories.txt` when supplied by the source.
 
+Semantic validation applies the model's 640×640 letterbox transform to both images and masks, ignores source label
+`0`, maps labels `1..150` to model classes `0..149`, and reports mIoU followed by pixel accuracy.
+
 ```bash
 python benchmark/vision/organize_ade20k.py \
   --output-dir ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+```
+
+```bash
+mblt-model-zoo val \
+  --model yolo26n-sem-ade20k \
+  --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
 ```
 
 ```text

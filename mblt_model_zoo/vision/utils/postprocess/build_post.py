@@ -7,6 +7,7 @@ from __future__ import annotations
 from .base import PostBase
 from .cls_post import ClsPost
 from .depth_post import DepthPost
+from .semantic_seg_post import SemanticSegPost
 from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
     YOLOAnchorlessOBBPost,
@@ -42,6 +43,8 @@ def build_postprocess(
         return ClsPost(pre_cfg, post_cfg)
     if task_lower == "depth_estimation":
         return DepthPost(pre_cfg, post_cfg)
+    if task_lower == "semantic_segmentation":
+        return SemanticSegPost(pre_cfg, post_cfg)
     if task_lower in {"object_detection", "face_detection"}:
         if post_cfg.get("anchors", False):
             return YOLOAnchorPost(

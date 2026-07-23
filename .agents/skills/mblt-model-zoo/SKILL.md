@@ -31,6 +31,7 @@ description: >-
 - Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not inferred from task
   alone.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
+- Preserve ADE20K's `0` ignore label and `1..150` to `0..149` validation mapping; report mIoU before pixel accuracy.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

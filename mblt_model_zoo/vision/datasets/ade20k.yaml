@@ -1,0 +1,12 @@
+# ADE20K validation dataset. Organized paths are relative to `path`.
+name: ade20k
+path: ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+val: images
+tasks:
+  - semantic_segmentation
+download:
+  url: http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip
+nc: 150
+source_ignore_label: 0
+ignore_label: 255
+label_offset: 1

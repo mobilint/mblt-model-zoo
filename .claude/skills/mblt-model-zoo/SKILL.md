@@ -15,6 +15,8 @@ Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not i
 
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
+ADE20K validation ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU before pixel
+accuracy.
 
 Use the focused entry points for Vision and Transformers work:
 

@@ -231,6 +231,134 @@ def get_nyu_depth_loader(
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
 
 
+class CustomADE20K(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """ADE20K validation dataset with paired RGB images and semantic PNG masks."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's flat ``images/`` and ``annotations/`` layout."""
+
+        self.root = root
+        image_root = os.path.join(root, "images")
+        annotation_root = os.path.join(root, "annotations")
+        if not os.path.isdir(image_root) or not os.path.isdir(annotation_root):
+            raise FileNotFoundError(f"ADE20K requires images/ and annotations/ directories under: {root}")
+        images = {
+            os.path.splitext(name)[0]: os.path.join(image_root, name)
+            for name in os.listdir(image_root)
+            if name.lower().endswith(self.IMG_EXTENSIONS)
+        }
+        annotations = {
+            os.path.splitext(name)[0]: os.path.join(annotation_root, name)
+            for name in os.listdir(annotation_root)
+            if name.lower().endswith(".png")
+        }
+        missing_annotations = sorted(set(images) - set(annotations))
+        missing_images = sorted(set(annotations) - set(images))
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(f"images without annotations: {', '.join(missing_annotations[:5])}")
+            if missing_images:
+                details.append(f"annotations without images: {', '.join(missing_images[:5])}")
+            raise ValueError(f"ADE20K image/annotation mismatch ({'; '.join(details)}).")
+        if not images:
+            raise ValueError(f"ADE20K contains no image/annotation pairs: {root}")
+        self.samples = [(images[stem], annotations[stem], stem) for stem in sorted(images)]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load one RGB image and map its source labels to model class IDs."""
+
+        image_path, annotation_path, stem = self.samples[index]
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"ADE20K image not found: {image_path}")
+        annotation = cv2.imread(annotation_path, cv2.IMREAD_GRAYSCALE)
+        if annotation is None:
+            raise FileNotFoundError(f"ADE20K annotation not found: {annotation_path}")
+        if image.shape[:2] != annotation.shape:
+            raise ValueError(
+                f"ADE20K image and annotation shapes must match, got {image.shape[:2]} and {annotation.shape}: {stem}"
+            )
+        if annotation.size and int(annotation.max()) > 150:
+            raise ValueError(f"ADE20K annotation values must be in [0, 150]: {annotation_path}")
+        target = np.full(annotation.shape, 255, dtype=np.uint8)
+        valid = annotation > 0
+        target[valid] = annotation[valid] - 1
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_ade20k_loader(
+    dataset: CustomADE20K,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int],
+) -> torch.utils.data.DataLoader:
+    """Create an ADE20K loader that applies matching letterbox geometry to masks.
+
+    Args:
+        dataset: Paired ADE20K validation dataset.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Image preprocessing function that returns letterbox metadata.
+        image_size: Configured model input size as ``(height, width)``.
+
+    Returns:
+        Configured ADE20K validation loader.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]], list[Any], tuple[str, ...]]:
+        images, targets, stems = zip(*batch)
+        processed_images, processed_targets, shapes, ratio_pads = [], [], [], []
+        input_height, input_width = image_size
+        for image, target in zip(images, targets):
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if not (isinstance(processed, tuple) and len(processed) == 2 and isinstance(processed[1], dict)):
+                raise ValueError("ADE20K preprocessing must return image data and letterbox metadata.")
+            processed_image, metadata = processed
+            ratio_pad = metadata.get("ratio_pad")
+            if ratio_pad is None:
+                raise ValueError("ADE20K preprocessing requires LetterBox ratio_pad metadata.")
+            ratio, pad = ratio_pad
+            resized_width = int(round(target.shape[1] * ratio[0]))
+            resized_height = int(round(target.shape[0] * ratio[1]))
+            resized_target = cv2.resize(target, (resized_width, resized_height), interpolation=cv2.INTER_NEAREST)
+            left, top = int(round(pad[0])), int(round(pad[1]))
+            right = input_width - resized_width - left
+            bottom = input_height - resized_height - top
+            if min(left, top, right, bottom) < 0:
+                raise ValueError("ADE20K letterbox metadata produced negative mask padding.")
+            processed_target = cv2.copyMakeBorder(
+                resized_target,
+                top,
+                bottom,
+                left,
+                right,
+                cv2.BORDER_CONSTANT,
+                value=255,
+            )
+            processed_images.append(processed_image)
+            processed_targets.append(processed_target)
+            ratio_pads.append(ratio_pad)
+        return (
+            np.stack(processed_images),
+            np.stack(processed_targets),
+            shapes,
+            ratio_pads,
+            stems,
+        )
+
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
+
+
 class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
     """Custom DOTAv1 validation dataset for OBB evaluation.
 

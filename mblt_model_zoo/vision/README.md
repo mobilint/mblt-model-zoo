@@ -1,7 +1,7 @@
 # Vision Framework
 
 The Mobilint Model Zoo vision framework provides image classification, depth estimation, object detection, instance
-segmentation, and pose estimation pipelines backed by pre-trained NPU model artifacts.
+segmentation, semantic segmentation, and pose estimation pipelines backed by pre-trained NPU model artifacts.
 
 Further usage examples can be found in the [tests](../../tests/vision) directory.
 
@@ -92,12 +92,13 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_d
 mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
 mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
 mblt-model-zoo predict --source ./room.jpg --model yolo26n-depth --framework onnx --output ./result_depth.jpg
+mblt-model-zoo predict --source ./room.jpg --model yolo26n-sem-ade20k --framework onnx --output ./result_semantic.jpg
 ```
 
 The `predict` command accepts classification and dense prediction options. `--topk` is used for
 image classification models. `--conf-thres` and `--iou-thres` are used for object detection,
-instance segmentation, and pose estimation models; depth estimation ignores these detection-only
-options and saves a colorized depth overlay. Detection-style models load default thresholds from
+instance segmentation, and pose estimation models; depth and semantic segmentation ignore these detection-only
+options and save colorized overlays. Detection-style models load default thresholds from
 their YAML file under [models](models/), and the CLI overrides those values when you pass explicit
 threshold arguments. The default CLI behavior is to use `0.25` for confidence and keep the model's
 YAML IoU threshold.
@@ -193,6 +194,9 @@ The command loads the model, infers its task, and validates it on the associated
 - YOLO26 depth-estimation models use NYU Depth V2. The organizer retains its validation-only `images/` and `depth/`
   layout. Validation stretches inputs and targets to 768×768, median-aligns each prediction, pools statistics over all
   valid pixels, and reports `delta1` (primary), `abs_rel`, and `rmse`.
+- YOLO26 ADE20K semantic-segmentation models use paired `images/` and `annotations/`. Validation applies matching
+  640×640 letterbox geometry, ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU
+  (primary) with pixel accuracy.
 
 If the organized dataset is not already available under the default cache directory, the CLI
 automatically prepares it before validation. Before downloading anything, it first looks for raw
@@ -204,6 +208,8 @@ command to an already organized dataset with `--data-path`.
 mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
 mblt-model-zoo val --model yolo26n-depth --framework onnx --data-path ~/.mblt_model_zoo/datasets/nyu-depth
+mblt-model-zoo val --model yolo26n-sem-ade20k --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
 ```
 
 If you omit `--conf-thres` and `--iou-thres`, validation uses the model's YAML thresholds. Pass

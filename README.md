@@ -88,7 +88,7 @@ model = MBLT_Engine(
 
 - `model_cls`: Model name or YAML config path.
 - `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
-- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` or `file_cfg.model_path` and otherwise falls back to `mxq`. `onnx` is supported for image classification, object detection, instance segmentation, and pose estimation.
+- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` or `file_cfg.model_path` and otherwise falls back to `mxq`. `onnx` is supported across the vision tasks, including depth and semantic segmentation.
 - `model_path`: Local MXQ or ONNX path. Use `""` to download and cache the published artifact automatically for the selected framework.
 - `mxq_path` and `onnx_path`: Backward-compatible explicit path aliases.
 - `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine uses `CPUExecutionProvider`; pass this option to select another provider order explicitly.
@@ -284,7 +284,7 @@ mblt-model-zoo predict --source ./cat.png --model resnet50 --framework onnx --on
 Prediction results are saved under `runs/vision/predict/` by default. Pass `--output` or
 `--save-path` to choose a specific output file. Classification models accept `--topk`; object
 detection, instance segmentation, and pose estimation models accept `--conf-thres` and
-`--iou-thres`.
+`--iou-thres`. Depth and semantic segmentation save colorized overlays without detection thresholds.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
@@ -292,7 +292,8 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 ```
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
-ImageNet, while object detection, instance segmentation, and pose estimation models use COCO.
+ImageNet, object detection, instance segmentation, and pose estimation models use COCO, and semantic segmentation
+models use ADE20K.
 Validation also supports `--framework onnx`, the shared `--model-path` override, and the
 framework-specific compatibility aliases.
 
@@ -304,6 +305,8 @@ mblt-model-zoo val --model resnet50 --model-path ./resnet50.onnx
 mblt-model-zoo val --model resnet50 --framework onnx
 mblt-model-zoo val --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
 mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
+mblt-model-zoo val --model yolo26n-sem-ade20k --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
 ```
 
 Common NPU and artifact options are shared by the vision commands:

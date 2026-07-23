@@ -79,7 +79,7 @@ truth when this snapshot becomes stale.
 - Every model YAML `post_cfg` must declare `dataset` as the output taxonomy and validation-dataset
   identifier. Dataset-aware postprocessing resolves class counts from the `(dataset, task)` pair.
 - The supported discovery tasks are `image_classification`, `depth_estimation`, `object_detection`,
-  `instance_segmentation`, `oriented_bounding_boxes`, `obb`, `pose_estimation`, and
+  `instance_segmentation`, `semantic_segmentation`, `oriented_bounding_boxes`, `obb`, `pose_estimation`, and
   `face_detection`. `obb` is an alias for `oriented_bounding_boxes`.
 - Keep model configuration shape (`model_cfg`, `pre_cfg`, and `post_cfg`) stable unless changing
   the public contract deliberately.
@@ -96,6 +96,8 @@ truth when this snapshot becomes stale.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
   `abs_rel` and `rmse` as auxiliary metrics.
+- ADE20K semantic-segmentation validation applies matching letterbox geometry to images and masks, ignores source
+  label `0`, maps labels `1..150` to model classes `0..149`, and reports mIoU as primary with pixel accuracy secondary.
 - ImageNet validation reports Top-1 accuracy as the primary metric and Top-5 accuracy as the secondary metric.
 - DOTAv1 validation reports rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may

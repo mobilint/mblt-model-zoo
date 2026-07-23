@@ -19,6 +19,7 @@ DEFAULT_WIDERFACE_IMAGE_SOURCE = get_dataset_config("widerface")["download"]["im
 DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"]["annotations"]
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
+DEFAULT_ADE20K_SOURCE = get_dataset_config("ade20k")["download"]["url"]
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -126,6 +127,18 @@ def _resolve_nyu_depth_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_NYU_DEPTH_SOURCE
 
 
+def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolve a local archive, extracted directory, or URL for ADE20K organization."""
+
+    dataset_path = args.annotation_dir or args.image_dir
+    if not args.force_organize:
+        dataset_path = dataset_path or _find_existing_source(
+            data_path,
+            ["ADEChallengeData2016.zip", "ADEChallengeData2016"],
+        )
+    return dataset_path or DEFAULT_ADE20K_SOURCE
+
+
 def _default_data_path_for_task(task: str) -> str:
     """Returns the default organized dataset path for a vision task."""
 
@@ -159,6 +172,8 @@ def _dataset_ready(task: str, data_path: str) -> bool:
         )
     if task == "depth_estimation":
         return (root / "images").is_dir() and (root / "depth").is_dir()
+    if task == "semantic_segmentation":
+        return (root / "images").is_dir() and (root / "annotations").is_dir()
     return False
 
 
@@ -172,6 +187,7 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
 
     try:
         from mblt_model_zoo.vision.utils.datasets import (
+            organize_ade20k,
             organize_coco,
             organize_dotav1,
             organize_imagenet,
@@ -214,6 +230,11 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             dataset_path=_resolve_nyu_depth_source(args, data_path),
             output_dir=data_path,
         )
+    elif task == "semantic_segmentation":
+        organize_ade20k(
+            dataset_path=_resolve_ade20k_source(args, data_path),
+            output_dir=data_path,
+        )
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
@@ -225,6 +246,7 @@ def _run_validation(args: argparse.Namespace) -> float:
 
     try:
         from mblt_model_zoo.vision.utils.evaluation import (
+            eval_ade20k,
             eval_coco,
             eval_dota,
             eval_imagenet,
@@ -261,6 +283,15 @@ def _run_validation(args: argparse.Namespace) -> float:
                 f"(rmse): {depth_result.rmse:.5f}"
             )
             return depth_result.delta1
+
+        if task == "semantic_segmentation":
+            semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
+            print(
+                "Validation score "
+                f"(mIoU): {semantic_result.miou:.5f}, "
+                f"(pixel accuracy): {semantic_result.pixel_accuracy:.5f}"
+            )
+            return semantic_result.primary_score
 
         if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
             score = eval_coco(
