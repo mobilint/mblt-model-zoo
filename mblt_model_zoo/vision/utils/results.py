@@ -188,7 +188,7 @@ class Results:
         save_path: str | None = None,
         **kwargs,
     ) -> np.ndarray:
-        """Colorize the first depth map and blend it over the original image."""
+        """Colorize the first depth map with near objects in red and blend it over the original image."""
 
         del kwargs
         if self.depth is None:
@@ -202,15 +202,18 @@ class Results:
         image = self._read_image(source_path)
         image_height, image_width = image.shape[:2]
         depth = self._restore_depth_map(depth, (image_height, image_width))
-        finite = np.isfinite(depth)
-        if not finite.any():
-            raise ValueError("Depth output contains no finite values.")
-        lower, upper = np.percentile(depth[finite], (1, 99))
+        valid = np.isfinite(depth) & (depth > 0)
+        if not valid.any():
+            raise ValueError("Depth output contains no positive finite values.")
+        disparity = np.zeros(depth.shape, dtype=np.float32)
+        disparity[valid] = 1.0 / depth[valid]
+        lower, upper = np.percentile(disparity[valid], (2, 98))
         if upper <= lower:
-            upper = lower + 1.0
+            upper = lower + 1e-6
         normalized = np.zeros(depth.shape, dtype=np.uint8)
-        normalized[finite] = np.clip((depth[finite] - lower) * 255 / (upper - lower), 0, 255).astype(np.uint8)
-        overlay = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)
+        normalized[valid] = np.clip((disparity[valid] - lower) * 255 / (upper - lower), 0, 255).astype(np.uint8)
+        overlay = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
+        overlay[~valid] = 0
         result = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
         if save_path is not None:
             cv2.imwrite(save_path, result)

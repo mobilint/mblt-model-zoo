@@ -144,10 +144,29 @@ def test_nyu_depth_pairing_and_plotting(tmp_path) -> None:
     plotted = result.plot(np.zeros((4, 8, 3), dtype=np.uint8), str(tmp_path / "depth.jpg"))
     assert plotted is not None
     assert plotted.shape == (4, 8, 3)
-    colorized_depth = cv2.applyColorMap(np.zeros((4, 8), dtype=np.uint8), cv2.COLORMAP_TURBO)
+    colorized_depth = cv2.applyColorMap(np.zeros((4, 8), dtype=np.uint8), cv2.COLORMAP_JET)
     assert np.array_equal(plotted, cv2.addWeighted(np.zeros_like(colorized_depth), 0.3, colorized_depth, 0.7, 0))
     assert (tmp_path / "depth.jpg").is_file()
 
     np.save(depth_dir / "extra.npy", np.ones((4, 8), dtype=np.float32))
     with pytest.raises(ValueError, match="mismatch"):
         CustomNYUDepth(str(tmp_path))
+
+
+def test_depth_plot_maps_near_objects_to_red() -> None:
+    """Use disparity contrast to render near, middle, and far depths as red, green, and blue."""
+
+    result = Results(
+        {},
+        {"task": "depth_estimation"},
+        torch.tensor([[1.0, 2.0, 100.0]], dtype=torch.float32),
+    )
+
+    plotted = result.plot(np.zeros((1, 3, 3), dtype=np.uint8))
+    expected_overlay = cv2.applyColorMap(np.array([[255, 126, 0]], dtype=np.uint8), cv2.COLORMAP_JET)
+    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
+
+    assert np.array_equal(plotted, expected)
+    assert plotted[0, 0, 2] > plotted[0, 0, 0]
+    assert plotted[0, 1, 1] > max(plotted[0, 1, 0], plotted[0, 1, 2])
+    assert plotted[0, 2, 0] > plotted[0, 2, 2]
