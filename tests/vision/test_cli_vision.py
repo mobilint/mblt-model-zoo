@@ -85,6 +85,11 @@ def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
 def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
     """Serve legacy class helper values from the YAML dataset definitions."""
 
+    ade20k_names = get_dataset_class_names("ade20k")
+    assert len(ade20k_names) == get_dataset_config("ade20k")["nc"] == 150
+    assert ade20k_names[12] == "person"
+    assert ade20k_names[80] == "bus"
+    assert ade20k_names[149] == "flag"
     assert get_dataset_class_names("coco")[0] == "person"
     assert get_dataset_category_ids("coco") is get_dataset_category_ids("coco")
     assert get_coco_label(79) == "toothbrush"

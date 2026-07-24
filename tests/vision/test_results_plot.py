@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import mblt_model_zoo.vision.utils.results as results_module
+from mblt_model_zoo.vision.utils.datasets import get_dotav1_palette
 from mblt_model_zoo.vision.utils.results import Results
 
 
@@ -66,3 +67,23 @@ def test_instance_segmentation_plot_supports_nonzero_coco_labels(
 
     assert plotted is not None
     assert save_path.is_file()
+
+
+def test_obb_plot_uses_dotav1_palette(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plot DOTAv1 boxes without consulting the COCO palette."""
+
+    def _reject_coco_palette(label_idx: int) -> tuple[int, int, int]:
+        raise AssertionError(f"Unexpected COCO palette lookup for DOTAv1 class {label_idx}.")
+
+    monkeypatch.setattr(results_module, "get_coco_det_palette", _reject_coco_palette)
+    box_cls = torch.tensor([[16.0, 16.0, 10.0, 10.0, 0.9, 2.0, 0.0]], dtype=torch.float32)
+    result = Results(
+        {"LetterBox": {"img_size": (32, 32)}},
+        {"task": "obb"},
+        [box_cls],
+    )
+
+    plotted = result.plot(np.zeros((32, 32, 3), dtype=np.uint8))
+
+    assert plotted is not None
+    assert np.any(np.all(plotted == get_dotav1_palette(2), axis=2))

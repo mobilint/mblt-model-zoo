@@ -21,6 +21,7 @@ from .datasets import (
     get_coco_limb_palette,
     get_coco_pose_skeleton,
     get_dotav1_label,
+    get_dotav1_palette,
     get_imagenet_label,
 )
 from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks, scale_rboxes, xywhr2xyxyxyxy
@@ -517,7 +518,7 @@ class Results:
         polygons = xywhr2xyxyxyxy(self.rboxes).to(torch.int32).cpu().numpy()
         for polygon, score, label in zip(polygons, self.scores, self.labels):
             label_idx = int(label.item())
-            color = get_coco_det_palette(label_idx)
+            color = get_dotav1_palette(label_idx)
             text_anchor = polygon.min(axis=0)
             img = cv2.putText(
                 img,

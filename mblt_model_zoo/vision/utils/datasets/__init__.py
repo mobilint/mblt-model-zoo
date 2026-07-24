@@ -28,7 +28,7 @@ from .dataloader import (
     get_nyu_depth_loader,
     get_widerface_loader,
 )
-from .dotav1 import get_dotav1_class_num, get_dotav1_label
+from .dotav1 import get_dotav1_class_num, get_dotav1_label, get_dotav1_palette
 from .imagenet import get_imagenet_label
 from .organizer import (
     organize_ade20k,
@@ -50,6 +50,7 @@ __all__: list[str] = [
     "get_coco_pose_skeleton",
     "get_dotav1_class_num",
     "get_dotav1_label",
+    "get_dotav1_palette",
     "CustomADE20K",
     "CustomCocodata",
     "CustomDOTAv1",
