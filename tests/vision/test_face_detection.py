@@ -12,11 +12,11 @@ import torch
 from mblt_model_zoo.vision import YOLO11m_face, list_models
 from mblt_model_zoo.vision.face_detection import YOLO11m_face as FaceDetectionYOLO11mFace
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchor_post import YOLOAnchorPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import YOLOAnchorlessPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_dflfree_post import YOLODFLFreePost
-from mblt_model_zoo.vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreePost
+from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
+from mblt_model_zoo.vision.utils.postprocess.yolo_anchor_post import YOLOAnchorDetectionPost
+from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import YOLOAnchorlessDetectionPost
+from mblt_model_zoo.vision.utils.postprocess.yolo_dflfree_post import YOLODFLFreeDetectionPost
+from mblt_model_zoo.vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
 from mblt_model_zoo.vision.utils.results import Results
 
 
@@ -35,19 +35,21 @@ def _post_cfg(**overrides: Any) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("post_cfg", "expected_type"),
     [
-        ({"nl": 3, "reg_max": 16}, YOLOAnchorlessPost),
-        ({"nl": 3, "dflfree": True}, YOLODFLFreePost),
-        ({"nl": 3, "nmsfree": True}, YOLONMSFreePost),
-        ({"anchors": [[10, 13, 16, 30, 33, 23]]}, YOLOAnchorPost),
+        ({"nl": 3, "reg_max": 16}, YOLOAnchorlessDetectionPost),
+        ({"nl": 3, "dflfree": True}, YOLODFLFreeDetectionPost),
+        ({"nl": 3, "nmsfree": True}, YOLONMSFreeDetectionPost),
+        ({"anchors": [[10, 13, 16, 30, 33, 23]]}, YOLOAnchorDetectionPost),
     ],
 )
-def test_face_detection_routes_postprocessors(post_cfg: dict[str, Any], expected_type: type[YOLOPostBase]) -> None:
+def test_face_detection_routes_postprocessors(
+    post_cfg: dict[str, Any], expected_type: type[YOLODetectionPostBase]
+) -> None:
     """Route every supported face head family to its YOLO postprocessor."""
 
     postprocessor = build_postprocess(_pre_cfg(), _post_cfg(**post_cfg))
 
     assert isinstance(postprocessor, expected_type)
-    assert cast(YOLOPostBase, postprocessor).nc == 1
+    assert cast(YOLODetectionPostBase, postprocessor).nc == 1
 
 
 def test_face_detection_exports_and_plot_label(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:

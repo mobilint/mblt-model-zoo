@@ -9,10 +9,10 @@ from typing import Any, cast
 import torch
 
 from .common import dist2bbox, dual_topk
-from .yolo_anchorless_post import YOLOAnchorlessPost
+from .yolo_anchorless_post import YOLOAnchorlessDetectionPost
 
 
-class YOLONMSFreePost(YOLOAnchorlessPost):
+class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO NMS-free models."""
 
     max_det = 300

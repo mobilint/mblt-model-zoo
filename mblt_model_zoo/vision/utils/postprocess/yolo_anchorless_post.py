@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import YOLOPostBase
+from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
@@ -22,7 +22,7 @@ from .common import (
 )
 
 
-class YOLOAnchorlessPost(YOLOPostBase):
+class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
     """Postprocessing for YOLO models without anchors."""
 
     def __init__(self, pre_cfg: dict, post_cfg: dict, **kwargs: object) -> None:
@@ -291,7 +291,7 @@ class YOLOAnchorlessPost(YOLOPostBase):
         return (x * self.dfl_weight.view(1, 1, self.reg_max, 1)).sum(dim=2)
 
 
-class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
+class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO segmentation models without anchors."""
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
@@ -395,7 +395,7 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessPost):
         return y, proto
 
 
-class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
+class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO pose estimation models without anchors."""
 
     def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
@@ -481,7 +481,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessPost):
         return torch.cat([dbox, scores.sigmoid(), keypoints], dim=1)
 
 
-class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessPost):
+class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
     """Postprocessing for anchorless YOLO OBB models."""
 
     def _angle_from_raw(self, angle: torch.Tensor) -> torch.Tensor:

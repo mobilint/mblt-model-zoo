@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import torch
 import torch.nn.functional as functional
 
 from ..types import ListTensorLike, TensorLike
+from ._letterbox import crop_letterbox, get_letterbox_input_shape, normalize_ratio_pads, normalize_shapes
+from .base import PostBase
 from .common import RatioPad
-from .depth_post import DepthPost
 
 
-class SemanticSegPost(DepthPost):
+class SemanticSegPost(PostBase):
     """Convert semantic logits to class maps and undo letterbox padding."""
 
     NC_BY_DATASET: dict[str, int] = {
@@ -23,7 +25,9 @@ class SemanticSegPost(DepthPost):
     def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any]) -> None:
         """Initialize semantic output handling for a configured dataset taxonomy."""
 
-        super().__init__(pre_cfg, post_cfg)
+        super().__init__()
+        # Preserve the validation messages previously inherited from DepthPost.
+        self.input_shape = get_letterbox_input_shape(pre_cfg, "Depth estimation", "Depth")
         dataset = post_cfg.get("dataset")
         if not isinstance(dataset, str):
             raise ValueError("Semantic segmentation requires a string dataset in post_cfg.")
@@ -40,6 +44,28 @@ class SemanticSegPost(DepthPost):
             raise ValueError(
                 f"nc={configured_nc} conflicts with semantic dataset '{self.dataset}', which requires nc={dataset_nc}."
             )
+
+    def __call__(
+        self,
+        x: TensorLike | ListTensorLike,
+        img0_shape: tuple[int, int] | Sequence[tuple[int, int]] | None = None,
+        ratio_pad: RatioPad | Sequence[RatioPad | None] | None = None,
+        **kwargs: Any,
+    ) -> torch.Tensor | list[torch.Tensor]:
+        """Return class maps, optionally restored to original image sizes."""
+
+        if kwargs:
+            raise TypeError(f"Unexpected semantic postprocess kwargs: {', '.join(sorted(kwargs))}")
+        class_maps = self._normalize_output(x)
+        if img0_shape is None:
+            return class_maps
+
+        shapes = normalize_shapes(img0_shape, class_maps.shape[0])
+        pads = normalize_ratio_pads(ratio_pad, class_maps.shape[0], shapes, self.input_shape)
+        restored = [
+            self._restore(class_maps[index], shapes[index], pads[index]) for index in range(class_maps.shape[0])
+        ]
+        return restored[0] if len(restored) == 1 else restored
 
     def _normalize_output(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
         """Normalize logits or baked maps to integer ``[B, H, W]`` class maps."""
@@ -71,21 +97,8 @@ class SemanticSegPost(DepthPost):
             f"Semantic segmentation expects [B, C, H, W] logits or [B, H, W] class maps, got {tuple(output.shape)}."
         )
 
-    def _restore(self, depth: torch.Tensor, shape: tuple[int, int], ratio_pad: RatioPad) -> torch.Tensor:
+    def _restore(self, class_map: torch.Tensor, shape: tuple[int, int], ratio_pad: RatioPad) -> torch.Tensor:
         """Crop padded pixels and nearest-resize a class map to its original shape."""
 
-        ratio, pad = ratio_pad
-        del ratio
-        output_height, output_width = depth.shape
-        scale_x = output_width / self.input_shape[1]
-        scale_y = output_height / self.input_shape[0]
-        left = int(round(pad[0] * scale_x))
-        top = int(round(pad[1] * scale_y))
-        original_height, original_width = shape
-        resize_ratio = min(self.input_shape[0] / original_height, self.input_shape[1] / original_width)
-        unpadded_width = int(round(original_width * resize_ratio * scale_x))
-        unpadded_height = int(round(original_height * resize_ratio * scale_y))
-        cropped = depth[top : top + unpadded_height, left : left + unpadded_width]
-        if cropped.numel() == 0:
-            raise ValueError("Semantic letterbox restoration produced an empty crop.")
+        cropped = crop_letterbox(class_map, shape, ratio_pad, self.input_shape, "Semantic")
         return functional.interpolate(cropped[None, None].float(), size=shape, mode="nearest")[0, 0].to(torch.int64)

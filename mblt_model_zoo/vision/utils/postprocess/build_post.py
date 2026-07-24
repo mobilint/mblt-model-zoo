@@ -8,15 +8,20 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .depth_post import DepthPost
 from .semantic_seg_post import SemanticSegPost
-from .yolo_anchor_post import YOLOAnchorPost, YOLOAnchorSegPost
+from .yolo_anchor_post import YOLOAnchorDetectionPost, YOLOAnchorSegPost
 from .yolo_anchorless_post import (
+    YOLOAnchorlessDetectionPost,
     YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
-    YOLOAnchorlessPost,
     YOLOAnchorlessSegPost,
 )
-from .yolo_dflfree_post import YOLODFLFreeOBBPost, YOLODFLFreePosePost, YOLODFLFreePost, YOLODFLFreeSegPost
-from .yolo_nmsfree_post import YOLONMSFreePost
+from .yolo_dflfree_post import (
+    YOLODFLFreeDetectionPost,
+    YOLODFLFreeOBBPost,
+    YOLODFLFreePosePost,
+    YOLODFLFreeSegPost,
+)
+from .yolo_nmsfree_post import YOLONMSFreeDetectionPost
 
 
 def build_postprocess(
@@ -47,24 +52,24 @@ def build_postprocess(
         return SemanticSegPost(pre_cfg, post_cfg)
     if task_lower in {"object_detection", "face_detection"}:
         if post_cfg.get("anchors", False):
-            return YOLOAnchorPost(
+            return YOLOAnchorDetectionPost(
                 pre_cfg,
                 post_cfg,
                 **kwargs,
             )
         if post_cfg.get("dflfree", False):  # nms free is only available for detection
-            return YOLODFLFreePost(
+            return YOLODFLFreeDetectionPost(
                 pre_cfg,
                 post_cfg,
                 **kwargs,
             )
         if post_cfg.get("nmsfree", False):
-            return YOLONMSFreePost(
+            return YOLONMSFreeDetectionPost(
                 pre_cfg,
                 post_cfg,
                 **kwargs,
             )
-        return YOLOAnchorlessPost(
+        return YOLOAnchorlessDetectionPost(
             pre_cfg,
             post_cfg,
             **kwargs,

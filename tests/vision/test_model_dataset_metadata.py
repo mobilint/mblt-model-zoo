@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
+from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
 from mblt_model_zoo.vision.wrapper import resolve_model_config
 
 MODEL_CONFIG_DIR = Path(__file__).parents[2] / "mblt_model_zoo" / "vision" / "models"
@@ -63,7 +63,7 @@ def test_oiv7_postprocessor_uses_601_classes() -> None:
     config = resolve_model_config("yolov8n-oiv7")
     postprocessor = build_postprocess(config["pre_cfg"], config["post_cfg"])
 
-    assert isinstance(postprocessor, YOLOPostBase)
+    assert isinstance(postprocessor, YOLODetectionPostBase)
     assert postprocessor.dataset == "open-images-v7"
     assert postprocessor.nc == 601
 

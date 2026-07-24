@@ -12,7 +12,7 @@ from scipy.io import loadmat
 from tqdm import tqdm
 
 from ..datasets import CustomWiderface, get_widerface_loader
-from ..postprocess.base import YOLOPostBase
+from ..postprocess.base import YOLODetectionPostBase
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -101,7 +101,7 @@ def eval_widerface(
         nms_outs = model.postprocess(out_npu)
         input_shape = (int(input_npu.shape[1]), int(input_npu.shape[2]))
         img0_shapes = [(int(shape[0]), int(shape[1])) for shape in org_shape.tolist()]
-        postprocessor = cast(YOLOPostBase, model.postprocessor)
+        postprocessor = cast(YOLODetectionPostBase, model.postprocessor)
         _, boxes_list, scores_list = postprocessor.nmsout2eval(
             nms_outs.output,
             input_shape,

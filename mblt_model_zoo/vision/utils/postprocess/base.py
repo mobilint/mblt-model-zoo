@@ -49,7 +49,7 @@ class PostBase(ABC):
                 setattr(self, name, value.to(self.device))
 
 
-class YOLOPostBase(PostBase):
+class YOLODetectionPostBase(PostBase):
     """Base class for YOLO postprocessing."""
 
     NC_BY_DATASET_TASK: dict[tuple[str, str], int] = {
@@ -69,7 +69,7 @@ class YOLOPostBase(PostBase):
     }
 
     def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs) -> None:
-        """Initializes the YOLOPostBase.
+        """Initialize the common YOLO detection postprocessor.
 
         Args:
             pre_cfg (dict): Preprocessing configuration.
