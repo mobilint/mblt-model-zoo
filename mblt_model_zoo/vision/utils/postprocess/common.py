@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
-from typing import Any, TypeAlias, overload
+from collections.abc import Callable, Sequence
+from typing import Any, TypeAlias, TypeGuard, overload
 
 import cv2
 import numpy as np
@@ -14,6 +14,61 @@ import torch.nn.functional as F
 from ..datasets import get_coco_inv, get_dotav1_label
 
 RatioPad: TypeAlias = tuple[tuple[float, float], tuple[float, float]]
+
+
+def _is_ratio_pad(value: object) -> TypeGuard[RatioPad]:
+    """Return whether a value has the nested numeric shape of one RatioPad."""
+
+    return (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(
+            isinstance(pair, tuple)
+            and len(pair) == 2
+            and all(isinstance(component, (int, float)) for component in pair)
+            for pair in value
+        )
+    )
+
+
+def normalize_image_shapes(
+    image_shapes: tuple[int, int] | Sequence[tuple[int, int]],
+    batch_size: int | None = None,
+) -> list[tuple[int, int]]:
+    """Normalize one or many image shapes to a list, optionally validating its batch size."""
+
+    if len(image_shapes) == 2 and isinstance(image_shapes[0], int):
+        shapes = [(int(image_shapes[0]), int(image_shapes[1]))]  # type: ignore[index]
+        if batch_size is not None:
+            shapes *= batch_size
+    else:
+        shapes = [(int(shape[0]), int(shape[1])) for shape in image_shapes]  # type: ignore[union-attr]
+    if batch_size is not None and len(shapes) != batch_size:
+        raise ValueError(f"Expected {batch_size} image shapes, got {len(shapes)}.")
+    return shapes
+
+
+def normalize_ratio_pads(
+    ratio_pads: RatioPad | Sequence[RatioPad | None] | None,
+    batch_size: int,
+) -> list[RatioPad | None]:
+    """Normalize optional letterbox metadata to a batch-sized list."""
+
+    if ratio_pads is None:
+        return [None] * batch_size
+    if _is_ratio_pad(ratio_pads):
+        return [ratio_pads] * batch_size
+    pads: list[RatioPad | None] = []
+    for ratio_pad in ratio_pads:
+        if ratio_pad is None:
+            pads.append(None)
+        elif _is_ratio_pad(ratio_pad):
+            pads.append(ratio_pad)
+        else:
+            raise TypeError("Each ratio_pad must be a ((ratio_x, ratio_y), (pad_x, pad_y)) tuple or None.")
+    if len(pads) != batch_size:
+        raise ValueError(f"Expected {batch_size} ratio_pad values, got {len(pads)}.")
+    return pads
 
 
 # --- Box Conversion Utilities ---
@@ -998,8 +1053,8 @@ def multi_encode(pixels: torch.Tensor) -> list[list[int]]:
 def nmsout2eval(
     nms_outs: list[torch.Tensor] | torch.Tensor,
     img1_shape: tuple[int, int],
-    img0_shapes: list[tuple[int, int]],
-    ratio_pads: list[RatioPad | None] | None = None,
+    img0_shapes: tuple[int, int] | Sequence[tuple[int, int]],
+    ratio_pads: RatioPad | Sequence[RatioPad | None] | None = None,
 ) -> tuple[list[list[int]], list[list[list[float]]], list[list[float]]]:
     """Converts NMS output to COCO evaluation format.
 
@@ -1018,15 +1073,12 @@ def nmsout2eval(
 
     if not isinstance(nms_outs, list):
         nms_outs = [nms_outs]
+    actual_img0_shapes = normalize_image_shapes(img0_shapes, len(nms_outs))
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(nms_outs))
     labels_list: list[list[int]] = []
     boxes_list: list[list[list[float]]] = []
     scores_list: list[list[float]] = []
-    actual_ratio_pads: list[RatioPad | None]
-    if ratio_pads is None:
-        actual_ratio_pads = [None] * len(img0_shapes)
-    else:
-        actual_ratio_pads = list(ratio_pads)
-    for nms_out, img0_shape, ratio_pad in zip(nms_outs, img0_shapes, actual_ratio_pads):
+    for nms_out, img0_shape, ratio_pad in zip(nms_outs, actual_img0_shapes, actual_ratio_pads):
         boxes = nms_out[:, :4].clone()
         scores = nms_out[:, 4]
         labels = nms_out[:, 5]
@@ -1067,17 +1119,8 @@ def nmsout2eval_seg(
             - scores (list[list]): The confidence scores for each image.
             - extra (list[list]): The encoded segmentation masks for each image.
     """
-    if isinstance(img0_shapes, tuple):
-        actual_img0_shapes = [img0_shapes]
-    else:
-        actual_img0_shapes = img0_shapes
-    actual_ratio_pads: list[RatioPad | None]
-    if ratio_pads is None:
-        actual_ratio_pads = [None] * len(actual_img0_shapes)
-    elif isinstance(ratio_pads, tuple):
-        actual_ratio_pads = [ratio_pads]
-    else:
-        actual_ratio_pads = list(ratio_pads)
+    actual_img0_shapes = normalize_image_shapes(img0_shapes)
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
 
     if not isinstance(nms_outs[0], (list, tuple)):
         actual_nms_outs = [nms_outs]
@@ -1140,14 +1183,8 @@ def nmsout2eval_pose(
             - scores (list[list]): The confidence scores for each image.
             - keypoints (list[list]): The scaled keypoints for each image.
     """
-    actual_img0_shapes = [img0_shapes] if isinstance(img0_shapes, tuple) else img0_shapes
-    actual_ratio_pads: list[RatioPad | None]
-    if ratio_pads is None:
-        actual_ratio_pads = [None] * len(actual_img0_shapes)
-    elif isinstance(ratio_pads, tuple):
-        actual_ratio_pads = [ratio_pads]
-    else:
-        actual_ratio_pads = list(ratio_pads)
+    actual_img0_shapes = normalize_image_shapes(img0_shapes)
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
     if not isinstance(nms_outs, list):
         actual_nms_outs = [nms_outs]
     else:
@@ -1184,13 +1221,8 @@ def nmsout2eval_obb(
     Returns:
         DOTAv1 labels, polygons, scores, and optionally scaled ``xywhr`` boxes.
     """
-    actual_img0_shapes = [img0_shapes] if isinstance(img0_shapes, tuple) else img0_shapes
-    if ratio_pads is None:
-        actual_ratio_pads: list[RatioPad | None] = [None] * len(actual_img0_shapes)
-    elif isinstance(ratio_pads, tuple):
-        actual_ratio_pads = [ratio_pads]
-    else:
-        actual_ratio_pads = list(ratio_pads)
+    actual_img0_shapes = normalize_image_shapes(img0_shapes)
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
     actual_nms_outs = [nms_outs] if not isinstance(nms_outs, list) else nms_outs
 
     labels_list: list[list[str]] = []

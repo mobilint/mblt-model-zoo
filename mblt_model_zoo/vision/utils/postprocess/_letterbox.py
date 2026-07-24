@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any
 
 import torch
 
-from .common import RatioPad
+from .common import RatioPad, compute_ratio_pad, normalize_ratio_pads
 
 
 def get_letterbox_input_shape(
@@ -26,47 +26,23 @@ def get_letterbox_input_shape(
     return int(image_size[0]), int(image_size[1])
 
 
-def normalize_shapes(img0_shape: tuple[int, int] | Sequence[tuple[int, int]], batch_size: int) -> list[tuple[int, int]]:
-    """Normalize one or many original image shapes to a batch-sized list."""
-
-    if len(img0_shape) == 2 and isinstance(img0_shape[0], int):
-        return [(int(img0_shape[0]), int(img0_shape[1]))] * batch_size  # type: ignore[index]
-    shapes = [(int(shape[0]), int(shape[1])) for shape in img0_shape]  # type: ignore[union-attr]
-    if len(shapes) != batch_size:
-        raise ValueError(f"Expected {batch_size} original image shapes, got {len(shapes)}.")
-    return shapes
-
-
-def ratio_pad_for_shape(input_shape: tuple[int, int], shape: tuple[int, int]) -> RatioPad:
-    """Recreate Ultralytics-compatible letterbox metadata for an original shape."""
-
-    height, width = shape
-    ratio = min(input_shape[0] / height, input_shape[1] / width)
-    unpadded_width, unpadded_height = int(round(width * ratio)), int(round(height * ratio))
-    pad_x = int(round((input_shape[1] - unpadded_width) / 2 - 0.1))
-    pad_y = int(round((input_shape[0] - unpadded_height) / 2 - 0.1))
-    return ((ratio, ratio), (pad_x, pad_y))
-
-
-def normalize_ratio_pads(
+def resolve_ratio_pads(
     ratio_pad: RatioPad | Sequence[RatioPad | None] | None,
     batch_size: int,
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
 ) -> list[RatioPad]:
-    """Normalize explicit or derived letterbox metadata for every sample."""
+    """Normalize letterbox metadata and derive values missing from a dense task batch."""
 
-    if ratio_pad is None:
-        return [ratio_pad_for_shape(input_shape, shape) for shape in shapes]
-    if isinstance(ratio_pad, tuple) and len(ratio_pad) == 2 and isinstance(ratio_pad[0], tuple):
-        return [cast(RatioPad, ratio_pad)] * batch_size
-    pads: list[RatioPad] = [
-        cast(RatioPad, pad) if pad is not None else ratio_pad_for_shape(input_shape, shapes[index])
-        for index, pad in enumerate(ratio_pad)
-    ]
-    if len(pads) != batch_size:
-        raise ValueError(f"Expected {batch_size} ratio_pad values, got {len(pads)}.")
-    return pads
+    pads = normalize_ratio_pads(ratio_pad, batch_size)
+    resolved = []
+    for pad, shape in zip(pads, shapes):
+        if pad is not None:
+            resolved.append(pad)
+            continue
+        gain, offset = compute_ratio_pad(input_shape, shape)
+        resolved.append(((gain, gain), offset))
+    return resolved
 
 
 def crop_letterbox(

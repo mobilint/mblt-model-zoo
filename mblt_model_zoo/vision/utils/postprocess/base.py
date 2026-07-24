@@ -249,15 +249,7 @@ class YOLODetectionPostBase(PostBase):
                 - Segmentation/Pose: (labels_list, boxes_list, scores_list, extra_list)
         """
 
-        img0_shapes = [img0_shape] if isinstance(img0_shape, tuple) else img0_shape
-        ratio_pads: list[RatioPad | None] | None
-        if ratio_pad is None:
-            ratio_pads = None
-        elif isinstance(ratio_pad, list):
-            ratio_pads = list(ratio_pad)
-        else:
-            ratio_pads = [ratio_pad]
-        return nmsout2eval(nms_out, img1_shape, img0_shapes, ratio_pads=ratio_pads)
+        return nmsout2eval(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
 
     def extract_final_outputs(
         self,

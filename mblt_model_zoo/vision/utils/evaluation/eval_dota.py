@@ -14,7 +14,14 @@ import torch
 from tqdm import tqdm
 
 from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
-from ..postprocess.common import RatioPad, batch_probiou, rotated_nms, xywhr2xyxyxyxy, xyxyxyxy2xywhr
+from ..postprocess.common import (
+    RatioPad,
+    batch_probiou,
+    compute_ratio_pad,
+    rotated_nms,
+    xywhr2xyxyxyxy,
+    xyxyxyxy2xywhr,
+)
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -269,15 +276,11 @@ def _ratio_pad_for_shape(
     ratio_pad: RatioPad | None,
 ) -> tuple[float, tuple[float, float]]:
     """Return letterbox gain and padding for an image."""
-    if ratio_pad is not None:
-        return float(ratio_pad[0][0]), (float(ratio_pad[1][0]), float(ratio_pad[1][1]))
     if len(input_shape) < 2:
         raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
-    gain = min(input_shape[0] / org_shape[0], input_shape[1] / org_shape[1])
-    pad_x = round((input_shape[1] - round(org_shape[1] * gain)) / 2 - 0.1)
-    pad_y = round((input_shape[0] - round(org_shape[0] * gain)) / 2 - 0.1)
-    return float(gain), (float(pad_x), float(pad_y))
+    gain, pad = compute_ratio_pad((input_shape[0], input_shape[1]), org_shape, ratio_pad)
+    return float(gain), (float(pad[0]), float(pad[1]))
 
 
 def _ground_truth_to_input_space(

@@ -19,6 +19,8 @@ from mblt_model_zoo.vision.utils.postprocess.common import (
     crop_mask,
     dual_topk,
     nmsout2eval,
+    normalize_image_shapes,
+    normalize_ratio_pads,
     scale_coords,
     scale_masks,
 )
@@ -1594,6 +1596,27 @@ def test_scale_coords_matches_ultralytics_rounding() -> None:
 
     expected = torch.tensor([[[160.0, 0.0, 1.0], [480.0, 481.0, 1.0]]], dtype=torch.float32)
     assert torch.allclose(scaled, expected)
+
+
+def test_letterbox_metadata_normalization_is_batch_aware() -> None:
+    """Share consistent shape and ratio-pad normalization across postprocessors."""
+
+    ratio_pad = ((1.0, 1.0), (0.0, 80.0))
+
+    assert normalize_image_shapes((481, 640), batch_size=2) == [(481, 640), (481, 640)]
+    assert normalize_ratio_pads(ratio_pad, batch_size=2) == [ratio_pad, ratio_pad]
+    assert normalize_ratio_pads((ratio_pad, ratio_pad), batch_size=2) == [ratio_pad, ratio_pad]
+    labels, boxes, scores = nmsout2eval(
+        [torch.zeros((0, 6)), torch.zeros((0, 6))],
+        (640, 640),
+        (481, 640),
+        ratio_pads=ratio_pad,
+    )
+    assert labels == boxes == scores == [[], []]
+    with pytest.raises(ValueError, match="Expected 2 image shapes"):
+        normalize_image_shapes([(481, 640)], batch_size=2)
+    with pytest.raises(ValueError, match="Expected 2 ratio_pad values"):
+        normalize_ratio_pads([ratio_pad], batch_size=2)
 
 
 def test_scale_masks_matches_ultralytics_rounding() -> None:

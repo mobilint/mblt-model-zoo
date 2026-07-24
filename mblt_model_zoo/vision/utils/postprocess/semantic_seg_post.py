@@ -9,9 +9,9 @@ import torch
 import torch.nn.functional as functional
 
 from ..types import ListTensorLike, TensorLike
-from ._letterbox import crop_letterbox, get_letterbox_input_shape, normalize_ratio_pads, normalize_shapes
+from ._letterbox import crop_letterbox, get_letterbox_input_shape, resolve_ratio_pads
 from .base import PostBase
-from .common import RatioPad
+from .common import RatioPad, normalize_image_shapes
 
 
 class SemanticSegPost(PostBase):
@@ -60,8 +60,8 @@ class SemanticSegPost(PostBase):
         if img0_shape is None:
             return class_maps
 
-        shapes = normalize_shapes(img0_shape, class_maps.shape[0])
-        pads = normalize_ratio_pads(ratio_pad, class_maps.shape[0], shapes, self.input_shape)
+        shapes = normalize_image_shapes(img0_shape, class_maps.shape[0])
+        pads = resolve_ratio_pads(ratio_pad, class_maps.shape[0], shapes, self.input_shape)
         restored = [
             self._restore(class_maps[index], shapes[index], pads[index]) for index in range(class_maps.shape[0])
         ]
