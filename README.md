@@ -227,11 +227,24 @@ For the `transformers` extra, the repository also includes:
 Installing this package exposes the `mblt-model-zoo` console command:
 
 ```bash
-mblt-model-zoo --help
+mblt-model-zoo -h
 ```
 
 The CLI provides Mobilint-specific helper commands and delegates selected upstream Hugging Face
 Transformers commands to the installed `transformers` package.
+
+The built-in command surface shown by `mblt-model-zoo -h` is:
+
+- `predict` — run classification, depth estimation, object or face detection, instance or semantic
+  segmentation, OBB, and pose inference; `classify`, `detect`, `pose`, and `segment` are aliases.
+- `val` — validate a vision model on its benchmark dataset.
+- `compile` — compile a configured vision ONNX model to MXQ.
+- `tps measure` and `tps sweep` — run Transformers token-per-second benchmarks.
+- `melo` — run the MeloTTS CLI; `melotts` is an alias.
+- `melo-ui` — launch the MeloTTS Gradio WebUI.
+
+Run `mblt-model-zoo <command> -h` for argparse-based commands. `melo` and `melotts` are
+Click-based and use `--help`.
 
 Compile a configured vision ONNX model with the optional compiler dependency:
 
@@ -250,12 +263,16 @@ derive these defaults from the current checkout or working directory.
 Compilation accepts one of three data entry levels: `--data-path` for a full organized image
 dataset, `--subset-path` for already-sampled images, or `--calib-data-path` for ready preprocessed
 `.npy` tensors. Later-stage input skips all earlier preparation stages.
+`--model-path` also accepts the `--onnx-path` compatibility alias, and `--calib-data-path` accepts
+the `--calib-data-dir` alias.
 
 ### Vision Prediction And Validation
 
 The vision CLI runs the same preprocess, NPU inference, postprocess, and plotting pipeline used by
 the Python API. Use `predict` with a source image and a model name; the task is inferred from the
-model configuration. `classify`, `detect`, `pose`, and `segment` are also accepted as aliases.
+model configuration. It supports image classification, depth estimation, object and face detection,
+instance and semantic segmentation, oriented bounding boxes (OBB), and pose estimation.
+`classify`, `detect`, `pose`, and `segment` are also accepted as aliases.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50
@@ -285,6 +302,9 @@ Prediction results are saved under `runs/vision/predict/` by default. Pass `--ou
 `--save-path` to choose a specific output file. Classification models accept `--topk`; object
 detection, instance segmentation, and pose estimation models accept `--conf-thres` and
 `--iou-thres`. Depth and semantic segmentation save colorized overlays without detection thresholds.
+Both `predict` and `val` accept `--e2e` to enable end-to-end YOLO postprocessing; provide
+`true` or `false`, or pass the bare flag to enable it. `predict --raw-output PATH` saves the
+export-style model output when end-to-end postprocessing is disabled.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
@@ -295,7 +315,10 @@ Use `val` to validate a supported vision model on its benchmark dataset. Classif
 ImageNet, object detection, instance segmentation, and pose estimation models use COCO. YOLO26 `*-sem` models use
 Cityscapes, while `*-sem-ade20k` models keep their independent ADE20K pipeline.
 Validation also supports `--framework onnx`, the shared `--model-path` override, and the
-framework-specific compatibility aliases.
+framework-specific compatibility aliases. Pass `--data-path` for an already organized validation
+dataset; otherwise the CLI uses the default cache location. `--force-organize` (also `--force` or
+`--reload`) rebuilds an organized dataset, while `--image-dir`, `--xml-dir`, and `--annotation-dir`
+override the local archive paths or download URLs used by automatic organization.
 
 ```bash
 mblt-model-zoo val --model resnet50
@@ -346,6 +369,8 @@ Detailed TPS benchmark examples are available in
 
 The `melo` command, also available as `melotts`, forwards arguments to the MeloTTS Click CLI. The
 `melo-ui` command launches the MeloTTS Gradio WebUI. These commands require the `MeloTTS` extra.
+`melo-ui` accepts `--share`, `--host`, and `--port`; use `melo --help` to see the MeloTTS text,
+language, speaker, speed, device, and local-file options.
 
 ```bash
 pip install "mblt-model-zoo[MeloTTS]"

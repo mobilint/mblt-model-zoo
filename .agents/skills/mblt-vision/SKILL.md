@@ -33,6 +33,8 @@ description: >-
   artifact. Use `onnx_filename` only when the published ONNX artifact has a different filename.
 - Require `post_cfg.dataset` in every model YAML and resolve class counts from the dataset-task
   pair. Do not assume all models for one task share a taxonomy.
+- Preserve anchorless decoded-output layout provenance through NMS. If a decoded tensor is
+  ambiguous without provenance, prioritize raw channels-first normalization before candidates-first.
 - Use an explicit default seed of `0` for new vision randomness.
 - Keep qbcompiler optional and lazily imported; never add module-level qbcompiler imports or make
   it a base dependency.

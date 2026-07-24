@@ -83,6 +83,8 @@ truth when this snapshot becomes stale.
   `face_detection`. `obb` is an alias for `oriented_bounding_boxes`.
 - Keep model configuration shape (`model_cfg`, `pre_cfg`, and `post_cfg`) stable unless changing
   the public contract deliberately.
+- Preserve anchorless decoded-output layout provenance through NMS. When provenance is unavailable
+  and a tensor shape is ambiguous, normalize it as raw channels-first before candidates-first.
 
 ### Vision Datasets and Compilation
 
@@ -130,6 +132,9 @@ truth when this snapshot becomes stale.
 
 - Keep public documentation aligned with `MBLT_Engine`, `list_models()`, the shared
   `--model-path` option, and framework auto-detection.
+- When CLI behavior, commands, aliases, or options change, update the README CLI guide and parser
+  help together. Verify `mblt-model-zoo -h` and each affected command's `-h` output reflect the
+  current interface.
 - When a package update changes a durable fact—such as version support, dependencies or extras,
   public APIs, CLI commands, repository layout, validation, or workflow—update this guide and the
   applicable Codex and Claude skills in the same change. Reflect the change concisely in

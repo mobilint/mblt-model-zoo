@@ -11,6 +11,8 @@
 - The Claude Code shared-skill entry point is `.claude/skills/mblt-model-zoo/SKILL.md`; its shared
   content is maintained in `.agents/skills/mblt-model-zoo/SKILL.md`. Use the focused Vision and
   Transformers entries in `.claude/skills/mblt-vision/` and `.claude/skills/mblt-transformers/`.
+- When the CLI changes, keep parser `-h`/`--help` text and the README CLI guide synchronized; check
+  the root help and each affected subcommand help output.
 - NYU Depth organization installs only its 654 validation image/depth pairs as `images/` and `depth/` at the output root.
 - NYU Depth evaluation uses stretched inputs, per-image median alignment, and pooled valid-pixel statistics; `delta1`
   is its primary score, with `abs_rel` and `rmse` also reported.
@@ -21,6 +23,8 @@
   artifact is derived unless `onnx_filename` explicitly names an exception.
 - Every model YAML declares `post_cfg.dataset`; postprocessing uses it with `task` to resolve the
   model's output taxonomy and class count.
+- Preserve anchorless decoded-output layout provenance through NMS. If provenance is unavailable
+  for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.

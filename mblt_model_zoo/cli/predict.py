@@ -23,7 +23,10 @@ def add_predict_parser(
         subparsers,
         command="predict",
         aliases=["classify", "detect", "pose", "segment"],
-        help_text="Run vision inference on an image.",
+        help_text=(
+            "Run vision inference for classification, depth estimation, detection, instance or semantic "
+            "segmentation, OBB, pose, and face detection."
+        ),
         handler=_cmd_predict,
     )
     parser.add_argument("--topk", type=int, default=5, help="Number of classification labels to show.")

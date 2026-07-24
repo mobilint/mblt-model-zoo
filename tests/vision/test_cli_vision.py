@@ -390,6 +390,17 @@ def test_cli_val_preserves_framework_specific_model_paths() -> None:
     assert args.onnx_path == "./resnet50.onnx"
 
 
+def test_cli_root_help_lists_supported_prediction_tasks() -> None:
+    """Describe every vision task family supported by the unified predict command."""
+
+    help_text = " ".join(build_parser().format_help().split())
+
+    assert "depth estimation" in help_text
+    assert "instance or semantic segmentation" in help_text
+    assert "OBB" in help_text
+    assert "face detection" in help_text
+
+
 @pytest.mark.parametrize(
     "command",
     [

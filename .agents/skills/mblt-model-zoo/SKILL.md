@@ -22,6 +22,8 @@ description: >-
 - Use the installed `mblt-model-zoo` CLI for package behavior. Its native commands are `predict`,
   `val`, `compile`, `tps`, `melo`, and `melo-ui`; `classify`, `detect`, `pose`, `segment`, and
   `melotts` are aliases.
+- When the CLI surface changes, synchronize parser `-h`/`--help` text and the README CLI guide.
+  Verify the root help and every affected subcommand help output against the current interface.
 
 ## Preserve Shared Contracts
 

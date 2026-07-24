@@ -1,7 +1,8 @@
 # Vision Framework
 
-The Mobilint Model Zoo vision framework provides image classification, depth estimation, object detection, instance
-segmentation, semantic segmentation, and pose estimation pipelines backed by pre-trained NPU model artifacts.
+The Mobilint Model Zoo vision framework provides image classification, depth estimation, object and face detection,
+oriented bounding box (OBB) detection, instance segmentation, semantic segmentation, and pose estimation pipelines
+backed by pre-trained NPU model artifacts.
 
 Further usage examples can be found in the [tests](../../tests/vision) directory.
 
@@ -97,8 +98,8 @@ mblt-model-zoo predict --source ./room.jpg --model yolo26n-sem-ade20k --framewor
 
 The `predict` command accepts classification and dense prediction options. `--topk` is used for
 image classification models. `--conf-thres` and `--iou-thres` are used for object detection,
-instance segmentation, and pose estimation models; depth and semantic segmentation ignore these detection-only
-options and save colorized overlays. Detection-style models load default thresholds from
+face detection, instance segmentation, OBB, and pose estimation models; depth and semantic segmentation ignore these
+detection-only options and save colorized overlays. Detection-style models load default thresholds from
 their YAML file under [models](models/), and the CLI overrides those values when you pass explicit
 threshold arguments. The default CLI behavior is to use `0.25` for confidence and keep the model's
 YAML IoU threshold.
