@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from ..datasets import CustomADE20K, get_ade20k_loader
+from ..datasets import CustomADE20K, CustomCityscapes, get_ade20k_loader, get_cityscapes_loader
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -16,6 +16,25 @@ if TYPE_CHECKING:
 
 class ADE20KResult(NamedTuple):
     """ADE20K metrics ordered from primary to secondary."""
+
+    miou: float
+    pixel_accuracy: float
+
+    @property
+    def primary_score(self) -> float:
+        """Return mean intersection-over-union."""
+
+        return self.miou
+
+    @property
+    def secondary_score(self) -> float:
+        """Return overall valid-pixel accuracy."""
+
+        return self.pixel_accuracy
+
+
+class SemanticSegmentationResult(NamedTuple):
+    """Generic semantic metrics ordered from primary to secondary."""
 
     miou: float
     pixel_accuracy: float
@@ -71,7 +90,7 @@ class SemanticMetricAccumulator:
             )
             self.matrix += histogram.reshape(self.nc, self.nc)
 
-    def result(self) -> ADE20KResult:
+    def result(self) -> SemanticSegmentationResult:
         """Compute mIoU over present classes and overall pixel accuracy."""
 
         ground_truth = self.matrix.sum(axis=1)
@@ -80,7 +99,7 @@ class SemanticMetricAccumulator:
         union = ground_truth + predicted - intersection
         present = ground_truth > 0
         if not present.any():
-            raise ValueError("ADE20K evaluation received no valid target pixels.")
+            raise ValueError("Semantic evaluation received no valid target pixels.")
         iou = np.divide(
             intersection,
             union,
@@ -88,7 +107,7 @@ class SemanticMetricAccumulator:
             where=union > 0,
         )
         total = int(self.matrix.sum())
-        return ADE20KResult(
+        return SemanticSegmentationResult(
             miou=float(iou[present].mean()),
             pixel_accuracy=float(intersection.sum() / total),
         )
@@ -104,28 +123,20 @@ def calculate_semantic_metrics(
 
     accumulator = SemanticMetricAccumulator(nc=nc, ignore_label=ignore_label)
     accumulator.update(prediction, target)
-    return accumulator.result()
+    result = accumulator.result()
+    return ADE20KResult(result.miou, result.pixel_accuracy)
 
 
-def eval_ade20k(model: MBLT_Engine, data_path: str, batch_size: int) -> ADE20KResult:
-    """Evaluate a semantic-segmentation model on ADE20K validation masks."""
+def _evaluate_semantic_loader(
+    model: MBLT_Engine,
+    loader: torch.utils.data.DataLoader,
+    nc: int,
+    description: str = "Evaluating semantic segmentation",
+) -> SemanticSegmentationResult:
+    """Evaluate input-space semantic maps from an organized validation loader."""
 
-    dataset = CustomADE20K(data_path)
-    letterbox_cfg = model.pre_cfg.get("LetterBox")
-    if not isinstance(letterbox_cfg, dict) or "img_size" not in letterbox_cfg:
-        raise ValueError("ADE20K validation requires a LetterBox img_size in the model preprocessing config.")
-    image_size = letterbox_cfg["img_size"]
-    if not isinstance(image_size, list) or len(image_size) != 2:
-        raise ValueError("ADE20K validation img_size must be a two-item [height, width] list.")
-    nc = int(getattr(model.postprocessor, "nc", 150))
-    loader = get_ade20k_loader(
-        dataset,
-        batch_size,
-        model.preprocess_with_metadata,
-        image_size=(int(image_size[0]), int(image_size[1])),
-    )
     accumulator = SemanticMetricAccumulator(nc=nc)
-    for inputs, targets, _, _, _ in tqdm(loader, desc="Evaluating ADE20K"):
+    for inputs, targets, _, _, _ in tqdm(loader, desc=description):
         result = model.postprocess(model(inputs))
         semantic_mask = result.semantic_mask
         if semantic_mask is None:
@@ -133,3 +144,69 @@ def eval_ade20k(model: MBLT_Engine, data_path: str, batch_size: int) -> ADE20KRe
         prediction = semantic_mask.detach().cpu().numpy() if isinstance(semantic_mask, torch.Tensor) else semantic_mask
         accumulator.update(np.asarray(prediction), targets)
     return accumulator.result()
+
+
+def eval_semantic_segmentation(
+    model: MBLT_Engine,
+    data_path: str,
+    batch_size: int,
+    dataset: str | None = None,
+) -> SemanticSegmentationResult:
+    """Evaluate a semantic model with the loader for its configured taxonomy.
+
+    Args:
+        model: Initialized semantic-segmentation engine.
+        data_path: Organized dataset root.
+        batch_size: Number of validation samples per inference batch.
+        dataset: Optional taxonomy override. Defaults to ``model.post_cfg.dataset``.
+
+    Returns:
+        Generic mIoU and pixel-accuracy result.
+    """
+
+    letterbox_cfg = model.pre_cfg.get("LetterBox")
+    if not isinstance(letterbox_cfg, dict) or "img_size" not in letterbox_cfg:
+        raise ValueError("Semantic validation requires a LetterBox img_size in the model preprocessing config.")
+    image_size = letterbox_cfg["img_size"]
+    if not isinstance(image_size, list) or len(image_size) != 2:
+        raise ValueError("Semantic validation img_size must be a two-item [height, width] list.")
+
+    configured_dataset = model.post_cfg.get("dataset")
+    taxonomy = (dataset or configured_dataset or "ade20k").lower()
+    image_size_tuple = (int(image_size[0]), int(image_size[1]))
+    if taxonomy == "ade20k":
+        validation_dataset = CustomADE20K(data_path)
+        loader = get_ade20k_loader(
+            validation_dataset,
+            batch_size,
+            model.preprocess_with_metadata,
+            image_size=image_size_tuple,
+        )
+        default_nc = 150
+        description = "Evaluating ADE20K"
+    elif taxonomy == "cityscapes":
+        validation_dataset = CustomCityscapes(data_path)
+        loader = get_cityscapes_loader(
+            validation_dataset,
+            batch_size,
+            model.preprocess_with_metadata,
+            image_size=image_size_tuple,
+        )
+        default_nc = 19
+        description = "Evaluating Cityscapes"
+    else:
+        raise ValueError(f"Unsupported semantic validation dataset: {taxonomy!r}.")
+    nc = int(getattr(model.postprocessor, "nc", default_nc))
+    return _evaluate_semantic_loader(model, loader, nc, description=description)
+
+
+def eval_ade20k(model: MBLT_Engine, data_path: str, batch_size: int) -> ADE20KResult:
+    """Evaluate a semantic-segmentation model on ADE20K validation masks."""
+
+    result = eval_semantic_segmentation(
+        model,
+        data_path,
+        batch_size,
+        dataset="ade20k",
+    )
+    return ADE20KResult(result.miou, result.pixel_accuracy)

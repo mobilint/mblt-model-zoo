@@ -24,5 +24,7 @@
 - ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.
+- Cityscapes organization installs only 500 validation PNG pairs from `Chris1/cityscapes`; validation maps the 19
+  canonical source IDs to train IDs and ignores all other labels.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

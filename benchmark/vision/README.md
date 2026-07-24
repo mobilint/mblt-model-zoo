@@ -8,8 +8,8 @@ task-specific scripts have been replaced by the standard runner below.
 ## Quick CLI Validation
 
 Use `mblt-model-zoo val` when you want to validate one vision model without manually selecting a
-dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, DOTAv1, NYU Depth, or ADE20K
-as appropriate, and organizes the default dataset cache if it is missing.
+dataset evaluator. The CLI infers the model task and taxonomy, selects ImageNet, COCO, WiderFace, DOTAv1, NYU Depth,
+Cityscapes, or ADE20K as appropriate, and organizes the default dataset cache if it is missing.
 
 ```bash
 mblt-model-zoo val --help
@@ -30,7 +30,7 @@ mblt-model-zoo val \
 
 Image classification validation uses Top-1 accuracy as its primary score and Top-5 accuracy as its
 secondary metric. Other tasks report their task-specific score, such as COCO mAP, WiderFace AP, DOTAv1 rotated mAP,
-or ADE20K mIoU and pixel accuracy. For a local ONNX model, use `--model-path ./model.onnx`; pass
+or semantic mIoU and pixel accuracy. For a local ONNX model, use `--model-path ./model.onnx`; pass
 `--framework onnx` only when an explicit override is needed.
 
 ## Standard Multi-Model Runner
@@ -335,6 +335,23 @@ python benchmark/vision/organize_nyu_depth.py \
 └── depth/
     ├── nyu_0000.npy
     └── ...
+```
+
+## Organize Cityscapes Dataset
+
+The Cityscapes organizer loads only the 500 validation samples from the explicit
+`Chris1/cityscapes` validation parquet shards. It writes lossless, flat PNG pairs and keeps source label IDs in the
+organized masks; the validation loader maps the 19 canonical source IDs to train IDs and treats every other ID as
+`255`.
+
+```bash
+python benchmark/vision/organize_cityscapes.py \
+  --output-dir ~/.mblt_model_zoo/datasets/cityscapes
+
+mblt-model-zoo val \
+  --model yolo26n-sem \
+  --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes
 ```
 
 ## Organize ADE20K Dataset

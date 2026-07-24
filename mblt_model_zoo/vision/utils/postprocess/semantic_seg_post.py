@@ -56,19 +56,19 @@ class SemanticSegPost(PostBase):
 
         if kwargs:
             raise TypeError(f"Unexpected semantic postprocess kwargs: {', '.join(sorted(kwargs))}")
-        class_maps = self._normalize_output(x)
+        output, is_logits = self._normalize_output(x)
         if img0_shape is None:
-            return class_maps
+            return self._to_input_space(output, is_logits)
 
-        shapes = normalize_image_shapes(img0_shape, class_maps.shape[0])
-        pads = resolve_ratio_pads(ratio_pad, class_maps.shape[0], shapes, self.input_shape)
+        shapes = normalize_image_shapes(img0_shape, output.shape[0])
+        pads = resolve_ratio_pads(ratio_pad, output.shape[0], shapes, self.input_shape)
         restored = [
-            self._restore(class_maps[index], shapes[index], pads[index]) for index in range(class_maps.shape[0])
+            self._restore(output[index], is_logits, shapes[index], pads[index]) for index in range(output.shape[0])
         ]
         return restored[0] if len(restored) == 1 else restored
 
-    def _normalize_output(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
-        """Normalize logits or baked maps to integer ``[B, H, W]`` class maps."""
+    def _normalize_output(self, x: TensorLike | ListTensorLike) -> tuple[torch.Tensor, bool]:
+        """Validate one logits tensor or baked class-map tensor."""
 
         if isinstance(x, (list, tuple)):
             if len(x) != 1:
@@ -81,24 +81,59 @@ class SemanticSegPost(PostBase):
                     f"Semantic segmentation for '{self.dataset}' expects [B, {self.nc}, H, W] logits, "
                     f"got {tuple(output.shape)}."
                 )
-            logits = output.to(dtype=torch.float32)
-            if tuple(logits.shape[-2:]) != self.input_shape:
-                logits = functional.interpolate(logits, size=self.input_shape, mode="bilinear", align_corners=False)
-            return logits.argmax(dim=1).to(dtype=torch.int64)
+            return output.to(dtype=torch.float32), True
         if output.ndim == 3:
-            class_map = output.to(dtype=torch.float32)
-            if tuple(class_map.shape[-2:]) != self.input_shape:
-                class_map = functional.interpolate(class_map[:, None], size=self.input_shape, mode="nearest")[:, 0]
-            class_map = class_map.to(dtype=torch.int64)
+            class_map = output.to(dtype=torch.int64)
             if class_map.numel() and (int(class_map.min()) < 0 or int(class_map.max()) >= self.nc):
                 raise ValueError(f"Semantic class-map values must be in [0, {self.nc - 1}].")
-            return class_map
+            return class_map, False
         raise ValueError(
             f"Semantic segmentation expects [B, C, H, W] logits or [B, H, W] class maps, got {tuple(output.shape)}."
         )
 
-    def _restore(self, class_map: torch.Tensor, shape: tuple[int, int], ratio_pad: RatioPad) -> torch.Tensor:
-        """Crop padded pixels and nearest-resize a class map to its original shape."""
+    def _to_input_space(self, output: torch.Tensor, is_logits: bool) -> torch.Tensor:
+        """Restore model output resolution to configured input space."""
 
-        cropped = crop_letterbox(class_map, shape, ratio_pad, self.input_shape, "Semantic")
+        if is_logits:
+            if tuple(output.shape[-2:]) != self.input_shape:
+                output = functional.interpolate(output, size=self.input_shape, mode="bilinear", align_corners=False)
+            return output.argmax(dim=1).to(dtype=torch.int64)
+        if tuple(output.shape[-2:]) != self.input_shape:
+            output = functional.interpolate(output[:, None].float(), size=self.input_shape, mode="nearest")[:, 0]
+        return output.to(dtype=torch.int64)
+
+    def _restore(
+        self,
+        output: torch.Tensor,
+        is_logits: bool,
+        shape: tuple[int, int],
+        ratio_pad: RatioPad,
+    ) -> torch.Tensor:
+        """Undo letterboxing, preserving logits until after bilinear restoration."""
+
+        if is_logits:
+            if tuple(output.shape[-2:]) != self.input_shape:
+                output = functional.interpolate(
+                    output[None],
+                    size=self.input_shape,
+                    mode="bilinear",
+                    align_corners=False,
+                )[0]
+            channels = [crop_letterbox(channel, shape, ratio_pad, self.input_shape, "Semantic") for channel in output]
+            cropped_logits = torch.stack(channels)
+            restored_logits = functional.interpolate(
+                cropped_logits[None],
+                size=shape,
+                mode="bilinear",
+                align_corners=False,
+            )[0]
+            return restored_logits.argmax(dim=0).to(dtype=torch.int64)
+
+        if tuple(output.shape[-2:]) != self.input_shape:
+            output = functional.interpolate(
+                output[None, None].float(),
+                size=self.input_shape,
+                mode="nearest",
+            )[0, 0].to(dtype=torch.int64)
+        cropped = crop_letterbox(output, shape, ratio_pad, self.input_shape, "Semantic")
         return functional.interpolate(cropped[None, None].float(), size=shape, mode="nearest")[0, 0].to(torch.int64)

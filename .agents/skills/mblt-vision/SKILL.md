@@ -53,6 +53,8 @@ description: >-
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - For ADE20K semantic validation, apply the same letterbox geometry to images and masks, pad masks with `255`, map
   source labels `1..150` to classes `0..149`, and report mIoU as primary with pixel accuracy secondary.
+- For Cityscapes semantic validation, load only the 500 validation parquet samples, map canonical source IDs to
+  classes `0..18`, pad ignored labels with `255`, and keep its pipeline independent from ADE20K.
 - Do not duplicate dataset URLs, paths, or long test commands owned by the registry or local guide.
 
 ## Validate Proportionately

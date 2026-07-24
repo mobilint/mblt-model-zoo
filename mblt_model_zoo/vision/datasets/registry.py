@@ -94,11 +94,13 @@ def get_dataset_category_ids(name: str) -> tuple[int, ...]:
     return tuple(category_ids)
 
 
-def get_dataset_config_for_task(task: str) -> dict[str, Any]:
+def get_dataset_config_for_task(task: str, dataset: str | None = None) -> dict[str, Any]:
     """Return the validation dataset definition associated with a vision task.
 
     Args:
         task: Vision task name from a model postprocess configuration.
+        dataset: Optional output-taxonomy name. When omitted, the first configured
+            task match is returned for backward compatibility.
 
     Returns:
         Matching dataset configuration.
@@ -106,6 +108,15 @@ def get_dataset_config_for_task(task: str) -> dict[str, Any]:
     Raises:
         ValueError: If no configured dataset supports the task.
     """
+
+    if dataset is not None:
+        try:
+            config = get_dataset_config(dataset)
+        except FileNotFoundError as exc:
+            raise ValueError(f"No vision dataset definition exists for taxonomy `{dataset}`.") from exc
+        if task not in config["tasks"]:
+            raise ValueError(f"Vision dataset `{dataset}` does not support task `{task}`.")
+        return config
 
     for config_path in sorted(DATASET_CONFIG_DIR.glob("*.yaml")):
         config = get_dataset_config(config_path.stem)

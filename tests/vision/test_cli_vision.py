@@ -15,7 +15,13 @@ import torch
 
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
-from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
+from mblt_model_zoo.cli.val import (
+    _dataset_ready,
+    _default_data_path_for_task,
+    _ensure_dataset,
+    _resolve_coco_sources,
+    _run_validation,
+)
 from mblt_model_zoo.vision.datasets import (
     get_dataset_category_ids,
     get_dataset_class_names,
@@ -26,7 +32,12 @@ from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, g
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
-from mblt_model_zoo.vision.utils.evaluation import ADE20KResult, DOTAResult, ImageNetResult
+from mblt_model_zoo.vision.utils.evaluation import (
+    ADE20KResult,
+    DOTAResult,
+    ImageNetResult,
+    SemanticSegmentationResult,
+)
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -96,6 +107,16 @@ def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
     assert get_coco_inv(11) == 13
     assert get_dotav1_label(2) == "storage-tank"
     assert get_imagenet_label(0) == "tench"
+
+
+def test_vision_dataset_registry_selects_semantic_taxonomies() -> None:
+    """Select Cityscapes explicitly while preserving task-only ADE20K fallback."""
+
+    cityscapes = get_dataset_config_for_task("semantic_segmentation", "cityscapes")
+    assert cityscapes["name"] == "cityscapes"
+    assert cityscapes["category_ids"] == [7, 8, 11, 12, 13, 17, *range(19, 29), 31, 32, 33]
+    assert len(get_dataset_class_names("cityscapes")) == 19
+    assert get_dataset_config_for_task("semantic_segmentation")["name"] == "ade20k"
 
 
 @pytest.mark.parametrize(
@@ -442,6 +463,9 @@ def test_cli_val_supports_semantic_segmentation_defaults() -> None:
     assert _default_data_path_for_task("semantic_segmentation").endswith(
         ".mblt_model_zoo/datasets/ADEChallengeData2016"
     )
+    assert _default_data_path_for_task("semantic_segmentation", "cityscapes").endswith(
+        ".mblt_model_zoo/datasets/cityscapes"
+    )
 
 
 def test_cli_val_detects_organized_ade20k(tmp_path: Path) -> None:
@@ -452,6 +476,37 @@ def test_cli_val_detects_organized_ade20k(tmp_path: Path) -> None:
     (data_path / "annotations").mkdir()
 
     assert _dataset_ready("semantic_segmentation", str(data_path))
+
+
+@pytest.mark.parametrize("taxonomy", ["cityscapes", "ade20k"])
+def test_cli_val_organizes_selected_semantic_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    taxonomy: str,
+) -> None:
+    """Invoke only the organizer belonging to the selected semantic taxonomy."""
+
+    calls: list[str] = []
+
+    def _fake_cityscapes(**kwargs: object) -> None:
+        calls.append("cityscapes")
+
+    def _fake_ade20k(**kwargs: object) -> None:
+        calls.append("ade20k")
+
+    import mblt_model_zoo.vision.utils.datasets as dataset_utils
+
+    monkeypatch.setattr(dataset_utils, "organize_cityscapes", _fake_cityscapes)
+    monkeypatch.setattr(dataset_utils, "organize_ade20k", _fake_ade20k)
+    args = Namespace(
+        data_path=str(tmp_path / taxonomy),
+        force_organize=False,
+        image_dir=None,
+        annotation_dir=None,
+    )
+
+    assert _ensure_dataset(args, "semantic_segmentation", taxonomy) == str(tmp_path / taxonomy)
+    assert calls == [taxonomy]
 
 
 def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
@@ -814,6 +869,65 @@ def test_cli_val_routes_semantic_segmentation_to_ade20k(
 
     assert score == 0.321
     assert "Validation score (mIoU): 0.32100, (pixel accuracy): 0.76500" in capsys.readouterr().out
+    assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
+    assert calls["disposed"] is True
+
+
+def test_cli_val_routes_semantic_segmentation_to_cityscapes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Route the base YOLO26 semantic family through Cityscapes evaluation."""
+
+    data_path = tmp_path / "cityscapes"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    calls: dict[str, object] = {}
+
+    class _FakeEngine:
+        """Minimal engine double for Cityscapes routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "cityscapes"}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_cityscapes(**kwargs: object) -> SemanticSegmentationResult:
+        calls["eval_kwargs"] = kwargs
+        return SemanticSegmentationResult(miou=0.456, pixel_accuracy=0.789)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_cityscapes", _fake_eval_cityscapes)
+    args = Namespace(
+        model="yolo26n-sem",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./yolo26n-sem.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=2,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    assert score == 0.456
     assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
     assert calls["disposed"] is True
 

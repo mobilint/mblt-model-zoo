@@ -139,18 +139,19 @@ def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_ADE20K_SOURCE
 
 
-def _default_data_path_for_task(task: str) -> str:
+def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
     """Returns the default organized dataset path for a vision task."""
 
     try:
-        return str(get_dataset_config_for_task(task)["path"])
+        return str(get_dataset_config_for_task(task, dataset)["path"])
     except ValueError as exc:
         raise SystemExit(f"Unsupported vision task for validation: {task}") from exc
 
 
-def _dataset_ready(task: str, data_path: str) -> bool:
+def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> bool:
     """Checks whether the organized dataset appears ready for validation."""
 
+    del dataset
     root = Path(data_path).expanduser()
     if task == "image_classification":
         return root.is_dir() and any(child.is_dir() for child in root.iterdir()) if root.exists() else False
@@ -177,17 +178,18 @@ def _dataset_ready(task: str, data_path: str) -> bool:
     return False
 
 
-def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
+def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = None) -> str:
     """Organizes the dataset automatically when the expected layout is missing."""
 
-    data_path = os.path.expanduser(args.data_path or _default_data_path_for_task(task))
-    if _dataset_ready(task, data_path) and not args.force_organize:
+    data_path = os.path.expanduser(args.data_path or _default_data_path_for_task(task, dataset))
+    if _dataset_ready(task, data_path, dataset) and not args.force_organize:
         print(f"Using organized dataset at {data_path}")
         return data_path
 
     try:
         from mblt_model_zoo.vision.utils.datasets import (
             organize_ade20k,
+            organize_cityscapes,
             organize_coco,
             organize_dotav1,
             organize_imagenet,
@@ -231,10 +233,13 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             output_dir=data_path,
         )
     elif task == "semantic_segmentation":
-        organize_ade20k(
-            dataset_path=_resolve_ade20k_source(args, data_path),
-            output_dir=data_path,
-        )
+        if dataset == "cityscapes":
+            organize_cityscapes(output_dir=data_path)
+        else:
+            organize_ade20k(
+                dataset_path=_resolve_ade20k_source(args, data_path),
+                output_dir=data_path,
+            )
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
@@ -247,6 +252,7 @@ def _run_validation(args: argparse.Namespace) -> float:
     try:
         from mblt_model_zoo.vision.utils.evaluation import (
             eval_ade20k,
+            eval_cityscapes,
             eval_coco,
             eval_dota,
             eval_imagenet,
@@ -263,7 +269,9 @@ def _run_validation(args: argparse.Namespace) -> float:
             raise SystemExit("Validation requires end-to-end YOLO postprocessing. Use `--e2e true` or omit the option.")
 
         task = str(model.post_cfg.get("task", "")).lower()
-        data_path = _ensure_dataset(args, task)
+        dataset = model.post_cfg.get("dataset")
+        taxonomy = str(dataset).lower() if isinstance(dataset, str) else None
+        data_path = _ensure_dataset(args, task, taxonomy)
 
         if task == "image_classification":
             imagenet_result = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
@@ -285,7 +293,10 @@ def _run_validation(args: argparse.Namespace) -> float:
             return depth_result.delta1
 
         if task == "semantic_segmentation":
-            semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
+            if taxonomy == "cityscapes":
+                semantic_result = eval_cityscapes(model=model, data_path=data_path, batch_size=args.batch_size)
+            else:
+                semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
             print(
                 "Validation score "
                 f"(mIoU): {semantic_result.miou:.5f}, "

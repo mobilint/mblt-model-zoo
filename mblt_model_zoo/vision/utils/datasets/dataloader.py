@@ -14,6 +14,8 @@ import torch
 from faster_coco_eval import COCO
 from PIL import Image
 
+from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
+
 
 class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
     """Custom COCO dataset class for loading images and metadata.
@@ -355,6 +357,128 @@ def get_ade20k_loader(
             ratio_pads,
             stems,
         )
+
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
+
+
+class CustomCityscapes(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """Cityscapes validation dataset with paired RGB images and source-ID masks."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's flat ``images/`` and ``annotations/`` layout."""
+
+        self.root = root
+        image_root = os.path.join(root, "images")
+        annotation_root = os.path.join(root, "annotations")
+        if not os.path.isdir(image_root) or not os.path.isdir(annotation_root):
+            raise FileNotFoundError(f"Cityscapes requires images/ and annotations/ directories under: {root}")
+        images = {
+            os.path.splitext(name)[0]: os.path.join(image_root, name)
+            for name in os.listdir(image_root)
+            if name.lower().endswith(self.IMG_EXTENSIONS)
+        }
+        annotations = {
+            os.path.splitext(name)[0]: os.path.join(annotation_root, name)
+            for name in os.listdir(annotation_root)
+            if name.lower().endswith(".png")
+        }
+        missing_annotations = sorted(set(images) - set(annotations))
+        missing_images = sorted(set(annotations) - set(images))
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(f"images without annotations: {', '.join(missing_annotations[:5])}")
+            if missing_images:
+                details.append(f"annotations without images: {', '.join(missing_images[:5])}")
+            raise ValueError(f"Cityscapes image/annotation mismatch ({'; '.join(details)}).")
+        if not images:
+            raise ValueError(f"Cityscapes contains no image/annotation pairs: {root}")
+        self.samples = [(images[stem], annotations[stem], stem) for stem in sorted(images)]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load an image and map Cityscapes source IDs to contiguous train IDs."""
+
+        image_path, annotation_path, stem = self.samples[index]
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"Cityscapes image not found: {image_path}")
+        with Image.open(annotation_path) as annotation_image:
+            annotation = np.asarray(annotation_image)
+        if annotation.ndim == 3:
+            if annotation.shape[2] not in {3, 4} or not np.array_equal(annotation[..., 0], annotation[..., 1]):
+                raise ValueError(
+                    f"Cityscapes RGB annotation channels must contain identical source IDs: {annotation_path}"
+                )
+            if not np.array_equal(annotation[..., 0], annotation[..., 2]):
+                raise ValueError(
+                    f"Cityscapes RGB annotation channels must contain identical source IDs: {annotation_path}"
+                )
+            annotation = annotation[..., 0]
+        if annotation.ndim != 2:
+            raise ValueError(f"Cityscapes annotation must be grayscale or RGB-grayscale: {annotation_path}")
+        if image.shape[:2] != annotation.shape:
+            raise ValueError(
+                "Cityscapes image and annotation shapes must match, "
+                f"got {image.shape[:2]} and {annotation.shape}: {stem}"
+            )
+        if annotation.size and (int(annotation.min()) < 0 or int(annotation.max()) > 255):
+            raise ValueError(f"Cityscapes annotation values must be in [0, 255]: {annotation_path}")
+        target = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_cityscapes_loader(
+    dataset: CustomCityscapes,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int],
+) -> torch.utils.data.DataLoader:
+    """Create a Cityscapes loader with image-matching letterbox geometry."""
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]], list[Any], tuple[str, ...]]:
+        images, targets, stems = zip(*batch)
+        processed_images, processed_targets, shapes, ratio_pads = [], [], [], []
+        input_height, input_width = image_size
+        for image, target in zip(images, targets):
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if not (isinstance(processed, tuple) and len(processed) == 2 and isinstance(processed[1], dict)):
+                raise ValueError("Cityscapes preprocessing must return image data and letterbox metadata.")
+            processed_image, metadata = processed
+            ratio_pad = metadata.get("ratio_pad")
+            if ratio_pad is None:
+                raise ValueError("Cityscapes preprocessing requires LetterBox ratio_pad metadata.")
+            ratio, pad = ratio_pad
+            resized_width = int(round(target.shape[1] * ratio[0]))
+            resized_height = int(round(target.shape[0] * ratio[1]))
+            resized_target = cv2.resize(target, (resized_width, resized_height), interpolation=cv2.INTER_NEAREST)
+            left, top = int(round(pad[0])), int(round(pad[1]))
+            right = input_width - resized_width - left
+            bottom = input_height - resized_height - top
+            if min(left, top, right, bottom) < 0:
+                raise ValueError("Cityscapes letterbox metadata produced negative mask padding.")
+            processed_target = cv2.copyMakeBorder(
+                resized_target,
+                top,
+                bottom,
+                left,
+                right,
+                cv2.BORDER_CONSTANT,
+                value=255,
+            )
+            processed_images.append(processed_image)
+            processed_targets.append(processed_target)
+            ratio_pads.append(ratio_pad)
+        return np.stack(processed_images), np.stack(processed_targets), shapes, ratio_pads, stems
 
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader)
 

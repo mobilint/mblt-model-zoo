@@ -15,6 +15,7 @@ from PIL import Image
 
 from .datasets import (
     get_ade20k_palette,
+    get_cityscapes_palette,
     get_coco_det_palette,
     get_coco_keypoint_palette,
     get_coco_label,
@@ -63,7 +64,7 @@ class Results:
         self.box_cls: torch.Tensor | np.ndarray | None = None
         self.mask: torch.Tensor | np.ndarray | None = None
         self.depth: torch.Tensor | np.ndarray | list[TensorLike] | None = None
-        self.semantic_mask: torch.Tensor | np.ndarray | None = None
+        self.semantic_mask: torch.Tensor | np.ndarray | list[TensorLike] | None = None
         self.output: TensorLike | ListTensorLike | NestedListTensorLike | None = None
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
@@ -134,9 +135,14 @@ class Results:
             else:
                 raise TypeError(f"Expected tensor depth output for task {self.task}, got {type(output)}.")
         elif self.task.lower() == "semantic_segmentation":
-            if not isinstance(output, (np.ndarray, torch.Tensor)):
+            if isinstance(output, Sequence) and not isinstance(output, (np.ndarray, torch.Tensor)):
+                if not all(isinstance(item, (np.ndarray, torch.Tensor)) for item in output):
+                    raise TypeError(f"Expected semantic-map tensors for task {self.task}, got {type(output)}.")
+                self.semantic_mask = [cast(TensorLike, item) for item in output]
+            elif isinstance(output, (np.ndarray, torch.Tensor)):
+                self.semantic_mask = output
+            else:
                 raise TypeError(f"Expected tensor semantic output for task {self.task}, got {type(output)}.")
-            self.semantic_mask = output
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
         self.output = output  # store raw output
@@ -230,10 +236,9 @@ class Results:
         del kwargs
         if self.semantic_mask is None:
             raise ValueError("No semantic output found.")
+        semantic_value = self.semantic_mask[0] if isinstance(self.semantic_mask, list) else self.semantic_mask
         class_map = (
-            self.semantic_mask.detach().cpu().numpy()
-            if isinstance(self.semantic_mask, torch.Tensor)
-            else self.semantic_mask
+            semantic_value.detach().cpu().numpy() if isinstance(semantic_value, torch.Tensor) else semantic_value
         )
         if class_map.ndim == 3:
             class_map = class_map[0]
@@ -241,13 +246,27 @@ class Results:
             raise ValueError(f"Expected a 2D semantic map or [B, H, W], got {class_map.shape}.")
         image = self._read_image(source_path)
         image_shape = (int(image.shape[0]), int(image.shape[1]))
-        class_map = self._restore_semantic_map(class_map, image_shape)
-        nc = int(self.post_cfg.get("nc", 150 if self.post_cfg.get("dataset") == "ade20k" else 19))
-        if class_map.size and (int(class_map.min()) < 0 or int(class_map.max()) >= nc):
-            raise ValueError(f"Semantic class-map values must be in [0, {nc - 1}].")
-        palette = np.array([get_ade20k_palette(index) for index in range(nc)], dtype=np.uint8)
-        overlay = palette[class_map.astype(np.int64)]
-        result = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
+        if tuple(class_map.shape) != image_shape:
+            class_map = self._restore_semantic_map(class_map, image_shape)
+        dataset = self.post_cfg.get("dataset")
+        if dataset == "ade20k":
+            default_nc = 150
+            palette_getter = get_ade20k_palette
+        elif dataset == "cityscapes":
+            default_nc = 19
+            palette_getter = get_cityscapes_palette
+        else:
+            raise ValueError(f"Unsupported semantic segmentation dataset palette: {dataset!r}.")
+        nc = int(self.post_cfg.get("nc", default_nc))
+        valid = class_map != 255
+        if valid.any() and (int(class_map[valid].min()) < 0 or int(class_map[valid].max()) >= nc):
+            raise ValueError(f"Semantic class-map values must be in [0, {nc - 1}] or 255.")
+        palette = np.array([palette_getter(index) for index in range(nc)], dtype=np.uint8)
+        overlay = np.zeros_like(image)
+        overlay[valid] = palette[class_map[valid].astype(np.int64)]
+        blended = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
+        result = image.copy()
+        result[valid] = blended[valid]
         if save_path is not None:
             cv2.imwrite(save_path, result)
         return result

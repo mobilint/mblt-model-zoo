@@ -38,6 +38,9 @@ NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/
 NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
 ADE20K_VALIDATION_SAMPLE_COUNT = 2000
+CITYSCAPES_REPO_ID = "Chris1/cityscapes"
+CITYSCAPES_VALIDATION_DATA_FILES = "data/validation-*.parquet"
+CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -646,6 +649,94 @@ def organize_ade20k(
             construct_ade20k(temp_dir, output_dir)
             return
         construct_ade20k(local_dataset_path, output_dir)
+
+
+def _load_cityscapes_validation() -> object:
+    """Load only the Cityscapes validation parquet shards from Hugging Face."""
+
+    from datasets import load_dataset
+
+    return load_dataset(
+        CITYSCAPES_REPO_ID,
+        data_files={"validation": CITYSCAPES_VALIDATION_DATA_FILES},
+        split="validation",
+    )
+
+
+def organize_cityscapes(
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/cityscapes"),
+) -> None:
+    """Materialize the Hugging Face Cityscapes validation split as lossless PNG pairs.
+
+    Only the validation parquet shards are requested. Images and source-ID masks
+    are installed atomically as flat ``images/`` and ``annotations/`` directories.
+
+    Args:
+        output_dir: Directory where the organized validation dataset is stored.
+
+    Raises:
+        ValueError: If the source does not contain exactly 500 valid pairs.
+    """
+
+    dataset = _load_cityscapes_validation()
+    if len(dataset) != CITYSCAPES_VALIDATION_SAMPLE_COUNT:
+        raise ValueError(
+            "Cityscapes validation dataset must contain "
+            f"{CITYSCAPES_VALIDATION_SAMPLE_COUNT} pairs, found {len(dataset)}."
+        )
+
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".cityscapes-staging-") as staging_dir:
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_annotation_dir = os.path.join(staging_dir, "annotations")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_annotation_dir)
+        for index, row in enumerate(dataset):
+            if not isinstance(row, dict) or "image" not in row or "semantic_segmentation" not in row:
+                raise ValueError("Cityscapes validation rows require `image` and `semantic_segmentation` fields.")
+            image = row["image"]
+            annotation = row["semantic_segmentation"]
+            if not isinstance(image, Image.Image):
+                image = Image.fromarray(image)
+            if not isinstance(annotation, Image.Image):
+                annotation = Image.fromarray(annotation)
+            if image.size != annotation.size:
+                raise ValueError(
+                    f"Cityscapes image and annotation shapes must match at validation index {index}: "
+                    f"{image.size} and {annotation.size}."
+                )
+            stem = f"cityscapes_val_{index:06d}"
+            image.convert("RGB").save(os.path.join(staged_image_dir, f"{stem}.png"), format="PNG")
+            annotation.save(os.path.join(staged_annotation_dir, f"{stem}.png"), format="PNG")
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_annotation_dir, os.path.join(output_dir, "annotations")),
+        )
+        os.makedirs(output_dir, exist_ok=True)
+        backups: dict[str, str] = {}
+        installed_dirs: list[str] = []
+        try:
+            for _, destination_dir in replacements:
+                if os.path.lexists(destination_dir):
+                    backup_dir = os.path.join(staging_dir, f"backup-{os.path.basename(destination_dir)}")
+                    os.replace(destination_dir, backup_dir)
+                    backups[destination_dir] = backup_dir
+            for staged_dir, destination_dir in replacements:
+                os.replace(staged_dir, destination_dir)
+                installed_dirs.append(destination_dir)
+        except OSError:
+            for directory in installed_dirs:
+                if os.path.isdir(directory) and not os.path.islink(directory):
+                    shutil.rmtree(directory)
+                elif os.path.lexists(directory):
+                    os.remove(directory)
+            for destination_dir, backup_dir in backups.items():
+                os.replace(backup_dir, destination_dir)
+            raise
+    print(f"Constructed Cityscapes validation dataset with {len(dataset)} image/mask pairs")
 
 
 def _resolve_dotav1_root(dataset_dir: str) -> str:

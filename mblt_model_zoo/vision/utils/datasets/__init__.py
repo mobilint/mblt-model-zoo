@@ -5,6 +5,7 @@ Datasets utilities and loaders.
 from __future__ import annotations
 
 from .ade20k import get_ade20k_palette
+from .cityscapes import get_cityscapes_palette
 from .coco import (
     get_coco_class_num,
     get_coco_det_palette,
@@ -16,12 +17,14 @@ from .coco import (
 )
 from .dataloader import (
     CustomADE20K,
+    CustomCityscapes,
     CustomCocodata,
     CustomDOTAv1,
     CustomImageFolder,
     CustomNYUDepth,
     CustomWiderface,
     get_ade20k_loader,
+    get_cityscapes_loader,
     get_coco_loader,
     get_dota_loader,
     get_imagenet_loader,
@@ -32,6 +35,7 @@ from .dotav1 import get_dotav1_class_num, get_dotav1_label, get_dotav1_palette
 from .imagenet import get_imagenet_label
 from .organizer import (
     organize_ade20k,
+    organize_cityscapes,
     organize_coco,
     organize_dotav1,
     organize_imagenet,
@@ -41,6 +45,7 @@ from .organizer import (
 
 __all__: list[str] = [
     "get_ade20k_palette",
+    "get_cityscapes_palette",
     "get_coco_class_num",
     "get_coco_det_palette",
     "get_coco_inv",
@@ -52,12 +57,14 @@ __all__: list[str] = [
     "get_dotav1_label",
     "get_dotav1_palette",
     "CustomADE20K",
+    "CustomCityscapes",
     "CustomCocodata",
     "CustomDOTAv1",
     "CustomImageFolder",
     "CustomNYUDepth",
     "CustomWiderface",
     "get_ade20k_loader",
+    "get_cityscapes_loader",
     "get_coco_loader",
     "get_dota_loader",
     "get_imagenet_loader",
@@ -66,6 +73,7 @@ __all__: list[str] = [
     "get_imagenet_label",
     "organize_coco",
     "organize_ade20k",
+    "organize_cityscapes",
     "organize_dotav1",
     "organize_imagenet",
     "organize_nyu_depth",

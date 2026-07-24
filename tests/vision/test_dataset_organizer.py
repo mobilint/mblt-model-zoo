@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from zipfile import ZipFile
 
+import numpy as np
 import pytest
 import requests
+from PIL import Image
 
 import mblt_model_zoo.vision.utils.datasets.organizer as organizer
 
@@ -153,3 +156,122 @@ def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.Mon
     assert (output_dir / "annotations" / "ADE_val_00000001.png").read_bytes() == b"validation"
     assert (output_dir / "objectInfo150.txt").read_bytes() == b"labels"
     assert not (output_dir / "images" / "training").exists()
+
+
+def test_cityscapes_loader_requests_only_validation_parquet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Select explicit validation shards without requesting train or test data."""
+
+    calls: dict[str, object] = {}
+
+    def _fake_load_dataset(repo_id: str, **kwargs: object) -> list[object]:
+        calls["repo_id"] = repo_id
+        calls.update(kwargs)
+        return []
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "datasets",
+        SimpleNamespace(load_dataset=_fake_load_dataset),
+    )
+    organizer._load_cityscapes_validation()
+
+    assert calls == {
+        "repo_id": "Chris1/cityscapes",
+        "data_files": {"validation": "data/validation-*.parquet"},
+        "split": "validation",
+    }
+
+
+def test_organize_cityscapes_materializes_lossless_validation_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Replace an existing layout with exactly the validation image/mask pairs."""
+
+    monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
+    rows = [
+        {
+            "image": Image.fromarray(np.full((2, 3, 3), index * 50, dtype=np.uint8)),
+            "semantic_segmentation": Image.fromarray(
+                np.array([[7, 8, 0], [11, 12, 33]], dtype=np.uint8),
+            ),
+        }
+        for index in range(2)
+    ]
+    monkeypatch.setattr(organizer, "_load_cityscapes_validation", lambda: rows)
+    output_dir = tmp_path / "cityscapes"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "annotations").mkdir()
+    (output_dir / "images" / "stale.png").write_bytes(b"stale")
+    (output_dir / "annotations" / "stale.png").write_bytes(b"stale")
+
+    organizer.organize_cityscapes(str(output_dir))
+
+    image_paths = sorted((output_dir / "images").glob("*.png"))
+    annotation_paths = sorted((output_dir / "annotations").glob("*.png"))
+    assert [path.name for path in image_paths] == [
+        "cityscapes_val_000000.png",
+        "cityscapes_val_000001.png",
+    ]
+    assert [path.name for path in annotation_paths] == [
+        "cityscapes_val_000000.png",
+        "cityscapes_val_000001.png",
+    ]
+    assert np.array_equal(np.asarray(Image.open(annotation_paths[0])), np.asarray(rows[0]["semantic_segmentation"]))
+
+
+def test_organize_cityscapes_enforces_validation_pair_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject incomplete validation sources before replacing existing data."""
+
+    monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setattr(organizer, "_load_cityscapes_validation", lambda: [])
+    output_dir = tmp_path / "cityscapes"
+    (output_dir / "images").mkdir(parents=True)
+    marker = output_dir / "images" / "keep.png"
+    marker.write_bytes(b"keep")
+
+    with pytest.raises(ValueError, match="must contain 2 pairs"):
+        organizer.organize_cityscapes(str(output_dir))
+
+    assert marker.read_bytes() == b"keep"
+
+
+def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Restore both previous directories if the staged installation fails."""
+
+    monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    rows = [
+        {
+            "image": Image.fromarray(np.zeros((1, 1, 3), dtype=np.uint8)),
+            "semantic_segmentation": Image.fromarray(np.array([[7]], dtype=np.uint8)),
+        }
+    ]
+    monkeypatch.setattr(organizer, "_load_cityscapes_validation", lambda: rows)
+    output_dir = tmp_path / "cityscapes"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "annotations").mkdir()
+    (output_dir / "images" / "keep.png").write_bytes(b"old image")
+    (output_dir / "annotations" / "keep.png").write_bytes(b"old annotation")
+    real_replace = organizer.os.replace
+    failed = False
+
+    def _fail_annotation_install(source: str, destination: str) -> None:
+        nonlocal failed
+        if not failed and Path(source).name == "annotations" and Path(destination) == output_dir / "annotations":
+            failed = True
+            raise OSError("simulated install failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(organizer.os, "replace", _fail_annotation_install)
+
+    with pytest.raises(OSError, match="simulated"):
+        organizer.organize_cityscapes(str(output_dir))
+
+    assert (output_dir / "images" / "keep.png").read_bytes() == b"old image"
+    assert (output_dir / "annotations" / "keep.png").read_bytes() == b"old annotation"

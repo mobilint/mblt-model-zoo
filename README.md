@@ -292,8 +292,8 @@ mblt-model-zoo predict --source ./street.jpg --model yolo11m --conf-thres 0.5 --
 ```
 
 Use `val` to validate a supported vision model on its benchmark dataset. Classification models use
-ImageNet, object detection, instance segmentation, and pose estimation models use COCO, and semantic segmentation
-models use ADE20K.
+ImageNet, object detection, instance segmentation, and pose estimation models use COCO. YOLO26 `*-sem` models use
+Cityscapes, while `*-sem-ade20k` models keep their independent ADE20K pipeline.
 Validation also supports `--framework onnx`, the shared `--model-path` override, and the
 framework-specific compatibility aliases.
 
@@ -307,6 +307,8 @@ mblt-model-zoo val --model resnet50 --framework onnx --mxq-path ./resnet50.mxq
 mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 mblt-model-zoo val --model yolo26n-sem-ade20k --framework onnx \
   --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+mblt-model-zoo val --model yolo26n-sem --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes
 ```
 
 Common NPU and artifact options are shared by the vision commands:

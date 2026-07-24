@@ -10,7 +10,14 @@ import pytest
 import torch
 
 from mblt_model_zoo.vision import list_models
-from mblt_model_zoo.vision.utils.datasets import CustomADE20K, get_ade20k_loader, get_ade20k_palette
+from mblt_model_zoo.vision.utils.datasets import (
+    CustomADE20K,
+    CustomCityscapes,
+    get_ade20k_loader,
+    get_ade20k_palette,
+    get_cityscapes_loader,
+    get_cityscapes_palette,
+)
 from mblt_model_zoo.vision.utils.evaluation import SemanticMetricAccumulator, calculate_semantic_metrics
 from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
 from mblt_model_zoo.vision.utils.preprocess import build_preprocess
@@ -22,10 +29,15 @@ def test_yolo26_ade20k_configs_resolve_onnx_artifacts() -> None:
     """Expose every ADE20K model and its matching Hub ONNX artifact."""
 
     assert list_models("semantic_segmentation")["semantic_segmentation"] == [
+        "YOLO26lSem",
         "YOLO26lSemADE20K",
+        "YOLO26mSem",
         "YOLO26mSemADE20K",
+        "YOLO26nSem",
         "YOLO26nSemADE20K",
+        "YOLO26sSem",
         "YOLO26sSemADE20K",
+        "YOLO26xSem",
         "YOLO26xSemADE20K",
     ]
     for size in "nsmlx":
@@ -34,6 +46,10 @@ def test_yolo26_ade20k_configs_resolve_onnx_artifacts() -> None:
         assert config["file_cfg"]["onnx_filename"] == f"yolo26{size}-sem-ade20k.onnx"
         assert config["pre_cfg"]["LetterBox"]["img_size"] == [640, 640]
         assert config["post_cfg"] == {"task": "semantic_segmentation", "dataset": "ade20k"}
+        cityscapes_config = resolve_model_config(f"yolo26{size}-sem")
+        assert cityscapes_config["file_cfg"]["repo_id"] == f"mobilint/YOLO26{size}-sem"
+        assert cityscapes_config["file_cfg"]["onnx_filename"] == f"yolo26{size}-sem.onnx"
+        assert cityscapes_config["post_cfg"] == {"task": "semantic_segmentation", "dataset": "cityscapes"}
 
 
 def test_semantic_postprocess_supports_logits_and_baked_maps() -> None:
@@ -75,6 +91,27 @@ def test_semantic_postprocess_restores_letterbox_padding() -> None:
     assert isinstance(restored, torch.Tensor)
     assert restored.shape == (2, 4)
     assert torch.equal(restored, torch.full((2, 4), 5))
+
+
+def test_semantic_logits_restore_before_argmax_and_support_batches() -> None:
+    """Bilinearly restore logits before choosing classes for each original shape."""
+
+    post = SemanticSegPost(
+        {"LetterBox": {"img_size": [4, 8]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+    )
+    logits = torch.zeros((2, 19, 2, 4))
+    logits[:, 0] = 1.0
+    logits[:, 1, :, 2:] = 2.0
+    restored = post(
+        logits,
+        img0_shape=[(2, 8), (1, 4)],
+        ratio_pad=[((1.0, 1.0), (0.0, 1.0)), ((2.0, 2.0), (0.0, 1.0))],
+    )
+
+    assert isinstance(restored, list)
+    assert [tuple(item.shape) for item in restored] == [(2, 8), (1, 4)]
+    assert set(restored[0].unique().tolist()) == {0, 1}
 
 
 def test_ade20k_loader_maps_labels_and_letterboxes_masks(tmp_path: Path) -> None:
@@ -122,6 +159,58 @@ def test_ade20k_dataset_rejects_unpaired_files(tmp_path: Path) -> None:
     assert cv2.imwrite(str(tmp_path / "images" / "sample.jpg"), np.zeros((2, 2, 3), dtype=np.uint8))
     with pytest.raises(ValueError, match="mismatch"):
         CustomADE20K(str(tmp_path))
+
+
+def test_cityscapes_loader_maps_source_ids_rgb_masks_and_padding(tmp_path: Path) -> None:
+    """Map Cityscapes source IDs from RGB-grayscale PNGs and pad with ignore labels."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    image = np.zeros((2, 4, 3), dtype=np.uint8)
+    source_ids = np.array([[7, 8, 0, 33], [11, 12, 28, 31]], dtype=np.uint8)
+    rgb_mask = np.repeat(source_ids[..., None], 3, axis=2)
+    assert cv2.imwrite(str(image_dir / "sample.png"), image)
+    assert cv2.imwrite(str(annotation_dir / "sample.png"), rgb_mask)
+    preprocessor = build_preprocess(
+        {
+            "Reader": {"style": "numpy"},
+            "LetterBox": {"img_size": [4, 4]},
+            "SetOrder": {"shape": "HWC"},
+            "Normalize": {"style": "cv"},
+        }
+    )
+    loader = get_cityscapes_loader(
+        CustomCityscapes(str(tmp_path)),
+        batch_size=1,
+        preprocess_fn=preprocessor.with_metadata,
+        image_size=(4, 4),
+    )
+    _, targets, shapes, ratio_pads, stems = next(iter(loader))
+
+    assert np.all(targets[0, 0] == 255)
+    assert np.array_equal(targets[0, 1], np.array([0, 1, 255, 18], dtype=np.uint8))
+    assert np.array_equal(targets[0, 2], np.array([2, 3, 15, 16], dtype=np.uint8))
+    assert np.all(targets[0, 3] == 255)
+    assert shapes == [(2, 4)]
+    assert ratio_pads == [((1.0, 1.0), (0, 1))]
+    assert stems == ("sample",)
+
+
+def test_cityscapes_dataset_rejects_shape_and_pair_mismatches(tmp_path: Path) -> None:
+    """Reject incomplete pairs and image/mask geometry mismatches."""
+
+    (tmp_path / "images").mkdir()
+    (tmp_path / "annotations").mkdir()
+    assert cv2.imwrite(str(tmp_path / "images" / "sample.png"), np.zeros((2, 2, 3), dtype=np.uint8))
+    with pytest.raises(ValueError, match="mismatch"):
+        CustomCityscapes(str(tmp_path))
+
+    assert cv2.imwrite(str(tmp_path / "annotations" / "sample.png"), np.zeros((1, 2), dtype=np.uint8))
+    dataset = CustomCityscapes(str(tmp_path))
+    with pytest.raises(ValueError, match="shapes must match"):
+        dataset[0]
 
 
 def test_semantic_metrics_ignore_void_pixels_and_pool_counts() -> None:
@@ -184,3 +273,38 @@ def test_semantic_results_plot_distinguishes_person_and_bus() -> None:
 
     assert np.array_equal(plotted, expected)
     assert not np.array_equal(plotted[0, 0], plotted[0, 1])
+
+
+def test_semantic_results_plot_uses_cityscapes_palette() -> None:
+    """Render Cityscapes classes with their dataset-native colors."""
+
+    assert get_cityscapes_palette(0) == (128, 64, 128)
+    assert get_cityscapes_palette(11) == (60, 20, 220)
+    assert get_cityscapes_palette(13) == (142, 0, 0)
+    class_map = torch.tensor([[0, 11, 13]], dtype=torch.int64)
+    result = Results(
+        {},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+        class_map,
+    )
+    plotted = result.plot(np.zeros((1, 3, 3), dtype=np.uint8))
+    expected_overlay = np.array([[[128, 64, 128], [60, 20, 220], [142, 0, 0]]], dtype=np.uint8)
+    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
+
+    assert np.array_equal(plotted, expected)
+
+
+def test_semantic_results_preserve_restored_maps_and_ignore_pixels() -> None:
+    """Avoid a second letterbox crop and leave ignored pixels uncolored."""
+
+    source = np.full((2, 4, 3), 100, dtype=np.uint8)
+    class_map = torch.tensor([[0, 0, 0, 0], [255, 255, 255, 255]], dtype=torch.int64)
+    result = Results(
+        {"LetterBox": {"img_size": [4, 4]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+        class_map,
+    )
+    plotted = result.plot(source)
+
+    assert plotted.shape == source.shape
+    assert np.array_equal(plotted[1], source[1])

@@ -197,12 +197,15 @@ The command loads the model, infers its task, and validates it on the associated
 - YOLO26 ADE20K semantic-segmentation models use paired `images/` and `annotations/`. Validation applies matching
   640×640 letterbox geometry, ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU
   (primary) with pixel accuracy.
+- YOLO26 `*-sem` models use 500 Cityscapes validation pairs from `Chris1/cityscapes`. Validation maps source IDs
+  `7,8,11,12,13,17,19..28,31..33` to classes `0..18`, ignores other IDs, and reports mIoU with pixel accuracy.
 
 If the organized dataset is not already available under the default cache directory, the CLI
-automatically prepares it before validation. Before downloading anything, it first looks for raw
-archives or extracted dataset directories near the target dataset path, including the dataset
-directory itself, its parent directory, and the current working directory. You can also point the
-command to an already organized dataset with `--data-path`.
+automatically prepares it before validation. Archive-backed organizers first look for raw archives
+or extracted dataset directories near the target dataset path, including the dataset directory
+itself, its parent directory, and the current working directory. Cityscapes requests only the
+explicit Hugging Face validation parquet shards. You can also point the command to an already
+organized dataset with `--data-path`.
 
 ```bash
 mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
@@ -210,6 +213,8 @@ mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres
 mblt-model-zoo val --model yolo26n-depth --framework onnx --data-path ~/.mblt_model_zoo/datasets/nyu-depth
 mblt-model-zoo val --model yolo26n-sem-ade20k --framework onnx \
   --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+mblt-model-zoo val --model yolo26n-sem --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes
 ```
 
 If you omit `--conf-thres` and `--iou-thres`, validation uses the model's YAML thresholds. Pass

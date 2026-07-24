@@ -93,11 +93,15 @@ truth when this snapshot becomes stale.
   under its output root.
 - Keep the ADE20K organizer validation-only: install its 2,000 paired samples as flat `images/` and `annotations/`
   directories, along with its source metadata files.
+- Keep the Cityscapes organizer validation-only: load only the 500 `Chris1/cityscapes` validation parquet samples and
+  install lossless flat `images/` and `annotations/` PNG pairs.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
   `abs_rel` and `rmse` as auxiliary metrics.
 - ADE20K semantic-segmentation validation applies matching letterbox geometry to images and masks, ignores source
   label `0`, maps labels `1..150` to model classes `0..149`, and reports mIoU as primary with pixel accuracy secondary.
+- Cityscapes semantic-segmentation validation maps source IDs `7,8,11,12,13,17,19..28,31..33` to classes `0..18`,
+  ignores other IDs, and reports mIoU as primary with pixel accuracy secondary.
 - ImageNet validation reports Top-1 accuracy as the primary metric and Top-5 accuracy as the secondary metric.
 - DOTAv1 validation reports rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
