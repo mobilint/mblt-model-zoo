@@ -163,7 +163,7 @@ def eval_coco(
         out_npu = model(input_npu)
         inference_time += time() - tic
 
-        nms_outs = model.postprocess(out_npu)
+        nms_outs = model.postprocess(out_npu, multi_label=True)
         infer_post_time += time() - tic
         results.extend(
             format_coco_results(

@@ -4,6 +4,9 @@ YOLO anchorless postprocessing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
+
 import torch
 
 from .base import YOLODetectionPostBase
@@ -20,6 +23,16 @@ from .common import (
     xywh2xyxy,
     yolo_multilabel_candidates,
 )
+
+AnchorlessOutputLayout = Literal["channels_first", "candidates_first"]
+
+
+@dataclass(frozen=True)
+class _AnchorlessNMSInput:
+    """Decoded anchorless detections together with their source layout."""
+
+    detections: torch.Tensor | list[torch.Tensor]
+    layout: AnchorlessOutputLayout
 
 
 class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
@@ -117,6 +130,30 @@ class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
         """
         return [self.process_box_cls(box_cls) for box_cls in x]
 
+    def _pre_process(
+        self,
+        x: list[torch.Tensor],
+    ) -> tuple[_AnchorlessNMSInput, torch.Tensor | None]:
+        """Decode detections while retaining whether the source was raw or converted.
+
+        Args:
+            x: Checked model output tensors.
+
+        Returns:
+            Layout-aware detections and an optional prototype output.
+        """
+        if len(x) == 1:
+            converted = self.conversion(x)
+            if not isinstance(converted, torch.Tensor):
+                raise TypeError("conversion should return a tensor for single-output YOLO postprocessing.")
+            detections = self.filter_conversion(converted)
+            return _AnchorlessNMSInput(detections, "candidates_first"), None
+        rearranged = self.rearrange(x)
+        if not isinstance(rearranged, torch.Tensor):
+            raise TypeError("rearrange should return a tensor for non-segmentation YOLO postprocessing.")
+        detections = self.decode(rearranged)
+        return _AnchorlessNMSInput(detections, "channels_first"), None
+
     def process_box_cls(self, box_cls: torch.Tensor) -> torch.Tensor:
         """Processes detection results for a single image.
 
@@ -188,52 +225,98 @@ class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
 
         return [process_conversion(xi) for xi in x_list]
 
-    def _nms_single(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+    def _nms_single(
+        self,
+        xi: torch.Tensor,
+        max_det: int,
+        max_nms: int,
+        max_wh: int,
+        multi_label: bool,
+    ) -> torch.Tensor:
         """Apply anchorless NMS to a single decoded image tensor."""
-        if xi.numel() == 0:
-            return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        xi_t = xi.transpose(0, 1)
-        score = xi_t[:, 4 : 4 + self.nc]
-        extra = xi_t[:, 4 + self.nc :]
-        conf, cls_idx = score.max(dim=1)
-        filt = conf > self.conf_thres
-        if not torch.any(filt):
-            return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        xi_t = xi_t[filt]
-        conf = conf[filt]
-        cls_idx = cls_idx[filt]
-        extra = extra[filt]
-        xi_out = torch.empty((xi_t.shape[0], 6 + self.n_extra), dtype=xi_t.dtype, device=xi_t.device)
-        xi_out[:, :4] = xi_t[:, :4]
-        xi_out[:, 4] = conf
-        xi_out[:, 5] = cls_idx.to(xi_t.dtype)
-        if self.n_extra > 0:
-            xi_out[:, 6:] = extra
-        xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
-        c = xi_out[:, 5:6] * max_wh
-        boxes, scores = xi_out[:, :4] + c, xi_out[:, 4]
-        i_idx = non_max_suppression(boxes, scores, self.iou_thres, max_det)
-        return xi_out[i_idx]
+        return self._nms_single_legacy_rows(
+            self._normalize_nms_input(xi, "channels_first"),
+            max_det=max_det,
+            max_nms=max_nms,
+            max_wh=max_wh,
+            multi_label=multi_label,
+        )
 
-    def _nms_single_legacy_rows(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+    def _normalize_nms_input(
+        self,
+        xi: torch.Tensor,
+        layout: AnchorlessOutputLayout | None = None,
+    ) -> torch.Tensor:
+        """Normalize one decoded tensor to ``(candidates, channels)``.
+
+        Source provenance resolves square tensors. Shape inference remains available
+        for callers that pass decoded tensors directly, with raw channel-first
+        layout taking precedence when both dimensions match.
+
+        Args:
+            xi: One image's decoded detections.
+            layout: Known source layout, if available.
+
+        Returns:
+            Detections in canonical ``(candidates, channels)`` layout.
+
+        Raises:
+            ValueError: If the tensor shape conflicts with the expected channel count
+                or with the supplied source layout.
+        """
+        if xi.ndim != 2:
+            raise ValueError(f"Expected 2D decoded tensor, got shape {tuple(xi.shape)}.")
+
+        expected_dim = 4 + self.nc + self.n_extra
+        if layout == "channels_first":
+            if xi.shape[0] != expected_dim:
+                raise ValueError(
+                    f"Expected channel-first decoded tensor with {expected_dim} channels, got shape {tuple(xi.shape)}."
+                )
+            return xi.transpose(0, 1)
+        if layout == "candidates_first":
+            if xi.shape[1] != expected_dim:
+                raise ValueError(
+                    "Expected candidates-first decoded tensor "
+                    f"with {expected_dim} channels, got shape {tuple(xi.shape)}."
+                )
+            return xi
+
+        if xi.shape[0] == expected_dim:
+            return xi.transpose(0, 1)
+        if xi.shape[1] == expected_dim:
+            return xi
+        raise ValueError(f"Unsupported decoded tensor shape {tuple(xi.shape)}.")
+
+    def _nms_single_legacy_rows(
+        self,
+        xi: torch.Tensor,
+        max_det: int,
+        max_nms: int,
+        max_wh: int,
+        multi_label: bool,
+    ) -> torch.Tensor:
         """Apply anchorless NMS to a single decoded image in row-major ``(anchors, channels)`` form."""
         if xi.numel() == 0:
             return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
-        conf, cls_idx = score.max(dim=1)
-        filt = conf > self.conf_thres
-        if not torch.any(filt):
-            return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
-        box = box[filt]
-        conf = conf[filt]
-        cls_idx = cls_idx[filt]
-        extra = extra[filt]
-        xi_out = torch.empty((box.shape[0], 6 + self.n_extra), dtype=xi.dtype, device=xi.device)
-        xi_out[:, :4] = box
-        xi_out[:, 4] = conf
-        xi_out[:, 5] = cls_idx.to(xi.dtype)
-        if self.n_extra > 0:
-            xi_out[:, 6:] = extra
+        if multi_label:
+            xi_out = yolo_multilabel_candidates(xi, self.nc, self.n_extra, self.conf_thres)
+        else:
+            box, score, extra = xi[:, :4], xi[:, 4 : 4 + self.nc], xi[:, 4 + self.nc :]
+            conf, cls_idx = score.max(dim=1)
+            filt = conf > self.conf_thres
+            if not torch.any(filt):
+                return torch.zeros((0, 6 + self.n_extra), dtype=torch.float32, device=self.device)
+            box = box[filt]
+            conf = conf[filt]
+            cls_idx = cls_idx[filt]
+            extra = extra[filt]
+            xi_out = torch.empty((box.shape[0], 6 + self.n_extra), dtype=xi.dtype, device=xi.device)
+            xi_out[:, :4] = box
+            xi_out[:, 4] = conf
+            xi_out[:, 5] = cls_idx.to(xi.dtype)
+            if self.n_extra > 0:
+                xi_out[:, 6:] = extra
         xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
         c = xi_out[:, 5:6] * max_wh
         boxes, scores = xi_out[:, :4] + c, xi_out[:, 4]
@@ -242,37 +325,50 @@ class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
 
     def nms(
         self,
-        x: torch.Tensor | list[torch.Tensor],
+        x: _AnchorlessNMSInput | torch.Tensor | list[torch.Tensor],
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
+        multi_label: bool = False,
     ) -> list[torch.Tensor]:
         """Performs Non-Maximum Suppression (NMS) on the decoded detections.
 
         Args:
-            x (list[torch.Tensor]): Decoded detections for each image.
+            x: Decoded detections for each image, optionally with source-layout
+                provenance.
             max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
             max_nms (int, optional): Maximum number of candidates to consider for NMS.
                 Defaults to 30000.
             max_wh (int, optional): Maximum box width/height for offset calculation.
                 Defaults to 7680.
+            multi_label: Whether to retain every class candidate above threshold.
 
         Returns:
             list[torch.Tensor]: Post-NMS detections for each image.
         """
-        if isinstance(x, list):
-            output = []
-            for xi in x:
-                if xi.ndim != 2:
-                    raise ValueError(f"Expected 2D decoded tensor, got shape {tuple(xi.shape)}.")
-                if xi.shape[1] == 4 + self.nc + self.n_extra:
-                    output.append(self._nms_single_legacy_rows(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh))
-                elif xi.shape[0] == 4 + self.nc + self.n_extra:
-                    output.append(self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh))
-                else:
-                    raise ValueError(f"Unsupported decoded tensor shape {tuple(xi.shape)}.")
-            return output
-        return [self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh) for xi in x]
+        layout: AnchorlessOutputLayout | None = None
+        if isinstance(x, _AnchorlessNMSInput):
+            layout = x.layout
+            x = x.detections
+
+        tensors = x if isinstance(x, list) else list(x)
+        return [
+            self._nms_single_legacy_rows(
+                self._normalize_nms_input(xi, layout),
+                max_det=max_det,
+                max_nms=max_nms,
+                max_wh=max_wh,
+                multi_label=multi_label,
+            )
+            for xi in tensors
+        ]
+
+    def nms_multilabel(
+        self,
+        x: _AnchorlessNMSInput | torch.Tensor | list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Perform Ultralytics-compatible multi-label NMS for validation."""
+        return self.nms(x, multi_label=True)
 
     def dfl(self, x: torch.Tensor) -> torch.Tensor:
         """Applies Distribution Focal Loss projection.
@@ -323,7 +419,7 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessDetectionPost):
             return proto.permute(0, 3, 1, 2)
         raise ValueError(f"Unsupported proto tensor shape {tuple(proto.shape)} for non-e2e output.")
 
-    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[_AnchorlessNMSInput, torch.Tensor]:
         """Preprocesses intermediate inputs into (boxes, proto) format.
 
         Args:
@@ -334,9 +430,10 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessDetectionPost):
         """
         if len(x) == 2:
             converted, proto_outs = self.conversion(x)
-            return self.filter_conversion(converted), proto_outs
+            detections = self.filter_conversion(converted)
+            return _AnchorlessNMSInput(detections, "candidates_first"), proto_outs
         rearranged, proto_outs = self.rearrange(x)
-        return self.decode(rearranged), proto_outs
+        return _AnchorlessNMSInput(self.decode(rearranged), "channels_first"), proto_outs
 
     def conversion(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Converts raw model output tensors into detections and prototypes.
@@ -488,7 +585,7 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
         """Decode YOLOv8/YOLO11 raw angle logits to radians."""
         return (angle.sigmoid() - 0.25) * torch.pi
 
-    def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
+    def _pre_process(self, x: list[torch.Tensor]) -> tuple[_AnchorlessNMSInput, torch.Tensor | None]:
         """Preprocess OBB inputs into row-major detections.
 
         Args:
@@ -498,8 +595,9 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
             A tuple of detections and no prototype output.
         """
         if len(x) in {1, 3, 5}:
-            return self.filter_conversion(self.conversion(x)), None
-        return self.decode(self.rearrange(x)), None
+            detections = self.filter_conversion(self.conversion(x))
+            return _AnchorlessNMSInput(detections, "candidates_first"), None
+        return _AnchorlessNMSInput(self.decode(self.rearrange(x)), "channels_first"), None
 
     def conversion(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Convert exported OBB outputs to one canonical tensor.
@@ -672,15 +770,36 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
                 outputs.append(torch.zeros((0, expected_dim), dtype=xi.dtype, device=xi.device))
         return outputs
 
-    def _nms_single(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+    def _nms_single(
+        self,
+        xi: torch.Tensor,
+        max_det: int,
+        max_nms: int,
+        max_wh: int,
+        multi_label: bool,
+    ) -> torch.Tensor:
         """Apply rotated NMS to a single decoded OBB image tensor."""
         if xi.numel() == 0:
             return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
         xi_t = xi.transpose(0, 1)
-        return self._nms_single_legacy_rows(xi_t, max_det=max_det, max_nms=max_nms, max_wh=max_wh)
+        return self._nms_single_legacy_rows(
+            xi_t,
+            max_det=max_det,
+            max_nms=max_nms,
+            max_wh=max_wh,
+            multi_label=multi_label,
+        )
 
-    def _nms_single_legacy_rows(self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int) -> torch.Tensor:
+    def _nms_single_legacy_rows(
+        self,
+        xi: torch.Tensor,
+        max_det: int,
+        max_nms: int,
+        max_wh: int,
+        multi_label: bool,
+    ) -> torch.Tensor:
         """Apply rotated NMS to row-major OBB detections."""
+        del multi_label
         if xi.numel() == 0:
             return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
         xi_out = yolo_multilabel_candidates(xi, self.nc, self.n_extra, self.conf_thres)
@@ -691,3 +810,10 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
         boxes = torch.cat([xi_out[:, :2] + c, xi_out[:, 2:4], xi_out[:, 6:7]], dim=-1)
         keep = rotated_nms(boxes, xi_out[:, 4], self.iou_thres)[:max_det]
         return xi_out[keep]
+
+    def nms_multilabel(
+        self,
+        x: _AnchorlessNMSInput | torch.Tensor | list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Preserve existing OBB NMS behavior outside the COCO validation scope."""
+        return self.nms(x)

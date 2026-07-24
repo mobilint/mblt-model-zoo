@@ -24,6 +24,12 @@ from mblt_model_zoo.vision.utils.postprocess.common import (
     scale_coords,
     scale_masks,
 )
+from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import (
+    AnchorlessOutputLayout,
+    YOLOAnchorlessDetectionPost,
+    YOLOAnchorlessPosePost,
+    _AnchorlessNMSInput,
+)
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
@@ -493,16 +499,17 @@ def test_custom_coco_data_filters_visible_keypoints(tmp_path: Path) -> None:
     assert dataset.ids == [2]
 
 
-def test_crop_mask_matches_ultralytics_rounding() -> None:
-    """Crop mask boxes with Ultralytics-compatible rounded boundaries."""
+@pytest.mark.parametrize("mask_count", [1, 50])
+def test_crop_mask_matches_ultralytics_fractional_boundaries(mask_count: int) -> None:
+    """Use identical fractional crop semantics on both sides of the former CPU branch."""
 
-    masks = torch.ones((1, 5, 5), dtype=torch.float32)
-    boxes = torch.tensor([[1.2, 1.8, 3.6, 4.2]], dtype=torch.float32)
+    masks = torch.ones((mask_count, 5, 5), dtype=torch.float32)
+    boxes = torch.tensor([[1.2, 1.8, 3.6, 4.2]], dtype=torch.float32).repeat(mask_count, 1)
 
     cropped = crop_mask(masks, boxes)
 
-    expected = torch.zeros((1, 5, 5), dtype=torch.float32)
-    expected[0, 2:4, 1:4] = 1
+    expected = torch.zeros((mask_count, 5, 5), dtype=torch.float32)
+    expected[:, 2:5, 2:4] = 1
     assert torch.equal(cropped, expected)
 
 
@@ -720,8 +727,8 @@ def test_final_onnx_detections_normalize_singleton_and_channel_first() -> None:
     assert torch.equal(channel_first_result[0], final_output[0, :1])
 
 
-def test_anchorless_pose_nms_prefers_row_major_ambiguous_shape() -> None:
-    """Keep ONNX row-major pose tensors row-major when candidate count equals channel count."""
+def test_anchorless_pose_nms_uses_converted_provenance_for_ambiguous_shape() -> None:
+    """Keep converted row-major pose tensors row-major when both dimensions match."""
 
     pre_cfg = {
         "LetterBox": {
@@ -741,7 +748,7 @@ def test_anchorless_pose_nms_prefers_row_major_ambiguous_shape() -> None:
     row_major[:, :4] = torch.tensor([10.0, 10.0, 20.0, 20.0])
     row_major[:, 4] = torch.linspace(0.9, 0.1, 56)
 
-    result = postprocessor.nms([row_major])
+    result = postprocessor.nms(_AnchorlessNMSInput([row_major], "candidates_first"))
 
     assert len(result) == 1
     assert result[0].shape == (1, 57)
@@ -1548,8 +1555,8 @@ def test_anchor_segmentation_accepts_mxq_raw_heads() -> None:
     assert result[1][1].shape == (0, 640, 640)
 
 
-def test_anchorless_nms_keeps_best_class_per_box() -> None:
-    """Use one detection per box to match Ultralytics best-class NMS behavior."""
+def test_anchorless_prediction_nms_keeps_best_class_per_box() -> None:
+    """Keep ordinary prediction output limited to the best class per box."""
 
     pre_cfg = {
         "LetterBox": {
@@ -1564,7 +1571,7 @@ def test_anchorless_nms_keeps_best_class_per_box() -> None:
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     decoded = torch.tensor(
         [
             [
@@ -1585,6 +1592,263 @@ def test_anchorless_nms_keeps_best_class_per_box() -> None:
     assert len(result) == 1
     assert result[0].shape == (2, 6)
     assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0]))
+
+
+@pytest.mark.parametrize(
+    ("layout", "candidate_count"),
+    [
+        ("channels_first", 117),
+        ("candidates_first", 117),
+        ("channels_first", 116),
+        ("candidates_first", 116),
+    ],
+)
+def test_anchorless_nms_normalizes_known_layout_before_suppression(
+    layout: AnchorlessOutputLayout,
+    candidate_count: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use source provenance to normalize raw and converted segmentation outputs."""
+
+    pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 80,
+        "n_extra": 32,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    canonical = torch.arange(candidate_count * 116, dtype=torch.float32).reshape(candidate_count, 116)
+    source = canonical.transpose(0, 1) if layout == "channels_first" else canonical
+    captured: list[torch.Tensor] = []
+
+    def capture_canonical(xi: torch.Tensor, **_: Any) -> torch.Tensor:
+        captured.append(xi)
+        return torch.empty((0, 38), dtype=torch.float32)
+
+    monkeypatch.setattr(postprocessor, "_nms_single_legacy_rows", capture_canonical)
+
+    postprocessor.nms(_AnchorlessNMSInput([source], layout))
+
+    assert captured[0].shape == (candidate_count, 116)
+    torch.testing.assert_close(captured[0], canonical)
+
+
+def test_anchorless_nms_shape_fallback_prefers_raw_layout_for_square_tensor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treat an ambiguous provenance-free square tensor as channel-first."""
+
+    pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 80,
+        "n_extra": 32,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    source = torch.arange(116 * 116, dtype=torch.float32).reshape(116, 116)
+    captured: list[torch.Tensor] = []
+
+    def capture_canonical(xi: torch.Tensor, **_: Any) -> torch.Tensor:
+        captured.append(xi)
+        return torch.empty((0, 38), dtype=torch.float32)
+
+    monkeypatch.setattr(postprocessor, "_nms_single_legacy_rows", capture_canonical)
+
+    postprocessor.nms([source])
+
+    torch.testing.assert_close(captured[0], source.transpose(0, 1))
+
+
+def test_anchorless_segmentation_preprocess_preserves_layout_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tag decoded MXQ heads as channel-first and converted outputs as candidates-first."""
+
+    pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 80,
+        "n_extra": 32,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    decoded = torch.zeros((116, 116), dtype=torch.float32)
+    converted = decoded.transpose(0, 1).unsqueeze(0)
+    proto = torch.zeros((1, 160, 160, 32), dtype=torch.float32)
+    rearranged = torch.empty(0)
+
+    monkeypatch.setattr(postprocessor, "rearrange", lambda _: (rearranged, proto))
+    monkeypatch.setattr(postprocessor, "decode", lambda value: [decoded] if value is rearranged else [])
+    raw_predictions, raw_proto = postprocessor._pre_process([torch.empty(0)] * 3)
+
+    monkeypatch.setattr(postprocessor, "conversion", lambda _: (converted, proto))
+    monkeypatch.setattr(postprocessor, "filter_conversion", lambda _: [converted.squeeze(0)])
+    converted_predictions, converted_proto = postprocessor._pre_process([torch.empty(0)] * 2)
+
+    assert raw_predictions.layout == "channels_first"
+    assert isinstance(raw_predictions.detections, list)
+    assert raw_predictions.detections[0] is decoded
+    assert raw_proto is proto
+    assert converted_predictions.layout == "candidates_first"
+    assert isinstance(converted_predictions.detections, list)
+    torch.testing.assert_close(converted_predictions.detections[0], converted.squeeze(0))
+    assert converted_proto is proto
+
+
+def test_anchorless_nms_normalizes_detection_without_extra_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize raw detection output when no segmentation or pose extras exist."""
+
+    pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 80,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    source = torch.arange(84 * 91, dtype=torch.float32).reshape(84, 91)
+    captured: list[torch.Tensor] = []
+
+    def capture_canonical(xi: torch.Tensor, **_: Any) -> torch.Tensor:
+        captured.append(xi)
+        return torch.empty((0, 6), dtype=torch.float32)
+
+    monkeypatch.setattr(postprocessor, "_nms_single_legacy_rows", capture_canonical)
+
+    postprocessor.nms(_AnchorlessNMSInput([source], "channels_first"))
+
+    assert postprocessor.n_extra == 0
+    assert captured[0].shape == (91, 84)
+    torch.testing.assert_close(captured[0], source.transpose(0, 1))
+
+
+def test_anchorless_nonambiguous_layouts_keep_identical_nms_results() -> None:
+    """Keep existing suppression results after canonical layout normalization."""
+
+    pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 80,
+        "n_extra": 32,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    canonical = torch.zeros((2, 116), dtype=torch.float32)
+    canonical[0, :4] = torch.tensor([10.0, 10.0, 20.0, 20.0])
+    canonical[1, :4] = torch.tensor([40.0, 40.0, 60.0, 60.0])
+    canonical[0, 4] = 0.9
+    canonical[1, 5] = 0.8
+    canonical[:, 84:] = torch.arange(64, dtype=torch.float32).reshape(2, 32)
+
+    raw_result = postprocessor.nms(_AnchorlessNMSInput([canonical.transpose(0, 1)], "channels_first"))
+    converted_result = postprocessor.nms(_AnchorlessNMSInput([canonical], "candidates_first"))
+
+    torch.testing.assert_close(raw_result[0], converted_result[0])
+
+
+def test_anchorless_validation_nms_keeps_multilabel_candidates() -> None:
+    """Retain all above-threshold classes when validation requests Ultralytics semantics."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [640, 640],
+        }
+    }
+    post_cfg = {
+        "task": "object_detection",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 3,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    decoded = torch.tensor(
+        [
+            [10.0, 10.0, 20.0, 20.0, 0.90, 0.80, 0.10],
+            [50.0, 50.0, 60.0, 60.0, 0.20, 0.85, 0.70],
+        ],
+        dtype=torch.float32,
+    )
+
+    result = postprocessor.nms([decoded], multi_label=True)
+
+    assert len(result) == 1
+    assert result[0].shape == (4, 6)
+    assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0, 1.0, 2.0]))
+
+
+def test_anchorless_segmentation_validation_duplicates_mask_coefficients_per_class() -> None:
+    """Copy mask coefficients when validation expands a box into multiple class candidates."""
+
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [640, 640],
+        }
+    }
+    post_cfg = {
+        "task": "instance_segmentation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 3,
+        "n_extra": 2,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
+    decoded = torch.tensor(
+        [[10.0, 10.0, 20.0, 20.0, 0.90, 0.80, 0.10, 0.25, -0.50]],
+        dtype=torch.float32,
+    )
+
+    result = postprocessor.nms([decoded], multi_label=True)
+
+    assert result[0].shape == (2, 8)
+    assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0]))
+    assert torch.equal(result[0][:, 6:], decoded[:, 7:].repeat(2, 1))
+
+
+def test_anchorless_pose_single_and_batch_decode_are_equivalent() -> None:
+    """Keep batched pose decoding equivalent to the verified v1.5.1 per-image formula."""
+
+    torch.manual_seed(0)
+    pre_cfg = {
+        "LetterBox": {
+            "img_size": [64, 64],
+        }
+    }
+    post_cfg = {
+        "task": "pose_estimation",
+        "nl": 3,
+        "reg_max": 16,
+        "nc": 1,
+        "n_extra": 51,
+        "conf_thres": 0.25,
+        "iou_thres": 0.7,
+    }
+    postprocessor = cast(YOLOAnchorlessPosePost, build_postprocess(pre_cfg, post_cfg))
+    anchor_count = postprocessor.anchors_as_tensor().shape[-1]
+    raw = torch.randn((2, 116, anchor_count), dtype=torch.float32)
+    raw[:, 64, :] = 10.0
+
+    batched = postprocessor.decode_batch(raw)
+    per_image = torch.stack([postprocessor.process_box_cls(image) for image in raw])
+
+    torch.testing.assert_close(batched, per_image)
 
 
 def test_scale_coords_matches_ultralytics_rounding() -> None:

@@ -164,6 +164,7 @@ class YOLODetectionPostBase(PostBase):
         x: TensorLike | ListTensorLike,
         conf_thres: float | None = None,
         iou_thres: float | None = None,
+        multi_label: bool = False,
     ) -> list[Any]:
         """Executes YOLO postprocessing.
 
@@ -173,6 +174,8 @@ class YOLODetectionPostBase(PostBase):
             x (TensorLike | ListTensorLike): Raw model outputs.
             conf_thres (float | None): Confidence threshold for detection.
             iou_thres (float | None): IoU threshold for NMS.
+            multi_label: Whether to emit one candidate for every class above the
+                confidence threshold. Validation uses this to match Ultralytics.
 
         Returns:
             list: List of detections per image.
@@ -190,7 +193,7 @@ class YOLODetectionPostBase(PostBase):
 
         predictions, proto_outs = self._pre_process(checked_input)
 
-        nms_output = self.nms(predictions)
+        nms_output = self.nms_multilabel(predictions) if multi_label else self.nms(predictions)
 
         if proto_outs is not None:
             return self.masking(nms_output, proto_outs)
@@ -513,6 +516,17 @@ class YOLODetectionPostBase(PostBase):
         Returns:
             Detections after NMS for each image in the batch.
         """
+
+    def nms_multilabel(self, x: Any) -> list[torch.Tensor]:
+        """Perform validation NMS with all above-threshold class candidates.
+
+        Args:
+            x: Decoded detections for each image.
+
+        Returns:
+            Detections after NMS for each image in the batch.
+        """
+        return self.nms(x)
 
     def masking(self, x: list[torch.Tensor], proto_outs: torch.Tensor | list[torch.Tensor]) -> list[list[torch.Tensor]]:
         """Apply prototype masks to detection results.
