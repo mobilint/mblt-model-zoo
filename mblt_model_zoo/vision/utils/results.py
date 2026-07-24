@@ -14,6 +14,7 @@ import torch
 from PIL import Image
 
 from .datasets import (
+    get_ade20k_palette,
     get_coco_det_palette,
     get_coco_keypoint_palette,
     get_coco_label,
@@ -28,6 +29,7 @@ from .types import ListTensorLike, NestedListTensorLike, TensorLike
 LW = 2  # line width
 RADIUS = 5  # circle radius
 ALPHA = 0.3  # alpha for overlay
+DENSE_OVERLAY_ALPHA = 0.7
 
 
 class Results:
@@ -208,7 +210,7 @@ class Results:
         normalized = np.zeros(depth.shape, dtype=np.uint8)
         normalized[finite] = np.clip((depth[finite] - lower) * 255 / (upper - lower), 0, 255).astype(np.uint8)
         overlay = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)
-        result = cv2.addWeighted(image, 0.45, overlay, 0.55, 0)
+        result = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
         if save_path is not None:
             cv2.imwrite(save_path, result)
         return result
@@ -239,18 +241,9 @@ class Results:
         nc = int(self.post_cfg.get("nc", 150 if self.post_cfg.get("dataset") == "ade20k" else 19))
         if class_map.size and (int(class_map.min()) < 0 or int(class_map.max()) >= nc):
             raise ValueError(f"Semantic class-map values must be in [0, {nc - 1}].")
-        palette = np.array(
-            [
-                cv2.cvtColor(
-                    np.array([[[index * 37 % 180, 200, 255]]], dtype=np.uint8),
-                    cv2.COLOR_HSV2BGR,
-                )[0, 0]
-                for index in range(nc)
-            ],
-            dtype=np.uint8,
-        )
+        palette = np.array([get_ade20k_palette(index) for index in range(nc)], dtype=np.uint8)
         overlay = palette[class_map.astype(np.int64)]
-        result = cv2.addWeighted(image, 1.0 - ALPHA, overlay, ALPHA, 0)
+        result = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
         if save_path is not None:
             cv2.imwrite(save_path, result)
         return result

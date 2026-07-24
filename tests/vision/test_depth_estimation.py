@@ -144,6 +144,8 @@ def test_nyu_depth_pairing_and_plotting(tmp_path) -> None:
     plotted = result.plot(np.zeros((4, 8, 3), dtype=np.uint8), str(tmp_path / "depth.jpg"))
     assert plotted is not None
     assert plotted.shape == (4, 8, 3)
+    colorized_depth = cv2.applyColorMap(np.zeros((4, 8), dtype=np.uint8), cv2.COLORMAP_TURBO)
+    assert np.array_equal(plotted, cv2.addWeighted(np.zeros_like(colorized_depth), 0.3, colorized_depth, 0.7, 0))
     assert (tmp_path / "depth.jpg").is_file()
 
     np.save(depth_dir / "extra.npy", np.ones((4, 8), dtype=np.float32))

@@ -4,6 +4,7 @@ Datasets utilities and loaders.
 
 from __future__ import annotations
 
+from .ade20k import get_ade20k_palette
 from .coco import (
     get_coco_class_num,
     get_coco_det_palette,
@@ -39,6 +40,7 @@ from .organizer import (
 )
 
 __all__: list[str] = [
+    "get_ade20k_palette",
     "get_coco_class_num",
     "get_coco_det_palette",
     "get_coco_inv",

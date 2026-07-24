@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from mblt_model_zoo.vision import list_models
-from mblt_model_zoo.vision.utils.datasets import CustomADE20K, get_ade20k_loader
+from mblt_model_zoo.vision.utils.datasets import CustomADE20K, get_ade20k_loader, get_ade20k_palette
 from mblt_model_zoo.vision.utils.evaluation import SemanticMetricAccumulator, calculate_semantic_metrics
 from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
 from mblt_model_zoo.vision.utils.preprocess import build_preprocess
@@ -156,4 +156,31 @@ def test_semantic_results_plot_restores_original_shape(tmp_path: Path) -> None:
     plotted = result.plot(str(source_path), str(save_path))
     assert plotted is not None
     assert plotted.shape == (4, 8, 3)
+    expected = cv2.addWeighted(
+        np.full((4, 8, 3), 255, dtype=np.uint8),
+        0.3,
+        np.broadcast_to(np.array([0, 237, 204], dtype=np.uint8), (4, 8, 3)),
+        0.7,
+        0,
+    )
+    assert np.array_equal(plotted, expected)
     assert save_path.is_file()
+
+
+def test_semantic_results_plot_distinguishes_person_and_bus() -> None:
+    """Use visibly different palette colors for person and bus classes."""
+
+    assert get_ade20k_palette(12) == (255, 255, 0)
+    assert get_ade20k_palette(80) == (255, 42, 4)
+    class_map = torch.tensor([[12, 80]], dtype=torch.int64)
+    result = Results(
+        {},
+        {"task": "semantic_segmentation", "dataset": "ade20k"},
+        class_map,
+    )
+    plotted = result.plot(np.zeros((1, 2, 3), dtype=np.uint8))
+    expected_overlay = np.array([[[255, 255, 0], [255, 42, 4]]], dtype=np.uint8)
+    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
+
+    assert np.array_equal(plotted, expected)
+    assert not np.array_equal(plotted[0, 0], plotted[0, 1])
