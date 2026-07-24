@@ -871,15 +871,7 @@ def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     """
     if boxes.device != masks.device:
         boxes = boxes.to(masks.device)
-    n, h, w = masks.shape
-    if n < 50 and not masks.is_cuda:
-        for i, (x1, y1, x2, y2) in enumerate(boxes.clamp(min=0).round().int()):
-            masks[i, :y1] = 0
-            masks[i, y2:] = 0
-            masks[i, :, :x1] = 0
-            masks[i, :, x2:] = 0
-        return masks
-
+    _, h, w = masks.shape
     x1, y1, x2, y2 = torch.chunk(boxes[:, :, None], 4, 1)
     rows = torch.arange(w, device=masks.device, dtype=x1.dtype)[None, None, :]
     cols = torch.arange(h, device=masks.device, dtype=x1.dtype)[None, :, None]
