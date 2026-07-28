@@ -239,24 +239,68 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         cached = getattr(self, "_mxq_all_logits_cached", None)
         if cached is not None:
             return cached
-        supports = False
+        supports = self._mxq_logits_token_axis() == _MXQ_DYNAMIC_AXIS_SENTINEL
+        self._mxq_all_logits_cached = supports
+        return supports
+
+    def _mxq_logits_token_axis(self) -> Optional[int]:
+        """Return the compiled LM-head token-axis extent, or None if unreadable.
+
+        The raw axis value, not an interpretation of it: equal to
+        ``_MXQ_DYNAMIC_AXIS_SENTINEL`` when the token axis is dynamic, otherwise
+        the statically compiled number of trailing positions the head emits.
+        Cached like the other shape probes.
+
+        Split out of :meth:`_mxq_supports_all_logits` because "dynamic or not"
+        loses the distinction between a 1-token graph and a K-token one, and
+        those want different execution paths — see
+        :meth:`_mxq_static_logits_width`.
+        """
+        sentinel = object()
+        cached = getattr(self, "_mxq_logits_token_axis_cached", sentinel)
+        if cached is not sentinel:
+            return cast(Optional[int], cached)
+        axis: Optional[int] = None
         try:
             output_shapes = self.npu_backend.mxq_model.get_model_output_shape()
             if output_shapes:
                 first_shape = tuple(output_shapes[0])
-                if (
-                    len(first_shape) >= abs(_MXQ_TOKEN_AXIS_INDEX)
-                    and int(first_shape[_MXQ_TOKEN_AXIS_INDEX]) == _MXQ_DYNAMIC_AXIS_SENTINEL
-                ):
-                    supports = True
+                if len(first_shape) >= abs(_MXQ_TOKEN_AXIS_INDEX):
+                    axis = int(first_shape[_MXQ_TOKEN_AXIS_INDEX])
         except (AttributeError, qbruntime.QbRuntimeError):
             # AttributeError: backend or ``get_model_output_shape`` missing.
             # QbRuntimeError: backend refused the probe. Only backend-specific
             # probe failures are swallowed; any other exception is a real bug
             # and should propagate.
-            supports = False
-        self._mxq_all_logits_cached = supports
-        return supports
+            axis = None
+        self._mxq_logits_token_axis_cached = axis
+        return axis
+
+    def _mxq_static_logits_width(self) -> Optional[int]:
+        """Positions one infer returns logits for, when that count is static.
+
+        ``None`` means "no usable static width": either the token axis is
+        dynamic (every position comes back, so :meth:`_mxq_supports_all_logits`
+        and Path 2 apply) or the probe could not read a sane extent. Otherwise
+        the compiled width — ``1`` for the production next-token graph, ``K > 1``
+        for a build whose LM head emits the last K positions.
+
+        A ``K > 1`` build is the interesting case: it costs the same to compile
+        as ``K == 1`` because the axis is still static, yet one infer yields K
+        scored positions, so a full per-position pass needs ``seq_len / K``
+        infers instead of ``seq_len``.
+
+        An explicit ``_mxq_all_logits_cached = True`` override wins: a caller
+        forcing the dynamic classification must not have it reinterpreted as a
+        static width. ``False`` is *not* treated as an override — that is what
+        the boolean probe itself stores for every static build, including K > 1.
+        """
+        if getattr(self, "_mxq_all_logits_cached", None) is True:
+            return None
+        axis = self._mxq_logits_token_axis()
+        if axis is None or axis == _MXQ_DYNAMIC_AXIS_SENTINEL or axis < 1:
+            return None
+        return axis
 
     def _mxq_static_vocab_size(self) -> int:
         """Return the compiled MXQ vocab dimension (last output-shape axis).
@@ -506,12 +550,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         dtype: torch.dtype,
         device: torch.device,
     ) -> torch.Tensor:
-        """Shared 3-path dispatch for HF-style ``logits_to_keep`` over a chunked MXQ.
+        """Shared 4-path dispatch for HF-style ``logits_to_keep`` over a chunked MXQ.
 
         Callers provide a ``do_infer(start, end)`` closure that runs one
         MXQ infer over the ``[start, end)`` slice of their own input(s)
         (advancing the KV cache) and returns the raw logits ndarray. This
-        helper handles the three execution paths uniformly:
+        helper handles the execution paths uniformly:
 
         1. ``logits_to_keep == 1``: fast path; the caller's chunk size is
            used as-is and only the last chunk's logits are returned.
@@ -519,6 +563,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
            :meth:`_mxq_supports_all_logits`): keep the caller's chunk size
            and concatenate per-chunk outputs, then slice to the requested
            positions along the token axis (``ndim - 2``).
+        2b. MXQ has a static token axis wider than one (see
+           :meth:`_mxq_static_logits_width`): cap the chunk at that width so
+           every fed position comes back, then map each chunk's rows to the
+           tail of the positions it covered. ``ceil(seq_len / K)`` infers.
         3. Otherwise (last-only MXQ + non-default request): a fallback that
            prefills the non-kept prefix with normal chunks (throwing away
            logits, only advancing the KV cache) and runs a size-1 infer at
@@ -622,6 +670,55 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     logits_ndarray = np.take(logits_ndarray, [-1], axis=token_axis)
 
             assert logits_ndarray is not None
+            return torch.tensor(logits_ndarray, dtype=dtype, device=device)
+
+        # Path 2b: static multi-token MXQ (K > 1). One infer returns the last K
+        # positions of the chunk it was given, so capping the chunk at K makes
+        # every fed position come back — the same bookkeeping as Path 2, but the
+        # rows are the *tail* of the chunk rather than all of it, and the walk
+        # drives the chunking instead of the caller's size. Costs
+        # ceil(seq_len / K) infers where Path 3 would spend one per kept
+        # position, which is the whole point of compiling K > 1.
+        static_width = self._mxq_static_logits_width()
+        if static_width is not None and static_width > 1:
+            effective_chunk = min(npu_prefill_chunk_size, static_width)
+            output_positions = self._output_positions_for_logits_to_keep(logits_to_keep, seq_len)
+            walk_positions = sorted(set(output_positions))
+            kept_by_position: dict[int, np.ndarray] = {}
+            walk_ptr = 0
+            cursor = 0
+            while cursor < seq_len:
+                end_index = min(cursor + effective_chunk, seq_len)
+                chunk_logits = do_infer(cursor, end_index)
+                token_axis = chunk_logits.ndim - 2
+                rows = chunk_logits.shape[token_axis]
+                width = end_index - cursor
+                # The payload's last `width` rows are this chunk's positions. A
+                # K-row payload for a shorter final chunk pads at the front, so
+                # index from the end. `width <= effective_chunk <= K <= rows`
+                # normally; a backend returning fewer rows than it was fed would
+                # leave positions uncovered, so say so instead of mis-mapping.
+                if rows < width:
+                    raise RuntimeError(
+                        "static multi-token MXQ returned fewer logit rows than "
+                        f"the chunk it was fed ({rows} < {width}); cannot map "
+                        "rows to positions"
+                    )
+                first_pos = end_index - width
+                while walk_ptr < len(walk_positions) and walk_positions[walk_ptr] < end_index:
+                    p = walk_positions[walk_ptr]
+                    kept_by_position[p] = np.take(
+                        chunk_logits, [rows - width + (p - first_pos)], axis=token_axis
+                    )
+                    walk_ptr += 1
+                cursor = end_index
+
+            if not output_positions:
+                # Cache is already advanced through the whole input by the loop.
+                return self._empty_kept_logits(1, dtype, device)
+            logits_ndarray = np.concatenate(
+                [kept_by_position[p] for p in output_positions], axis=-2
+            )
             return torch.tensor(logits_ndarray, dtype=dtype, device=device)
 
         # Path 3: fallback. Interleave normal chunks (for positions the
@@ -924,6 +1021,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             is_default_keep = lens_equal and self._is_last_only_selector(
                 logits_to_keep, sequence_lengths[0]
             )
+        # Note: unlike the single-input path this has no static-multi-token
+        # branch, so a K > 1 build still falls to the batched Path 3 here and
+        # spends one infer per kept position. Correct, just not yet taking the
+        # shortcut — batching interleaves items into one infer, so the
+        # rows-are-the-chunk-tail mapping needs per-item bookkeeping that the
+        # single-input version does not.
         supports_all = False if is_default_keep else self._mxq_supports_all_logits()
 
         # Path 2 uses the output positions directly to assemble the final
