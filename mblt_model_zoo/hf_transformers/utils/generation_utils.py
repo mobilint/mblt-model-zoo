@@ -115,7 +115,7 @@ def _upstream_positional_params_cached(func: Callable) -> tuple[str, ...]:
 
 
 def upstream_positional_params(func: Callable) -> tuple[str, ...]:
-    """Return the positional-bindable parameter names of ``func`` (excluding ``self``).
+    r"""Return the positional-bindable parameter names of ``func`` (excluding ``self``).
 
     Only ``POSITIONAL_ONLY`` and ``POSITIONAL_OR_KEYWORD`` parameters are returned —
     i.e. names that a caller's positional ``*args`` can bind to under normal Python
