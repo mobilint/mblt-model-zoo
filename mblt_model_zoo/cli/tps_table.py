@@ -97,25 +97,7 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     # --- NPU latency ---
     _row("prefill_npu_lat", "prefill_npu_lat", "%", _ALL_LLM, llm_prefix=True, sweep_suffix=True),
     _row("decode_npu_lat", "decode_npu_lat", "%", _ALL_LLM, llm_prefix=True, sweep_suffix=True),
-    # total_npu_lat: LLM measure / LLM sweep / VLM measure keep the unprefixed
-    # label (no vision NPU tracking, so no disambiguation was needed
-    # historically).  The new VLM sweep LLM subtable row (added in this task)
-    # uses ``llm_total_npu_lat(last)`` — the extra prefix disambiguates from
-    # vision-side metrics in the paired vision subtable.
-    _row(
-        "total_npu_lat",
-        "total_npu_lat",
-        "%",
-        (SECTION_LLM_MEASURE, SECTION_LLM_SWEEP, SECTION_VLM_MEASURE),
-        sweep_suffix=True,
-    ),
-    _row(
-        "total_npu_lat",
-        "llm_total_npu_lat",
-        "%",
-        (SECTION_VLM_SWEEP_LLM,),
-        sweep_suffix=True,
-    ),
+    _row("total_npu_lat", "total_npu_lat", "%", _ALL_LLM, llm_prefix=True, sweep_suffix=True),
 
     # --- EAGLE-3 acceptance (LLM measure only) ---
     _row("accept_steps", "accept_steps", "count", (SECTION_LLM_MEASURE,)),

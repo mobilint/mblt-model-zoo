@@ -90,21 +90,15 @@ def test_sweep_sections_add_last_suffix_to_perpoint_rows():
     assert "avg_power(last)" not in llm_sweep
 
 
-def test_new_total_npu_lat_rows_present():
-    """Task 2-2 adds total_npu_lat rows to sweep tables."""
+def test_total_npu_lat_labels_across_sections():
+    """total_npu_lat mirrors prefill/decode_npu_lat: llm_ prefix in VLM sections,
+    (last) suffix in sweep sections."""
+    assert "total_npu_lat" in _emit_labels(SECTION_LLM_MEASURE, device_metrics=True)
     assert "total_npu_lat(last)" in _emit_labels(SECTION_LLM_SWEEP, device_metrics=True)
-    assert "llm_total_npu_lat(last)" in _emit_labels(SECTION_VLM_SWEEP_LLM, device_metrics=True)
-
-
-def test_vlm_measure_total_npu_lat_keeps_unprefixed_label():
-    """total_npu_lat in VLM measure is intentionally NOT renamed.
-
-    The rename is scoped to overall LLM device rows (task 2-1); NPU latency
-    was already unprefixed there and the plan does not expand that list.
-    """
     vlm_measure = _emit_labels(SECTION_VLM_MEASURE, device_metrics=True)
-    assert "total_npu_lat" in vlm_measure
-    assert "llm_total_npu_lat" not in vlm_measure
+    assert "llm_total_npu_lat" in vlm_measure
+    assert "total_npu_lat" not in vlm_measure
+    assert "llm_total_npu_lat(last)" in _emit_labels(SECTION_VLM_SWEEP_LLM, device_metrics=True)
 
 
 def test_vision_rows_only_appear_in_vlm_sections():

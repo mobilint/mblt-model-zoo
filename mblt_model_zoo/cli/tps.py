@@ -2181,7 +2181,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "total_ms": _summary(total_ms),
                 "llm_prefill_npu_lat_pct": _summary(prefill_npu_latency_pct),
                 "llm_decode_npu_lat_pct": _summary(decode_npu_latency_pct),
-                "total_npu_lat_pct": _summary(total_npu_latency_pct),
+                "llm_total_npu_lat_pct": _summary(total_npu_latency_pct),
                 "avg_power_w": _summary(avg_power_w),
                 "p99_power_w": _summary(p99_power_w),
                 "llm_prefill_avg_power_w": _summary(prefill_avg_power_w),
