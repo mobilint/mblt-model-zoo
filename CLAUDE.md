@@ -23,6 +23,7 @@
   artifact is derived unless `onnx_filename` explicitly names an exception.
 - Every model YAML declares `post_cfg.dataset`; postprocessing uses it with `task` to resolve the
   model's output taxonomy and class count.
+- Use `obb` consistently as the vision task key for oriented bounding boxes.
 - Preserve anchorless decoded-output layout provenance through NMS. If provenance is unavailable
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.

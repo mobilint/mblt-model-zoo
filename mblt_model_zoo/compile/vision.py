@@ -36,7 +36,7 @@ IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 
 def _normalize_task(task: str) -> str:
-    """Normalize supported task aliases.
+    """Validate and normalize a supported task name.
 
     Args:
         task: Task value from a model postprocess configuration.
@@ -49,8 +49,6 @@ def _normalize_task(task: str) -> str:
     """
 
     normalized = task.lower()
-    if normalized == "oriented_bounding_boxes":
-        normalized = "obb"
     if normalized not in DEFAULT_SUBSET_SIZES:
         raise ValueError(f"Vision compilation does not support task `{task}`.")
     return normalized

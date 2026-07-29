@@ -17,6 +17,8 @@ Model YAMLs derive same-stem ONNX Hub artifact names from `file_cfg.filename`; u
 Every model YAML declares `post_cfg.dataset`; dataset-aware postprocessing combines it with
 `task` to resolve the output taxonomy and class count.
 
+Use `obb` consistently as the vision task key for oriented bounding boxes.
+
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
 ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports

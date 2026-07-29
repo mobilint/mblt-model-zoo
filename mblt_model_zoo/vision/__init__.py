@@ -11,8 +11,8 @@ from . import depth_estimation as depth_estimation
 from . import face_detection as face_detection
 from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
+from . import obb as obb
 from . import object_detection as object_detection
-from . import oriented_bounding_boxes as oriented_bounding_boxes
 from . import pose_estimation as pose_estimation
 from . import semantic_segmentation as semantic_segmentation
 from ._api import list_models as list_models
@@ -25,7 +25,7 @@ _TASK_MODULES = (
     image_classification,
     instance_segmentation,
     object_detection,
-    oriented_bounding_boxes,
+    obb,
     pose_estimation,
     semantic_segmentation,
 )
@@ -46,7 +46,7 @@ _PUBLIC_EXPORTS = [
     "image_classification",
     "instance_segmentation",
     "object_detection",
-    "oriented_bounding_boxes",
+    "obb",
     "pose_estimation",
     "semantic_segmentation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)

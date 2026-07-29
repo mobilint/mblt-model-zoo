@@ -14,7 +14,6 @@ TASKS = [
     "object_detection",
     "instance_segmentation",
     "semantic_segmentation",
-    "oriented_bounding_boxes",
     "obb",
     "pose_estimation",
     "face_detection",
@@ -26,8 +25,7 @@ _TASK_MODULES = {
     "object_detection": "object_detection",
     "instance_segmentation": "instance_segmentation",
     "semantic_segmentation": "semantic_segmentation",
-    "oriented_bounding_boxes": "oriented_bounding_boxes",
-    "obb": "oriented_bounding_boxes",
+    "obb": "obb",
     "pose_estimation": "pose_estimation",
     "face_detection": "face_detection",
 }
@@ -38,7 +36,7 @@ _DEFAULT_TASKS = [
     "object_detection",
     "instance_segmentation",
     "semantic_segmentation",
-    "oriented_bounding_boxes",
+    "obb",
     "pose_estimation",
     "face_detection",
 ]

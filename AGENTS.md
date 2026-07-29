@@ -79,8 +79,8 @@ truth when this snapshot becomes stale.
 - Every model YAML `post_cfg` must declare `dataset` as the output taxonomy and validation-dataset
   identifier. Dataset-aware postprocessing resolves class counts from the `(dataset, task)` pair.
 - The supported discovery tasks are `image_classification`, `depth_estimation`, `object_detection`,
-  `instance_segmentation`, `semantic_segmentation`, `oriented_bounding_boxes`, `obb`, `pose_estimation`, and
-  `face_detection`. `obb` is an alias for `oriented_bounding_boxes`.
+  `instance_segmentation`, `semantic_segmentation`, `obb`, `pose_estimation`, and `face_detection`.
+  Use `obb` consistently for oriented bounding boxes.
 - Keep model configuration shape (`model_cfg`, `pre_cfg`, and `post_cfg`) stable unless changing
   the public contract deliberately.
 - Preserve anchorless decoded-output layout provenance through NMS. When provenance is unavailable
