@@ -714,15 +714,11 @@ def scale_coords(
     Returns:
         np.ndarray | torch.Tensor: The scaled coordinates, in the format of (x, y)
     """
-    if ratio_pad is None:  # calculate from img0_shape
-        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-        pad = (
-            (img1_shape[1] - round(img0_shape[1] * gain)) / 2,
-            (img1_shape[0] - round(img0_shape[0] * gain)) / 2,
-        )  # wh padding
-    else:
-        gain = ratio_pad[0][0]
-        pad = ratio_pad[1]
+    # Use the same ratio/pad as scale_boxes/scale_rboxes so keypoints are
+    # un-letterboxed with the exact integer pad copyMakeBorder applied
+    # (compute_ratio_pad == LetterBox pad). The previous inline formula produced
+    # a fractional pad that drifted from the box/letterbox pad by up to ~0.5 px.
+    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
     if isinstance(coords, np.ndarray):
         if padding:
             coords[..., 0] -= pad[0]  # x padding
