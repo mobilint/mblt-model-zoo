@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from ..letterbox import LetterBoxGeometry, RatioPad
+from ..letterbox import LetterBoxGeometry, RatioPad, resolve_ratio_pad
 from .common import normalize_ratio_pads
 
 
@@ -36,13 +36,7 @@ def resolve_ratio_pads(
     """Normalize letterbox metadata and derive values missing from a dense task batch."""
 
     pads = normalize_ratio_pads(ratio_pad, batch_size)
-    resolved = []
-    for pad, shape in zip(pads, shapes):
-        if pad is not None:
-            resolved.append(pad)
-            continue
-        resolved.append(LetterBoxGeometry.from_shapes(input_shape, shape).ratio_pad)
-    return resolved
+    return [resolve_ratio_pad(input_shape, shape, pad) for pad, shape in zip(pads, shapes)]
 
 
 def crop_letterbox(

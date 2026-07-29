@@ -90,3 +90,24 @@ class LetterBoxGeometry:
         right = left + int(round(resized_width * scale_x))
         bottom = top + int(round(resized_height * scale_y))
         return top, bottom, left, right
+
+
+def resolve_ratio_pad(
+    input_shape: tuple[int, int],
+    original_shape: tuple[int, int],
+    ratio_pad: RatioPad | None = None,
+) -> RatioPad:
+    """Return supplied letterbox metadata or derive it from image shapes.
+
+    Args:
+        input_shape: Letterboxed shape as ``(height, width)``.
+        original_shape: Source shape as ``(height, width)``.
+        ratio_pad: Optional metadata recorded during preprocessing.
+
+    Returns:
+        Resize ratios and top-left padding as ``((ratio_x, ratio_y), (pad_x, pad_y))``.
+    """
+
+    if ratio_pad is not None:
+        return ratio_pad
+    return LetterBoxGeometry.from_shapes(input_shape, original_shape).ratio_pad

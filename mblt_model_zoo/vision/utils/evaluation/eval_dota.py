@@ -14,10 +14,9 @@ import torch
 from tqdm import tqdm
 
 from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
+from ..letterbox import RatioPad, resolve_ratio_pad
 from ..postprocess.common import (
-    RatioPad,
     batch_probiou,
-    compute_ratio_pad,
     rotated_nms,
     xywhr2xyxyxyxy,
     xyxyxyxy2xywhr,
@@ -279,8 +278,8 @@ def _ratio_pad_for_shape(
     if len(input_shape) < 2:
         raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
-    gain, pad = compute_ratio_pad((input_shape[0], input_shape[1]), org_shape, ratio_pad)
-    return float(gain), (float(pad[0]), float(pad[1]))
+    ratio, pad = resolve_ratio_pad((input_shape[0], input_shape[1]), org_shape, ratio_pad)
+    return float(ratio[0]), (float(pad[0]), float(pad[1]))
 
 
 def _ground_truth_to_input_space(

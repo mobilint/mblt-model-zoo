@@ -13,6 +13,7 @@ from huggingface_hub.errors import EntryNotFoundError
 import mblt_model_zoo.vision.wrapper as wrapper
 from mblt_model_zoo.vision._compat import create_model_class
 from mblt_model_zoo.vision.utils.datasets import CustomCocodata
+from mblt_model_zoo.vision.utils.letterbox import resolve_ratio_pad
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
 from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
 from mblt_model_zoo.vision.utils.postprocess.common import (
@@ -1898,12 +1899,14 @@ def test_anchorless_pose_single_and_batch_decode_are_equivalent() -> None:
 def test_scale_coords_matches_ultralytics_rounding() -> None:
     """Match upstream letterbox padding rounding for keypoint scaling."""
 
-    coords = torch.tensor([[[160.0, 0.0, 1.0], [480.0, 640.0, 1.0]]], dtype=torch.float32)
+    coords = torch.tensor([[[160.0, 100.0, 1.0], [480.0, 500.0, 1.0]]], dtype=torch.float32)
 
-    scaled = scale_coords((640, 640), coords.clone(), (481, 640))
+    ratio_pad = resolve_ratio_pad((640, 640), (581, 640))
+    scaled = scale_coords((640, 640), coords.clone(), (581, 640))
 
-    expected = torch.tensor([[[160.0, 0.0, 1.0], [480.0, 481.0, 1.0]]], dtype=torch.float32)
-    assert torch.allclose(scaled, expected)
+    expected = torch.tensor([[[160.0, 71.0, 1.0], [480.0, 471.0, 1.0]]], dtype=torch.float32)
+    assert ratio_pad == ((1.0, 1.0), (0, 29))
+    torch.testing.assert_close(scaled, expected)
 
 
 def test_letterbox_metadata_normalization_is_batch_aware() -> None:

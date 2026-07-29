@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from ..datasets import get_coco_inv, get_dotav1_label
-from ..letterbox import LetterBoxGeometry, RatioPad
+from ..letterbox import RatioPad, resolve_ratio_pad
 
 
 def _is_ratio_pad(value: object) -> TypeGuard[RatioPad]:
@@ -659,7 +659,8 @@ def scale_boxes(
     Returns:
         np.ndarray | torch.Tensor: The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
-    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    gain = ratio[0]
     if isinstance(boxes, np.ndarray):
         if padding:
             boxes[..., [0, 2]] -= pad[0]  # x padding
@@ -714,11 +715,8 @@ def scale_coords(
     Returns:
         np.ndarray | torch.Tensor: The scaled coordinates, in the format of (x, y)
     """
-    # Use the same ratio/pad as scale_boxes/scale_rboxes so keypoints are
-    # un-letterboxed with the exact integer pad copyMakeBorder applied
-    # (compute_ratio_pad == LetterBox pad). The previous inline formula produced
-    # a fractional pad that drifted from the box/letterbox pad by up to ~0.5 px.
-    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    gain = ratio[0]
     if isinstance(coords, np.ndarray):
         if padding:
             coords[..., 0] -= pad[0]  # x padding
@@ -751,7 +749,8 @@ def scale_rboxes(
     Returns:
         Rescaled rotated boxes in ``xywhr`` format.
     """
-    gain, pad = compute_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    gain = ratio[0]
     scaled = rboxes.clone()
     if padding:
         scaled[..., 0] -= pad[0]
@@ -765,7 +764,7 @@ def compute_ratio_pad(
     img0_shape: tuple[int, int],
     ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None,
 ) -> tuple[float, tuple[float, float]]:
-    """Computes ratio and padding used to resize an image to the input shape.
+    """Return letterbox gain and padding for compatibility with existing callers.
 
     Args:
         img1_shape (tuple): The target shape (height, width).
@@ -776,12 +775,8 @@ def compute_ratio_pad(
     Returns:
         tuple: (gain, pad) where gain is the scaling factor and pad is the (x, y) padding.
     """
-    if ratio_pad is not None:
-        gain = ratio_pad[0][0]
-        pad = ratio_pad[1]
-        return gain, pad
-    geometry = LetterBoxGeometry.from_shapes(img1_shape, img0_shape)
-    return geometry.ratio, geometry.pad
+    ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    return ratio[0], pad
 
 
 @overload
