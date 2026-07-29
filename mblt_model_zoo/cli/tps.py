@@ -66,6 +66,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+_VLM_WARMUP_PREFILL = 128
 _BATCH_SWEEP_LENGTH_SCALE = 4
 _DEFAULT_TPS_TASK = "text-generation"
 _VLM_TASK_FALLBACK = "image-text-to-text"
@@ -253,6 +254,13 @@ def _scale_range_arg(value: Tuple[int, int, int], divisor: int) -> Tuple[int, in
 def _scale_int_list(values: Sequence[int], divisor: int) -> list[int]:
     """Scale a list of positive integers down by ``divisor``."""
     return [_scale_positive_int(v, divisor) for v in values]
+
+
+def _vlm_warmup_llm_kwargs() -> dict[str, Any]:
+    return {
+        "prefill_range": (_VLM_WARMUP_PREFILL, _VLM_WARMUP_PREFILL, _VLM_WARMUP_PREFILL),
+        "cache_lengths": [_VLM_WARMUP_PREFILL],
+    }
 
 
 def _apply_sweep_batch_auto_scale(args: argparse.Namespace, pipeline: Any) -> None:
@@ -2742,7 +2750,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     csv_rows: list[dict[str, Any]] = []
 
     for resolution in args.image_resolutions:
-        for _ in range(args.warmup):
+        for _ in tqdm(range(args.warmup), desc=f"vision warmup@{resolution}", leave=False):
             measurer.measure_vision(
                 image_resolution=resolution,
                 repeat=1,
@@ -2944,14 +2952,15 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     finally:
         _stop_qbruntime_trace(trace_handle)
 
-    for _ in range(args.warmup):
+    warmup_llm_kwargs = _vlm_warmup_llm_kwargs()
+    for warmup_idx in tqdm(range(args.warmup), desc="llm warmup", leave=False):
         measurer.measure_llm_full(
             image_resolution=llm_resolution,
             prompt=args.prompt,
-            prefill_range=args.prefill_range,
-            cache_lengths=args.cache_lengths,
+            **warmup_llm_kwargs,
             decode_window=args.decode_window,
-            show_progress=False,
+            show_progress=True,
+            progress_prefix=f"llm warmup {warmup_idx + 1}/{args.warmup}",
             batch_size=batch_size,
         )
 
@@ -2959,7 +2968,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     llm_device_time_series_runs: list[dict[str, dict[str, list[dict[str, float]]]]] = []
     trace_handle = _start_qbruntime_trace(llm_trace_path)
     try:
-        for _ in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
+        for i in tqdm(range(args.repeat), desc=f"llm@{llm_resolution}", leave=False):
             llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
             try:
                 run = measurer.measure_llm_full(
@@ -2968,7 +2977,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     prefill_range=args.prefill_range,
                     cache_lengths=args.cache_lengths,
                     decode_window=args.decode_window,
-                    show_progress=False,
+                    show_progress=True,
+                    progress_prefix=f"run {i + 1}/{args.repeat}",
                     batch_size=batch_size,
                     on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
                     on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
