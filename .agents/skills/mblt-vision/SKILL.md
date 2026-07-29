@@ -39,6 +39,10 @@ description: >-
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for forward resize/padding metadata and inverse
   dense-output crops. Keep image interpolation/padding and target interpolation/ignore padding
   task-specific.
+- Normalize dense MXQ outputs before inverse letterboxing: depth accepts single-image
+  `[1, H/4, W/4]` maps and bilinearly upsamples them by four; Cityscapes semantic segmentation
+  accepts `[H, W, 19]` or `[B, H, W, 19]` logits and converts them to NCHW before bilinear
+  restoration and `argmax`. Preserve ONNX full-resolution depth, NCHW logits, and baked maps.
 - Use an explicit default seed of `0` for new vision randomness.
 - Keep qbcompiler optional and lazily imported; never add module-level qbcompiler imports or make
   it a base dependency.

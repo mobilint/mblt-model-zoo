@@ -45,7 +45,7 @@ class DepthPost(PostBase):
         return restored[0] if len(restored) == 1 else restored
 
     def _normalize_output(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
-        """Validate and normalize ONNX output to ``[B, H, W]`` tensors."""
+        """Validate dense output and normalize it to input-sized ``[B, H, W]`` tensors."""
 
         if isinstance(x, (list, tuple)):
             if len(x) != 1:
@@ -58,7 +58,18 @@ class DepthPost(PostBase):
             depth = depth[:, 0]
         elif depth.ndim != 3:
             raise ValueError(f"Depth estimation expects [B, H, W] or [B, 1, H, W], got {tuple(depth.shape)}.")
-        return depth.to(device=self.device, dtype=torch.float32)
+        depth = depth.to(device=self.device, dtype=torch.float32)
+        if tuple(depth.shape[-2:]) == self.input_shape:
+            return depth
+
+        quarter_shape = tuple(dimension // 4 for dimension in self.input_shape)
+        if tuple(depth.shape[-2:]) == quarter_shape:
+            return functional.interpolate(depth[:, None], scale_factor=4.0, mode="bilinear", align_corners=False)[:, 0]
+
+        raise ValueError(
+            f"Depth estimation output spatial shape must be {self.input_shape} or quarter-resolution {quarter_shape}, "
+            f"got {tuple(depth.shape[-2:])}."
+        )
 
     def _restore(self, depth: torch.Tensor, shape: tuple[int, int], ratio_pad: RatioPad) -> torch.Tensor:
         """Crop padded depth pixels and bilinearly resize to an original image shape."""

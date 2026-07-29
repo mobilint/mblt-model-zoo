@@ -78,6 +78,41 @@ def test_semantic_postprocess_supports_logits_and_baked_maps() -> None:
         post(torch.full((1, 4, 4), 150))
 
 
+def test_semantic_postprocess_supports_mxq_hwc_and_batched_nhwc_logits() -> None:
+    """Convert Cityscapes MXQ channel-last logits before choosing class maps."""
+
+    post = SemanticSegPost(
+        {"LetterBox": {"img_size": [4, 8]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+    )
+    hwc_logits = torch.zeros((4, 8, 19))
+    hwc_logits[..., 6] = 2.0
+    hwc_result = post(hwc_logits)
+    assert isinstance(hwc_result, torch.Tensor)
+    assert hwc_result.shape == (1, 4, 8)
+    assert torch.equal(hwc_result, torch.full((1, 4, 8), 6))
+
+    nhwc_logits = torch.zeros((2, 2, 4, 19))
+    nhwc_logits[0, ..., 3] = 2.0
+    nhwc_logits[1, ..., 9] = 2.0
+    nhwc_result = post(nhwc_logits)
+    assert isinstance(nhwc_result, torch.Tensor)
+    assert nhwc_result.shape == (2, 4, 8)
+    assert torch.equal(nhwc_result[0], torch.full((4, 8), 3))
+    assert torch.equal(nhwc_result[1], torch.full((4, 8), 9))
+
+    with pytest.raises(ValueError, match=r"expects \[B, 19, H, W\]"):
+        post(torch.zeros((1, 4, 8, 18)))
+    with pytest.raises(ValueError, match=r"expects \[H, W, 19\] MXQ logits"):
+        post(torch.zeros((4, 8, 18)))
+
+    baked_width_matches_nc = torch.arange(19).reshape(1, 1, 19)
+    baked_result = post(baked_width_matches_nc)
+    assert isinstance(baked_result, torch.Tensor)
+    assert baked_result.shape == (1, 4, 8)
+    assert torch.equal(baked_result[0, 0], torch.tensor([0, 2, 4, 7, 9, 11, 14, 16]))
+
+
 def test_semantic_postprocess_restores_letterbox_padding() -> None:
     """Crop padding before nearest-restoring a semantic map."""
 
@@ -268,6 +303,7 @@ def test_semantic_results_plot_distinguishes_person_and_bus() -> None:
         class_map,
     )
     plotted = result.plot(np.zeros((1, 2, 3), dtype=np.uint8))
+    assert plotted is not None
     expected_overlay = np.array([[[255, 255, 0], [255, 42, 4]]], dtype=np.uint8)
     expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
 
@@ -288,6 +324,7 @@ def test_semantic_results_plot_uses_cityscapes_palette() -> None:
         class_map,
     )
     plotted = result.plot(np.zeros((1, 3, 3), dtype=np.uint8))
+    assert plotted is not None
     expected_overlay = np.array([[[128, 64, 128], [60, 20, 220], [142, 0, 0]]], dtype=np.uint8)
     expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
 
@@ -306,5 +343,6 @@ def test_semantic_results_preserve_restored_maps_and_ignore_pixels() -> None:
     )
     plotted = result.plot(source)
 
+    assert plotted is not None
     assert plotted.shape == source.shape
     assert np.array_equal(plotted[1], source[1])

@@ -36,6 +36,69 @@ from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
+@pytest.mark.parametrize(
+    ("model_name", "output_shape", "expected_shape", "expected_class"),
+    [
+        ("yolo26m-depth", (1, 192, 192), (1, 768, 768), None),
+        ("yolo26m-sem", (1024, 2048, 19), (1, 1024, 2048), 8),
+    ],
+)
+def test_local_mxq_dense_pipeline_uses_normalized_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    model_name: str,
+    output_shape: tuple[int, ...],
+    expected_shape: tuple[int, int, int],
+    expected_class: int | None,
+) -> None:
+    """Exercise preprocessing, MXQ output normalization, and ``Results`` without an NPU."""
+
+    mxq_path = tmp_path / f"{model_name}.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["mxq_path"] == str(mxq_path)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def __call__(self, input_value: np.ndarray) -> np.ndarray:
+            assert input_value.ndim == 3
+            output = np.zeros(output_shape, dtype=np.float32)
+            if expected_class is not None:
+                output[..., expected_class] = 1.0
+            else:
+                output[...] = 1.0
+            return output
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    engine = MBLT_Engine(model_name, model_path=str(mxq_path))
+    try:
+        preprocessed = engine.preprocess(np.zeros((20, 40, 3), dtype=np.uint8))
+        raw_output = engine(preprocessed)
+        result = engine.postprocess(raw_output)
+        if expected_class is None:
+            assert isinstance(result.depth, torch.Tensor)
+            assert tuple(result.depth.shape) == expected_shape
+            assert torch.isfinite(result.depth).all()
+        else:
+            assert isinstance(result.semantic_mask, torch.Tensor)
+            assert tuple(result.semantic_mask.shape) == expected_shape
+            assert set(result.semantic_mask.unique().tolist()) == {expected_class}
+    finally:
+        engine.dispose()
+
+
 def test_default_cache_dir_uses_private_temporary_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Avoid a predictable shared cache when the preferred cache cannot be created."""
 

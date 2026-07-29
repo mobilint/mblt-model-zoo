@@ -23,6 +23,10 @@ Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared resize, padding, met
 crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes from
 `post_cfg.dataset` and samples their organized RGB images.
 
+Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
+upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW
+before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked maps compatible.
+
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
 ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports

@@ -28,6 +28,9 @@
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared forward and inverse letterbox
   geometry.
+- Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[1, H/4, W/4]` maps by
+  four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
+  and `argmax`. Preserve existing ONNX layouts and baked class maps.
 - Resolve dense compilation datasets from `post_cfg.dataset`: NYU Depth, ADE20K, or Cityscapes;
   sample calibration inputs from their organized `images/` directories.
 - ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.

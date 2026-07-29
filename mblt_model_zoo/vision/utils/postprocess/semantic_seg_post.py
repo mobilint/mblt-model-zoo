@@ -68,7 +68,7 @@ class SemanticSegPost(PostBase):
         return restored[0] if len(restored) == 1 else restored
 
     def _normalize_output(self, x: TensorLike | ListTensorLike) -> tuple[torch.Tensor, bool]:
-        """Validate one logits tensor or baked class-map tensor."""
+        """Validate logits in NCHW/NHWC layout or a baked class-map tensor."""
 
         if isinstance(x, (list, tuple)):
             if len(x) != 1:
@@ -76,19 +76,29 @@ class SemanticSegPost(PostBase):
             x = x[0]
         output = torch.as_tensor(x, device=self.device)
         if output.ndim == 4:
-            if output.shape[1] != self.nc:
-                raise ValueError(
-                    f"Semantic segmentation for '{self.dataset}' expects [B, {self.nc}, H, W] logits, "
-                    f"got {tuple(output.shape)}."
-                )
-            return output.to(dtype=torch.float32), True
+            if output.shape[1] == self.nc:
+                return output.to(dtype=torch.float32), True
+            if output.shape[-1] == self.nc:
+                return output.permute(0, 3, 1, 2).to(dtype=torch.float32), True
+            raise ValueError(
+                f"Semantic segmentation for '{self.dataset}' expects [B, {self.nc}, H, W] or "
+                f"[B, H, W, {self.nc}] logits, got {tuple(output.shape)}."
+            )
         if output.ndim == 3:
+            if tuple(output.shape[:2]) == self.input_shape:
+                if output.shape[-1] != self.nc:
+                    raise ValueError(
+                        f"Semantic segmentation for '{self.dataset}' expects [H, W, {self.nc}] MXQ logits, "
+                        f"got {tuple(output.shape)}."
+                    )
+                return output.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32), True
             class_map = output.to(dtype=torch.int64)
             if class_map.numel() and (int(class_map.min()) < 0 or int(class_map.max()) >= self.nc):
                 raise ValueError(f"Semantic class-map values must be in [0, {self.nc - 1}].")
             return class_map, False
         raise ValueError(
-            f"Semantic segmentation expects [B, C, H, W] logits or [B, H, W] class maps, got {tuple(output.shape)}."
+            f"Semantic segmentation expects [B, C, H, W] or [B, H, W, C] logits, or [B, H, W] class maps, "
+            f"got {tuple(output.shape)}."
         )
 
     def _to_input_space(self, output: torch.Tensor, is_logits: bool) -> torch.Tensor:

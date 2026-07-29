@@ -63,6 +63,41 @@ def test_depth_post_restores_letterbox_padding() -> None:
         post(torch.zeros((1, 2, 8, 8)))
 
 
+def test_depth_post_normalizes_quarter_resolution_mxq_before_restoring() -> None:
+    """Upsample the MXQ depth layout before undoing letterbox padding."""
+
+    post = DepthPost({"LetterBox": {"img_size": [8, 8]}}, {})
+    mxq_depth = torch.arange(4, dtype=torch.float32).reshape(1, 2, 2)
+    expected = torch.nn.functional.interpolate(
+        mxq_depth[:, None], scale_factor=4.0, mode="bilinear", align_corners=False
+    )[:, 0]
+
+    normalized = post(mxq_depth)
+    assert isinstance(normalized, torch.Tensor)
+    assert torch.equal(normalized, expected)
+
+    restored = post(mxq_depth, img0_shape=(2, 4), ratio_pad=((2.0, 2.0), (0.0, 2.0)))
+    assert isinstance(restored, torch.Tensor)
+    assert restored.shape == (2, 4)
+    expected_restored = torch.nn.functional.interpolate(
+        expected[0, 2:6][None, None], size=(2, 4), mode="bilinear", align_corners=False
+    )[0, 0]
+    assert torch.equal(restored, expected_restored)
+
+
+def test_depth_post_keeps_full_resolution_onnx_output_and_rejects_other_scales() -> None:
+    """Keep ONNX depth unchanged while rejecting unsupported dense output scales."""
+
+    post = DepthPost({"LetterBox": {"img_size": [8, 8]}}, {})
+    full_resolution = torch.arange(64, dtype=torch.float32).reshape(1, 1, 8, 8)
+    normalized = post(full_resolution)
+    assert isinstance(normalized, torch.Tensor)
+    assert torch.equal(normalized, full_resolution[:, 0])
+
+    with pytest.raises(ValueError, match="spatial shape must be"):
+        post(torch.zeros((1, 3, 3)))
+
+
 def test_depth_metrics_median_align_and_ignore_invalid_pixels() -> None:
     """Apply per-image median scale alignment and exclude invalid NYU targets."""
 
@@ -163,6 +198,7 @@ def test_depth_plot_maps_near_objects_to_red() -> None:
     )
 
     plotted = result.plot(np.zeros((1, 3, 3), dtype=np.uint8))
+    assert plotted is not None
     expected_overlay = cv2.applyColorMap(np.array([[255, 126, 0]], dtype=np.uint8), cv2.COLORMAP_JET)
     expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
 
