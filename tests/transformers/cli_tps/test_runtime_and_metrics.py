@@ -1687,6 +1687,15 @@ def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, t
     assert payload["summary"]["llm_decode_energy_j"]["mean"] == pytest.approx(6.0)
     assert payload["summary"]["llm_total_energy_j"]["mean"] == pytest.approx(10.0)
     assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
+    # prefill_tokens = num_prefill * batch = 8 * 4 = 32; prefill_energy_j = 4.0
+    assert payload["summary"]["llm_prefill_tps_per_w"]["mean"] == pytest.approx(32 / 4.0)
+    # decode_tokens = num_decode * batch = 2 * 4 = 8; decode_energy_j = 6.0
+    assert payload["summary"]["llm_decode_tps_per_w"]["mean"] == pytest.approx(8 / 6.0)
+    assert payload["summary"]["llm_prefill_j_per_tok"]["mean"] == pytest.approx(4.0 / 32)
+    assert payload["summary"]["llm_decode_j_per_tok"]["mean"] == pytest.approx(6.0 / 8)
+    run_llm = payload["runs"][0]["llm"]
+    assert run_llm["prefill_tps_per_w"] == pytest.approx(32 / 4.0)
+    assert run_llm["decode_tps_per_w"] == pytest.approx(8 / 6.0)
 
 
 def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):

@@ -1742,7 +1742,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     finally:
         _stop_qbruntime_trace(trace_handle)
 
-    for _ in tqdm(range(args.warmup), desc="llm warmup runs", leave=False):
+    for warmup_idx in tqdm(range(args.warmup), desc="llm warmup runs", leave=False):
         measurer.measure_llm_full(
             image_resolution=args.image_resolution,
             prompt=args.prompt,
@@ -1750,14 +1750,15 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             cache_lengths=[args.prefill],
             decode_window=args.decode,
             npu_prefill_chunk_size=args.npu_prefill_chunk_size,
-            show_progress=False,
+            show_progress=True,
+            progress_prefix=f"llm warmup {warmup_idx + 1}/{args.warmup}",
             batch_size=batch_size,
         )
 
     llm_results = []
     trace_handle = _start_qbruntime_trace(llm_trace_path)
     try:
-        for _ in tqdm(range(args.repeat), desc="llm measure runs", leave=False):
+        for measure_idx in tqdm(range(args.repeat), desc="llm measure runs", leave=False):
             llm_tracker_prefill, llm_tracker_decode = _build_phase_trackers(args, pipeline)
             try:
                 llm_result = measurer.measure_llm_full(
@@ -1767,7 +1768,8 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                     cache_lengths=[args.prefill],
                     decode_window=args.decode,
                     npu_prefill_chunk_size=args.npu_prefill_chunk_size,
-                    show_progress=False,
+                    show_progress=True,
+                    progress_prefix=f"llm measure {measure_idx + 1}/{args.repeat}",
                     batch_size=batch_size,
                     on_prefill_start=(lambda: llm_tracker_prefill.start()) if llm_tracker_prefill is not None else None,
                     on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
@@ -1853,6 +1855,29 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     llm_total_energy_j = [m["llm_total_energy_j"] for m in device_metrics if m.get("llm_total_energy_j") is not None]
     total_energy_j = [m["total_energy_j"] for m in device_metrics if m.get("total_energy_j") is not None]
 
+    def _phase_tps_per_w(run: Any, phase: str) -> Optional[float]:
+        attached = getattr(run.llm, f"{phase}_tps_per_w", None)
+        if attached is not None:
+            return attached
+        phase_power = getattr(run.llm, f"{phase}_avg_power_w", None) or getattr(run.llm, "avg_power_w", None)
+        phase_tps = getattr(run.llm, f"{phase}_tps", None)
+        if phase_power is None or phase_tps is None or phase_power <= 0:
+            return None
+        return float(phase_tps) / float(phase_power)
+
+    llm_prefill_tps_per_w = [
+        v for v in (_phase_tps_per_w(r, "prefill") for r in runs) if v is not None
+    ]
+    llm_decode_tps_per_w = [
+        v for v in (_phase_tps_per_w(r, "decode") for r in runs) if v is not None
+    ]
+    llm_prefill_j_per_tok = [
+        r.llm.prefill_j_per_token for r in runs if getattr(r.llm, "prefill_j_per_token", None) is not None
+    ]
+    llm_decode_j_per_tok = [
+        r.llm.decode_j_per_token for r in runs if getattr(r.llm, "decode_j_per_token", None) is not None
+    ]
+
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
@@ -1888,6 +1913,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         _print_summary("llm_decode_energy", llm_decode_energy_j, "J")
         _print_summary("llm_total_energy", llm_total_energy_j, "J")
         _print_summary("total_energy", total_energy_j, "J")
+        _print_summary("llm_prefill_tps_per_w", llm_prefill_tps_per_w, "tok/s/W")
+        _print_summary("llm_decode_tps_per_w", llm_decode_tps_per_w, "tok/s/W")
+        _print_summary("llm_prefill_j_per_tok", llm_prefill_j_per_tok, "J/tok")
+        _print_summary("llm_decode_j_per_tok", llm_decode_j_per_tok, "J/tok")
     _print_summary_footer()
 
     if args.json:
@@ -1926,6 +1955,10 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "llm_decode_energy_j": _summary(llm_decode_energy_j),
                 "llm_total_energy_j": _summary(llm_total_energy_j),
                 "total_energy_j": _summary(total_energy_j),
+                "llm_prefill_tps_per_w": _summary(llm_prefill_tps_per_w),
+                "llm_decode_tps_per_w": _summary(llm_decode_tps_per_w),
+                "llm_prefill_j_per_tok": _summary(llm_prefill_j_per_tok),
+                "llm_decode_j_per_tok": _summary(llm_decode_j_per_tok),
             },
             "device_runs": device_metrics,
             "device_time_series_runs": device_time_series_runs,
