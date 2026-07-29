@@ -66,8 +66,8 @@ def test_cmd_sweep_routes_vlm_task(monkeypatch):
     monkeypatch.setattr(tps_cli, "_run_vlm_sweep", fake_vlm_sweep)
     monkeypatch.setattr(tps_cli, "_run_text_sweep", fake_text_sweep)
 
-    assert tps_cli._cmd_sweep(type("Args", (), {"task": "image-text-to-text"})()) == 0
-    assert tps_cli._cmd_sweep(type("Args", (), {"task": "text-generation"})()) == 0
+    assert tps_cli._cmd_sweep(type("Args", (), {"task": "image-text-to-text", "task_explicit": True})()) == 0
+    assert tps_cli._cmd_sweep(type("Args", (), {"task": "text-generation", "task_explicit": True})()) == 0
     assert calls == ["vlm:image-text-to-text", "text:text-generation"]
 
 
@@ -85,6 +85,6 @@ def test_cmd_measure_routes_vlm_task(monkeypatch):
     monkeypatch.setattr(tps_cli, "_run_vlm_measure", fake_vlm_measure)
     monkeypatch.setattr(tps_cli, "_run_text_measure", fake_text_measure)
 
-    assert tps_cli._cmd_measure(type("Args", (), {"task": "image-text-to-text"})()) == 0
-    assert tps_cli._cmd_measure(type("Args", (), {"task": "text-generation"})()) == 0
+    assert tps_cli._cmd_measure(type("Args", (), {"task": "image-text-to-text", "task_explicit": True})()) == 0
+    assert tps_cli._cmd_measure(type("Args", (), {"task": "text-generation", "task_explicit": True})()) == 0
     assert calls == ["vlm:image-text-to-text", "text:text-generation"]

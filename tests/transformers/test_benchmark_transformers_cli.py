@@ -652,7 +652,7 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
         lambda tracker: {"power_w": [{"timestamp_s": 0.0, "value": 10.0}, {"timestamp_s": 1.0, "value": 10.0}]},
     )
 
-    payload, rows = vlm_bench._run_model(args, "model-a", object())
+    payload, rows = vlm_bench._run_model(args, "model-a", "model-a", object())
 
     llm_run = payload["benchmark"]["llm_results"]["runs"][0]
     llm_summary = payload["benchmark"]["llm_results"]["summary"]
