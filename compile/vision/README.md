@@ -78,7 +78,10 @@ standalone compatibility wrapper.
 Compilation maps model tasks to the packaged dataset registry:
 
 - Image classification uses ImageNet.
+- Depth estimation uses NYU Depth V2.
 - Object detection, instance segmentation, and pose estimation use COCO.
+- Semantic segmentation uses the dataset declared by the model's `post_cfg.dataset`: ADE20K or
+  Cityscapes.
 - Face detection uses WiderFace.
 - Oriented bounding boxes use DOTAv1.
 
@@ -86,10 +89,15 @@ Compilation maps model tasks to the packaged dataset registry:
 registry-backed organizer downloads and prepares the dataset. When no path is supplied, the
 registry default under `~/.mblt_model_zoo/datasets` is used.
 
+NYU Depth and ADE20K use their registry download URLs. Cityscapes requires the manually downloaded
+official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` archives; place both inside the
+organized dataset path or its parent before compiling a Cityscapes model.
+
 Selection is deterministic with seed `0`. ImageNet and WiderFace select one image from every
-category subfolder by default; COCO and DOTAv1 select 100 images total. Override these values with
-`--subset-size` and `--seed`. Selected images and preprocessed NumPy arrays live only in temporary
-directories and are removed after compilation, including when compilation fails.
+category subfolder by default; COCO, DOTAv1, NYU Depth, ADE20K, and Cityscapes select 100 images
+total. Override these values with `--subset-size` and `--seed`. Selected images and preprocessed
+NumPy arrays live only in temporary directories and are removed after compilation, including when
+compilation fails.
 
 The compiler uses explicit `--percentile` and `--topk-ratio` values first. Missing values are read
 independently from `aries/best_result.json`; if optional hosted values are unavailable, defaults of
@@ -105,4 +113,7 @@ python compile/vision/make_imagenet_subset.py --output-dir ./imagenet-calibratio
 python compile/vision/make_coco_subset.py --output-dir ./coco-calibration
 python compile/vision/make_dotav1_subset.py --output-dir ./dotav1-calibration
 python compile/vision/make_widerface_subset.py --output-dir ./widerface-calibration
+python compile/vision/make_nyu_depth_subset.py --output-dir ./nyu-depth-calibration
+python compile/vision/make_ade20k_subset.py --output-dir ./ade20k-calibration
+python compile/vision/make_cityscapes_subset.py --output-dir ./cityscapes-calibration
 ```

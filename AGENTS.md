@@ -85,6 +85,9 @@ truth when this snapshot becomes stale.
   the public contract deliberately.
 - Preserve anchorless decoded-output layout provenance through NMS. When provenance is unavailable
   and a tensor shape is ambiguous, normalize it as raw channels-first before candidates-first.
+- Keep shared forward and inverse letterbox geometry in
+  `mblt_model_zoo/vision/utils/letterbox.py`; task-specific code selects interpolation and padding
+  values without duplicating resize, border, or crop calculations.
 
 ### Vision Datasets and Compilation
 
@@ -117,6 +120,9 @@ truth when this snapshot becomes stale.
   `subset_path` (skip organization and sampling), or `calib_data_path` (validated `.npy` tensors;
   skip all preparation). Keep default models under `~/.mblt_model_zoo` and datasets under
   `~/.mblt_model_zoo/datasets`.
+- Compilation resolves dense calibration datasets from `post_cfg.dataset`: NYU Depth for depth
+  estimation and ADE20K or Cityscapes for semantic segmentation. Sample RGB images from the
+  organized `images/` directory; targets are validation metadata, not compiler inputs.
 
 ### Transformers and MeloTTS
 

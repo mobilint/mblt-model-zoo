@@ -20,6 +20,9 @@ accuracy.
 Cityscapes organization retains only 500 paired validation images and `gtFine_labelIds` masks from the official ZIP
 packages, maps its canonical 19 source IDs to train IDs, and never installs train or test data.
 
+Dense compilation uses `post_cfg.dataset` to select NYU Depth, ADE20K, or Cityscapes and samples
+only their organized RGB images.
+
 Use the focused entry points for Vision and Transformers work:
 
 - [`mblt-vision`](../mblt-vision/SKILL.md)

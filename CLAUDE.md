@@ -26,6 +26,10 @@
 - Use `obb` consistently as the vision task key for oriented bounding boxes.
 - Preserve anchorless decoded-output layout provenance through NMS. If provenance is unavailable
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
+- Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared forward and inverse letterbox
+  geometry.
+- Resolve dense compilation datasets from `post_cfg.dataset`: NYU Depth, ADE20K, or Cityscapes;
+  sample calibration inputs from their organized `images/` directories.
 - ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.

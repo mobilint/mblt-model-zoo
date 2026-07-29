@@ -26,8 +26,10 @@ DEFAULT_SEED = 0
 DEFAULT_MODEL_DIR = Path(MOBILINT_CACHE_DIR)
 DEFAULT_SUBSET_SIZES = {
     "image_classification": 1,
+    "depth_estimation": 100,
     "object_detection": 100,
     "instance_segmentation": 100,
+    "semantic_segmentation": 100,
     "pose_estimation": 100,
     "face_detection": 1,
     "obb": 100,
@@ -71,6 +73,20 @@ def _dataset_ready(task: str, data_path: Path) -> bool:
             sum(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in class_dir.iterdir()) == 50
             for class_dir in class_dirs
         )
+    if task == "depth_estimation":
+        image_dir = data_path / "images"
+        return (
+            image_dir.is_dir()
+            and (data_path / "depth").is_dir()
+            and any(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in image_dir.rglob("*"))
+        )
+    if task == "semantic_segmentation":
+        image_dir = data_path / "images"
+        return (
+            image_dir.is_dir()
+            and (data_path / "annotations").is_dir()
+            and any(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in image_dir.rglob("*"))
+        )
     image_dir = {
         "object_detection": data_path / "val2017",
         "instance_segmentation": data_path / "val2017",
@@ -83,22 +99,44 @@ def _dataset_ready(task: str, data_path: Path) -> bool:
     )
 
 
-def _organize_dataset(task: str, data_path: Path) -> None:
+def _find_dataset_source(data_path: Path, filename: str) -> Path | None:
+    """Find a manually supplied dataset source at or beside its organized root.
+
+    Args:
+        data_path: Organized dataset destination.
+        filename: Archive filename to locate.
+
+    Returns:
+        Existing archive path, or ``None`` when it is unavailable.
+    """
+
+    for directory in (data_path, data_path.parent):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _organize_dataset(task: str, data_path: Path, dataset: str | None = None) -> None:
     """Organize the registry-backed dataset required by a task.
 
     Args:
         task: Canonical vision task name.
         data_path: Destination dataset root.
+        dataset: Optional dataset taxonomy used to disambiguate semantic datasets.
     """
 
     from mblt_model_zoo.vision.utils.datasets import (
+        organize_ade20k,
+        organize_cityscapes,
         organize_coco,
         organize_dotav1,
         organize_imagenet,
+        organize_nyu_depth,
         organize_widerface,
     )
 
-    config = get_dataset_config_for_task(task)
+    config = get_dataset_config_for_task(task, dataset)
     download = config.get("download")
     if not isinstance(download, dict):
         raise ValueError(f"Dataset `{config.get('name', task)}` does not define download metadata.")
@@ -122,26 +160,50 @@ def _organize_dataset(task: str, data_path: Path) -> None:
             annotation_dir=str(download["annotations"]),
             output_dir=str(data_path),
         )
-    else:
+    elif task == "obb":
         organize_dotav1(dataset_path=str(download["url"]), output_dir=str(data_path))
+    elif task == "depth_estimation":
+        organize_nyu_depth(dataset_path=str(download["url"]), output_dir=str(data_path))
+    elif config["name"] == "ade20k":
+        organize_ade20k(dataset_path=str(download["url"]), output_dir=str(data_path))
+    elif config["name"] == "cityscapes":
+        image_archive = _find_dataset_source(data_path, str(download["images_archive"]))
+        annotation_archive = _find_dataset_source(data_path, str(download["annotations_archive"]))
+        if image_archive is None or annotation_archive is None:
+            raise ValueError(
+                "Cityscapes compilation requires leftImg8bit_trainvaltest.zip and gtFine_trainvaltest.zip "
+                f"at {data_path} or {data_path.parent}."
+            )
+        organize_cityscapes(
+            image_dir=str(image_archive),
+            annotation_dir=str(annotation_archive),
+            output_dir=str(data_path),
+        )
+    else:
+        raise ValueError(f"Unsupported calibration dataset `{config['name']}` for task `{task}`.")
 
 
-def ensure_calibration_dataset(task: str, data_path: str | Path | None = None) -> Path:
+def ensure_calibration_dataset(
+    task: str,
+    data_path: str | Path | None = None,
+    dataset: str | None = None,
+) -> Path:
     """Resolve and, when needed, organize a calibration dataset.
 
     Args:
         task: Vision task name.
         data_path: Optional organized dataset root.
+        dataset: Optional dataset taxonomy from the model postprocess configuration.
 
     Returns:
         Expanded organized dataset root.
     """
 
     normalized_task = _normalize_task(task)
-    config = get_dataset_config_for_task(normalized_task)
+    config = get_dataset_config_for_task(normalized_task, dataset)
     resolved_path = Path(data_path if data_path is not None else config["path"]).expanduser()
     if not _dataset_ready(normalized_task, resolved_path):
-        _organize_dataset(normalized_task, resolved_path)
+        _organize_dataset(normalized_task, resolved_path, dataset)
     if not _dataset_ready(normalized_task, resolved_path):
         raise ValueError(f"Organized calibration dataset is missing images at {resolved_path}.")
     return resolved_path
@@ -260,8 +322,10 @@ def select_calibration_images(
         return selected
 
     image_dir = {
+        "depth_estimation": root / "images",
         "object_detection": root / "val2017",
         "instance_segmentation": root / "val2017",
+        "semantic_segmentation": root / "images",
         "pose_estimation": root / "val2017",
         "obb": root / "images",
     }[normalized_task]
@@ -722,6 +786,9 @@ def compile_vision_model(
         raise ValueError("Resolved vision model configuration requires `file_cfg` and `post_cfg` objects.")
 
     task = _normalize_task(str(post_cfg.get("task", "")))
+    dataset = post_cfg.get("dataset")
+    if not isinstance(dataset, str) or not dataset:
+        raise ValueError("Resolved vision model configuration requires a non-empty `post_cfg.dataset` value.")
     selected_local_path = model_path if model_path is not None else onnx_path
     if calib_data_path is not None:
         resolved_onnx = _resolve_compile_onnx_path(file_cfg, selected_local_path)
@@ -799,7 +866,7 @@ def compile_vision_model(
             if subset_path is not None:
                 subset_images = get_subset_images(subset_path)
             else:
-                dataset_path = ensure_calibration_dataset(task, data_path)
+                dataset_path = ensure_calibration_dataset(task, data_path, dataset)
                 subset_images = make_calibration_subset(
                     task,
                     dataset_path,

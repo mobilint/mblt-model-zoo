@@ -36,6 +36,8 @@ description: >-
 - Preserve ADE20K's `0` ignore label and `1..150` to `0..149` validation mapping; report mIoU before pixel accuracy.
 - Preserve Cityscapes's 500 validation-only lossless PNG pairs from the two official train/validation/test ZIP
   packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.
+- Route dense compilation through `post_cfg.dataset`: NYU Depth for depth models and ADE20K or
+  Cityscapes for semantic models.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

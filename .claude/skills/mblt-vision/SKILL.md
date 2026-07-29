@@ -19,6 +19,10 @@ Every model YAML declares `post_cfg.dataset`; dataset-aware postprocessing combi
 
 Use `obb` consistently as the vision task key for oriented bounding boxes.
 
+Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared resize, padding, metadata, and inverse
+crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes from
+`post_cfg.dataset` and samples their organized RGB images.
+
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.
 ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports

@@ -36,11 +36,16 @@ description: >-
 - Use `obb` consistently as the vision task key for oriented bounding boxes.
 - Preserve anchorless decoded-output layout provenance through NMS. If a decoded tensor is
   ambiguous without provenance, prioritize raw channels-first normalization before candidates-first.
+- Reuse `vision.utils.letterbox.LetterBoxGeometry` for forward resize/padding metadata and inverse
+  dense-output crops. Keep image interpolation/padding and target interpolation/ignore padding
+  task-specific.
 - Use an explicit default seed of `0` for new vision randomness.
 - Keep qbcompiler optional and lazily imported; never add module-level qbcompiler imports or make
   it a base dependency.
 - Keep `data_path`, `subset_path`, and `calib_data_path` mutually exclusive compilation entry
   levels; each skips earlier preparation stages.
+- Resolve compilation datasets with both `post_cfg.task` and `post_cfg.dataset`. Dense calibration
+  samples RGB files from NYU Depth, ADE20K, or Cityscapes `images/` directories.
 
 ## Datasets and Evaluation
 
