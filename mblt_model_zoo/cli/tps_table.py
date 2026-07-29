@@ -204,7 +204,7 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         device_metric=True,
     ),
 
-    # --- Efficiency (per-phase, sweep-varying) ---
+    # --- Efficiency (per-phase, phase-wide aggregate) ---
     _row(
         "prefill_tps_per_w",
         "prefill_tps_per_w",
@@ -212,7 +212,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _ALL_LLM,
         device_metric=True,
         llm_prefix=True,
-        sweep_suffix=True,
     ),
     _row(
         "decode_tps_per_w",
@@ -221,7 +220,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _ALL_LLM,
         device_metric=True,
         llm_prefix=True,
-        sweep_suffix=True,
     ),
     _row(
         "prefill_j_per_tok",
@@ -230,7 +228,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _ALL_LLM,
         device_metric=True,
         llm_prefix=True,
-        sweep_suffix=True,
     ),
     _row(
         "decode_j_per_tok",
@@ -239,7 +236,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _ALL_LLM,
         device_metric=True,
         llm_prefix=True,
-        sweep_suffix=True,
     ),
     _row("vision_img_per_j", "vision_img_per_j", "img/J", _VLM_VISION, device_metric=True),
     _row("vision_j_per_img", "vision_j_per_img", "J/img", _VLM_VISION, device_metric=True),

@@ -84,7 +84,13 @@ def test_sweep_sections_add_last_suffix_to_perpoint_rows():
     assert "prefill_tps(last)" in llm_sweep
     assert "decode_tps(last)" in llm_sweep
     assert "ttft(last)" in llm_sweep
-    assert "prefill_tps_per_w(last)" in llm_sweep
+    # Per-phase efficiency rows are phase-wide aggregates in sweep tables, not
+    # last-sweep-point metrics, so they must not carry the (last) suffix.
+    assert "prefill_tps_per_w" in llm_sweep
+    assert "prefill_tps_per_w(last)" not in llm_sweep
+    assert "decode_tps_per_w(last)" not in llm_sweep
+    assert "prefill_j_per_tok(last)" not in llm_sweep
+    assert "decode_j_per_tok(last)" not in llm_sweep
     # Device aggregates (non-sweep-varying) stay unsuffixed even in a sweep.
     assert "avg_power" in llm_sweep
     assert "avg_power(last)" not in llm_sweep
