@@ -126,11 +126,13 @@ def test_depth_metrics_pool_valid_pixels_across_images() -> None:
     )
     assert clamped.delta1 == pytest.approx(1 / 3)
 
-    lower_median = calculate_nyu_depth_metrics(
+    even_pixel_median = calculate_nyu_depth_metrics(
         np.array([[1.0, 4.0]]),
         np.array([[1.0, 10.0]]),
     )
-    assert lower_median.abs_rel == pytest.approx(0.3)
+    assert even_pixel_median.delta1 == pytest.approx(0.5)
+    assert even_pixel_median.abs_rel == pytest.approx(0.66)
+    assert even_pixel_median.rmse == pytest.approx(1.2)
 
 
 def test_nyu_depth_validation_loader_stretches_rgb_and_target(tmp_path) -> None:

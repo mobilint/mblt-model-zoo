@@ -53,9 +53,8 @@ class NYUDepthMetricAccumulator:
             raise ValueError("NYU Depth sample has no valid pixels in the (0.001, 100.0) range.")
 
         predicted, actual = prediction[valid], target[valid]
-        median_index = (valid_pixel_count - 1) // 2
-        median_prediction = np.partition(np.maximum(predicted, self.MIN_DEPTH), median_index)[median_index]
-        median_target = np.partition(actual, median_index)[median_index]
+        median_prediction = np.median(np.maximum(predicted, self.MIN_DEPTH))
+        median_target = np.median(actual)
         aligned = predicted * (median_target / median_prediction)
         aligned = np.clip(aligned, self.MIN_DEPTH, self.MAX_DEPTH)
         ratio = np.maximum(actual / aligned, aligned / actual)
