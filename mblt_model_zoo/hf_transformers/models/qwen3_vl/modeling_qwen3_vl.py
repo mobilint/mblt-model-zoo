@@ -435,6 +435,13 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if past_key_values is not None and not isinstance(past_key_values, MobilintDeepStackCache):
             raise TypeError("Qwen3-VL text decoding requires MobilintDeepStackCache.")
 
+        # Reset the NPU timing accumulator before either dispatch so the
+        # batched path's `_run_batch_infer` (in the shared helper) does not
+        # trip its `self.npu_time is not None` assertion. Base LLM does the
+        # same reset up front — mirror that here so the batched deepstack
+        # path is symmetric with the single-batch fallback below.
+        self.npu_time = 0.0 if count_npu_time else None
+
         if attention_mask is not None:
             self._validate_batch_cache(past_key_values, attention_mask.shape[0])
             return self._llm_forward_batch_deepstack(
@@ -470,7 +477,6 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
 
         mxq_model = self.get_mxq_model()
-        self.npu_time = 0.0 if count_npu_time else None
 
         def _do_infer(start_index: int, end_index: int) -> np.ndarray:
             # See modeling_utils.llm_forward._do_infer: without a caller cache,
