@@ -52,6 +52,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     npu_backend_prefix: Literal["", "encoder_", "decoder_", "base_", "draft_", "fc_"] = ""
     _DEFAULT_PREFILL_CHUNK_SIZE = 128
 
+    # Batched LLM MXQ inputs are compiled as ``(1, 1, seq, hidden)`` (rank 4),
+    # so the shared batched-infer helper unsqueezes an extra axis before
+    # calling ``mxq_model.infer``. Multi-input decoders whose compiled shape
+    # is already rank 3 (e.g. Qwen3-VL, whose text MXQ declares
+    # ``(1, -1, 4096)`` / ``(3, -1, 4096)``) override this to ``False`` so
+    # the packed inputs match the compiled contract.
+    _batched_input_expand_dims: bool = True
+
     def __init__(self, config: Union[MobilintConfigMixin, MobilintEncoderDecoderConfigMixin], *args, **kwargs):
         no_launch = kwargs.pop("no_launch", False)
 
@@ -847,6 +855,10 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         npu_prefill_chunk_size: int = 0,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        *,
+        pack_extra_inputs: Optional[
+            Callable[..., list[np.ndarray]]
+        ] = None,
     ):
         """Batched sibling of :meth:`llm_forward` with the same 3-path dispatch.
 
@@ -866,6 +878,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         collection incur this cost inherently on last-only builds. A
         runtime WARNING fires once per model instance on the first Path
         3 entry to surface the cost.
+
+        ``pack_extra_inputs`` is a hook for multi-input decoders (e.g.
+        Qwen3-VL, whose text MXQ takes ``[inputs_embeds, deepstack]``).
+        When provided, it is called once per infer with keyword args
+        ``chunk_start``, ``sequence_lengths_chunks``, and ``cache_ids``
+        and must return the additional ndarrays to concatenate after
+        ``inputs_embeds`` in the ``mxq_model.infer`` input list. The
+        caller is responsible for shaping the extras to match the
+        compiled model's expected input layout.
         """
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
         batch_size = attention_mask.shape[0]
@@ -969,11 +990,24 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             cache_sizes_chunks_l: list[int],
             inputs_embeds_chunks_l: list[torch.Tensor],
             phase_override: Optional[Literal["prefill", "decode"]] = None,
+            *,
+            chunk_start: int = 0,
         ) -> tuple[np.ndarray, tuple[int, ...]]:
             inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
             inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
-            if inputs_embeds_numpy_l.ndim == 3:
+            if self._batched_input_expand_dims and inputs_embeds_numpy_l.ndim == 3:
                 inputs_embeds_numpy_l = np.expand_dims(inputs_embeds_numpy_l, 1)
+            infer_inputs_l: list[np.ndarray] = [inputs_embeds_numpy_l]
+            if pack_extra_inputs is not None:
+                # Hook for multi-input decoders (e.g. Qwen3-VL deepstack). The
+                # callback receives the same window info as _assemble_batch_chunk
+                # emitted so it can slice per-item side inputs the same way.
+                extras = pack_extra_inputs(
+                    chunk_start=chunk_start,
+                    sequence_lengths_chunks=sequence_lengths_chunks_l,
+                    cache_ids=cache_ids_l,
+                )
+                infer_inputs_l.extend(extras)
             batch_params_l = [
                 qbruntime.BatchParam(
                     sequence_length=sequence_lengths_chunks_l[k],
@@ -984,7 +1018,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             ]
             if count_npu_time:
                 t0 = time.perf_counter()
-                result_l = mxq_model.infer([inputs_embeds_numpy_l], None, 0, batch_params_l)
+                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
                 assert self.npu_time is not None
                 elapsed = time.perf_counter() - t0
                 self.npu_time += elapsed
@@ -1002,7 +1036,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 )
                 self._record_npu_timing(phase, elapsed)
             else:
-                result_l = mxq_model.infer([inputs_embeds_numpy_l], None, 0, batch_params_l)
+                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
             assert result_l is not None, "mxq infer result is None!"
             return result_l[0], inputs_embeds_numpy_l.shape
 
@@ -1040,7 +1074,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     continue
 
                 raw_output, inputs_embeds_numpy_shape = _run_batch_infer(
-                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                    cache_ids,
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
+                    inputs_embeds_chunks,
+                    chunk_start=start_index,
                 )
                 # Two runtime layouts show up in practice for default-keep
                 # batched infer:
@@ -1263,7 +1301,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     continue
 
                 raw_output, _ = _run_batch_infer(
-                    cache_ids, sequence_lengths_chunks, cache_sizes_chunks, inputs_embeds_chunks
+                    cache_ids,
+                    sequence_lengths_chunks,
+                    cache_sizes_chunks,
+                    inputs_embeds_chunks,
+                    chunk_start=start_index,
                 )
 
                 total_tokens = sum(sequence_lengths_chunks)
@@ -1423,6 +1465,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                 cache_sizes_chunks,
                 inputs_embeds_chunks,
                 phase_override="decode" if chunk == 1 else None,
+                chunk_start=cursor,
             )
             logits_chunks = cast(
                 torch.FloatTensor,
