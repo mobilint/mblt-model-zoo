@@ -768,24 +768,25 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
     llm_run = payload["llm_results"]["runs"][0]
     llm_summary = payload["llm_results"]["summary"]
+    vision_summary = payload["vision_results"][0]["summary"]
     rows = list(csv.DictReader(Path(args.csv).open(encoding="utf-8")))
     llm_rows = [row for row in rows if row["type"] == "llm"]
     prefill_tps_per_w = ((128 + 256) * 2) / 10.0
     decode_tps_per_w = (32 * 3 * 2) / 10.0
 
-    assert llm_run["vision_energy_j"] == pytest.approx(10.0)
-    assert llm_run["llm_prefill_energy_j"] == pytest.approx(10.0)
-    assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
-    assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
-    assert llm_run["total_energy_j"] == pytest.approx(30.0)
-    assert llm_summary["llm_prefill_energy_j"]["mean"] == pytest.approx(10.0)
-    assert llm_summary["llm_decode_energy_j"]["mean"] == pytest.approx(10.0)
-    assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
-    assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
-    assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
-    assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
-    assert llm_summary["llm_prefill_tps_per_w_last"]["mean"] == pytest.approx(prefill_tps_per_w)
-    assert llm_summary["llm_decode_tps_per_w_last"]["mean"] == pytest.approx(decode_tps_per_w)
+    assert vision_summary["vision_energy"]["mean"] == pytest.approx(10.0)
+    assert llm_run["llm_prefill_energy"] == pytest.approx(10.0)
+    assert llm_run["llm_decode_energy"] == pytest.approx(10.0)
+    assert llm_run["llm_total_energy"] == pytest.approx(20.0)
+    assert llm_summary["llm_prefill_energy"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["llm_decode_energy"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["llm_total_energy"]["mean"] == pytest.approx(20.0)
+    assert llm_run["llm_prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
+    assert llm_run["llm_decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
+    assert llm_run["llm_prefill_j_per_tok"] == pytest.approx(10.0 / ((128 + 256) * 2))
+    assert llm_run["llm_decode_j_per_tok"] == pytest.approx(10.0 / (32 * 3 * 2))
+    assert llm_summary["llm_prefill_tps_per_w"]["mean"] == pytest.approx(prefill_tps_per_w)
+    assert llm_summary["llm_decode_tps_per_w"]["mean"] == pytest.approx(decode_tps_per_w)
     assert [float(row["llm_prefill_tps_per_w"]) for row in llm_rows] == [pytest.approx(prefill_tps_per_w)]
     assert [float(row["llm_decode_tps_per_w"]) for row in llm_rows] == [pytest.approx(decode_tps_per_w)]
     assert [float(row["vision_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
