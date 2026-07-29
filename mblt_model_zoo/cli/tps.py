@@ -2053,6 +2053,41 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     avg_memory_used_pct = _overall_per_run("avg_memory_used_pct", "avg_memory_used_pct")
     p99_memory_used_pct = _overall_p99_per_run("p99_memory_used_pct", "p99_memory_used_pct")
 
+    # LLM-only (prefill + decode, no vision) overall device metrics per run — time-weighted.
+    # Feeds the llm_avg_*/llm_p99_* rows so their labels match the underlying data.
+    def _llm_overall_per_run(run_key: str) -> list[float]:
+        values: list[float] = []
+        for r in runs:
+            p_val = getattr(r.llm, f"prefill_{run_key}", None)
+            p_w = float(getattr(r.llm, "prefill_latency", 0.0) or 0.0)
+            d_val = getattr(r.llm, f"decode_{run_key}", None)
+            d_w = float(getattr(r.llm, "decode_duration", 0.0) or 0.0)
+            combined = _weighted_mean([(p_val, p_w), (d_val, d_w)])
+            if combined is not None:
+                values.append(float(combined))
+        return values
+
+    def _llm_overall_p99_per_run(run_key: str) -> list[float]:
+        values: list[float] = []
+        for r in runs:
+            p = getattr(r.llm, f"prefill_{run_key}", None)
+            d = getattr(r.llm, f"decode_{run_key}", None)
+            m = _max_ignore_none((p, d))
+            if m is not None:
+                values.append(float(m))
+        return values
+
+    llm_avg_power_w = _llm_overall_per_run("avg_power_w")
+    llm_p99_power_w = _llm_overall_p99_per_run("p99_power_w")
+    llm_avg_utilization_pct = _llm_overall_per_run("avg_utilization_pct")
+    llm_p99_utilization_pct = _llm_overall_p99_per_run("p99_utilization_pct")
+    llm_avg_temperature_c = _llm_overall_per_run("avg_temperature_c")
+    llm_p99_temperature_c = _llm_overall_p99_per_run("p99_temperature_c")
+    llm_avg_memory_used_mb = _llm_overall_per_run("avg_memory_used_mb")
+    llm_p99_memory_used_mb = _llm_overall_p99_per_run("p99_memory_used_mb")
+    llm_avg_memory_used_pct = _llm_overall_per_run("avg_memory_used_pct")
+    llm_p99_memory_used_pct = _llm_overall_p99_per_run("p99_memory_used_pct")
+
     vision_energy_j = [m["vision_energy_j"] for m in device_metrics if m.get("vision_energy_j") is not None]
     prefill_energy_j = [m["prefill_energy_j"] for m in device_metrics if m.get("prefill_energy_j") is not None]
     decode_energy_j = [m["decode_energy_j"] for m in device_metrics if m.get("decode_energy_j") is not None]
@@ -2099,32 +2134,32 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     if args.device_metrics:
         values_by_key.update(
             {
-                "avg_power": avg_power_w,
-                "p99_power": p99_power_w,
+                "avg_power": llm_avg_power_w,
+                "p99_power": llm_p99_power_w,
                 "prefill_avg_power": prefill_avg_power_w,
                 "prefill_p99_power": prefill_p99_power_w,
                 "decode_avg_power": decode_avg_power_w,
                 "decode_p99_power": decode_p99_power_w,
                 "vision_avg_power": vision_avg_power_w,
                 "vision_p99_power": vision_p99_power_w,
-                "avg_util": avg_utilization_pct,
-                "p99_util": p99_utilization_pct,
+                "avg_util": llm_avg_utilization_pct,
+                "p99_util": llm_p99_utilization_pct,
                 "prefill_avg_util": prefill_avg_utilization_pct,
                 "prefill_p99_util": prefill_p99_utilization_pct,
                 "decode_avg_util": decode_avg_utilization_pct,
                 "decode_p99_util": decode_p99_utilization_pct,
                 "vision_avg_util": vision_avg_utilization_pct,
                 "vision_p99_util": vision_p99_utilization_pct,
-                "avg_temp": avg_temperature_c,
-                "p99_temp": p99_temperature_c,
+                "avg_temp": llm_avg_temperature_c,
+                "p99_temp": llm_p99_temperature_c,
                 "prefill_avg_temp": prefill_avg_temperature_c,
                 "prefill_p99_temp": prefill_p99_temperature_c,
                 "decode_avg_temp": decode_avg_temperature_c,
                 "decode_p99_temp": decode_p99_temperature_c,
                 "vision_avg_temp": vision_avg_temperature_c,
                 "vision_p99_temp": vision_p99_temperature_c,
-                "avg_mem_used": avg_memory_used_mb,
-                "p99_mem_used": p99_memory_used_mb,
+                "avg_mem_used": llm_avg_memory_used_mb,
+                "p99_mem_used": llm_p99_memory_used_mb,
                 "prefill_avg_mem_used": prefill_avg_memory_used_mb,
                 "prefill_p99_mem_used": prefill_p99_memory_used_mb,
                 "decode_avg_mem_used": decode_avg_memory_used_mb,
@@ -2132,8 +2167,8 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                 "vision_avg_mem_used": vision_avg_memory_used_mb,
                 "vision_p99_mem_used": vision_p99_memory_used_mb,
                 "total_mem": total_memory_mb,
-                "avg_mem_used_pct": avg_memory_used_pct,
-                "p99_mem_used_pct": p99_memory_used_pct,
+                "avg_mem_used_pct": llm_avg_memory_used_pct,
+                "p99_mem_used_pct": llm_p99_memory_used_pct,
                 "prefill_avg_mem_used_pct": prefill_avg_memory_used_pct,
                 "prefill_p99_mem_used_pct": prefill_p99_memory_used_pct,
                 "decode_avg_mem_used_pct": decode_avg_memory_used_pct,
@@ -3313,7 +3348,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 "decode_p99_mem_used_pct": llm_decode_p99_memory_used_pct,
                 "prefill_energy": llm_prefill_energy_j,
                 "decode_energy": llm_decode_energy_j,
-                "llm_total_energy": llm_total_energy_j,
+                "llm_total_energy": llm_only_total_energy_j,
                 "prefill_tps_per_w": llm_prefill_tps_per_w,
                 "decode_tps_per_w": llm_decode_tps_per_w,
                 "prefill_j_per_tok": llm_prefill_j_per_token,
