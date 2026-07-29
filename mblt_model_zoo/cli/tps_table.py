@@ -228,13 +228,23 @@ def _throughput_row(
     scale = 1000.0 if ms_scale else 1.0
     per_run_attr_final = per_run_attr
 
+    def _scale_curve(curve: Optional[list]) -> Optional[list]:
+        # SweepData stores latency values in seconds; ms_scale rows advertise
+        # milliseconds and must convert to keep runs/aggregate curves aligned
+        # with the ms-scaled summary values.
+        if curve is None:
+            return None
+        if not ms_scale:
+            return curve
+        return [None if v is None else float(v) * 1000.0 for v in curve]
+
     def _from_run(obj: Any) -> Any:
         # Prefer sweep curve when present (BenchmarkResult / VLM sweep LLM
         # runs).  Fall back to the flat attribute (SingleMeasurement /
         # VLMSingleMeasurement.llm).
         curve = _sweep_curve(sweep_attr, sweep_values_attr)(obj)
         if curve:
-            return curve
+            return _scale_curve(curve)
         v = _get_optional(obj, per_run_attr_final)
         if v is None:
             return None
@@ -243,7 +253,7 @@ def _throughput_row(
     def _from_aggregate(obj: Any) -> Any:
         curve = _sweep_curve(sweep_attr, sweep_values_attr)(obj)
         if curve:
-            return curve
+            return _scale_curve(curve)
         return None
 
     def _from_runs_for_summary(runs: Sequence[Any]) -> list[float]:
@@ -465,6 +475,35 @@ def _accept_row(
     )
 
 
+def _total_measure_from_run(obj: Any) -> Optional[float]:
+    """Return per-run total wall time in ms for a measure section.
+
+    VLMSingleMeasurement has no top-level ``total_time`` — the vision phase
+    latency lives in ``vision_encode_latency`` (per-image, seconds) and the
+    LLM phase in ``llm.total_time`` (seconds).  The summary emits the
+    combined wall time ``vision_encode_latency * batch_size + llm.total_time``;
+    the per-run extractor mirrors that so ``runs[i].total`` and
+    ``summary.total`` describe the same quantity.
+
+    ``batch_size`` is read from the measurement when present (defaulting to
+    ``1``) so callers that later attach ``obj.batch_size`` — or add the
+    field to :class:`VLMSingleMeasurement` — get correct batched totals
+    without further changes here.
+    """
+    vision = getattr(obj, "vision_encode_latency", None)
+    if vision is not None:
+        llm = getattr(obj, "llm", None)
+        llm_total = getattr(llm, "total_time", None) if llm is not None else None
+        if llm_total is None:
+            return None
+        batch_size = getattr(obj, "batch_size", 1)
+        return (float(vision) * float(batch_size) + float(llm_total)) * 1000.0
+    total = _get_optional(obj, "total_time")
+    if total is None:
+        return None
+    return float(total) * 1000.0
+
+
 TPS_TABLE_SPEC: list[TpsRow] = [
     # --- Vision throughput/latency (VLM measure + VLM sweep vision) ---
     _row(
@@ -536,11 +575,7 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "total",
         "ms",
         _MEASURE_LLM,
-        from_run=lambda obj: (
-            None
-            if _get_optional(obj, "total_time") is None
-            else float(_get_optional(obj, "total_time")) * 1000.0
-        ),
+        from_run=_total_measure_from_run,
         from_runs_for_summary=_list_attr("total_time", scale=1000.0),
     ),
 
@@ -803,16 +838,21 @@ def label_for(row: TpsRow, section: str) -> str:
     return label
 
 
-def json_key_for(row: TpsRow, section: str) -> str:
+def json_key_for(row: TpsRow, section: str, *, is_summary: bool = False) -> str:
     """Return the JSON key for ``row`` when emitted in ``section``.
 
-    Same rules as :func:`label_for` but a sweep-suffix row renders with a
-    ``_last`` suffix (JSON-safe) instead of ``(last)``.
+    Same ``llm_`` prefix rule as :func:`label_for`.  The ``_last`` suffix
+    is reserved for summary scalars: it fires only when ``is_summary=True``
+    and the row has ``sweep_suffix`` set, mirroring the CHANGELOG 2.3.0
+    contract where runs/aggregate curves surface at the top level with
+    bare names (``prefill_tps``, ``llm_ttft``) and the summary section's
+    ``_last`` keys mark scalar statistics blocks derived from the last
+    sweep point.
     """
     key = row.label
     if row.llm_prefix and section in _VLM_SECTIONS:
         key = f"llm_{key}"
-    if row.sweep_suffix and section in _SWEEP_SECTIONS:
+    if is_summary and row.sweep_suffix and section in _SWEEP_SECTIONS:
         key = f"{key}_last"
     return key
 
@@ -868,17 +908,15 @@ def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[
 
     ``keys_present``, when provided, filters the output to canonical keys
     that actually appear in the JSON payload — this drops units for rows
-    whose data was omitted because the run did not produce it.
+    whose data was omitted because the run did not produce it.  Keys use
+    the bare (non-summary) form since units apply equally to the top-level
+    curves and to the derived ``_last`` summary scalars.
     """
     out: dict[str, str] = {}
     for row in iter_json_rows(section):
         key = json_key_for(row, section)
         if keys_present is not None and key not in keys_present:
-            # Also try the summary-form key (without _last) since some
-            # callers pre-populate keys_present with runs-only keys.
-            plain_key = json_key_for(row, section)
-            if plain_key not in keys_present:
-                continue
+            continue
         out[key] = row.unit
     return out
 
@@ -891,15 +929,16 @@ def render_summary_json(
     """Build the ``summary`` JSON block for ``section``.
 
     ``values_by_key`` is the same canonical-keyed dict used to drive the CLI
-    table.  Rows with a ``sweep_suffix`` render with a ``_last`` suffix per
-    :func:`json_key_for`.
+    table.  Sweep-suffix rows render with the ``_last`` suffix here — the
+    summary block is the only place that suffix appears (see
+    :func:`json_key_for`).
     """
     out: dict[str, dict[str, float]] = {}
     for row in iter_json_rows(section):
         values = values_by_key.get(row.key)
         if values is None:
             continue
-        out[json_key_for(row, section)] = summary_fn(values)
+        out[json_key_for(row, section, is_summary=True)] = summary_fn(values)
     return out
 
 
@@ -910,14 +949,15 @@ def render_summary_json_from_runs(
 ) -> dict[str, dict[str, float]]:
     """Build the ``summary`` block by invoking each row's ``from_runs_for_summary``.
 
-    Rows without ``from_runs_for_summary`` are skipped.
+    Rows without ``from_runs_for_summary`` are skipped.  Emits summary-form
+    keys (``_last`` suffix for sweep-suffix rows).
     """
     out: dict[str, dict[str, float]] = {}
     for row in iter_json_rows(section):
         if row.from_runs_for_summary is None:
             continue
         values = row.from_runs_for_summary(runs)
-        out[json_key_for(row, section)] = summary_fn(values)
+        out[json_key_for(row, section, is_summary=True)] = summary_fn(values)
     return out
 
 
@@ -925,6 +965,8 @@ def render_run_json(section: str, run: Any) -> dict[str, Any]:
     """Build a per-run canonical projection for ``run``.
 
     Missing/None extractions are skipped, matching the CLI table gating.
+    Sweep-curve rows surface with bare names (no ``_last`` suffix) — that
+    suffix is reserved for summary scalars.
     """
     out: dict[str, Any] = {}
     for row in iter_json_rows(section):

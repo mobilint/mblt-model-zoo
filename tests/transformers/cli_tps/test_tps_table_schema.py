@@ -189,19 +189,22 @@ def test_iter_json_rows_matches_cli_table_membership(section):
 
 
 def test_json_key_for_uses_underscore_last_not_parenthesized_last():
-    """JSON keys must use ``_last`` where CLI labels use ``(last)``."""
+    """JSON summary keys must use ``_last`` where CLI labels use ``(last)``."""
     rows = {row.key: row for row in iter_json_rows(SECTION_VLM_SWEEP_LLM)}
     prefill_tps = rows["prefill_tps"]
-    # sweep_suffix=True + VLM section (llm_prefix=True) → both transformations.
+    # sweep_suffix=True + VLM section (llm_prefix=True) → both transformations
+    # kick in for the summary form; runs/aggregate keep the bare name.
     assert label_for(prefill_tps, SECTION_VLM_SWEEP_LLM) == "llm_prefill_tps(last)"
-    assert json_key_for(prefill_tps, SECTION_VLM_SWEEP_LLM) == "llm_prefill_tps_last"
+    assert json_key_for(prefill_tps, SECTION_VLM_SWEEP_LLM, is_summary=True) == "llm_prefill_tps_last"
+    assert json_key_for(prefill_tps, SECTION_VLM_SWEEP_LLM) == "llm_prefill_tps"
     # Non-sweep, non-VLM: identity.
     avg_power = rows["avg_power"]
     assert json_key_for(avg_power, SECTION_LLM_MEASURE) == "avg_power"
     assert json_key_for(avg_power, SECTION_VLM_SWEEP_LLM) == "llm_avg_power"
-    # Sweep-suffix but no llm_prefix: only _last is applied.
+    # Sweep-suffix but no llm_prefix: only _last is applied, and only for summary.
     npu_row = next(r for r in TPS_TABLE_SPEC if r.key == "prefill_npu_lat")
-    assert json_key_for(npu_row, SECTION_LLM_SWEEP) == "prefill_npu_lat_last"
+    assert json_key_for(npu_row, SECTION_LLM_SWEEP, is_summary=True) == "prefill_npu_lat_last"
+    assert json_key_for(npu_row, SECTION_LLM_SWEEP) == "prefill_npu_lat"
 
 
 def test_json_key_never_encodes_singular_unit_suffix():
@@ -306,3 +309,112 @@ def test_summary_extractors_produce_scalars_from_synthetic_runs():
     assert rows["avg_power"].from_runs_for_summary(runs) == [3.0, 4.0]
     # llm_total_energy: LLM-only, not vision+LLM.
     assert rows["llm_total_energy"].from_runs_for_summary(runs) == [10.0, 12.0]
+
+
+_SWEEP_SECTIONS_FOR_TEST = (SECTION_LLM_SWEEP, SECTION_VLM_SWEEP_LLM, SECTION_VLM_SWEEP_VISION)
+
+
+def test_json_key_last_suffix_is_summary_only():
+    """``_last`` fires on summary keys only; runs/aggregate use bare names.
+
+    Regression guard for the CHANGELOG 2.3.0 contract: top-level curves in
+    runs/aggregate must not carry ``_last`` (they hold the full curve, not
+    a scalar), and every sweep-suffix row must expose the ``_last`` scalar
+    key in the summary block.
+    """
+    for row in TPS_TABLE_SPEC:
+        if not row.sweep_suffix:
+            continue
+        for section in row.sections:
+            if section not in _SWEEP_SECTIONS_FOR_TEST:
+                continue
+            bare = json_key_for(row, section)
+            summary = json_key_for(row, section, is_summary=True)
+            assert not bare.endswith("_last"), (row.key, section, bare)
+            assert summary.endswith("_last"), (row.key, section, summary)
+            assert summary == f"{bare}_last", (row.key, section, bare, summary)
+
+
+def test_ms_scale_rows_convert_sweep_curves_to_milliseconds():
+    """ms_scale=True rows return millisecond-scaled curves from every extractor.
+
+    Regression guard for the SoT-unification bug where runs[].ttft /
+    aggregate.ttft came out 1000x smaller than summary.ttft because the
+    curve extractors returned SweepData.time_values (seconds) verbatim
+    while the summary already multiplied by 1000.
+    """
+    from types import SimpleNamespace
+
+    ms_rows = [row for row in TPS_TABLE_SPEC if row.key in ("ttft", "decode_duration")]
+    assert {r.key for r in ms_rows} == {"ttft", "decode_duration"}
+
+    sweep_attr_by_key = {"ttft": "prefill_sweep", "decode_duration": "decode_sweep"}
+    time_values = [0.001, 0.002, 0.005]
+    expected_curve = [1.0, 2.0, 5.0]
+    expected_last = 5.0
+
+    for row in ms_rows:
+        sweep_attr = sweep_attr_by_key[row.key]
+        sweep = SimpleNamespace(
+            x_values=[1, 2, 3],
+            tps_values=[10.0, 20.0, 30.0],
+            time_values=list(time_values),
+            avg_total_token_latency_values=[],
+            avg_npu_token_latency_values=[],
+        )
+        obj = SimpleNamespace(**{sweep_attr: sweep})
+
+        run_curve = row.from_run(obj)
+        assert run_curve == expected_curve, (row.key, run_curve)
+
+        agg_curve = row.from_aggregate(obj)
+        assert agg_curve == expected_curve, (row.key, agg_curve)
+
+        summary_values = row.from_runs_for_summary([obj])
+        assert summary_values == [expected_last], (row.key, summary_values)
+
+
+def test_total_row_from_run_combines_vision_and_llm_for_vlm_measure():
+    """``total.from_run`` for a VLM measurement returns vision+LLM wall time in ms.
+
+    Regression guard for the SoT-unification bug where runs[].total came
+    back as ``llm.total_time`` alone (LLM-only) while summary.total was
+    ``vision_encode_latency * batch_size + llm.total_time`` (combined) —
+    the two carried mismatched quantities under the same key.
+    """
+    from types import SimpleNamespace
+
+    row = next(r for r in TPS_TABLE_SPEC if r.key == "total")
+    assert row.from_run is not None
+
+    vlm_run = SimpleNamespace(
+        image_resolution=224,
+        vision_encode_latency=0.010,
+        vision_fps=100.0,
+        batch_size=4,
+        llm=SimpleNamespace(total_time=1.0),
+    )
+    # (0.010 * 4 + 1.0) * 1000 = 1040 ms.
+    assert row.from_run(vlm_run) == pytest.approx(1040.0)
+
+    # batch_size defaults to 1 when the measurement doesn't carry it.
+    vlm_run_no_batch = SimpleNamespace(
+        vision_encode_latency=0.010,
+        vision_fps=100.0,
+        llm=SimpleNamespace(total_time=1.0),
+    )
+    # (0.010 * 1 + 1.0) * 1000 = 1010 ms.
+    assert row.from_run(vlm_run_no_batch) == pytest.approx(1010.0)
+
+    # Plain LLM measurement still uses the flat total_time attribute (in seconds).
+    llm_run = SimpleNamespace(total_time=2.0)
+    assert row.from_run(llm_run) == pytest.approx(2000.0)
+
+    # VLM measurement missing llm.total_time yields None rather than a wrong total.
+    vlm_run_incomplete = SimpleNamespace(
+        vision_encode_latency=0.010,
+        vision_fps=100.0,
+        batch_size=1,
+        llm=SimpleNamespace(),
+    )
+    assert row.from_run(vlm_run_incomplete) is None
