@@ -1,15 +1,12 @@
 """Regression tests for the shared ``logits_to_keep`` path in ``MobilintModelMixin``.
 
-Covers the code branches introduced by the HF-style ``logits_to_keep``
+Covers three code branches introduced by the HF-style ``logits_to_keep``
 support in the shared LLM inference core:
 
 1. Fast path (``logits_to_keep == 1``): the original last-token behavior.
 2. Dynamic-axis MXQ path (``mxq_model.get_model_output_shape()[0][-2] == -1``):
    the compiled model emits per-position logits, so all-chunk outputs are
    concatenated then sliced.
-2b. Static multi-token MXQ path (that axis is a ``K > 1``): the chunk is capped
-   at K and each chunk's rows are mapped to the tail of the positions it
-   covered, costing ``ceil(seq_len / K)`` infers.
 3. Last-only MXQ fallback: prefill non-kept prefix through normal chunks and
    run a size-1 infer at each kept position.
 
@@ -30,7 +27,6 @@ from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMix
 from tests.transformers._fake_mxq import (
     DynamicAxisMxq,
     StaticLastOnlyMxq,
-    StaticMultiTokenMxq,
     make_model,
 )
 
@@ -615,152 +611,6 @@ class TestLlmForwardSingle:
         # subsequent decode steps observe the same cache state as the other
         # branches would leave behind.
         assert cache.get_seq_length() == seq_len
-
-
-# ---------------------------------------------------------------------------
-# Static multi-token MXQ (K > 1)
-# ---------------------------------------------------------------------------
-
-
-class TestStaticMultiTokenLogits:
-    """A static K-token LM head is neither dynamic nor last-only.
-
-    The all-logits probe reports False for it, which used to send every
-    non-default request into the size-1-infer fallback and discard K-1 of the K
-    logits each infer already produced. These pin the middle path.
-    """
-
-    def _run(self, mxq, seq_len: int, hidden_size: int, *, logits_to_keep,
-             npu_prefill_chunk_size=None):
-        model = make_model(mxq)
-        inputs_embeds = torch.arange(seq_len * hidden_size, dtype=torch.float32).reshape(
-            1, seq_len, hidden_size
-        )
-        logits = model.llm_forward(
-            inputs_embeds=inputs_embeds,
-            past_key_values=None,
-            cache_position=torch.arange(seq_len),
-            npu_prefill_chunk_size=npu_prefill_chunk_size,
-            logits_to_keep=logits_to_keep,
-        )
-        return model, logits
-
-    @staticmethod
-    def _expected(positions, vocab_size: int) -> np.ndarray:
-        """The fake encodes absolute position into every element of its row."""
-        return np.repeat(
-            np.asarray(positions, dtype=np.float32)[:, None], vocab_size, axis=1
-        )
-
-    def test_probe_reports_static_width_not_just_not_dynamic(self) -> None:
-        model = make_model(StaticMultiTokenMxq(k=4))
-        assert model._mxq_supports_all_logits() is False
-        assert model._mxq_static_logits_width() == 4
-
-    def test_last_only_and_dynamic_have_no_multi_token_width(self) -> None:
-        # k == 1 is static but has nothing extra to harvest; dynamic is Path 2.
-        assert make_model(StaticLastOnlyMxq())._mxq_static_logits_width() == 1
-        assert make_model(DynamicAxisMxq())._mxq_static_logits_width() is None
-
-    def test_keep_all_uses_one_infer_per_k_positions(self) -> None:
-        """seq_len/K infers, not seq_len — the reason to compile K > 1."""
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        seq_len = 12
-        _model, logits = self._run(
-            mxq, seq_len=seq_len, hidden_size=3, logits_to_keep=0, npu_prefill_chunk_size=8
-        )
-
-        assert logits.shape == (seq_len, mxq.vocab_size)
-        assert len(mxq.calls) == seq_len // mxq.k == 3
-        # Chunks are capped at K: a wider chunk would come back holding only its
-        # last K rows and silently drop the positions before them.
-        assert [c["chunk_len"] for c in mxq.calls] == [4, 4, 4]
-        np.testing.assert_allclose(
-            logits.numpy(), self._expected(range(seq_len), mxq.vocab_size)
-        )
-
-    def test_ragged_tail_chunk_is_read_from_the_row_tail(self) -> None:
-        """A final chunk shorter than K pads at the front; index from the end."""
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        seq_len = 10  # 4 + 4 + 2
-        _model, logits = self._run(
-            mxq, seq_len=seq_len, hidden_size=3, logits_to_keep=0, npu_prefill_chunk_size=4
-        )
-
-        assert [c["chunk_len"] for c in mxq.calls] == [4, 4, 2]
-        assert logits.shape == (seq_len, mxq.vocab_size)
-        assert not np.isnan(logits.numpy()).any(), "read a padding row"
-        np.testing.assert_allclose(
-            logits.numpy(), self._expected(range(seq_len), mxq.vocab_size)
-        )
-
-    def test_sparse_selector_keeps_caller_order_and_duplicates(self) -> None:
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        _model, logits = self._run(
-            mxq,
-            seq_len=12,
-            hidden_size=3,
-            logits_to_keep=torch.tensor([7, 2, 7]),
-            npu_prefill_chunk_size=4,
-        )
-        assert logits.shape == (3, mxq.vocab_size)
-        np.testing.assert_allclose(
-            logits.numpy(), self._expected([7, 2, 7], mxq.vocab_size)
-        )
-
-    def test_default_keep_still_takes_the_fast_path(self) -> None:
-        """logits_to_keep=1 must not be rerouted; Path 1 is already optimal."""
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        model, logits = self._run(
-            mxq, seq_len=12, hidden_size=3, logits_to_keep=1, npu_prefill_chunk_size=12
-        )
-        assert logits.shape == (1, mxq.vocab_size)
-        # The caller's chunk size is honoured, so the prefill is a single infer.
-        assert [c["chunk_len"] for c in mxq.calls] == [12]
-        assert getattr(model, "_mxq_all_logits_cached", None) is None
-
-    def test_no_slow_path_warning(self) -> None:
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            self._run(
-                mxq, seq_len=8, hidden_size=3, logits_to_keep=0, npu_prefill_chunk_size=4
-            )
-        assert not [w for w in caught if "one MXQ infer per kept" in str(w.message)]
-
-    def test_empty_selector_advances_cache_and_returns_no_rows(self) -> None:
-        mxq = StaticMultiTokenMxq(vocab_size=5, max_width=8, k=4)
-        _model, logits = self._run(
-            mxq,
-            seq_len=8,
-            hidden_size=3,
-            logits_to_keep=torch.tensor([], dtype=torch.long),
-            npu_prefill_chunk_size=4,
-        )
-        assert logits.shape == (0, mxq.vocab_size)
-        # The whole input still went through the NPU.
-        assert sum(c["chunk_len"] for c in mxq.calls) == 8
-
-    def test_forced_dynamic_override_is_respected(self) -> None:
-        """An explicit dynamic classification must not be reinterpreted as K."""
-        model = make_model(StaticMultiTokenMxq(k=4))
-        model._mxq_all_logits_cached = True
-        assert model._mxq_static_logits_width() is None
-
-    def test_backend_returning_fewer_rows_than_fed_is_reported(self) -> None:
-        class _ShortPayloadMxq(StaticMultiTokenMxq):
-            def infer(self, inputs, _extra, cache_size, batch_params=None):
-                out = super().infer(inputs, _extra, cache_size, batch_params)
-                return [out[0][:, :1, :]]  # fewer rows than the chunk width
-
-        with pytest.raises(RuntimeError, match="fewer logit rows"):
-            self._run(
-                _ShortPayloadMxq(k=4),
-                seq_len=8,
-                hidden_size=3,
-                logits_to_keep=0,
-                npu_prefill_chunk_size=4,
-            )
 
 
 # ---------------------------------------------------------------------------

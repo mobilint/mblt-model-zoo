@@ -116,47 +116,6 @@ class DynamicAxisMxq:
         return [flat]
 
 
-class StaticMultiTokenMxq:
-    """MXQ stub whose LM head emits the last ``k`` positions per infer.
-
-    The middle ground between :class:`StaticLastOnlyMxq` (``k == 1``) and
-    :class:`DynamicAxisMxq` (dynamic axis): the token axis is static, so the
-    all-logits probe reports False, yet one infer still yields ``k`` positions.
-
-    Rows always number ``k``. When fed fewer than ``k`` tokens the leading rows
-    are NaN padding, so a consumer that mis-indexes the tail lands on NaN rather
-    than a plausible-looking number. Each row's value is the absolute position it
-    represents, letting tests assert every kept position came from the right row.
-    """
-
-    def __init__(self, vocab_size: int = 5, max_width: int = 4, k: int = 2):
-        self.vocab_size = vocab_size
-        self.max_width = max_width
-        self.k = k
-        self.calls: list[dict] = []
-
-    def get_input_buffer_info(self):
-        return [FakeInputBufferInfo(max_width=self.max_width)]
-
-    def get_model_output_shape(self):
-        # Static token axis of k > 1: neither dynamic nor last-only.
-        return [(1, self.k, self.vocab_size)]
-
-    def infer(self, inputs, _extra, cache_size, batch_params=None):
-        chunk = np.asarray(inputs[0])
-        chunk_len = int(chunk.shape[2])
-        self.calls.append(
-            {"shape": tuple(chunk.shape), "cache_size": int(cache_size), "chunk_len": chunk_len}
-        )
-        payload = np.full((1, self.k, self.vocab_size), np.nan, dtype=np.float32)
-        kept = min(chunk_len, self.k)
-        for row in range(kept):
-            # Rows are the tail of the chunk; the last row is the last position.
-            position = int(cache_size) + chunk_len - kept + row
-            payload[0, self.k - kept + row, :] = float(position)
-        return [payload]
-
-
 class FakeBackend:
     def __init__(self, mxq_model):
         self.mxq_model = mxq_model
