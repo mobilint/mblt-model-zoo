@@ -778,19 +778,19 @@ def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None
     assert llm_run["llm_decode_energy_j"] == pytest.approx(10.0)
     assert llm_run["llm_total_energy_j"] == pytest.approx(20.0)
     assert llm_run["total_energy_j"] == pytest.approx(30.0)
-    assert llm_summary["llm_prefill_energy_j"]["mean"] == pytest.approx(10.0)
-    assert llm_summary["llm_decode_energy_j"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["prefill_energy_j"]["mean"] == pytest.approx(10.0)
+    assert llm_summary["decode_energy_j"]["mean"] == pytest.approx(10.0)
     assert llm_run["prefill_tps_per_w"] == pytest.approx(prefill_tps_per_w)
     assert llm_run["decode_tps_per_w"] == pytest.approx(decode_tps_per_w)
     assert llm_run["prefill_j_per_token"] == pytest.approx(10.0 / ((128 + 256) * 2))
     assert llm_run["decode_j_per_token"] == pytest.approx(10.0 / (32 * 3 * 2))
-    assert llm_summary["prefill_tps_per_w"]["mean"] == pytest.approx(prefill_tps_per_w)
-    assert llm_summary["decode_tps_per_w"]["mean"] == pytest.approx(decode_tps_per_w)
+    assert llm_summary["prefill_tps_per_w_last"]["mean"] == pytest.approx(prefill_tps_per_w)
+    assert llm_summary["decode_tps_per_w_last"]["mean"] == pytest.approx(decode_tps_per_w)
     assert [float(row["prefill_tps_per_w"]) for row in llm_rows] == [pytest.approx(prefill_tps_per_w)]
     assert [float(row["decode_tps_per_w"]) for row in llm_rows] == [pytest.approx(decode_tps_per_w)]
     assert [float(row["vision_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
-    assert [float(row["llm_prefill_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
-    assert [float(row["llm_decode_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["prefill_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
+    assert [float(row["decode_energy_j"]) for row in llm_rows] == [pytest.approx(10.0)]
     assert [float(row["llm_total_energy_j"]) for row in llm_rows] == [pytest.approx(20.0)]
     assert [float(row["total_energy_j"]) for row in llm_rows] == [pytest.approx(30.0)]
 
