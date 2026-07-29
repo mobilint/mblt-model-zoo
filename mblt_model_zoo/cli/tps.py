@@ -10,6 +10,7 @@ import sys
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
 import torch
@@ -1322,6 +1323,64 @@ def _attach_aggregate_sweep_device(
     )
 
 
+_VLM_LLM_AGGREGATE_SCALAR_ATTRS: tuple[str, ...] = (
+    "avg_power_w",
+    "p99_power_w",
+    "prefill_avg_power_w",
+    "prefill_p99_power_w",
+    "decode_avg_power_w",
+    "decode_p99_power_w",
+    "avg_utilization_pct",
+    "p99_utilization_pct",
+    "prefill_avg_utilization_pct",
+    "prefill_p99_utilization_pct",
+    "decode_avg_utilization_pct",
+    "decode_p99_utilization_pct",
+    "avg_temperature_c",
+    "p99_temperature_c",
+    "prefill_avg_temperature_c",
+    "prefill_p99_temperature_c",
+    "decode_avg_temperature_c",
+    "decode_p99_temperature_c",
+    "avg_memory_used_mb",
+    "p99_memory_used_mb",
+    "prefill_avg_memory_used_mb",
+    "prefill_p99_memory_used_mb",
+    "decode_avg_memory_used_mb",
+    "decode_p99_memory_used_mb",
+    "avg_memory_used_pct",
+    "p99_memory_used_pct",
+    "prefill_avg_memory_used_pct",
+    "prefill_p99_memory_used_pct",
+    "decode_avg_memory_used_pct",
+    "decode_p99_memory_used_pct",
+    "total_memory_mb",
+)
+
+
+def _attach_vlm_llm_aggregate_scalars(agg: Any, runs: Sequence[Any]) -> None:
+    """Attach mean-across-runs device scalars to a VLM LLM sweep aggregate.
+
+    The aggregated ``BenchmarkResult`` produced by ``_aggregate_sweep_results``
+    only carries prefill/decode sweep curves.  The VLM sweep LLM section of
+    :data:`TPS_TABLE_SPEC` declares power/util/temp/mem/energy scalars that
+    the schema pulls from the aggregate via ``getattr``.  Without this
+    attachment the ``aggregate`` JSON block silently drops those keys while
+    ``runs[i]`` / ``summary`` still expose them, leaving the three JSON layers
+    inconsistent.  Energy and efficiency (tps_per_w / j_per_token) are handled
+    separately by :func:`_attach_aggregate_sweep_device` which is the mirror
+    of what the text sweep does.
+    """
+    if not runs:
+        return
+
+    for attr in _VLM_LLM_AGGREGATE_SCALAR_ATTRS:
+        values = [float(v) for r in runs if (v := getattr(r, attr, None)) is not None]
+        if not values:
+            continue
+        setattr(agg, attr, sum(values) / len(values))
+
+
 def _aggregate_sweep_results(results: Sequence[Any]) -> Any:
     if len(results) == 1:
         return results[0]
@@ -1858,12 +1917,17 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             on_decode_start=on_decode_start,
             on_decode_end=on_decode_end,
         )
-        return VLMSingleMeasurement(
+        measurement = VLMSingleMeasurement(
             image_resolution=args.image_resolution,
             vision_encode_latency=vision_latency,
             vision_fps=vision_fps,
             llm=_single_llm_measurement(llm_result),
         )
+        # Attach batch_size so the schema extractor for ``runs[i].total`` can
+        # compute ``vision_encode_latency * batch_size + llm.total_time``
+        # instead of defaulting to 1 and diverging from ``summary.total``.
+        measurement.batch_size = batch_size
+        return measurement
 
     measurer = VLMTPSMeasurer(pipeline)
     tracker = _build_device_tracker(args, pipeline)
@@ -1981,6 +2045,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             vision_fps=vision_fps,
             llm=llm_measurement,
         )
+        run.batch_size = batch_size
         runs.append(run)
         if idx < len(vision_device_metrics) and idx < len(vision_device_time_series_runs):
             metric = vision_device_metrics[idx]
@@ -2878,6 +2943,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     try:
         for resolution in args.image_resolutions:
             vision_runs = []
+            vision_run_holders: list[SimpleNamespace] = []
             vision_power_avg = []
             vision_power_p99 = []
             vision_util_avg = []
@@ -2907,6 +2973,17 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                 finally:
                     _stop_tracker_safe(tracker)
                 vision_runs.append(single)
+                latency, fps = single
+                # Per-run holder used by ``render_run_json`` so the JSON
+                # ``runs[i]`` entries carry canonical schema keys (vision_encode
+                # in ms, plus every device/energy field the section declares).
+                holder = SimpleNamespace(
+                    image_resolution=resolution,
+                    vision_encode_latency=float(latency),
+                    vision_fps=float(fps),
+                    batch_size=batch_size,
+                )
+                vision_run_holders.append(holder)
                 if tracker is not None:
                     metric = _extract_device_metric(tracker)
                     device_time_series = _extract_device_time_series(tracker)
@@ -2925,32 +3002,57 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     if avg_power is not None:
                         avg_power_f = float(avg_power)
                         vision_power_avg.append(avg_power_f)
+                        holder.vision_avg_power_w = avg_power_f
                     energy = _energy_from_device_time_series(device_time_series)
                     if energy is not None:
                         bs = max(1, int(batch_size))
-                        vision_energy_j.append(energy)
-                        vision_img_per_j.append(bs / energy if energy > 0 else 0.0)
-                        vision_j_per_img.append(energy / bs)
+                        energy_f = float(energy)
+                        vision_energy_j.append(energy_f)
+                        vision_img_per_j.append(bs / energy_f if energy_f > 0 else 0.0)
+                        vision_j_per_img.append(energy_f / bs)
+                        holder.vision_energy_j = energy_f
+                        holder.vision_img_per_j = bs / energy_f if energy_f > 0 else 0.0
+                        holder.vision_j_per_img = energy_f / bs
                     if p99_power is not None:
-                        vision_power_p99.append(float(p99_power))
+                        p99_power_f = float(p99_power)
+                        vision_power_p99.append(p99_power_f)
+                        holder.vision_p99_power_w = p99_power_f
                     if avg_utilization is not None:
-                        vision_util_avg.append(float(avg_utilization))
+                        avg_util_f = float(avg_utilization)
+                        vision_util_avg.append(avg_util_f)
+                        holder.vision_avg_utilization_pct = avg_util_f
                     if p99_utilization is not None:
-                        vision_util_p99.append(float(p99_utilization))
+                        p99_util_f = float(p99_utilization)
+                        vision_util_p99.append(p99_util_f)
+                        holder.vision_p99_utilization_pct = p99_util_f
                     if avg_temperature is not None:
-                        vision_temp_avg.append(float(avg_temperature))
+                        avg_temp_f = float(avg_temperature)
+                        vision_temp_avg.append(avg_temp_f)
+                        holder.vision_avg_temperature_c = avg_temp_f
                     if p99_temperature is not None:
-                        vision_temp_p99.append(float(p99_temperature))
+                        p99_temp_f = float(p99_temperature)
+                        vision_temp_p99.append(p99_temp_f)
+                        holder.vision_p99_temperature_c = p99_temp_f
                     if avg_memory_used_mb is not None:
-                        vision_mem_used_avg_mb.append(float(avg_memory_used_mb))
+                        avg_mem_used_mb_f = float(avg_memory_used_mb)
+                        vision_mem_used_avg_mb.append(avg_mem_used_mb_f)
+                        holder.vision_avg_memory_used_mb = avg_mem_used_mb_f
                     if p99_memory_used_mb is not None:
-                        vision_mem_used_p99_mb.append(float(p99_memory_used_mb))
+                        p99_mem_used_mb_f = float(p99_memory_used_mb)
+                        vision_mem_used_p99_mb.append(p99_mem_used_mb_f)
+                        holder.vision_p99_memory_used_mb = p99_mem_used_mb_f
                     if total_memory_mb is not None:
-                        vision_mem_total_mb.append(float(total_memory_mb))
+                        total_mem_mb_f = float(total_memory_mb)
+                        vision_mem_total_mb.append(total_mem_mb_f)
+                        holder.total_memory_mb = total_mem_mb_f
                     if avg_memory_used_pct is not None:
-                        vision_mem_used_pct_avg.append(float(avg_memory_used_pct))
+                        avg_mem_used_pct_f = float(avg_memory_used_pct)
+                        vision_mem_used_pct_avg.append(avg_mem_used_pct_f)
+                        holder.vision_avg_memory_used_pct = avg_mem_used_pct_f
                     if p99_memory_used_pct is not None:
-                        vision_mem_used_pct_p99.append(float(p99_memory_used_pct))
+                        p99_mem_used_pct_f = float(p99_memory_used_pct)
+                        vision_mem_used_pct_p99.append(p99_mem_used_pct_f)
+                        holder.vision_p99_memory_used_pct = p99_mem_used_pct_f
 
             vision_ms = [lat * 1000.0 for lat, _ in vision_runs]
             vision_fps = [fps for _, fps in vision_runs]
@@ -3046,11 +3148,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "batch_size": batch_size,
                     "units": _units_for_section(SECTION_VLM_SWEEP_VISION, vision_values_by_key),
                     "runs": [
-                        {
-                            "vision_encode_latency": latency,
-                            "vision_fps": fps,
-                        }
-                        for latency, fps in vision_runs
+                        _render_run_json(SECTION_VLM_SWEEP_VISION, holder)
+                        for holder in vision_run_holders
                     ],
                     "summary": _render_summary_json(
                         SECTION_VLM_SWEEP_VISION, vision_values_by_key, _summary
@@ -3120,6 +3219,15 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         _stop_qbruntime_trace(trace_handle)
 
     llm_result = _aggregate_sweep_results(llm_runs)
+    # Aggregate scalars: mean-across-runs device metrics + energy/efficiency
+    # (via the text-sweep helper).  Without this the ``aggregate`` JSON block
+    # would silently drop every ``llm_avg_power``/``llm_prefill_energy``/etc
+    # row that the schema declares — ``runs[i]`` and ``summary`` populate them
+    # but ``aggregate`` extractors would fall back to ``None``.
+    _attach_vlm_llm_aggregate_scalars(llm_result, llm_runs)
+    _attach_aggregate_sweep_device(
+        llm_result, llm_runs, batch_size=batch_size, decode_window=args.decode_window
+    )
     llm_prefill_tps = [r.prefill_sweep.tps_values[-1] for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
