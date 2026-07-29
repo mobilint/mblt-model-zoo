@@ -35,6 +35,29 @@ from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
 
 
+def test_default_cache_dir_uses_private_temporary_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Avoid a predictable shared cache when the preferred cache cannot be created."""
+
+    shared_cache = tmp_path / "mblt_model_zoo"
+    shared_cache.mkdir()
+    (shared_cache / "poisoned.onnx").write_bytes(b"untrusted")
+
+    def _fail_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        del self, args, kwargs
+        raise OSError("home cache is unavailable")
+
+    monkeypatch.setattr(wrapper.Path, "mkdir", _fail_mkdir)
+    monkeypatch.setattr(wrapper.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    cache_dir = Path(wrapper._default_cache_dir())
+
+    assert cache_dir.parent == tmp_path
+    assert cache_dir.name.startswith("mblt_model_zoo-")
+    assert cache_dir != shared_cache
+    assert not (cache_dir / "poisoned.onnx").exists()
+    assert cache_dir.stat().st_mode & 0o777 == 0o700
+
+
 def test_onnx_runtime_defaults_to_cpu_provider() -> None:
     """Avoid accelerator provider probing unless callers explicitly opt in."""
 
@@ -691,6 +714,27 @@ def test_final_onnx_detections_apply_confidence_threshold() -> None:
     assert len(result) == 1
     assert result[0].shape == (1, 6)
     assert torch.all(result[0][:, 4] > 0.5)
+
+
+def test_nmsfree_postprocess_supports_multilabel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep COCO's multi-label postprocess path compatible with NMS-free models."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    decoded = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0, 0.9, 2.0], [11.0, 21.0, 31.0, 41.0, 0.0, 1.0]]],
+        dtype=torch.float32,
+    )
+    monkeypatch.setattr(postprocessor, "extract_final_outputs", lambda _: (None, None))
+    monkeypatch.setattr(postprocessor, "check_input", lambda x: x)
+    monkeypatch.setattr(postprocessor, "_pre_process", lambda _: (decoded, None))
+
+    result = postprocessor([torch.empty(1)], multi_label=True)
+
+    assert len(result) == 1
+    assert torch.equal(result[0], decoded[0, :1])
 
 
 def test_final_onnx_detections_normalize_singleton_and_channel_first() -> None:

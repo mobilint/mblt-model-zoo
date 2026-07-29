@@ -20,6 +20,9 @@ DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
 DEFAULT_ADE20K_SOURCE = get_dataset_config("ade20k")["download"]["url"]
+CITYSCAPES_DOWNLOAD_CONFIG = get_dataset_config("cityscapes")["download"]
+CITYSCAPES_IMAGE_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["images_archive"]
+CITYSCAPES_ANNOTATION_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["annotations_archive"]
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -139,6 +142,32 @@ def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_ADE20K_SOURCE
 
 
+def _resolve_cityscapes_sources(args: argparse.Namespace, data_path: str) -> tuple[str, str]:
+    """Resolve the two manually downloaded official Cityscapes archives.
+
+    Args:
+        args: Parsed validation CLI arguments.
+        data_path: Organized Cityscapes output path used as a discovery anchor.
+
+    Returns:
+        Image and annotation ZIP paths.
+
+    Raises:
+        SystemExit: If either required archive cannot be found.
+    """
+
+    image_dir = args.image_dir or _find_existing_source(data_path, [CITYSCAPES_IMAGE_ARCHIVE])
+    annotation_dir = args.annotation_dir or _find_existing_source(data_path, [CITYSCAPES_ANNOTATION_ARCHIVE])
+    if image_dir is None or annotation_dir is None:
+        raise SystemExit(
+            "Cityscapes organization requires the official image and annotation ZIP archives. "
+            "Register at https://www.cityscapes-dataset.com/, then download them with:\n"
+            "  csDownload -d <download-dir> gtFine_trainvaltest.zip leftImg8bit_trainvaltest.zip\n"
+            "Pass the resulting files with --image-dir and --annotation-dir, or place them near the dataset path."
+        )
+    return image_dir, annotation_dir
+
+
 def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
     """Returns the default organized dataset path for a vision task."""
 
@@ -234,7 +263,12 @@ def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = N
         )
     elif task == "semantic_segmentation":
         if dataset == "cityscapes":
-            organize_cityscapes(output_dir=data_path)
+            image_dir, annotation_dir = _resolve_cityscapes_sources(args, data_path)
+            organize_cityscapes(
+                image_dir=image_dir,
+                annotation_dir=annotation_dir,
+                output_dir=data_path,
+            )
         else:
             organize_ade20k(
                 dataset_path=_resolve_ade20k_source(args, data_path),
@@ -424,7 +458,9 @@ def add_val_parser(
     )
     parser.add_argument(
         "--image-dir",
-        help="Local archive path or download URL for the dataset images used by automatic organization.",
+        help=(
+            "Local archive path or download URL for dataset images. Cityscapes requires leftImg8bit_trainvaltest.zip."
+        ),
     )
     parser.add_argument(
         "--xml-dir",
@@ -432,7 +468,9 @@ def add_val_parser(
     )
     parser.add_argument(
         "--annotation-dir",
-        help="Local archive path or download URL for dataset annotations used by automatic organization.",
+        help=(
+            "Local archive path or download URL for dataset annotations. Cityscapes requires gtFine_trainvaltest.zip."
+        ),
     )
     add_threshold_args(parser, conf_default=None, iou_default=None)
     add_e2e_arg(parser)

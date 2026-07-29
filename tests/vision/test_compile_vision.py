@@ -164,6 +164,33 @@ def test_selection_rejects_invalid_sizes(subset_size: int, tmp_path: Path) -> No
         select_calibration_images("object_detection", tmp_path, subset_size=subset_size)
 
 
+def test_selection_rejects_symlinked_images(tmp_path: Path) -> None:
+    """Reject image-looking symlinks instead of sampling their targets."""
+
+    external_image = _write_images(tmp_path / "external", ["secret.jpg"])[0]
+    image_dir = tmp_path / "dataset" / "val2017"
+    image_dir.mkdir(parents=True)
+    (image_dir / "stolen.jpg").symlink_to(external_image)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        select_calibration_images("object_detection", tmp_path / "dataset", subset_size=1)
+
+
+def test_copy_rejects_symlinked_or_outside_images(tmp_path: Path) -> None:
+    """Defend direct copy callers against symlink and outside-root sources."""
+
+    dataset = tmp_path / "dataset"
+    external_image = _write_images(tmp_path / "external", ["secret.jpg"])[0]
+    symlink = dataset / "stolen.jpg"
+    dataset.mkdir()
+    symlink.symlink_to(external_image)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        copy_calibration_subset([symlink], dataset, tmp_path / "subset")
+    with pytest.raises(ValueError, match="must remain within dataset root"):
+        copy_calibration_subset([external_image], dataset, tmp_path / "subset")
+
+
 def test_flat_subset_names_are_collision_safe(tmp_path: Path) -> None:
     """Preserve images with duplicate basenames from nested source directories."""
 

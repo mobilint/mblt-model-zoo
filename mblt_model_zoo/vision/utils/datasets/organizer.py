@@ -8,7 +8,10 @@ import concurrent.futures
 import os
 import re
 import shutil
+import stat
+import tarfile
 import xml.etree.ElementTree as ET
+import zipfile
 from collections.abc import Iterable
 from tempfile import TemporaryDirectory
 from time import sleep
@@ -38,9 +41,10 @@ NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/
 NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
 ADE20K_VALIDATION_SAMPLE_COUNT = 2000
-CITYSCAPES_REPO_ID = "Chris1/cityscapes"
-CITYSCAPES_VALIDATION_DATA_FILES = "data/validation-*.parquet"
 CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
+CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
+CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
+CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$")
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -301,8 +305,8 @@ def organize_imagenet(
 
         if local_image_dir.endswith(".tar") and local_xml_dir.endswith(".tgz"):
             print("Unpacking image and XML files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
-            shutil.unpack_archive(local_xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
+            _safe_unpack_archive(local_image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
+            _safe_unpack_archive(local_xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
             print("Unpacking completed")
             construct_imagenet(
                 os.path.join(temp_dir, "ILSVRC2012_img_val"),
@@ -355,8 +359,8 @@ def organize_coco(
 
         if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, temp_dir)
-            shutil.unpack_archive(local_annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
+            _safe_unpack_archive(local_image_dir, temp_dir)
+            _safe_unpack_archive(local_annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
             print("Unpacking completed")
             construct_coco(
                 os.path.join(temp_dir, "val2017"),
@@ -407,8 +411,8 @@ def organize_widerface(
 
         if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, temp_dir)
-            shutil.unpack_archive(local_annotation_dir, temp_dir)
+            _safe_unpack_archive(local_image_dir, temp_dir)
+            _safe_unpack_archive(local_annotation_dir, temp_dir)
             print("Unpacking completed")
             construct_widerface(
                 os.path.join(temp_dir, "WIDER_val"),
@@ -540,7 +544,7 @@ def organize_nyu_depth(
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
             print("Unpacking NYU Depth files to temporary directory...")
-            shutil.unpack_archive(local_dataset_path, temp_dir)
+            _safe_unpack_archive(local_dataset_path, temp_dir)
             print("Unpacking completed")
             construct_nyu_depth(temp_dir, output_dir)
             return
@@ -645,71 +649,151 @@ def organize_ade20k(
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
-            shutil.unpack_archive(local_dataset_path, temp_dir)
+            _safe_unpack_archive(local_dataset_path, temp_dir)
             construct_ade20k(temp_dir, output_dir)
             return
         construct_ade20k(local_dataset_path, output_dir)
 
 
-def _load_cityscapes_validation() -> object:
-    """Load only the Cityscapes validation parquet shards from Hugging Face."""
+def _validate_cityscapes_zip(archive_path: str, source_name: str) -> str:
+    """Validate one official Cityscapes ZIP source.
 
-    from datasets import load_dataset
+    Args:
+        archive_path: Path to the raw Cityscapes archive.
+        source_name: Human-readable source description for errors.
 
-    return load_dataset(
-        CITYSCAPES_REPO_ID,
-        data_files={"validation": CITYSCAPES_VALIDATION_DATA_FILES},
-        split="validation",
-    )
+    Returns:
+        Expanded absolute archive path.
+
+    Raises:
+        ValueError: If the path is missing, is not a file, is not a ZIP, or contains duplicate members.
+    """
+
+    resolved_path = os.path.abspath(os.path.expanduser(archive_path))
+    if not os.path.isfile(resolved_path):
+        raise ValueError(f"Cityscapes {source_name} archive does not exist or is not a file: {resolved_path}.")
+    if not zipfile.is_zipfile(resolved_path):
+        raise ValueError(f"Cityscapes {source_name} source must be a valid ZIP archive: {resolved_path}.")
+
+    with zipfile.ZipFile(resolved_path) as archive:
+        seen_members: set[str] = set()
+        duplicate_members: set[str] = set()
+        for member in archive.infolist():
+            if member.filename in seen_members:
+                duplicate_members.add(member.filename)
+            seen_members.add(member.filename)
+    if duplicate_members:
+        raise ValueError(
+            f"Cityscapes {source_name} archive contains duplicate members: {', '.join(sorted(duplicate_members)[:3])}."
+        )
+    return resolved_path
+
+
+def _collect_cityscapes_validation_files(
+    split_dir: str,
+    suffix: str,
+    source_name: str,
+) -> dict[str, str]:
+    """Collect official Cityscapes validation files keyed by shared sample ID.
+
+    Args:
+        split_dir: Extracted ``leftImg8bit/val`` or ``gtFine/val`` directory.
+        suffix: Required official file suffix.
+        source_name: Human-readable source description for errors.
+
+    Returns:
+        Mapping from ``<city>_<sequence>_<frame>`` to source path.
+
+    Raises:
+        ValueError: If a candidate filename is malformed, misplaced, or duplicates an ID.
+    """
+
+    files: dict[str, str] = {}
+    if not os.path.isdir(split_dir):
+        return files
+
+    for current_root, _, file_names in os.walk(split_dir):
+        relative_root = os.path.relpath(current_root, split_dir)
+        for file_name in file_names:
+            if not file_name.endswith(suffix):
+                continue
+            if relative_root == "." or os.sep in relative_root:
+                raise ValueError(
+                    f"Malformed Cityscapes {source_name} path: "
+                    f"{os.path.relpath(os.path.join(current_root, file_name), split_dir)}."
+                )
+            sample_id = file_name.removesuffix(suffix)
+            match = CITYSCAPES_SAMPLE_ID_PATTERN.fullmatch(sample_id)
+            if match is None or match.group("city") != relative_root:
+                raise ValueError(f"Malformed Cityscapes {source_name} filename: {file_name}.")
+            if sample_id in files:
+                raise ValueError(f"Duplicate Cityscapes {source_name} sample ID: {sample_id}.")
+            files[sample_id] = os.path.join(current_root, file_name)
+    return files
 
 
 def organize_cityscapes(
+    image_dir: str,
+    annotation_dir: str,
     output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/cityscapes"),
 ) -> None:
-    """Materialize the Hugging Face Cityscapes validation split as lossless PNG pairs.
+    """Install official Cityscapes validation archives as lossless flat PNG pairs.
 
-    Only the validation parquet shards are requested. Images and source-ID masks
-    are installed atomically as flat ``images/`` and ``annotations/`` directories.
+    Only validation RGB images and ``gtFine_labelIds`` masks are selected.
+    Training, test, and auxiliary annotation files remain excluded.
 
     Args:
+        image_dir: Path to ``leftImg8bit_trainvaltest.zip``.
+        annotation_dir: Path to ``gtFine_trainvaltest.zip``.
         output_dir: Directory where the organized validation dataset is stored.
 
     Raises:
-        ValueError: If the source does not contain exactly 500 valid pairs.
+        ValueError: If either source is invalid or does not contain exactly 500 matching pairs.
+        OSError: If extraction, copying, or atomic installation fails.
     """
 
-    dataset = _load_cityscapes_validation()
-    if len(dataset) != CITYSCAPES_VALIDATION_SAMPLE_COUNT:
-        raise ValueError(
-            "Cityscapes validation dataset must contain "
-            f"{CITYSCAPES_VALIDATION_SAMPLE_COUNT} pairs, found {len(dataset)}."
-        )
-
-    output_dir = os.path.abspath(output_dir)
+    image_archive = _validate_cityscapes_zip(image_dir, "image")
+    annotation_archive = _validate_cityscapes_zip(annotation_dir, "annotation")
+    output_dir = os.path.abspath(os.path.expanduser(output_dir))
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".cityscapes-staging-") as staging_dir:
+        extracted_image_dir = os.path.join(staging_dir, "raw-images")
+        extracted_annotation_dir = os.path.join(staging_dir, "raw-annotations")
+        _safe_unpack_archive(image_archive, extracted_image_dir)
+        _safe_unpack_archive(annotation_archive, extracted_annotation_dir)
+        images = _collect_cityscapes_validation_files(
+            os.path.join(extracted_image_dir, "leftImg8bit", "val"),
+            CITYSCAPES_IMAGE_SUFFIX,
+            "image",
+        )
+        annotations = _collect_cityscapes_validation_files(
+            os.path.join(extracted_annotation_dir, "gtFine", "val"),
+            CITYSCAPES_ANNOTATION_SUFFIX,
+            "annotation",
+        )
+        missing_annotations = sorted(images.keys() - annotations.keys())
+        missing_images = sorted(annotations.keys() - images.keys())
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(f"missing annotations for {', '.join(missing_annotations[:3])}")
+            if missing_images:
+                details.append(f"missing images for {', '.join(missing_images[:3])}")
+            raise ValueError(f"Cityscapes validation image/annotation mismatch ({'; '.join(details)}).")
+        if len(images) != CITYSCAPES_VALIDATION_SAMPLE_COUNT:
+            raise ValueError(
+                "Cityscapes validation archives must contain "
+                f"{CITYSCAPES_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
+            )
+
         staged_image_dir = os.path.join(staging_dir, "images")
         staged_annotation_dir = os.path.join(staging_dir, "annotations")
         os.makedirs(staged_image_dir)
         os.makedirs(staged_annotation_dir)
-        for index, row in enumerate(dataset):
-            if not isinstance(row, dict) or "image" not in row or "semantic_segmentation" not in row:
-                raise ValueError("Cityscapes validation rows require `image` and `semantic_segmentation` fields.")
-            image = row["image"]
-            annotation = row["semantic_segmentation"]
-            if not isinstance(image, Image.Image):
-                image = Image.fromarray(image)
-            if not isinstance(annotation, Image.Image):
-                annotation = Image.fromarray(annotation)
-            if image.size != annotation.size:
-                raise ValueError(
-                    f"Cityscapes image and annotation shapes must match at validation index {index}: "
-                    f"{image.size} and {annotation.size}."
-                )
-            stem = f"cityscapes_val_{index:06d}"
-            image.convert("RGB").save(os.path.join(staged_image_dir, f"{stem}.png"), format="PNG")
-            annotation.save(os.path.join(staged_annotation_dir, f"{stem}.png"), format="PNG")
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, f"{sample_id}.png"))
+            shutil.copy2(annotations[sample_id], os.path.join(staged_annotation_dir, f"{sample_id}.png"))
 
         replacements = (
             (staged_image_dir, os.path.join(output_dir, "images")),
@@ -736,7 +820,7 @@ def organize_cityscapes(
             for destination_dir, backup_dir in backups.items():
                 os.replace(backup_dir, destination_dir)
             raise
-    print(f"Constructed Cityscapes validation dataset with {len(dataset)} image/mask pairs")
+    print(f"Constructed Cityscapes validation dataset with {len(images)} image/mask pairs")
 
 
 def _resolve_dotav1_root(dataset_dir: str) -> str:
@@ -826,6 +910,80 @@ def _iter_files(root: str, extensions: Iterable[str]) -> Iterable[str]:
                 yield os.path.join(current_root, file_name)
 
 
+def _safe_archive_member_path(member_name: str, destination: str) -> str:
+    """Return an archive member destination after enforcing staging-directory containment.
+
+    Args:
+        member_name: Path stored in an archive member.
+        destination: Archive extraction directory.
+
+    Returns:
+        Absolute destination path for the member.
+
+    Raises:
+        ValueError: If the member path is absolute or escapes the extraction directory.
+    """
+
+    root = os.path.abspath(destination)
+    target = os.path.abspath(os.path.join(root, member_name))
+    if os.path.commonpath((root, target)) != root:
+        raise ValueError(f"Unsafe archive member path: {member_name!r}.")
+    return target
+
+
+def _safe_unpack_archive(archive_path: str, destination: str) -> None:
+    """Extract an archive while rejecting links, special files, and escaping paths.
+
+    Args:
+        archive_path: ZIP or tar-family dataset archive.
+        destination: Empty staging directory where archive members are written.
+
+    Raises:
+        ValueError: If the archive format or any member is unsafe or unsupported.
+        OSError: If a validated archive cannot be read or written.
+    """
+
+    if zipfile.is_zipfile(archive_path):
+        with zipfile.ZipFile(archive_path) as archive:
+            members = archive.infolist()
+            for member in members:
+                _safe_archive_member_path(member.filename, destination)
+                file_type = stat.S_IFMT(member.external_attr >> 16)
+                if file_type and not (stat.S_ISREG(file_type) or stat.S_ISDIR(file_type)):
+                    raise ValueError(f"Unsafe archive member type: {member.filename!r}.")
+            for member in members:
+                target = _safe_archive_member_path(member.filename, destination)
+                if member.is_dir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with archive.open(member) as source, open(target, "wb") as output_file:
+                    shutil.copyfileobj(source, output_file)
+        return
+
+    if tarfile.is_tarfile(archive_path):
+        with tarfile.open(archive_path) as archive:
+            members = archive.getmembers()
+            for member in members:
+                _safe_archive_member_path(member.name, destination)
+                if not (member.isfile() or member.isdir()):
+                    raise ValueError(f"Unsafe archive member type: {member.name!r}.")
+            for member in members:
+                target = _safe_archive_member_path(member.name, destination)
+                if member.isdir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ValueError(f"Unable to read archive member: {member.name!r}.")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with source, open(target, "wb") as output_file:
+                    shutil.copyfileobj(source, output_file)
+        return
+
+    raise ValueError(f"Unsupported archive format: {archive_path}.")
+
+
 def _write_dotav1_yolo_labels(image_path: str, original_label_path: str, output_path: str) -> None:
     """Converts one official DOTAv1 label file into normalized OBB label format."""
 
@@ -869,8 +1027,8 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
     with TemporaryDirectory() as extract_dir:
         image_dir = os.path.join(extract_dir, "images")
         label_dir = os.path.join(extract_dir, "labels")
-        shutil.unpack_archive(image_archive, image_dir)
-        shutil.unpack_archive(label_archive, label_dir)
+        _safe_unpack_archive(image_archive, image_dir)
+        _safe_unpack_archive(label_archive, label_dir)
 
         labels = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(label_dir, [".txt"])}
         if not labels:
@@ -1041,7 +1199,7 @@ def organize_dotav1(
 
         if local_dataset_path.endswith(".zip"):
             print("Unpacking DOTAv1 files to temporary directory...")
-            shutil.unpack_archive(local_dataset_path, temp_dir)
+            _safe_unpack_archive(local_dataset_path, temp_dir)
             print("Unpacking completed")
             construct_dotav1(temp_dir, output_dir)
             return

@@ -29,7 +29,8 @@ dependencies = [
     "tqdm",
     "mblt-tracker>=1.0.1",
     "PyYAML",
-    "datasets>=3.2.0,<=3.6.0",
+    "matplotlib",
+    "cityscapesScripts",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -63,6 +64,7 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 [project.optional-dependencies]
 transformers = [
     "transformers[serving]>=4.54.0, <=5.12.1",
+    "datasets>=3.2.0,<=3.6.0",
     "sentencepiece",
     "torchvision",
 ]
@@ -114,7 +116,6 @@ dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "jiwer>=3.0.0",
-    "matplotlib",
     "librosa>=0.11.0, <=0.11.0",
     "numba>=0.60.0, <=0.60.0",
     "hf_xet",

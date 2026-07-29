@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import io
+import runpy
+import sys
+import tarfile
 import zipfile
 from argparse import Namespace
 from pathlib import Path
@@ -19,6 +23,7 @@ from mblt_model_zoo.cli.val import (
     _dataset_ready,
     _default_data_path_for_task,
     _ensure_dataset,
+    _resolve_cityscapes_sources,
     _resolve_coco_sources,
     _run_validation,
 )
@@ -115,6 +120,12 @@ def test_vision_dataset_registry_selects_semantic_taxonomies() -> None:
     cityscapes = get_dataset_config_for_task("semantic_segmentation", "cityscapes")
     assert cityscapes["name"] == "cityscapes"
     assert cityscapes["category_ids"] == [7, 8, 11, 12, 13, 17, *range(19, 29), 31, 32, 33]
+    assert cityscapes["download"] == {
+        "type": "cityscapes",
+        "source": "https://github.com/mcordts/cityscapesScripts",
+        "images_archive": "leftImg8bit_trainvaltest.zip",
+        "annotations_archive": "gtFine_trainvaltest.zip",
+    }
     assert len(get_dataset_class_names("cityscapes")) == 19
     assert get_dataset_config_for_task("semantic_segmentation")["name"] == "ade20k"
 
@@ -497,13 +508,13 @@ def test_cli_val_organizes_selected_semantic_taxonomy(
 ) -> None:
     """Invoke only the organizer belonging to the selected semantic taxonomy."""
 
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     def _fake_cityscapes(**kwargs: object) -> None:
-        calls.append("cityscapes")
+        calls.append(("cityscapes", kwargs))
 
     def _fake_ade20k(**kwargs: object) -> None:
-        calls.append("ade20k")
+        calls.append(("ade20k", kwargs))
 
     import mblt_model_zoo.vision.utils.datasets as dataset_utils
 
@@ -512,12 +523,98 @@ def test_cli_val_organizes_selected_semantic_taxonomy(
     args = Namespace(
         data_path=str(tmp_path / taxonomy),
         force_organize=False,
-        image_dir=None,
-        annotation_dir=None,
+        image_dir=str(tmp_path / "leftImg8bit_trainvaltest.zip"),
+        annotation_dir=str(tmp_path / "gtFine_trainvaltest.zip"),
     )
 
     assert _ensure_dataset(args, "semantic_segmentation", taxonomy) == str(tmp_path / taxonomy)
-    assert calls == [taxonomy]
+    assert calls[0][0] == taxonomy
+    if taxonomy == "cityscapes":
+        assert calls[0][1] == {
+            "image_dir": str(tmp_path / "leftImg8bit_trainvaltest.zip"),
+            "annotation_dir": str(tmp_path / "gtFine_trainvaltest.zip"),
+            "output_dir": str(tmp_path / taxonomy),
+        }
+
+
+def test_cli_val_discovers_cityscapes_archives_near_output(tmp_path: Path) -> None:
+    """Discover both official ZIP filenames beside the organized dataset path."""
+
+    data_path = tmp_path / "datasets" / "cityscapes"
+    data_path.parent.mkdir()
+    image_archive = data_path.parent / "leftImg8bit_trainvaltest.zip"
+    annotation_archive = data_path.parent / "gtFine_trainvaltest.zip"
+    image_archive.touch()
+    annotation_archive.touch()
+    args = Namespace(image_dir=None, annotation_dir=None, force_organize=False)
+
+    assert _resolve_cityscapes_sources(args, str(data_path)) == (str(image_archive), str(annotation_archive))
+
+
+def test_cli_val_cityscapes_sources_allow_explicit_paths() -> None:
+    """Route explicit Cityscapes archive paths without requiring discovery."""
+
+    args = Namespace(image_dir="/raw/images.zip", annotation_dir="/raw/annotations.zip", force_organize=True)
+
+    assert _resolve_cityscapes_sources(args, "/organized/cityscapes") == (
+        "/raw/images.zip",
+        "/raw/annotations.zip",
+    )
+
+
+def test_cli_val_cityscapes_sources_report_download_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explain how to obtain both manually gated Cityscapes packages."""
+
+    import mblt_model_zoo.cli.val as val_module
+
+    monkeypatch.setattr(val_module, "_candidate_search_roots", lambda data_path: [Path(data_path)])
+    args = Namespace(image_dir=None, annotation_dir=None, force_organize=False)
+
+    with pytest.raises(SystemExit, match=r"csDownload -d <download-dir> gtFine_trainvaltest\.zip"):
+        _resolve_cityscapes_sources(args, str(tmp_path / "cityscapes"))
+
+
+def test_standalone_cityscapes_organizer_routes_required_archives(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pass standalone organizer arguments through to the public API."""
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_organize_cityscapes(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    import mblt_model_zoo.vision.utils.datasets as dataset_utils
+
+    monkeypatch.setattr(dataset_utils, "organize_cityscapes", _fake_organize_cityscapes)
+    script_path = Path(__file__).parents[2] / "benchmark" / "vision" / "organize_cityscapes.py"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(script_path),
+            "--image-dir",
+            "/raw/leftImg8bit_trainvaltest.zip",
+            "--annotation-dir",
+            "/raw/gtFine_trainvaltest.zip",
+            "--output-dir",
+            str(tmp_path / "cityscapes"),
+        ],
+    )
+
+    runpy.run_path(str(script_path), run_name="__main__")
+
+    assert calls == [
+        {
+            "image_dir": "/raw/leftImg8bit_trainvaltest.zip",
+            "annotation_dir": "/raw/gtFine_trainvaltest.zip",
+            "output_dir": str(tmp_path / "cityscapes"),
+        }
+    ]
 
 
 def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
@@ -545,6 +642,51 @@ def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) ->
         archive.write(label_source, "labelTxt/P0002.txt")
 
     with pytest.raises(ValueError, match="DOTAv1 archive stem mismatch"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+
+def test_google_drive_dotav1_archives_reject_traversal_members(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reject tar members that would write outside the temporary extraction tree."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.tar"
+    label_archive = tmp_path / "labelTxt.tar"
+    outside_marker = tmp_path / "outside-marker.txt"
+    with tarfile.open(image_archive, "w") as archive:
+        archive.add(image_source, arcname="images/P0001.png")
+        traversal = tarfile.TarInfo(str(outside_marker))
+        traversal.size = len(b"outside")
+        archive.addfile(traversal, io.BytesIO(b"outside"))
+    with tarfile.open(label_archive, "w") as archive:
+        archive.add(label_source, arcname="labelTxt/P0001.txt")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    with pytest.raises(ValueError, match="Unsafe archive member path"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+    assert not outside_marker.exists()
+
+
+def test_google_drive_dotav1_archives_reject_link_members(tmp_path: Path) -> None:
+    """Reject tar symlinks before archive extraction can follow them."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    image_archive = tmp_path / "part1.tar"
+    label_archive = tmp_path / "labelTxt.tar"
+    with tarfile.open(image_archive, "w") as archive:
+        archive.add(image_source, arcname="images/P0001.png")
+        link = tarfile.TarInfo("images/link.png")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside-marker.txt"
+        archive.addfile(link)
+    with tarfile.open(label_archive, "w"):
+        pass
+
+    with pytest.raises(ValueError, match="Unsafe archive member type"):
         construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
 
 

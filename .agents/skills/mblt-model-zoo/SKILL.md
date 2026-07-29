@@ -34,8 +34,8 @@ description: >-
   alone.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - Preserve ADE20K's `0` ignore label and `1..150` to `0..149` validation mapping; report mIoU before pixel accuracy.
-- Preserve Cityscapes's 500 validation-only lossless PNG pairs and canonical 19-class source-ID mapping; never request
-  its train or test shards.
+- Preserve Cityscapes's 500 validation-only lossless PNG pairs from the two official train/validation/test ZIP
+  packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

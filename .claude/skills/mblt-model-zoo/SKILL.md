@@ -17,8 +17,8 @@ ADE20K organization preserves its 2,000 validation image/mask pairs as flat `ima
 directories.
 ADE20K validation ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU before pixel
 accuracy.
-Cityscapes organization retains only 500 validation samples from `Chris1/cityscapes`, maps its canonical 19 source
-IDs to train IDs, and never requests train or test shards.
+Cityscapes organization retains only 500 paired validation images and `gtFine_labelIds` masks from the official ZIP
+packages, maps its canonical 19 source IDs to train IDs, and never installs train or test data.
 
 Use the focused entry points for Vision and Transformers work:
 

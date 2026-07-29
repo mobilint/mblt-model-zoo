@@ -82,9 +82,7 @@ def _default_cache_dir() -> str:
         test_file.unlink(missing_ok=True)
         return str(preferred)
     except OSError:
-        fallback = Path(tempfile.gettempdir()) / "mblt_model_zoo"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return str(fallback)
+        return tempfile.mkdtemp(prefix="mblt_model_zoo-", dir=tempfile.gettempdir())
 
 
 MOBILINT_CACHE_DIR = _default_cache_dir()

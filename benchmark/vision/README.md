@@ -339,18 +339,44 @@ python benchmark/vision/organize_nyu_depth.py \
 
 ## Organize Cityscapes Dataset
 
-The Cityscapes organizer loads only the 500 validation samples from the explicit
-`Chris1/cityscapes` validation parquet shards. It writes lossless, flat PNG pairs and keeps source label IDs in the
-organized masks; the validation loader maps the 19 canonical source IDs to train IDs and treats every other ID as
-`255`.
+Register at the [Cityscapes dataset website](https://www.cityscapes-dataset.com/) and use the `csDownload` command
+installed by `cityscapesScripts` to download the two official train/validation/test ZIP packages:
+
+```bash
+csDownload -d <download-dir> gtFine_trainvaltest.zip leftImg8bit_trainvaltest.zip
+```
+
+The organizer reads only the 500 validation RGB images and matching `gtFine_labelIds` masks. It excludes train/test
+files and auxiliary color, instance-ID, polygon, and train-ID annotations, then copies each PNG losslessly into the
+flat validation layout:
 
 ```bash
 python benchmark/vision/organize_cityscapes.py \
+  --image-dir <download-dir>/leftImg8bit_trainvaltest.zip \
+  --annotation-dir <download-dir>/gtFine_trainvaltest.zip \
   --output-dir ~/.mblt_model_zoo/datasets/cityscapes
+```
 
+```text
+~/.mblt_model_zoo/datasets/cityscapes/
+├── images/
+│   ├── frankfurt_000000_000294.png
+│   └── ...
+└── annotations/
+    ├── frankfurt_000000_000294.png
+    └── ...
+```
+
+The organized masks retain source label IDs; the validation loader maps the 19 canonical source IDs to train IDs and
+treats every other ID as `255`. The validation CLI discovers the two official archive filenames in the dataset
+directory, its parent, or the current working directory. You can also pass them explicitly:
+
+```bash
 mblt-model-zoo val \
   --model yolo26n-sem \
   --framework onnx \
+  --image-dir <download-dir>/leftImg8bit_trainvaltest.zip \
+  --annotation-dir <download-dir>/gtFine_trainvaltest.zip \
   --data-path ~/.mblt_model_zoo/datasets/cityscapes
 ```
 

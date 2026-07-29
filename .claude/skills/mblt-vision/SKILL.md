@@ -21,5 +21,5 @@ ADE20K organization preserves its 2,000 validation image/mask pairs as flat `ima
 directories.
 ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports
 mIoU before pixel accuracy.
-Cityscapes semantic validation uses only its 500 validation samples, canonical 19-class source-ID mapping, and `255`
-ignore padding independently from ADE20K.
+Cityscapes semantic validation uses only 500 paired validation images and `gtFine_labelIds` masks from the official
+ZIP packages, the canonical 19-class source-ID mapping, and `255` ignore padding independently from ADE20K.

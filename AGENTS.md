@@ -95,8 +95,9 @@ truth when this snapshot becomes stale.
   under its output root.
 - Keep the ADE20K organizer validation-only: install its 2,000 paired samples as flat `images/` and `annotations/`
   directories, along with its source metadata files.
-- Keep the Cityscapes organizer validation-only: load only the 500 `Chris1/cityscapes` validation parquet samples and
-  install lossless flat `images/` and `annotations/` PNG pairs.
+- Keep the Cityscapes organizer ZIP-only and validation-only: select exactly 500 paired images and `gtFine_labelIds`
+  masks from the official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` packages, then install lossless
+  flat `images/` and `annotations/` PNG pairs.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
   `abs_rel` and `rmse` as auxiliary metrics.

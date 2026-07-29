@@ -163,6 +163,52 @@ def _validate_subset_size(subset_size: int) -> None:
         raise ValueError("subset_size must be greater than zero.")
 
 
+def _validate_calibration_image(image_path: Path, dataset_root: Path) -> Path:
+    """Resolve and validate a calibration image within its dataset root.
+
+    Args:
+        image_path: Candidate calibration image path.
+        dataset_root: Resolved organized dataset root.
+
+    Returns:
+        Resolved regular image path.
+
+    Raises:
+        ValueError: If the candidate is a symlink, not a regular image, or escapes the dataset root.
+    """
+
+    if image_path.is_symlink():
+        raise ValueError(f"Calibration image must not be a symlink: {image_path}.")
+    try:
+        source = image_path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve calibration image {image_path}: {exc}.") from exc
+    if not source.is_file() or source.suffix.lower() not in IMAGE_SUFFIXES:
+        raise ValueError(f"Calibration image must be a supported regular image file: {image_path}.")
+    if not source.is_relative_to(dataset_root):
+        raise ValueError(f"Calibration image must remain within dataset root: {image_path}.")
+    return source
+
+
+def _selectable_calibration_images(paths: Sequence[Path], dataset_root: Path) -> list[Path]:
+    """Validate supported image candidates before they enter subset sampling.
+
+    Args:
+        paths: Candidate filesystem paths.
+        dataset_root: Resolved organized dataset root.
+
+    Returns:
+        Validated candidate paths, retaining their original names for stable sampling.
+    """
+
+    images: list[Path] = []
+    for path in paths:
+        if path.suffix.lower() in IMAGE_SUFFIXES and (path.is_symlink() or path.is_file()):
+            _validate_calibration_image(path, dataset_root)
+            images.append(path)
+    return images
+
+
 def select_calibration_images(
     task: str,
     data_path: str | Path,
@@ -192,6 +238,7 @@ def select_calibration_images(
 
     normalized_task = _normalize_task(task)
     root = Path(data_path).expanduser()
+    resolved_root = root.resolve()
     requested_size = DEFAULT_SUBSET_SIZES[normalized_task] if subset_size is None else subset_size
     _validate_subset_size(requested_size)
     random_generator = random.Random(seed)
@@ -206,9 +253,7 @@ def select_calibration_images(
             raise ValueError(f"No {dataset_name} category directories found in {category_root}.")
         selected: list[Path] = []
         for category_dir in category_dirs:
-            images = sorted(
-                path for path in category_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-            )
+            images = _selectable_calibration_images(sorted(category_dir.iterdir()), resolved_root)
             if requested_size > len(images):
                 raise ValueError(
                     f"subset_size ({requested_size}) exceeds the {len(images)} available images in {category_dir.name}."
@@ -222,11 +267,7 @@ def select_calibration_images(
         "pose_estimation": root / "val2017",
         "obb": root / "images",
     }[normalized_task]
-    images = (
-        sorted(path for path in image_dir.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES)
-        if image_dir.is_dir()
-        else []
-    )
+    images = _selectable_calibration_images(sorted(image_dir.rglob("*")), resolved_root) if image_dir.is_dir() else []
     if not images:
         raise ValueError(f"No calibration images found in {image_dir}.")
     if requested_size > len(images):
@@ -251,11 +292,8 @@ def copy_calibration_subset(images: Sequence[Path], data_path: str | Path, outpu
     destination.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
     for image_path in images:
-        source = image_path.resolve()
-        try:
-            relative_name = source.relative_to(root).as_posix()
-        except ValueError:
-            relative_name = source.as_posix()
+        source = _validate_calibration_image(image_path, root)
+        relative_name = source.relative_to(root).as_posix()
         digest = hashlib.sha256(relative_name.encode()).hexdigest()[:12]
         target = destination / f"{digest}_{source.name}"
         if target.exists():

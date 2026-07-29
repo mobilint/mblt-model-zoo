@@ -1,4 +1,5 @@
-# Cityscapes validation taxonomy sourced from Hugging Face. Organized paths are relative to `path`.
+# Cityscapes validation taxonomy from the official train/validation/test archives.
+# Organized paths are relative to `path`.
 name: cityscapes
 path: ~/.mblt_model_zoo/datasets/cityscapes
 val: images
@@ -47,7 +48,7 @@ palette:
   17: [0, 0, 230]
   18: [119, 11, 32]
 download:
-  type: huggingface
-  repo_id: Chris1/cityscapes
-  data_files: data/validation-*.parquet
-  split: validation
+  type: cityscapes
+  source: https://github.com/mcordts/cityscapesScripts
+  images_archive: leftImg8bit_trainvaltest.zip
+  annotations_archive: gtFine_trainvaltest.zip
