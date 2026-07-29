@@ -1013,6 +1013,20 @@ def _energy_from_device_time_series(device_time_series: dict[str, list[dict[str,
     return _energy_from_device_time_series_common(device_time_series)
 
 
+def _vision_efficiency_metrics(
+    vision_energy_j: Sequence[float], batch_size: int
+) -> tuple[list[float], list[float]]:
+    """Return (vision_img_per_j, vision_j_per_img) scaled by ``batch_size``.
+
+    A single ``measure_vision`` invocation processes ``batch_size`` images under
+    one energy tracker window, so the raw joules figure covers the whole batch.
+    """
+    bs = max(1, int(batch_size))
+    img_per_j = [bs / e for e in vision_energy_j if e > 0]
+    j_per_img = [e / bs for e in vision_energy_j]
+    return img_per_j, j_per_img
+
+
 def _weighted_two(
     a: Optional[float],
     a_weight: float,
@@ -2144,8 +2158,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     decode_j_per_tok = [
         r.llm.decode_j_per_token for r in runs if getattr(r.llm, "decode_j_per_token", None) is not None
     ]
-    vision_img_per_j = [1.0 / e for e in vision_energy_j if e > 0]
-    vision_j_per_img = list(vision_energy_j)
+    vision_img_per_j, vision_j_per_img = _vision_efficiency_metrics(vision_energy_j, batch_size)
 
     values_by_key: dict[str, Sequence[float]] = {
         "vision_encode": vision_ms,
@@ -2252,9 +2265,11 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         dmetric = device_metrics[idx] if idx < len(device_metrics) else {}
         vision_e = dmetric.get("vision_energy_j")
         if vision_e is not None:
-            run.vision_energy_j = float(vision_e)
-            run.vision_img_per_j = 1.0 / float(vision_e) if float(vision_e) > 0 else 0.0
-            run.vision_j_per_img = float(vision_e)
+            vision_e_f = float(vision_e)
+            run.vision_energy_j = vision_e_f
+            bs = max(1, int(batch_size))
+            run.vision_img_per_j = bs / vision_e_f if vision_e_f > 0 else 0.0
+            run.vision_j_per_img = vision_e_f / bs
         llm_e = dmetric.get("llm_energy_j")
         if llm_e is not None:
             run.llm_total_energy_j = float(llm_e)
@@ -2912,9 +2927,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                         vision_power_avg.append(avg_power_f)
                     energy = _energy_from_device_time_series(device_time_series)
                     if energy is not None:
+                        bs = max(1, int(batch_size))
                         vision_energy_j.append(energy)
-                        vision_img_per_j.append(1.0 / energy if energy > 0 else 0.0)
-                        vision_j_per_img.append(energy)
+                        vision_img_per_j.append(bs / energy if energy > 0 else 0.0)
+                        vision_j_per_img.append(energy / bs)
                     if p99_power is not None:
                         vision_power_p99.append(float(p99_power))
                     if avg_utilization is not None:
