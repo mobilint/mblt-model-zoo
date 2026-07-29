@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
-from typing import Any, TypeAlias, TypeGuard, overload
+from typing import Any, TypeGuard, overload
 
 import cv2
 import numpy as np
@@ -12,8 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from ..datasets import get_coco_inv, get_dotav1_label
-
-RatioPad: TypeAlias = tuple[tuple[float, float], tuple[float, float]]
+from ..letterbox import LetterBoxGeometry, RatioPad
 
 
 def _is_ratio_pad(value: object) -> TypeGuard[RatioPad]:
@@ -781,16 +780,12 @@ def compute_ratio_pad(
     Returns:
         tuple: (gain, pad) where gain is the scaling factor and pad is the (x, y) padding.
     """
-    if ratio_pad is None:  # calculate from img0_shape
-        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-        pad = (
-            round((img1_shape[1] - round(img0_shape[1] * gain)) / 2 - 0.1),
-            round((img1_shape[0] - round(img0_shape[0] * gain)) / 2 - 0.1),
-        )  # wh padding
-    else:
+    if ratio_pad is not None:
         gain = ratio_pad[0][0]
         pad = ratio_pad[1]
-    return gain, pad
+        return gain, pad
+    geometry = LetterBoxGeometry.from_shapes(img1_shape, img0_shape)
+    return geometry.ratio, geometry.pad
 
 
 @overload

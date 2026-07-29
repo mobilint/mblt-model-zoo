@@ -7,7 +7,8 @@ from typing import Any
 
 import torch
 
-from .common import RatioPad, compute_ratio_pad, normalize_ratio_pads
+from ..letterbox import LetterBoxGeometry, RatioPad
+from .common import normalize_ratio_pads
 
 
 def get_letterbox_input_shape(
@@ -40,8 +41,7 @@ def resolve_ratio_pads(
         if pad is not None:
             resolved.append(pad)
             continue
-        gain, offset = compute_ratio_pad(input_shape, shape)
-        resolved.append(((gain, gain), offset))
+        resolved.append(LetterBoxGeometry.from_shapes(input_shape, shape).ratio_pad)
     return resolved
 
 
@@ -54,18 +54,10 @@ def crop_letterbox(
 ) -> torch.Tensor:
     """Crop letterbox padding from a dense two-dimensional output."""
 
-    ratio, pad = ratio_pad
-    del ratio
-    output_height, output_width = output.shape
-    scale_x = output_width / input_shape[1]
-    scale_y = output_height / input_shape[0]
-    left = int(round(pad[0] * scale_x))
-    top = int(round(pad[1] * scale_y))
-    original_height, original_width = shape
-    resize_ratio = min(input_shape[0] / original_height, input_shape[1] / original_width)
-    unpadded_width = int(round(original_width * resize_ratio * scale_x))
-    unpadded_height = int(round(original_height * resize_ratio * scale_y))
-    cropped = output[top : top + unpadded_height, left : left + unpadded_width]
+    geometry = LetterBoxGeometry.from_shapes(input_shape, shape)
+    output_shape = (int(output.shape[0]), int(output.shape[1]))
+    top, bottom, left, right = geometry.crop_bounds(output_shape, pad=ratio_pad[1])
+    cropped = output[top:bottom, left:right]
     if cropped.numel() == 0:
         raise ValueError(f"{task_name} letterbox restoration produced an empty crop.")
     return cropped

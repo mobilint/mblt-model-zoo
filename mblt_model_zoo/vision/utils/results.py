@@ -25,6 +25,7 @@ from .datasets import (
     get_dotav1_palette,
     get_imagenet_label,
 )
+from .letterbox import LetterBoxGeometry
 from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks, scale_rboxes, xywhr2xyxyxyxy
 from .types import ListTensorLike, NestedListTensorLike, TensorLike
 
@@ -274,47 +275,33 @@ class Results:
     def _restore_semantic_map(self, class_map: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
         """Undo the configured letterbox transform using nearest-neighbor interpolation."""
 
-        letterbox_cfg = self.pre_cfg.get("LetterBox", {})
-        input_shape = letterbox_cfg.get("img_size")
-        if not isinstance(input_shape, list) or len(input_shape) != 2:
-            return cv2.resize(class_map, (image_shape[1], image_shape[0]), interpolation=cv2.INTER_NEAREST)
-        input_height, input_width = int(input_shape[0]), int(input_shape[1])
-        image_height, image_width = image_shape
-        ratio = min(input_height / image_height, input_width / image_width)
-        unpadded_width = int(round(image_width * ratio))
-        unpadded_height = int(round(image_height * ratio))
-        left = int(round((input_width - unpadded_width) / 2 - 0.1))
-        top = int(round((input_height - unpadded_height) / 2 - 0.1))
-        scale_x, scale_y = class_map.shape[1] / input_width, class_map.shape[0] / input_height
-        cropped = class_map[
-            int(round(top * scale_y)) : int(round((top + unpadded_height) * scale_y)),
-            int(round(left * scale_x)) : int(round((left + unpadded_width) * scale_x)),
-        ]
-        if cropped.size == 0:
-            raise ValueError("Semantic letterbox restoration produced an empty crop.")
-        return cv2.resize(cropped, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
+        return self._restore_dense_map(class_map, image_shape, cv2.INTER_NEAREST, "Semantic")
 
     def _restore_depth_map(self, depth: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
         """Undo the configured letterbox transform and resize a depth map to an image."""
 
+        return self._restore_dense_map(depth, image_shape, cv2.INTER_LINEAR, "Depth")
+
+    def _restore_dense_map(
+        self,
+        output: np.ndarray,
+        image_shape: tuple[int, int],
+        interpolation: int,
+        task_name: str,
+    ) -> np.ndarray:
+        """Undo configured letterboxing for a dense two-dimensional output."""
+
         letterbox_cfg = self.pre_cfg.get("LetterBox", {})
         input_shape = letterbox_cfg.get("img_size")
         if not isinstance(input_shape, list) or len(input_shape) != 2:
-            return cv2.resize(depth, (image_shape[1], image_shape[0]), interpolation=cv2.INTER_LINEAR)
-        input_height, input_width = int(input_shape[0]), int(input_shape[1])
-        image_height, image_width = image_shape
-        ratio = min(input_height / image_height, input_width / image_width)
-        unpadded_width, unpadded_height = int(round(image_width * ratio)), int(round(image_height * ratio))
-        left = int(round((input_width - unpadded_width) / 2 - 0.1))
-        top = int(round((input_height - unpadded_height) / 2 - 0.1))
-        scale_x, scale_y = depth.shape[1] / input_width, depth.shape[0] / input_height
-        cropped = depth[
-            int(round(top * scale_y)) : int(round((top + unpadded_height) * scale_y)),
-            int(round(left * scale_x)) : int(round((left + unpadded_width) * scale_x)),
-        ]
+            return cv2.resize(output, (image_shape[1], image_shape[0]), interpolation=interpolation)
+        geometry = LetterBoxGeometry.from_shapes((int(input_shape[0]), int(input_shape[1])), image_shape)
+        output_shape = (int(output.shape[0]), int(output.shape[1]))
+        top, bottom, left, right = geometry.crop_bounds(output_shape)
+        cropped = output[top:bottom, left:right]
         if cropped.size == 0:
-            raise ValueError("Depth letterbox restoration produced an empty crop.")
-        return cv2.resize(cropped, (image_width, image_height), interpolation=cv2.INTER_LINEAR)
+            raise ValueError(f"{task_name} letterbox restoration produced an empty crop.")
+        return cv2.resize(cropped, (image_shape[1], image_shape[0]), interpolation=interpolation)
 
     def _plot_image_classification(
         self,

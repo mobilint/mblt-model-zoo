@@ -14,6 +14,7 @@ import torch
 from faster_coco_eval import COCO
 from PIL import Image
 
+from ..preprocess.letterbox import letterbox_semantic_mask
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 
 
@@ -329,24 +330,12 @@ def get_ade20k_loader(
             ratio_pad = metadata.get("ratio_pad")
             if ratio_pad is None:
                 raise ValueError("ADE20K preprocessing requires LetterBox ratio_pad metadata.")
-            ratio, pad = ratio_pad
-            resized_width = int(round(target.shape[1] * ratio[0]))
-            resized_height = int(round(target.shape[0] * ratio[1]))
-            resized_target = cv2.resize(target, (resized_width, resized_height), interpolation=cv2.INTER_NEAREST)
-            left, top = int(round(pad[0])), int(round(pad[1]))
-            right = input_width - resized_width - left
-            bottom = input_height - resized_height - top
-            if min(left, top, right, bottom) < 0:
-                raise ValueError("ADE20K letterbox metadata produced negative mask padding.")
-            processed_target = cv2.copyMakeBorder(
-                resized_target,
-                top,
-                bottom,
-                left,
-                right,
-                cv2.BORDER_CONSTANT,
-                value=255,
+            processed_target, target_ratio_pad = letterbox_semantic_mask(
+                target,
+                [input_height, input_width],
             )
+            if target_ratio_pad != ratio_pad:
+                raise ValueError("ADE20K image and mask LetterBox geometry do not match.")
             processed_images.append(processed_image)
             processed_targets.append(processed_target)
             ratio_pads.append(ratio_pad)
@@ -457,24 +446,12 @@ def get_cityscapes_loader(
             ratio_pad = metadata.get("ratio_pad")
             if ratio_pad is None:
                 raise ValueError("Cityscapes preprocessing requires LetterBox ratio_pad metadata.")
-            ratio, pad = ratio_pad
-            resized_width = int(round(target.shape[1] * ratio[0]))
-            resized_height = int(round(target.shape[0] * ratio[1]))
-            resized_target = cv2.resize(target, (resized_width, resized_height), interpolation=cv2.INTER_NEAREST)
-            left, top = int(round(pad[0])), int(round(pad[1]))
-            right = input_width - resized_width - left
-            bottom = input_height - resized_height - top
-            if min(left, top, right, bottom) < 0:
-                raise ValueError("Cityscapes letterbox metadata produced negative mask padding.")
-            processed_target = cv2.copyMakeBorder(
-                resized_target,
-                top,
-                bottom,
-                left,
-                right,
-                cv2.BORDER_CONSTANT,
-                value=255,
+            processed_target, target_ratio_pad = letterbox_semantic_mask(
+                target,
+                [input_height, input_width],
             )
+            if target_ratio_pad != ratio_pad:
+                raise ValueError("Cityscapes image and mask LetterBox geometry do not match.")
             processed_images.append(processed_image)
             processed_targets.append(processed_target)
             ratio_pads.append(ratio_pad)
