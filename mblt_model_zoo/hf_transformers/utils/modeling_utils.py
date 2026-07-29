@@ -1142,12 +1142,27 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                         ).reshape([active, 1, vocab]),
                     )
                 else:
+                    hint = ""
+                    if n_rows == 1 and active > 1:
+                        # A non-batched compiled MXQ collapses the packed
+                        # tokens into one sequence and emits a single
+                        # last-row logit. This is the classic "wrong mxq"
+                        # symptom — surface it plainly so callers know to
+                        # point at a batched build.
+                        hint = (
+                            " This shape is what a batch=1 compiled MXQ "
+                            "emits when it receives packed batched inputs; "
+                            "point the text backend at a batch-compiled "
+                            "MXQ (e.g. via `--text-mxq-path`) whose "
+                            "input shape declares dynamic tokens on the "
+                            "batch/sequence axis."
+                        )
                     raise RuntimeError(
                         f"Unexpected batched MXQ output row count {n_rows} "
                         f"(vocab={vocab}, raw size={raw_arr.size}) for "
                         f"active={active}, total_tokens={total_tokens}: "
                         f"expected {active} (per-item last row) or "
-                        f"{total_tokens} (per-token flat)."
+                        f"{total_tokens} (per-token flat).{hint}"
                     )
 
                 if debug_enabled:
