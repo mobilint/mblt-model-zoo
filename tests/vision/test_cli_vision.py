@@ -1325,16 +1325,20 @@ def test_dota_evaluator_reports_map50_and_map5095() -> None:
     assert result.secondary_score == result.map50
 
 
-def test_metric_results_order_primary_before_secondary() -> None:
-    """Keep tuple ordering aligned with public primary and secondary metrics."""
+def test_metric_results_preserve_tuple_compatibility() -> None:
+    """Keep legacy tuple fields while exposing primary and secondary metrics."""
 
     imagenet_result = ImageNetResult(top1=0.75, top5=0.95)
-    dota_result = DOTAResult(map5095=0.45, map50=0.7)
+    dota_result = DOTAResult(0.7, 0.45)
 
     assert tuple(imagenet_result) == (0.75, 0.95)
     assert imagenet_result.primary_score == imagenet_result.top1
     assert imagenet_result.secondary_score == imagenet_result.top5
-    assert tuple(dota_result) == (0.45, 0.7)
+    assert tuple(dota_result) == (0.7, 0.45)
+    assert dota_result.map50 == 0.7
+    assert dota_result.map5095 == 0.45
+    assert dota_result.primary_score == dota_result.map5095
+    assert dota_result.secondary_score == dota_result.map50
 
 
 def test_dota_matching_uses_one_to_one_duplicates() -> None:

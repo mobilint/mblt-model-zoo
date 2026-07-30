@@ -30,10 +30,10 @@ DOTAV1_CLASS_TO_IDX = {get_dotav1_label(index): index for index in range(get_dot
 
 
 class DOTAResult(NamedTuple):
-    """DOTAv1 rotated detection metrics ordered from primary to secondary."""
+    """DOTAv1 rotated detection metrics in the legacy tuple order."""
 
-    map5095: float
     map50: float
+    map5095: float
 
     @property
     def primary_score(self) -> float:
