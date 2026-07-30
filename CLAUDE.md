@@ -14,8 +14,8 @@
 - When the CLI changes, keep parser `-h`/`--help` text and the README CLI guide synchronized; check
   the root help and each affected subcommand help output.
 - NYU Depth organization installs only its 654 validation image/depth pairs as `images/` and `depth/` at the output root.
-- NYU Depth evaluation uses stretched inputs, per-image median alignment, and pooled valid-pixel statistics; `delta1`
-  is its primary score, with `abs_rel` and `rmse` also reported.
+- NYU Depth evaluation uses stretched inputs, per-image median alignment, and pooled target-valid-pixel statistics;
+  it rejects non-finite predictions at those pixels and reports `delta1`, `abs_rel`, and `rmse`.
 - `eval_imagenet()` returns Top-1 as a float for compatibility; `eval_imagenet_metrics()` exposes
   structured Top-1 primary and Top-5 secondary metrics.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.

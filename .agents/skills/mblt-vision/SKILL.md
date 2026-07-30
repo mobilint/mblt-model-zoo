@@ -56,8 +56,8 @@ description: >-
 
 - Preserve the NYU Depth organizer's 654 validation pairs as `images/` and `depth/` at the output
   root. For NYU Depth V2 evaluation, stretch inputs and targets to the configured model size,
-  median-align each prediction, pool valid pixels, return `delta1` as the primary metric, and
-  report `abs_rel` and `rmse` for diagnosis.
+  reject non-finite predictions at target-valid pixels before median alignment, pool those target-valid
+  pixels, return `delta1` as the primary metric, and report `abs_rel` and `rmse` for diagnosis.
 - Keep `eval_imagenet()` returning Top-1 as a float for compatibility, and use
   `eval_imagenet_metrics()` when structured Top-1 primary and Top-5 secondary metrics are needed.
   For DOTAv1, return rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.

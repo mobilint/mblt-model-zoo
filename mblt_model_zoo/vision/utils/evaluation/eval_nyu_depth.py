@@ -47,12 +47,17 @@ class NYUDepthMetricAccumulator:
             raise ValueError(
                 f"NYU Depth prediction and target shapes must match, got {prediction.shape} and {target.shape}."
             )
-        valid = np.isfinite(prediction) & np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
+        valid = np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
         valid_pixel_count = int(valid.sum())
         if valid_pixel_count == 0:
             raise ValueError("NYU Depth sample has no valid pixels in the (0.001, 100.0) range.")
 
         predicted, actual = prediction[valid], target[valid]
+        invalid_prediction_count = int((~np.isfinite(predicted)).sum())
+        if invalid_prediction_count:
+            raise ValueError(
+                f"NYU Depth prediction contains {invalid_prediction_count} non-finite value(s) at valid target pixels."
+            )
         median_prediction = np.median(np.maximum(predicted, self.MIN_DEPTH))
         median_target = np.median(actual)
         aligned = predicted * (median_target / median_prediction)

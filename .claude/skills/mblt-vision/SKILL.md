@@ -30,6 +30,8 @@ crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes f
 Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
 upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW
 before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked maps compatible.
+Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels
+before per-image median alignment.
 
 ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
 directories.

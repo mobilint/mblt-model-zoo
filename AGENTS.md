@@ -112,8 +112,8 @@ truth when this snapshot becomes stale.
   required metadata and targets, and full official validation sample count are all valid. Apply
   this consistently to ImageNet, COCO, DOTAv1, WiderFace, and dense datasets.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
-  prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
-  `abs_rel` and `rmse` as auxiliary metrics.
+  prediction, pools statistics over target-valid NYU Depth V2 pixels, rejects non-finite predictions at those
+  pixels, and reports `delta1` as the primary score with `abs_rel` and `rmse` as auxiliary metrics.
 - ADE20K semantic-segmentation validation applies matching letterbox geometry to images and masks, ignores source
   label `0`, maps labels `1..150` to model classes `0..149`, and reports mIoU as primary with pixel accuracy secondary.
 - Cityscapes semantic-segmentation validation maps source IDs `7,8,11,12,13,17,19..28,31..33` to classes `0..18`,

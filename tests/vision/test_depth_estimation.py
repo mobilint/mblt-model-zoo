@@ -98,15 +98,26 @@ def test_depth_post_keeps_full_resolution_onnx_output_and_rejects_other_scales()
         post(torch.zeros((1, 3, 3)))
 
 
-def test_depth_metrics_median_align_and_ignore_invalid_pixels() -> None:
+def test_depth_metrics_median_align_and_ignore_invalid_targets() -> None:
     """Apply per-image median scale alignment and exclude invalid NYU targets."""
 
     target = np.array([[1.0, 2.0], [4.0, np.nan]], dtype=np.float32)
-    prediction = np.array([[2.0, 4.0], [8.0, 7.0]], dtype=np.float32)
+    prediction = np.array([[2.0, 4.0], [8.0, np.nan]], dtype=np.float32)
     metrics = calculate_nyu_depth_metrics(prediction, target)
     assert metrics.delta1 == pytest.approx(1.0)
     assert metrics.abs_rel == pytest.approx(0.0)
     assert metrics.rmse == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("invalid_prediction", [np.nan, np.inf, -np.inf])
+def test_depth_metrics_reject_non_finite_predictions_at_valid_targets(invalid_prediction: float) -> None:
+    """Do not remove invalid model outputs from the metric denominator."""
+
+    prediction = np.array([[1.0, invalid_prediction]], dtype=np.float32)
+    target = np.array([[1.0, 2.0]], dtype=np.float32)
+
+    with pytest.raises(ValueError, match=r"1 non-finite value\(s\) at valid target pixels"):
+        calculate_nyu_depth_metrics(prediction, target)
 
 
 def test_depth_metrics_pool_valid_pixels_across_images() -> None:
