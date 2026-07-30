@@ -38,6 +38,7 @@
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.
 - Cityscapes organization selects only 500 validation PNG pairs from the two official train/validation/test ZIP
-  packages; validation maps the 19 canonical source IDs to train IDs and ignores all other labels.
+  packages; validation maps the 19 canonical source IDs to train IDs and ignores all other labels. Reject semantic
+  validation taxonomies other than `ade20k` and `cityscapes`.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

@@ -67,7 +67,7 @@ description: >-
   source labels `1..150` to classes `0..149`, and report mIoU as primary with pixel accuracy secondary.
 - For Cityscapes semantic validation, select exactly 500 paired validation images and `gtFine_labelIds` masks from the
   official ZIP packages, map canonical source IDs to classes `0..18`, pad ignored labels with `255`, and keep its
-  pipeline independent from ADE20K.
+  pipeline independent from ADE20K. Reject other semantic validation taxonomies.
 - Do not duplicate dataset URLs, paths, or long test commands owned by the registry or local guide.
 
 ## Validate Proportionately

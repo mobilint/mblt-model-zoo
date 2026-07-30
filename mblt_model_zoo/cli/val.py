@@ -305,6 +305,11 @@ def _run_validation(args: argparse.Namespace) -> float:
         task = str(model.post_cfg.get("task", "")).lower()
         dataset = model.post_cfg.get("dataset")
         taxonomy = str(dataset).lower() if isinstance(dataset, str) else None
+        if task == "semantic_segmentation" and taxonomy not in {"ade20k", "cityscapes"}:
+            raise SystemExit(
+                f"Unsupported semantic segmentation taxonomy for validation: {taxonomy!r}. "
+                "Expected `ade20k` or `cityscapes`."
+            )
         data_path = _ensure_dataset(args, task, taxonomy)
 
         if task == "image_classification":
@@ -329,8 +334,10 @@ def _run_validation(args: argparse.Namespace) -> float:
         if task == "semantic_segmentation":
             if taxonomy == "cityscapes":
                 semantic_result = eval_cityscapes(model=model, data_path=data_path, batch_size=args.batch_size)
-            else:
+            elif taxonomy == "ade20k":
                 semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
+            else:
+                raise AssertionError(f"Unexpected validated semantic taxonomy: {taxonomy!r}.")
             print(
                 "Validation score "
                 f"(mIoU): {semantic_result.miou:.5f}, "

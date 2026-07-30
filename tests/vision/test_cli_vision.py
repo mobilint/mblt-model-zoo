@@ -1008,7 +1008,7 @@ def test_cli_val_routes_semantic_segmentation_to_ade20k(
 
         def __init__(self, **kwargs: object) -> None:
             calls["engine_kwargs"] = kwargs
-            self.post_cfg = {"task": "semantic_segmentation"}
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "ade20k"}
             self.postprocessor = Namespace()
 
         def dispose(self) -> None:
@@ -1051,6 +1051,64 @@ def test_cli_val_routes_semantic_segmentation_to_ade20k(
     assert score == 0.321
     assert "Validation score (mIoU): 0.32100, (pixel accuracy): 0.76500" in capsys.readouterr().out
     assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
+    assert calls["disposed"] is True
+
+
+def test_cli_val_rejects_unsupported_semantic_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject custom semantic taxonomies instead of scoring them as ADE20K."""
+
+    data_path = tmp_path / "custom"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    calls: dict[str, object] = {}
+
+    class _FakeEngine:
+        """Minimal engine double for unsupported semantic taxonomy routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "custom", "nc": 2}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_ade20k",
+        lambda **kwargs: pytest.fail("unsupported taxonomies must not use ADE20K evaluation"),
+    )
+    args = Namespace(
+        model="custom-semantic",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./custom-semantic.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=1,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    with pytest.raises(SystemExit, match="Unsupported semantic segmentation taxonomy.*custom"):
+        _run_validation(args)
+
     assert calls["disposed"] is True
 
 
