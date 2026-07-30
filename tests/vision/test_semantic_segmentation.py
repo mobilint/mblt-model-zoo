@@ -87,6 +87,33 @@ def test_semantic_postprocess_supports_logits_and_baked_maps() -> None:
         post(torch.full((1, 4, 4), 150))
 
 
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), float("-inf")])
+def test_semantic_postprocess_rejects_non_finite_baked_class_ids(invalid_value: float) -> None:
+    """Reject non-finite baked class IDs before converting their dtype."""
+
+    post = SemanticSegPost(
+        {"LetterBox": {"img_size": [4, 4]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+    )
+    class_map = torch.zeros((1, 2, 2), dtype=torch.float32)
+    class_map[0, 0, 0] = invalid_value
+
+    with pytest.raises(ValueError, match="must be finite"):
+        post(class_map)
+
+
+def test_semantic_postprocess_rejects_fractional_baked_class_ids() -> None:
+    """Reject fractional baked class IDs instead of silently truncating them."""
+
+    post = SemanticSegPost(
+        {"LetterBox": {"img_size": [4, 4]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+    )
+
+    with pytest.raises(ValueError, match="must be integer-valued"):
+        post(torch.tensor([[[0.0, 1.9], [2.0, 18.0]]]))
+
+
 def test_semantic_postprocess_reports_semantic_letterbox_errors() -> None:
     """Use semantic task labels when validating preprocessing configuration."""
 

@@ -41,7 +41,8 @@ and validation loaders reuse the same geometry for targets.
 
 Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
 upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW
-before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked maps compatible.
+before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked maps compatible,
+but require baked semantic IDs to be finite, integral, and in-range before casting.
 Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels
 before per-image median alignment.
 

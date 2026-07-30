@@ -91,10 +91,16 @@ class SemanticSegPost(PostBase):
                         f"got {tuple(output.shape)}."
                     )
                 return output.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32), True
-            class_map = output.to(dtype=torch.int64)
-            if class_map.numel() and (int(class_map.min()) < 0 or int(class_map.max()) >= self.nc):
+            if output.is_complex():
+                raise ValueError("Semantic class-map values must be finite integers.")
+            if output.is_floating_point():
+                if not bool(torch.isfinite(output).all()):
+                    raise ValueError("Semantic class-map values must be finite.")
+                if not bool(torch.eq(output, output.trunc()).all()):
+                    raise ValueError("Semantic class-map values must be integer-valued.")
+            if output.numel() and (int(output.min()) < 0 or int(output.max()) >= self.nc):
                 raise ValueError(f"Semantic class-map values must be in [0, {self.nc - 1}].")
-            return class_map, False
+            return output.to(dtype=torch.int64), False
         raise ValueError(
             f"Semantic segmentation expects [B, C, H, W] or [B, H, W, C] logits, or [B, H, W] class maps, "
             f"got {tuple(output.shape)}."

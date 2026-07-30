@@ -40,6 +40,7 @@ description: >-
 - Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.
 - Normalize quarter-resolution MXQ depth and channel-last Cityscapes MXQ logits before inverse
   letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
+  Validate baked semantic IDs as finite, integral, and in-range before converting their dtype.
 - Require explicit YOLO LetterBox configuration. Metadata-enabled semantic preprocessing exposes
   original shape and `ratio_pad`; prediction restores spatial logits before `argmax`.
 - Route dense compilation through `post_cfg.dataset`: NYU Depth for depth models and ADE20K or

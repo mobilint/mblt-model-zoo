@@ -25,6 +25,7 @@ Semantic evaluators reject taxonomy overrides that differ from `model.post_cfg.d
 
 Dense compilation uses `post_cfg.dataset` to select NYU Depth, ADE20K, or Cityscapes and samples
 only their organized RGB images.
+Validate baked semantic class IDs as finite, integral, and in-range before converting their dtype.
 NYU Depth metric validity comes from targets; non-finite predictions at valid target pixels are rejected
 before median alignment.
 Reuse organized validation and calibration datasets only after validating taxonomy-specific layout,

@@ -45,7 +45,8 @@
   logits with this geometry before `argmax`, while validation loaders reuse it for targets.
 - Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[1, H/4, W/4]` maps by
   four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
-  and `argmax`. Preserve existing ONNX layouts and baked class maps.
+  and `argmax`. Preserve existing ONNX layouts and baked class maps; validate baked IDs as finite,
+  integral, and in-range before converting to `int64`.
 - Resolve dense compilation datasets from `post_cfg.dataset`: NYU Depth, ADE20K, or Cityscapes;
   sample calibration inputs from their organized `images/` directories.
 - ADE20K organization atomically installs its 2,000 validation pairs with required

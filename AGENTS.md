@@ -98,7 +98,8 @@ truth when this snapshot becomes stale.
 - Normalize dense MXQ outputs before inverse letterboxing: bilinearly upsample depth
   `[1, H/4, W/4]` maps by four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to
   NCHW before bilinear restoration and `argmax`. Preserve full-resolution ONNX depth, NCHW
-  semantic logits, and baked class maps.
+  semantic logits, and baked class maps. Accept floating baked maps only when every value is
+  finite, integral, and within the configured class range; validate before converting to `int64`.
 
 ### Vision Datasets and Compilation
 
