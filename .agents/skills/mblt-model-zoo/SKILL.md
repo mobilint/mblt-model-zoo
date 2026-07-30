@@ -32,7 +32,8 @@ description: >-
   Keep shared guidance concise.
 - Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not inferred from task
   alone.
-- Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
+- Atomically install ADE20K's 2,000 flat validation pairs only after staged readiness verifies
+  `objectInfo150.txt` and `sceneCategories.txt` with the `images/` and `annotations/` directories.
 - Preserve ADE20K's `0` ignore label and `1..150` to `0..149` validation mapping; report mIoU before pixel accuracy.
 - Preserve Cityscapes's 500 validation-only lossless PNG pairs from the two official train/validation/test ZIP
   packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.

@@ -69,7 +69,8 @@ description: >-
   depth, and dispatch ADE20K or Cityscapes semantic evaluation from `post_cfg.dataset`.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts. Keep loader compatibility with legacy `images/val` datasets.
-- Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
+- Atomically install ADE20K's 2,000 flat validation pairs only after staged readiness verifies
+  `objectInfo150.txt` and `sceneCategories.txt` with the `images/` and `annotations/` directories.
 - Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only when
   taxonomy-specific layout, required metadata and targets, and the complete official split are valid.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure

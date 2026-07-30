@@ -28,6 +28,7 @@ from mblt_model_zoo.vision.utils.postprocess.common import (
 from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import (
     AnchorlessOutputLayout,
     YOLOAnchorlessDetectionPost,
+    YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     _AnchorlessNMSInput,
 )
@@ -254,6 +255,55 @@ def test_engine_init_accepts_local_mxq_model_path(
     try:
         assert engine.file_cfg["mxq_path"] == str(mxq_path)
         assert backend_kwargs["mxq_path"] == str(mxq_path)
+    finally:
+        engine.dispose()
+
+
+def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Construct the canonical OBB postprocessor from the compatibility task spelling."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {},
+            "pre_cfg": {"LetterBox": {"img_size": [640, 640]}},
+            "post_cfg": {
+                "task": "oriented_bounding_boxes",
+                "dataset": "dotav1",
+                "nl": 3,
+                "reg_max": 16,
+                "n_extra": 1,
+            },
+        },
+        model_path=str(mxq_path),
+    )
+
+    try:
+        assert isinstance(engine.postprocessor, YOLOAnchorlessOBBPost)
+        assert engine.postprocessor.task == "obb"
     finally:
         engine.dispose()
 

@@ -296,6 +296,9 @@ def test_semantic_dataset_readiness_checks_taxonomy(
     assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
 
     (tmp_path / "annotations" / f"{image_path.stem}.png").write_bytes(b"annotation")
+    if dataset == "ade20k":
+        (tmp_path / "objectInfo150.txt").write_bytes(b"labels")
+        (tmp_path / "sceneCategories.txt").write_bytes(b"scenes")
     assert compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
     assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, other_dataset)
 

@@ -23,6 +23,7 @@ WIDERFACE_VALIDATION_SAMPLE_COUNT = 3226
 NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 ADE20K_VALIDATION_SAMPLE_COUNT = 2000
 CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
+ADE20K_METADATA_FILES = ("objectInfo150.txt", "sceneCategories.txt")
 IMAGENET_CLASS_PATTERN = re.compile(r"n\d{8}")
 IMAGENET_IMAGE_PATTERN = re.compile(r"ILSVRC2012_val_\d{8}")
 COCO_IMAGE_PATTERN = re.compile(r"\d{12}")
@@ -234,6 +235,7 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             len(images) == ADE20K_VALIDATION_SAMPLE_COUNT
             and all(stem.startswith("ADE_val_") for stem in images)
             and all(path.suffix.lower() in {".jpg", ".jpeg"} for path in images.values())
+            and all((root / file_name).is_file() for file_name in ADE20K_METADATA_FILES)
         )
     if normalized == "cityscapes":
         return (

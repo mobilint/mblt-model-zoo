@@ -26,6 +26,7 @@ from tqdm import tqdm
 
 from ...datasets import get_dataset_config
 from .readiness import (
+    ADE20K_METADATA_FILES,
     ADE20K_VALIDATION_SAMPLE_COUNT,
     CITYSCAPES_SAMPLE_ID_PATTERN,
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
@@ -680,13 +681,19 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         raise ValueError(
             f"ADE20K validation dataset must contain {ADE20K_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
         )
+    missing_metadata = [
+        file_name for file_name in ADE20K_METADATA_FILES if not os.path.isfile(os.path.join(dataset_root, file_name))
+    ]
+    if missing_metadata:
+        raise ValueError(f"ADE20K dataset is missing required metadata files: {', '.join(missing_metadata)}.")
 
     output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".ade20k-staging-") as staging_dir:
-        staged_image_dir = os.path.join(staging_dir, "images")
-        staged_annotation_dir = os.path.join(staging_dir, "annotations")
+        staged_output_dir = os.path.join(staging_dir, "ade20k")
+        staged_image_dir = os.path.join(staged_output_dir, "images")
+        staged_annotation_dir = os.path.join(staged_output_dir, "annotations")
         os.makedirs(staged_image_dir)
         os.makedirs(staged_annotation_dir)
         for sample_id in sorted(images):
@@ -694,17 +701,18 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
             shutil.copy2(
                 annotations[sample_id], os.path.join(staged_annotation_dir, os.path.basename(annotations[sample_id]))
             )
+        for file_name in ADE20K_METADATA_FILES:
+            shutil.copy2(
+                os.path.join(dataset_root, file_name),
+                os.path.join(staged_output_dir, file_name),
+            )
 
-        replacements = (
-            (staged_image_dir, os.path.join(output_dir, "images")),
-            (staged_annotation_dir, os.path.join(output_dir, "annotations")),
+        _validate_staged_dataset(staged_output_dir, "ade20k", ("semantic_segmentation",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".ade20k-backup-",
         )
-        os.makedirs(output_dir, exist_ok=True)
-        _replace_staged_directories(replacements, output_parent_dir, ".ade20k-backup-")
-        for file_name in ("objectInfo150.txt", "sceneCategories.txt"):
-            source_path = os.path.join(dataset_root, file_name)
-            if os.path.isfile(source_path):
-                shutil.copy2(source_path, os.path.join(output_dir, file_name))
     print(f"Constructed ADE20K validation dataset with {len(images)} image/mask pairs")
 
 

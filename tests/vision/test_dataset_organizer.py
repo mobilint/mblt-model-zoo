@@ -12,6 +12,7 @@ import pytest
 import requests
 
 import mblt_model_zoo.vision.utils.datasets.organizer as organizer
+from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 
 
 class _DummyTqdm:
@@ -396,10 +397,24 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     assert (backup_dirs[0] / "depth" / "keep.npy").read_bytes() == b"old depth"
 
 
+def _create_ade20k_source(tmp_path: Path) -> Path:
+    """Create a compact extracted ADE20K validation source."""
+
+    dataset_dir = tmp_path / "ADEChallengeData2016"
+    (dataset_dir / "images").mkdir(parents=True)
+    (dataset_dir / "annotations").mkdir()
+    (dataset_dir / "images" / "ADE_val_00000001.jpg").write_bytes(b"validation")
+    (dataset_dir / "annotations" / "ADE_val_00000001.png").write_bytes(b"annotation")
+    (dataset_dir / "objectInfo150.txt").write_bytes(b"labels")
+    (dataset_dir / "sceneCategories.txt").write_bytes(b"scenes")
+    return dataset_dir
+
+
 def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Install only ADE20K validation image/mask pairs in the reference layout."""
 
     monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     archive_path = tmp_path / "ADEChallengeData2016.zip"
     with ZipFile(archive_path, "w") as archive:
         archive.writestr("ADEChallengeData2016/images/training/ADE_train_00000001.jpg", b"training")
@@ -407,6 +422,7 @@ def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.Mon
         archive.writestr("ADEChallengeData2016/images/validation/ADE_val_00000001.jpg", b"validation")
         archive.writestr("ADEChallengeData2016/annotations/validation/ADE_val_00000001.png", b"validation")
         archive.writestr("ADEChallengeData2016/objectInfo150.txt", b"labels")
+        archive.writestr("ADEChallengeData2016/sceneCategories.txt", b"scenes")
 
     output_dir = tmp_path / "organized"
     organizer.organize_ade20k(str(archive_path), str(output_dir))
@@ -414,7 +430,53 @@ def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.Mon
     assert (output_dir / "images" / "ADE_val_00000001.jpg").read_bytes() == b"validation"
     assert (output_dir / "annotations" / "ADE_val_00000001.png").read_bytes() == b"validation"
     assert (output_dir / "objectInfo150.txt").read_bytes() == b"labels"
+    assert (output_dir / "sceneCategories.txt").read_bytes() == b"scenes"
     assert not (output_dir / "images" / "training").exists()
+
+
+def test_construct_ade20k_requires_metadata_before_replacing_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preserve the cache when an ADE20K source omits required metadata."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = _create_ade20k_source(tmp_path)
+    (dataset_dir / "sceneCategories.txt").unlink()
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    (output_dir / "valid-cache-marker").write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="sceneCategories.txt"):
+        organizer.construct_ade20k(str(dataset_dir), str(output_dir))
+
+    assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
+
+
+def test_construct_ade20k_preserves_cache_when_metadata_staging_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preserve the cache when copying required ADE20K metadata into staging fails."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = _create_ade20k_source(tmp_path)
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    (output_dir / "valid-cache-marker").write_bytes(b"existing")
+    real_copy2 = organizer.shutil.copy2
+
+    def _fail_scene_metadata_copy(source: str, destination: str) -> str:
+        if Path(source).name == "sceneCategories.txt":
+            raise OSError("simulated metadata copy failure")
+        return real_copy2(source, destination)
+
+    monkeypatch.setattr(organizer.shutil, "copy2", _fail_scene_metadata_copy)
+
+    with pytest.raises(OSError, match="simulated metadata copy failure"):
+        organizer.construct_ade20k(str(dataset_dir), str(output_dir))
+
+    assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
 
 
 def _write_cityscapes_archives(tmp_path: Path, sample_ids: list[str]) -> tuple[Path, Path]:

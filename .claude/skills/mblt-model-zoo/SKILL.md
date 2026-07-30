@@ -14,8 +14,8 @@ Keep shared workflow content there so Codex and Claude Code stay synchronized.
 Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not inferred from task alone.
 Require explicit YOLO LetterBox configuration and metadata-enabled semantic validation preprocessing.
 
-ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
-directories.
+ADE20K organization atomically installs its 2,000 flat validation pairs only after staged readiness
+verifies `objectInfo150.txt` and `sceneCategories.txt` with `images/` and `annotations/`.
 ADE20K validation ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU before pixel
 accuracy.
 Cityscapes organization retains only 500 paired validation images and `gtFine_labelIds` masks from the official ZIP

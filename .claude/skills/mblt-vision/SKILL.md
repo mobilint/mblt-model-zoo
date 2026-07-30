@@ -39,8 +39,8 @@ before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked m
 Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels
 before per-image median alignment.
 
-ADE20K organization preserves its 2,000 validation image/mask pairs as flat `images/` and `annotations/`
-directories.
+ADE20K organization atomically installs its 2,000 flat validation pairs only after staged readiness
+verifies `objectInfo150.txt` and `sceneCategories.txt` with `images/` and `annotations/`.
 Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only after validating
 taxonomy-specific layout, required metadata and targets, and the complete official split.
 Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure

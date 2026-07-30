@@ -525,6 +525,8 @@ def test_cli_val_validates_dense_dataset_taxonomy_and_completeness(
     assert not _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
 
     (data_path / "annotations" / "ADE_val_00000002.png").write_bytes(b"annotation")
+    (data_path / "objectInfo150.txt").write_bytes(b"labels")
+    (data_path / "sceneCategories.txt").write_bytes(b"scenes")
 
     assert _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
     assert not _dataset_ready("semantic_segmentation", str(data_path), "cityscapes")
@@ -1075,6 +1077,8 @@ def test_cli_val_routes_semantic_segmentation_to_ade20k(
     (data_path / "annotations").mkdir()
     (data_path / "images" / "ADE_val_00000001.jpg").write_bytes(b"image")
     (data_path / "annotations" / "ADE_val_00000001.png").write_bytes(b"annotation")
+    (data_path / "objectInfo150.txt").write_bytes(b"labels")
+    (data_path / "sceneCategories.txt").write_bytes(b"scenes")
     monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 

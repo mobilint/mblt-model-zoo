@@ -105,8 +105,9 @@ truth when this snapshot becomes stale.
   `get_dataset_config_for_task()` rather than duplicating URLs or paths.
 - Keep the NYU Depth organizer validation-only: install its 654 paired samples as `images/` and `depth/` directly
   under its output root.
-- Keep the ADE20K organizer validation-only: install its 2,000 paired samples as flat `images/` and `annotations/`
-  directories, along with its source metadata files.
+- Keep the ADE20K organizer validation-only: stage and validate its 2,000 paired samples as flat
+  `images/` and `annotations/` directories with required `objectInfo150.txt` and
+  `sceneCategories.txt` metadata, then atomically replace the managed root.
 - Keep the Cityscapes organizer ZIP-only and validation-only: select exactly 500 paired images and `gtFine_labelIds`
   masks from the official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` packages, then install lossless
   flat `images/` and `annotations/` PNG pairs.

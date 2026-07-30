@@ -158,3 +158,22 @@ def test_widerface_readiness_rejects_tree_not_named_by_metadata(
     _write_file(tmp_path / "images" / event_name / f"{image_name}.jpg")
 
     assert not readiness.dataset_ready(tmp_path, "face_detection", "widerface")
+
+
+def test_ade20k_readiness_requires_source_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Require both ADE20K metadata files before reusing an organized cache."""
+
+    monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    _write_file(tmp_path / "images" / "ADE_val_00000001.jpg")
+    _write_file(tmp_path / "annotations" / "ADE_val_00000001.png")
+
+    assert not readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
+
+    _write_file(tmp_path / "objectInfo150.txt")
+    assert not readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
+
+    _write_file(tmp_path / "sceneCategories.txt")
+    assert readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")

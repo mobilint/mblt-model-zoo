@@ -42,7 +42,8 @@
   and `argmax`. Preserve existing ONNX layouts and baked class maps.
 - Resolve dense compilation datasets from `post_cfg.dataset`: NYU Depth, ADE20K, or Cityscapes;
   sample calibration inputs from their organized `images/` directories.
-- ADE20K organization installs its 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
+- ADE20K organization atomically installs its 2,000 validation pairs with required
+  `objectInfo150.txt` and `sceneCategories.txt` metadata after validating the complete staged root.
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.
 - Cityscapes organization selects only 500 validation PNG pairs from the two official train/validation/test ZIP
