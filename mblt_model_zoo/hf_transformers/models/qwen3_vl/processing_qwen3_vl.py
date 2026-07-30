@@ -9,10 +9,12 @@ from PIL import Image
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import ImageInput, load_image
 from transformers.models.auto.processing_auto import AutoProcessor
+from transformers.models.auto.video_processing_auto import AutoVideoProcessor
 from transformers.models.qwen3_vl.processing_qwen3_vl import (
     Qwen3VLProcessor,
     Qwen3VLProcessorKwargs,
 )
+from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor
 from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 from transformers.utils.generic import logging
@@ -41,9 +43,57 @@ def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]
     return (side, side)
 
 
+class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
+    """Force NPU-compatible frame size before upstream `_preprocess`.
+
+    When `dynamic_vision` is True the NPU accepts variable resolutions, so we
+    delegate straight to the upstream implementation. Otherwise every frame is
+    bicubic-resized to the fixed grid derived from `_compute_npu_frame_size`.
+    """
+
+    dynamic_vision = False
+
+    def _preprocess(self, videos, do_resize=True, size=None, **kwargs):
+        if self.dynamic_vision:
+            return super()._preprocess(videos, do_resize=do_resize, size=size, **kwargs)
+        target = _compute_npu_frame_size(self.patch_size, self.merge_size)
+        resized = [
+            F.interpolate(v.float(), size=target, mode="bicubic", align_corners=False)
+            for v in videos
+        ]
+        return super()._preprocess(resized, do_resize=False, size=size, **kwargs)
+
+
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     dynamic_vision = False
     max_vision_tokens = _NPU_MAX_VISION_TOKENS
+
+    def __init__(
+        self,
+        image_processor=None,
+        tokenizer=None,
+        video_processor=None,
+        chat_template=None,
+        **kwargs,
+    ):
+        # AutoVideoProcessor loads the vanilla Qwen3VLVideoProcessor from the
+        # HF config; rebuild it as our subclass so `_preprocess` is our override.
+        if video_processor is not None and not isinstance(
+            video_processor, MobilintQwen3VLVideoProcessor
+        ):
+            video_processor = MobilintQwen3VLVideoProcessor(**video_processor.to_dict())
+        super().__init__(
+            image_processor=image_processor,
+            tokenizer=tokenizer,
+            video_processor=video_processor,
+            chat_template=chat_template,
+            **kwargs,
+        )
+
+    def _sync_dynamic_vision_to_video_processor(self) -> None:
+        vp = getattr(self, "video_processor", None)
+        if isinstance(vp, MobilintQwen3VLVideoProcessor):
+            vp.dynamic_vision = bool(self.dynamic_vision)
 
     def sync_dynamic_vision_from_model(self, model) -> None:
         """Adopt ``dynamic_vision`` from a loaded Qwen3-VL model's vision MXQ.
@@ -78,6 +128,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 "or reload with a matching MXQ."
             )
         self.dynamic_vision = detected
+        self._sync_dynamic_vision_to_video_processor()
 
     @staticmethod
     def _resize_one(img, size=(224, 224)):
@@ -100,25 +151,6 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if isinstance(images, list):
             return [cls._resize_images(item) for item in images]
         return cls._resize_one(images)
-
-    def _install_video_resize_hook(self) -> None:
-        """Override video_processor._preprocess to force NPU-compatible frame size."""
-        vp = self.video_processor
-        if getattr(vp, "_mobilint_hooked", False):
-            return
-
-        target = _compute_npu_frame_size(vp.patch_size, vp.merge_size)
-        orig_preprocess = vp._preprocess
-
-        def _hooked_preprocess(videos, do_resize=True, size=None, **kw):
-            resized = []
-            for v in videos:
-                T, C, H, W = v.shape
-                resized.append(F.interpolate(v.float(), size=target, mode="bicubic", align_corners=False))
-            return orig_preprocess(resized, do_resize=False, size=size, **kw)
-
-        vp._preprocess = _hooked_preprocess
-        vp._mobilint_hooked = True
 
     def _clamp_dynamic_image_size(self) -> None:
         """Cap `max_pixels` so dynamic-vision grids fit the NPU sequence limit.
@@ -171,9 +203,10 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 images = self._resize_images(images)
 
         if videos is not None:
-            self._install_video_resize_hook()
+            self._sync_dynamic_vision_to_video_processor()
 
         return super().__call__(images, text, videos, **kwargs)
 
 
 AutoProcessor.register(MobilintQwen3VLConfig, MobilintQwen3VLProcessor)
+AutoVideoProcessor.register(MobilintQwen3VLConfig, MobilintQwen3VLVideoProcessor)
