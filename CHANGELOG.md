@@ -56,8 +56,35 @@
   is sourced from `run.llm_total_energy_j` (LLM-only) and never falls back
   to `total_energy_j`, which now carries vision + LLM in VLM contexts.
 
-  CLI printed table labeling is unchanged in this release — only JSON
-  output changed to match the label convention.
+  CLI printed tables also adopted the canonical short-form labels
+  during this PR chain (introduced in `05174a7 Unify tps measure/sweep
+  tables and auto-scale batch sweep lengths` and consolidated under
+  `TPS_TABLE_SPEC` in `e60e702 Drive tps summary tables from a shared
+  schema`).  Downstream tooling that parses printed CLI output should
+  update to the new labels:
+
+  | Old CLI label | New CLI label |
+  | --- | --- |
+  | `avg_utilization` / `avg_utilization_pct` (and `p99_`, `prefill_avg_`, `prefill_p99_`, `decode_avg_`, `decode_p99_`, `vision_avg_`, `vision_p99_` variants) | `avg_util` (and matching variants) |
+  | `avg_temperature` / `avg_temperature_c` (and phase / vision variants) | `avg_temp` (and matching variants) |
+  | `avg_memory_used` / `avg_memory_used_mb` (and phase / vision variants) | `avg_mem_used` (and matching variants) |
+  | `total_memory` / `total_memory_mb` | `total_mem` |
+  | `prefill_npu_latency` / `decode_npu_latency` / `total_npu_latency` (all with `_pct`) | `prefill_npu_lat` / `decode_npu_lat` / `total_npu_lat` |
+  | `prefill_energy_j`, `decode_energy_j`, `vision_energy_j`, `total_energy_j`, `llm_total_energy_j` | `prefill_energy`, `decode_energy`, `vision_energy`, `total_energy`, `llm_total_energy` |
+  | `avg_power_w` / `p99_power_w` (and phase / vision variants) | `avg_power` / `p99_power` (and matching variants) |
+  | Sweep-last row suffix `(last_point)` | `(last)` |
+
+  As with the JSON key changes, unit tokens (`_w`, `_c`, `_mb`, `_j`,
+  and `_pct` where it merely restated the unit column) were stripped
+  from CLI labels; units now live in the table's dedicated unit column
+  and in the JSON `units` metadata block.  The `_pct` suffix is
+  retained only where it disambiguates a percent-of metric from its
+  absolute counterpart (`avg_mem_used` in MB vs. `avg_mem_used_pct` in
+  %).  VLM tables prefix all shared LLM-phase rows with `llm_` (e.g.
+  `llm_avg_util`, `llm_prefill_npu_lat`), matching the JSON key
+  convention above.  Row labels for `ttft`, `decode_duration`,
+  `prefill_tps`, `decode_tps`, `vision_encode`, `vision_fps`, and the
+  EAGLE-3 acceptance rows are unchanged.
 
 ## 2.0.0
 
