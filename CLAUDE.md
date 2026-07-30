@@ -44,5 +44,8 @@
   validation taxonomies other than `ade20k` and `cityscapes`.
 - Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only after
   checking taxonomy-specific layout, required metadata and targets, and the complete official split.
+- Keep TPS table and JSON output synchronized through `mblt_model_zoo/cli/tps_table.py`.
+- Keep VLM non-batch tests under `image_text_to_text/non_batch`; matrix-runner Phase B owns the
+  batch text-generation and image-text-to-text suites.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

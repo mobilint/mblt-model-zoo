@@ -229,13 +229,17 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
-        if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
-
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
         assert inputs_embeds is not None
+
+        # Route attention_mask through so batch>1 hits MobilintModelMixin._llm_forward_batch.
+        # Qwen2-VL text decoder has the same structural contract as plain Qwen2 here.
+        effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
+
+        if use_cache and past_key_values is None:
+            past_key_values = self._get_cache("", 0, 0)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -256,6 +260,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position,
             npu_prefill_chunk_size,
             count_npu_time=count_npu_time,
+            attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,
         )
 

@@ -18,6 +18,12 @@ description: >-
 - Install the matching `transformers` optional extra before running integration tests.
 - Reuse shared NPU options and `tests.npu_backend_options.build_vision_engine_kwargs()` rather
   than introducing divergent hardware flags or engine keyword bundles.
+- Treat `mblt_model_zoo/cli/tps_table.py` as the source of truth for TPS printed rows, JSON keys,
+  units, and run/aggregate/summary extraction. Update the focused `tests/transformers/cli_tps`
+  schema and layer-consistency tests with any change.
+- Keep VLM non-batch tests under `tests/transformers/image_text_to_text/non_batch`. Keep batch
+  text-generation and image-text-to-text suites in their `batch` directories and route both
+  through serial Phase B in `scripts/test_transformers_matrix.py`.
 - Preserve local style in `mblt_model_zoo/hf_transformers`; it is excluded from repository-wide
   Ruff checks.
 

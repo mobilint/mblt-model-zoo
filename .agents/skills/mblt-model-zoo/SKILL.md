@@ -44,6 +44,8 @@ description: >-
   before median alignment.
 - Reuse organized validation and calibration datasets only after checking their taxonomy-specific
   layout, required metadata and targets, and full official split count.
+- Keep `mblt-model-zoo tps` printed tables and JSON output driven by the shared
+  `mblt_model_zoo/cli/tps_table.py` schema.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

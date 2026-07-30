@@ -140,6 +140,11 @@ truth when this snapshot becomes stale.
 ### Transformers and MeloTTS
 
 - Install the matching optional extra before running integration tests.
+- Keep `mblt-model-zoo tps` table labels, JSON keys, units, and extraction behavior centralized in
+  `mblt_model_zoo/cli/tps_table.py`; update its schema and focused CLI TPS tests together.
+- Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Route batch
+  text-generation and image-text-to-text suites through the serial Phase B in
+  `scripts/test_transformers_matrix.py`, where they can use the required NPU core allocation.
 - Start with the narrowest test file or documented `-k` selection. Use
   `pytest tests/transformers --full-matrix` only for a release or pre-merge matrix; use `-x` while
   iterating.
