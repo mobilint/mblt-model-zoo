@@ -46,5 +46,12 @@ def pipe(
         model_kwargs=model_kwargs or None,
     )
 
+    # Mirror the vision MXQ's detected mode into the processor so a dynamic
+    # vision build loaded via `--vision-mxq-path` doesn't get force-resized
+    # by the static-path clamp. No-op for models without this helper.
+    sync = getattr(pipe.processor, "sync_dynamic_vision_from_model", None)
+    if callable(sync):
+        sync(pipe.model)
+
     yield pipe
     del pipe
