@@ -93,16 +93,18 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 
     def __init__(self, config: MobilintQwen3VLVisionConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
-        self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
-        self.num_grid_per_side = int(config.num_position_embeddings**0.5)
-        head_dim = config.hidden_size // config.num_heads
-        # Both pos_embed and rotary_pos_emb are unconditionally allocated: the
-        # dynamic-vision path needs them and the static path only pays a
-        # trivially small extra weight-load cost. Detection below drives *how*
-        # the encoder is called, not what modules exist.
-        self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
         num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
         self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs, config)
+        # Only the dynamic path consumes `pos_embed` and `rotary_pos_emb`
+        # (via `_prepare_dynamic_npu_inputs`), and static Qwen3-VL Hub
+        # checkpoints don't ship `visual.pos_embed.weight`. Skipping the
+        # allocation on static builds avoids a spurious "MISSING: newly
+        # initialized" load warning for a weight that would never be used.
+        if self._uses_dynamic_vision:
+            self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
+            self.num_grid_per_side = int(config.num_position_embeddings**0.5)
+            head_dim = config.hidden_size // config.num_heads
+            self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
@@ -655,23 +657,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         super().__init__(config, *args, **kwargs)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
-        # Trust the compiled text MXQ over any config attr: 2-input builds are
-        # [inputs, deepstack] and cannot consume a rope tensor, 3-input builds
-        # are [inputs, deepstack, rope]. Skipping the rotary_emb allocation on
-        # 2-input builds keeps them compatible with older checkpoints that were
-        # compiled before MRoPE support existed.
+        # Trust the compiled text MXQ over any config attr: 3-input builds are
+        # [inputs, deepstack, rope] and need MRoPE; anything else (legacy
+        # 2-input [inputs, deepstack] or older batch builds that report a
+        # single fused input buffer) does not consume an external rope
+        # tensor. Only rope-capable builds allocate `rotary_emb`.
         num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
         if num_mxq_inputs == 3:
             self._uses_rope_input = True
             self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
-        elif num_mxq_inputs == 2:
+        else:
             self._uses_rope_input = False
             self.rotary_emb = None
-        else:
-            raise ValueError(
-                f"Qwen3-VL text MXQ must expose 2 ([inputs, deepstack]) or 3 "
-                f"([inputs, deepstack, rope]) inputs; got {num_mxq_inputs}."
-            )
         self.num_deepstack_layers = 0
 
     def get_input_embeddings(self) -> nn.Module:
