@@ -43,6 +43,8 @@ ADE20K organization preserves its 2,000 validation image/mask pairs as flat `ima
 directories.
 Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only after validating
 taxonomy-specific layout, required metadata and targets, and the complete official split.
+Atomically replace staged ImageNet, COCO, and WiderFace roots during organization, and require exact
+WiderFace event/image identity agreement with `wider_face_val.mat`.
 ADE20K semantic validation applies matching letterbox geometry to images and masks, pads masks with `255`, and reports
 mIoU before pixel accuracy.
 Cityscapes semantic validation uses only 500 paired validation images and `gtFine_labelIds` masks from the official

@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from scipy.io import savemat
 
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
@@ -54,6 +55,17 @@ from mblt_model_zoo.vision.utils.evaluation.eval_widerface import WiderFaceResul
 
 if TYPE_CHECKING:
     from mblt_model_zoo.vision.wrapper import MBLT_Engine
+
+
+def _write_widerface_metadata(path: Path, event_images: dict[str, list[str]]) -> None:
+    """Write minimal WiderFace validation identity metadata."""
+
+    event_list = np.empty((len(event_images), 1), dtype=object)
+    file_list = np.empty((len(event_images), 1), dtype=object)
+    for index, (event_name, image_stems) in enumerate(event_images.items()):
+        event_list[index, 0] = event_name
+        file_list[index, 0] = np.array([[stem] for stem in image_stems], dtype=object)
+    savemat(path, {"event_list": event_list, "file_list": file_list})
 
 
 def test_cli_predict_example_parses() -> None:
@@ -889,7 +901,8 @@ def test_cli_val_detects_organized_widerface(monkeypatch: pytest.MonkeyPatch, tm
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
     (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
-    for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+    _write_widerface_metadata(data_path / "wider_face_val.mat", {"0--Parade": ["sample"]})
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
     monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
     monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
@@ -1275,7 +1288,8 @@ def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPa
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
     (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
-    for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+    _write_widerface_metadata(data_path / "wider_face_val.mat", {"0--Parade": ["sample"]})
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
     monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
     monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)

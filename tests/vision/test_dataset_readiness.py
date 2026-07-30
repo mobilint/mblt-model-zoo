@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
+from scipy.io import savemat
 
 from mblt_model_zoo.vision.utils.datasets import readiness
 
@@ -15,6 +17,17 @@ def _write_file(path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"data")
+
+
+def _write_widerface_metadata(path: Path, event_images: dict[str, list[str]]) -> None:
+    """Write the WiderFace event and image-name cell arrays used by readiness."""
+
+    event_list = np.empty((len(event_images), 1), dtype=object)
+    file_list = np.empty((len(event_images), 1), dtype=object)
+    for index, (event_name, image_stems) in enumerate(event_images.items()):
+        event_list[index, 0] = event_name
+        file_list[index, 0] = np.array([[stem] for stem in image_stems], dtype=object)
+    savemat(path, {"event_list": event_list, "file_list": file_list})
 
 
 def test_imagenet_readiness_requires_complete_official_class_tree(
@@ -105,7 +118,11 @@ def test_widerface_readiness_requires_complete_event_tree_and_metadata(
 
     monkeypatch.setattr(readiness, "WIDERFACE_EVENT_COUNT", 2)
     monkeypatch.setattr(readiness, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 2)
-    for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+    _write_widerface_metadata(
+        tmp_path / "wider_face_val.mat",
+        {"0--Parade": ["sample-0"], "1--Handshaking": ["sample-1"]},
+    )
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         _write_file(tmp_path / file_name)
     _write_file(tmp_path / "images" / "0--Parade" / "sample-0.jpg")
     (tmp_path / "images" / "1--Handshaking").mkdir()
@@ -116,3 +133,28 @@ def test_widerface_readiness_requires_complete_event_tree_and_metadata(
 
     assert readiness.dataset_ready(tmp_path, "face_detection", "widerface")
     assert not readiness.dataset_ready(tmp_path, "face_detection", "coco")
+
+
+@pytest.mark.parametrize(
+    ("event_name", "image_name"),
+    [
+        ("0--Parade", "stale"),
+        ("1--Handshaking", "expected"),
+    ],
+)
+def test_widerface_readiness_rejects_tree_not_named_by_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    event_name: str,
+    image_name: str,
+) -> None:
+    """Reject complete-looking trees whose event or image identity differs from metadata."""
+
+    monkeypatch.setattr(readiness, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
+    _write_widerface_metadata(tmp_path / "wider_face_val.mat", {"0--Parade": ["expected"]})
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+        _write_file(tmp_path / file_name)
+    _write_file(tmp_path / "images" / event_name / f"{image_name}.jpg")
+
+    assert not readiness.dataset_ready(tmp_path, "face_detection", "widerface")

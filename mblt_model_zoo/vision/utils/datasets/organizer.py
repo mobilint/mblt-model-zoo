@@ -310,32 +310,43 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 
     pbar.close()
 
-    # construct the ImageNet dataset
-    pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Constructing ImageNet dataset")
-    for xml_file in pbar:
-        xml_path = os.path.join(xml_dir + "/val", xml_file)
-        xml_tree = ET.parse(xml_path)
-        root = xml_tree.getroot()
-        object_name = _get_object_name(root.findall("object")[0], xml_file)
-        image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
-        if not os.path.isfile(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".imagenet-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "imagenet")
 
-        os.makedirs(os.path.join(output_dir, object_name), exist_ok=True)  # create the directory for the object
-        shutil.copy(
-            image_path,
-            os.path.join(output_dir, object_name, os.path.basename(image_path)),
-        )  # copy the image to the directory with the same name
-    pbar.close()
+        # construct the ImageNet dataset
+        pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Constructing ImageNet dataset")
+        for xml_file in pbar:
+            xml_path = os.path.join(xml_dir + "/val", xml_file)
+            xml_tree = ET.parse(xml_path)
+            root = xml_tree.getroot()
+            object_name = _get_object_name(root.findall("object")[0], xml_file)
+            image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
+            if not os.path.isfile(image_path):
+                raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    # validate the ImageNet dataset
-    pbar = tqdm(os.listdir(output_dir), desc="Validating ImageNet dataset")
-    print(f"Number of categories: {len(os.listdir(output_dir))}")
-    for object_name in pbar:
-        num_images = len(os.listdir(os.path.join(output_dir, object_name)))
-        if num_images != 50:
-            raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
-    pbar.close()
+            os.makedirs(os.path.join(staged_output_dir, object_name), exist_ok=True)
+            shutil.copy(
+                image_path,
+                os.path.join(staged_output_dir, object_name, os.path.basename(image_path)),
+            )
+        pbar.close()
+
+        # validate the staged ImageNet dataset before replacing the managed output root
+        pbar = tqdm(os.listdir(staged_output_dir), desc="Validating ImageNet dataset")
+        print(f"Number of categories: {len(os.listdir(staged_output_dir))}")
+        for object_name in pbar:
+            num_images = len(os.listdir(os.path.join(staged_output_dir, object_name)))
+            if num_images != 50:
+                raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
+        pbar.close()
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".imagenet-backup-",
+        )
     print("Each category has 50 images")
     print("ImageNet dataset constructed successfully")
 
@@ -380,17 +391,23 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
         output_dir (str): Directory where the organized dataset will be stored.
     """
     print(f"Constructing COCO dataset from {image_dir} and {annotation_dir} to {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copytree(
-        image_dir, os.path.join(output_dir, "val2017"), dirs_exist_ok=True
-    )  # copy the image directory to the output directory
-    # copy *_val2017.json to the output directory
-    for file in os.listdir(os.path.join(annotation_dir, "annotations")):
-        if file.endswith("_val2017.json"):
-            shutil.copy(
-                os.path.join(annotation_dir, "annotations", file),
-                os.path.join(output_dir, file),
-            )
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".coco-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "coco")
+        shutil.copytree(image_dir, os.path.join(staged_output_dir, "val2017"))
+        for file in os.listdir(os.path.join(annotation_dir, "annotations")):
+            if file.endswith("_val2017.json"):
+                shutil.copy(
+                    os.path.join(annotation_dir, "annotations", file),
+                    os.path.join(staged_output_dir, file),
+                )
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".coco-backup-",
+        )
     print("Constructing COCO dataset completed")
 
 
@@ -434,15 +451,23 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) ->
         output_dir (str): Directory where the organized dataset will be stored.
     """
     print(f"Constructing WiderFace dataset from {image_dir} and {annotation_dir} to {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copytree(
-        os.path.join(image_dir, "images"),
-        os.path.join(output_dir, "images"),
-        dirs_exist_ok=True,
-    )
-    for file in os.listdir(annotation_dir):
-        if "_val" in file:
-            shutil.copy(os.path.join(annotation_dir, file), output_dir)
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".widerface-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "widerface")
+        shutil.copytree(
+            os.path.join(image_dir, "images"),
+            os.path.join(staged_output_dir, "images"),
+        )
+        for file in os.listdir(annotation_dir):
+            if "_val" in file:
+                shutil.copy(os.path.join(annotation_dir, file), staged_output_dir)
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".widerface-backup-",
+        )
     print("Constructing WiderFace dataset completed")
 
 

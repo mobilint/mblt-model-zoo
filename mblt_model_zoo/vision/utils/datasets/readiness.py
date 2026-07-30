@@ -7,6 +7,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from scipy.io import loadmat
+from scipy.io.matlab import MatReadError
+
 from ..._tasks import normalize_vision_task
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -126,6 +130,9 @@ def _widerface_ready(root: Path) -> bool:
     )
     if not all((root / file_name).is_file() for file_name in required_files):
         return False
+    expected_images = _load_widerface_image_names(root / "wider_face_val.mat")
+    if expected_images is None:
+        return False
     image_root = root / "images"
     if not image_root.is_dir():
         return False
@@ -134,12 +141,62 @@ def _widerface_ready(root: Path) -> bool:
         WIDERFACE_EVENT_PATTERN.fullmatch(path.name) is None for path in event_dirs
     ):
         return False
-    image_count = sum(
-        path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    if {path.name for path in event_dirs} != expected_images.keys():
+        return False
+    actual_images = {
+        event_dir.name: {
+            path.name for path in event_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+        }
         for event_dir in event_dirs
-        for path in event_dir.iterdir()
+    }
+    return (
+        actual_images == expected_images
+        and sum(len(image_names) for image_names in actual_images.values()) == WIDERFACE_VALIDATION_SAMPLE_COUNT
     )
-    return image_count == WIDERFACE_VALIDATION_SAMPLE_COUNT
+
+
+def _flatten_matlab_strings(value: Any) -> list[str]:
+    """Flatten strings stored inside nested MATLAB cell arrays."""
+
+    if isinstance(value, (str, np.str_)):
+        return [str(value)]
+    if isinstance(value, np.ndarray):
+        strings: list[str] = []
+        for item in value.flat:
+            strings.extend(_flatten_matlab_strings(item))
+        return strings
+    return []
+
+
+def _load_widerface_image_names(annotation_path: Path) -> dict[str, set[str]] | None:
+    """Load exact event and image identities from WiderFace validation metadata."""
+
+    try:
+        annotation = loadmat(annotation_path)
+        event_list = annotation["event_list"]
+        file_list = annotation["file_list"]
+    except (IndexError, KeyError, MatReadError, OSError, TypeError, ValueError):
+        return None
+    if len(event_list) != len(file_list):
+        return None
+
+    expected: dict[str, set[str]] = {}
+    for event_cell, file_cell in zip(event_list, file_list, strict=True):
+        event_names = _flatten_matlab_strings(event_cell)
+        image_stems = _flatten_matlab_strings(file_cell)
+        if (
+            len(event_names) != 1
+            or not image_stems
+            or len(image_stems) != len(set(image_stems))
+            or WIDERFACE_EVENT_PATTERN.fullmatch(event_names[0]) is None
+            or any(not stem or Path(stem).name != stem for stem in image_stems)
+            or event_names[0] in expected
+        ):
+            return None
+        expected[event_names[0]] = {f"{stem}.jpg" for stem in image_stems}
+    if len(expected) != WIDERFACE_EVENT_COUNT:
+        return None
+    return expected
 
 
 def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:

@@ -27,6 +27,8 @@ NYU Depth metric validity comes from targets; non-finite predictions at valid ta
 before median alignment.
 Reuse organized validation and calibration datasets only after validating taxonomy-specific layout,
 required metadata and targets, and the complete official split.
+Atomically replace staged ImageNet, COCO, and WiderFace roots during organization, and require exact
+WiderFace event/image identity agreement with `wider_face_val.mat`.
 Keep TPS printed tables and JSON output synchronized through the shared
 `mblt_model_zoo/cli/tps_table.py` schema.
 Keep Vision evaluator primary and secondary score properties aligned; the standard benchmark

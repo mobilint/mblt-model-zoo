@@ -112,6 +112,73 @@ def test_should_download_serially_for_same_host_urls() -> None:
     )
 
 
+def test_construct_imagenet_replaces_stale_output(tmp_path: Path) -> None:
+    """Replace the managed ImageNet root so stale categories cannot survive repair."""
+
+    image_dir = tmp_path / "source-images"
+    xml_dir = tmp_path / "source-xml" / "val"
+    image_dir.mkdir()
+    xml_dir.mkdir(parents=True)
+    for index in range(50):
+        stem = f"ILSVRC2012_val_{index + 1:08d}"
+        (image_dir / f"{stem}.JPEG").write_bytes(b"image")
+        (xml_dir / f"{stem}.xml").write_text(
+            "<annotation><object><name>n00000001</name></object></annotation>",
+            encoding="utf-8",
+        )
+
+    output_dir = tmp_path / "imagenet"
+    (output_dir / "stale-class").mkdir(parents=True)
+    (output_dir / "stale-class" / "stale.JPEG").write_bytes(b"stale")
+
+    organizer.construct_imagenet(str(image_dir), str(xml_dir.parent), str(output_dir))
+
+    assert {path.name for path in output_dir.iterdir()} == {"n00000001"}
+    assert len(list((output_dir / "n00000001").iterdir())) == 50
+
+
+def test_construct_coco_replaces_stale_output(tmp_path: Path) -> None:
+    """Replace the managed COCO root so stale images and annotations are removed."""
+
+    image_dir = tmp_path / "source-images"
+    annotation_dir = tmp_path / "source-annotations" / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir(parents=True)
+    (image_dir / "000000000001.jpg").write_bytes(b"image")
+    (annotation_dir / "instances_val2017.json").write_text("{}", encoding="utf-8")
+
+    output_dir = tmp_path / "coco"
+    (output_dir / "val2017").mkdir(parents=True)
+    (output_dir / "val2017" / "stale.jpg").write_bytes(b"stale")
+    (output_dir / "stale_val2017.json").write_text("{}", encoding="utf-8")
+
+    organizer.construct_coco(str(image_dir), str(annotation_dir.parent), str(output_dir))
+
+    assert {path.name for path in (output_dir / "val2017").iterdir()} == {"000000000001.jpg"}
+    assert {path.name for path in output_dir.iterdir()} == {"val2017", "instances_val2017.json"}
+
+
+def test_construct_widerface_replaces_stale_output(tmp_path: Path) -> None:
+    """Replace the managed WiderFace root so stale event images cannot survive repair."""
+
+    image_dir = tmp_path / "source-images" / "images" / "0--Parade"
+    annotation_dir = tmp_path / "source-annotations"
+    image_dir.mkdir(parents=True)
+    annotation_dir.mkdir()
+    (image_dir / "sample.jpg").write_bytes(b"image")
+    (annotation_dir / "wider_face_val.mat").write_bytes(b"metadata")
+
+    output_dir = tmp_path / "widerface"
+    (output_dir / "images" / "stale-event").mkdir(parents=True)
+    (output_dir / "images" / "stale-event" / "stale.jpg").write_bytes(b"stale")
+    (output_dir / "stale_val.mat").write_bytes(b"stale")
+
+    organizer.construct_widerface(str(image_dir.parent.parent), str(annotation_dir), str(output_dir))
+
+    assert {path.name for path in (output_dir / "images").iterdir()} == {"0--Parade"}
+    assert {path.name for path in output_dir.iterdir()} == {"images", "wider_face_val.mat"}
+
+
 def test_safe_unpack_archive_preserves_regular_tar_layout(tmp_path: Path) -> None:
     """Extract regular files and directories from a supported tar archive."""
 
