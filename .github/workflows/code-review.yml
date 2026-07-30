@@ -1,3 +1,9 @@
+# managed-by: mobilint/.github
+# managed-template: code-review
+# managed-template-version: 1
+# Repository-specific policy belongs in the central reusable workflow or
+# GitHub Actions variables, not in this caller file.
+
 name: Codex Review
 
 on:
@@ -6,6 +12,7 @@ on:
       - opened
       - reopened
       - ready_for_review
+      - synchronize
   issue_comment:
     types:
       - created
@@ -19,18 +26,9 @@ on:
 jobs:
   codex-review:
     if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
-    uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
     permissions:
       actions: read
       contents: read
       pull-requests: write
       issues: write
-    with:
-      post_untrusted_notice: true
-      skip_draft_pr: true
-      max_files: 500
-      max_diff_chars: 1000000
-      official_review_wait_minutes: 5
-      review_on_pr_synchronize: false
-      allow_unsafe_no_sandbox_fallback: false
-      max_concurrent_mention_reviews: 10
+    uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
