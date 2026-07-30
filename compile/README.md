@@ -4,6 +4,10 @@ Vision models can be compiled through the installed Python API or CLI. See the
 [vision compilation guide](vision/README.md) for dependency setup, automatic ONNX and dataset
 downloads, calibration defaults, and compatibility scripts.
 
+Registry-backed calibration supports ImageNet, COCO, WiderFace, DOTAv1, NYU Depth, ADE20K, and
+Cityscapes. Dense models select NYU Depth, ADE20K, or Cityscapes from their `post_cfg.dataset`
+metadata.
+
 ```python
 from mblt_model_zoo.compile.vision import compile_vision_model
 

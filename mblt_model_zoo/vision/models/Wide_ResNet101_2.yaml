@@ -2,7 +2,7 @@ DEFAULT: IMAGENET1K_V2
 IMAGENET1K_V1:
   file_cfg:
     repo_id: mobilint/Wide_ResNet101_2.tv1_in1k
-    filename: wide_resnet101_2_IMAGEN1K_V1.mxq
+    filename: wide_resnet101_2_IMAGENET1K_V1.mxq
     revision: main
   pre_cfg:
     Reader:
@@ -20,6 +20,7 @@ IMAGENET1K_V1:
       style: torch
   post_cfg:
     task: image_classification
+    dataset: imagenet
 IMAGENET1K_V2:
   update: IMAGENET1K_V1
   file_cfg:

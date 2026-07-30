@@ -28,10 +28,10 @@ class Reader(PreOps):
             style (str): Reading style, either "pil" or "numpy".
         """
         super().__init__()
-        assert style.lower() in [
-            "pil",
-            "numpy",
-        ], f"Unsupported style={style} for image reader."
+        if not isinstance(style, str):
+            raise TypeError(f"Reader style must be a string, got {type(style).__name__}.")
+        if style.lower() not in {"pil", "numpy"}:
+            raise ValueError(f"Unsupported Reader style {style!r}; expected 'pil' or 'numpy'.")
         self.style = style.lower()
 
     def __call__(self, x: str | Path | TensorLike | Image.Image) -> np.ndarray | Image.Image:
@@ -56,7 +56,7 @@ class Reader(PreOps):
             elif isinstance(x, Image.Image):
                 return np.array(x)
             else:
-                raise ValueError("Got Unsupported Input")
+                raise TypeError(f"Reader(style='numpy') does not support input type {type(x).__name__}.")
         elif self.style == "pil":
             if isinstance(x, np.ndarray):
                 return Image.fromarray(x.astype(np.uint8))
@@ -68,6 +68,6 @@ class Reader(PreOps):
             elif isinstance(x, Image.Image):
                 return x
             else:
-                raise ValueError("Got Unsupported Input")
+                raise TypeError(f"Reader(style='pil') does not support input type {type(x).__name__}.")
         else:
-            raise NotImplementedError("Got Unsupported Style")
+            raise RuntimeError(f"Reader has an invalid validated style: {self.style!r}.")

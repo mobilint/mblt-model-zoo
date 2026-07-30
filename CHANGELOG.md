@@ -2,6 +2,19 @@
 
 ## 2.3.0
 
+### Breaking Changes
+
+- Semantic validation loaders now require preprocessing callbacks to return
+  `(image, metadata)` with LetterBox `ratio_pad` metadata so image and target
+  geometry remain identical. External callbacks that previously returned only
+  an image must switch to the metadata-enabled preprocessing path, such as
+  `preprocessor.with_metadata`.
+- YOLO detection postprocessors now require a `LetterBox` entry in `pre_cfg`.
+  External model YAML files and direct postprocessor callers must provide the
+  configured LetterBox input size instead of relying on an implicit fallback.
+- When the default user cache is unavailable, vision artifacts now fall back to
+  a private process-specific temporary directory instead of a shared path.
+
 ### Changed
 
 - The `mblt-model-zoo tps` CLI JSON schema is now driven by

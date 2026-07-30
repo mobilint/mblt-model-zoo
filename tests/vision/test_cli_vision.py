@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import io
+import runpy
+import sys
+import tarfile
 import zipfile
 from argparse import Namespace
 from pathlib import Path
@@ -12,10 +16,18 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from scipy.io import savemat
 
 from mblt_model_zoo.cli._vision import run_vision_inference
 from mblt_model_zoo.cli.main import build_parser
-from mblt_model_zoo.cli.val import _dataset_ready, _default_data_path_for_task, _resolve_coco_sources, _run_validation
+from mblt_model_zoo.cli.val import (
+    _dataset_ready,
+    _default_data_path_for_task,
+    _ensure_dataset,
+    _resolve_cityscapes_sources,
+    _resolve_coco_sources,
+    _run_validation,
+)
 from mblt_model_zoo.vision.datasets import (
     get_dataset_category_ids,
     get_dataset_class_names,
@@ -24,8 +36,16 @@ from mblt_model_zoo.vision.datasets import (
 )
 from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
+from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
-from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
+from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1, construct_dotav1_from_archives
+from mblt_model_zoo.vision.utils.evaluation import (
+    ADE20KResult,
+    COCOResult,
+    DOTAResult,
+    ImageNetResult,
+    SemanticSegmentationResult,
+)
 from mblt_model_zoo.vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     _match_predictions,
@@ -35,6 +55,17 @@ from mblt_model_zoo.vision.utils.evaluation.eval_widerface import WiderFaceResul
 
 if TYPE_CHECKING:
     from mblt_model_zoo.vision.wrapper import MBLT_Engine
+
+
+def _write_widerface_metadata(path: Path, event_images: dict[str, list[str]]) -> None:
+    """Write minimal WiderFace validation identity metadata."""
+
+    event_list = np.empty((len(event_images), 1), dtype=object)
+    file_list = np.empty((len(event_images), 1), dtype=object)
+    for index, (event_name, image_stems) in enumerate(event_images.items()):
+        event_list[index, 0] = event_name
+        file_list[index, 0] = np.array([[stem] for stem in image_stems], dtype=object)
+    savemat(path, {"event_list": event_list, "file_list": file_list})
 
 
 def test_cli_predict_example_parses() -> None:
@@ -76,7 +107,7 @@ def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
 
     config = get_dataset_config("dotav1")
 
-    assert config["val"] == "images/val"
+    assert config["val"] == "images"
     assert config["download"]["type"] == "google_drive_folder"
     assert get_dataset_config_for_task("obb")["name"] == config["name"]
 
@@ -84,12 +115,33 @@ def test_vision_dataset_yaml_registry_resolves_dotav1() -> None:
 def test_vision_dataset_yaml_registry_preserves_class_metadata() -> None:
     """Serve legacy class helper values from the YAML dataset definitions."""
 
+    ade20k_names = get_dataset_class_names("ade20k")
+    assert len(ade20k_names) == get_dataset_config("ade20k")["nc"] == 150
+    assert ade20k_names[12] == "person"
+    assert ade20k_names[80] == "bus"
+    assert ade20k_names[149] == "flag"
     assert get_dataset_class_names("coco")[0] == "person"
     assert get_dataset_category_ids("coco") is get_dataset_category_ids("coco")
     assert get_coco_label(79) == "toothbrush"
     assert get_coco_inv(11) == 13
     assert get_dotav1_label(2) == "storage-tank"
     assert get_imagenet_label(0) == "tench"
+
+
+def test_vision_dataset_registry_selects_semantic_taxonomies() -> None:
+    """Select Cityscapes explicitly while preserving task-only ADE20K fallback."""
+
+    cityscapes = get_dataset_config_for_task("semantic_segmentation", "cityscapes")
+    assert cityscapes["name"] == "cityscapes"
+    assert cityscapes["category_ids"] == [7, 8, 11, 12, 13, 17, *range(19, 29), 31, 32, 33]
+    assert cityscapes["download"] == {
+        "type": "cityscapes",
+        "source": "https://github.com/mcordts/cityscapesScripts",
+        "images_archive": "leftImg8bit_trainvaltest.zip",
+        "annotations_archive": "gtFine_trainvaltest.zip",
+    }
+    assert len(get_dataset_class_names("cityscapes")) == 19
+    assert get_dataset_config_for_task("semantic_segmentation")["name"] == "ade20k"
 
 
 @pytest.mark.parametrize(
@@ -339,6 +391,95 @@ def test_cli_predict_applies_obb_thresholds(monkeypatch: pytest.MonkeyPatch, tmp
     assert calls["disposed"] is True
 
 
+def test_cli_predict_restores_semantic_logits_with_preprocess_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Restore non-square semantic logits before selecting their classes."""
+
+    from mblt_model_zoo.vision.utils.postprocess.semantic_seg_post import SemanticSegPost
+
+    source_path = tmp_path / "street.png"
+    source_path.write_bytes(b"fake")
+    calls: dict[str, object] = {}
+
+    class _FakeResult:
+        def __init__(self, semantic_mask: torch.Tensor) -> None:
+            self.semantic_mask = semantic_mask
+
+        def plot(self, source_path: str, save_path: str, **kwargs: object) -> None:
+            calls["plot"] = (source_path, save_path, kwargs)
+
+    class _FakeEngine:
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "cityscapes"}
+            self.postprocessor = SemanticSegPost(
+                {"LetterBox": {"img_size": [8, 8]}},
+                {"task": "semantic_segmentation", "dataset": "cityscapes"},
+            )
+
+        def preprocess_with_metadata(self, source: str) -> tuple[torch.Tensor, dict[str, object]]:
+            calls["preprocess"] = source
+            return torch.zeros((8, 8, 3)), {
+                "img0_shape": (2, 4),
+                "ratio_pad": ((2.0, 2.0), (0, 2)),
+            }
+
+        def __call__(self, input_img: torch.Tensor) -> torch.Tensor:
+            calls["forward_shape"] = tuple(input_img.shape)
+            logits = torch.zeros((1, 19, 8, 8), dtype=torch.float32)
+            logits[:, 0] = 0.5
+            logits[:, 1] = torch.linspace(0.0, 1.0, 64).reshape(8, 8)
+            return logits
+
+        def postprocess(self, output: torch.Tensor, **kwargs: object) -> _FakeResult:
+            calls["postprocess_kwargs"] = kwargs
+            return _FakeResult(cast(torch.Tensor, self.postprocessor(output, **kwargs)))
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    import mblt_model_zoo.cli._vision as vision_cli_module
+
+    monkeypatch.setattr(vision_cli_module, "require_source_file", lambda source: None)
+    monkeypatch.setattr(
+        vision_cli_module,
+        "resolve_output_path",
+        lambda output, command, source, model: str(tmp_path / "out.png"),
+    )
+    monkeypatch.setattr("mblt_model_zoo.vision.MBLT_Engine", _FakeEngine)
+
+    args = Namespace(
+        source=str(source_path),
+        model="yolo26m-sem",
+        output="",
+        framework="onnx",
+        model_path="/models/yolo26m-sem.onnx",
+        mxq_path="",
+        onnx_path="",
+        model_type="DEFAULT",
+        core_mode="global8",
+        dev_no=0,
+        target_cores=None,
+        target_clusters=None,
+        topk=5,
+        conf_thres=0.25,
+        iou_thres=0.6,
+        e2e=True,
+    )
+
+    result = run_vision_inference(args, command="predict")
+
+    assert calls["postprocess_kwargs"] == {
+        "img0_shape": (2, 4),
+        "ratio_pad": ((2.0, 2.0), (0, 2)),
+    }
+    assert result.semantic_mask.shape == (2, 4)
+    assert set(result.semantic_mask.unique().tolist()) == {0, 1}
+    assert calls["disposed"] is True
+
+
 def test_cli_val_preserves_framework_specific_model_paths() -> None:
     """Keep validation compatibility path aliases separate from the generic model path."""
 
@@ -361,6 +502,17 @@ def test_cli_val_preserves_framework_specific_model_paths() -> None:
     assert args.model_path == ""
     assert args.mxq_path == "./resnet50.mxq"
     assert args.onnx_path == "./resnet50.onnx"
+
+
+def test_cli_root_help_lists_supported_prediction_tasks() -> None:
+    """Describe every vision task family supported by the unified predict command."""
+
+    help_text = " ".join(build_parser().format_help().split())
+
+    assert "depth estimation" in help_text
+    assert "instance or semantic segmentation" in help_text
+    assert "OBB" in help_text
+    assert "face detection" in help_text
 
 
 @pytest.mark.parametrize(
@@ -430,14 +582,204 @@ def test_cli_val_supports_face_detection_defaults() -> None:
     assert _default_data_path_for_task("face_detection").endswith(".mblt_model_zoo/datasets/widerface")
 
 
-def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
+def test_cli_val_supports_semantic_segmentation_defaults() -> None:
+    """Use ADE20K as the default semantic-segmentation validation dataset."""
+
+    assert _default_data_path_for_task("semantic_segmentation").endswith(
+        ".mblt_model_zoo/datasets/ADEChallengeData2016"
+    )
+    assert _default_data_path_for_task("semantic_segmentation", "cityscapes").endswith(
+        ".mblt_model_zoo/datasets/cityscapes"
+    )
+
+
+def test_cli_val_validates_dense_dataset_taxonomy_and_completeness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject incomplete dense datasets and roots from another taxonomy."""
+
+    data_path = tmp_path / "ADEChallengeData2016"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
+
+    for index in range(2):
+        stem = f"ADE_val_{index + 1:08d}"
+        (data_path / "images" / f"{stem}.jpg").write_bytes(b"image")
+        if index == 0:
+            (data_path / "annotations" / f"{stem}.png").write_bytes(b"annotation")
+
+    assert not _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
+
+    (data_path / "annotations" / "ADE_val_00000002.png").write_bytes(b"annotation")
+    (data_path / "objectInfo150.txt").write_bytes(b"labels")
+    (data_path / "sceneCategories.txt").write_bytes(b"scenes")
+
+    assert _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
+    assert not _dataset_ready("semantic_segmentation", str(data_path), "cityscapes")
+
+
+@pytest.mark.parametrize("taxonomy", ["cityscapes", "ade20k"])
+def test_cli_val_organizes_selected_semantic_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    taxonomy: str,
+) -> None:
+    """Invoke only the organizer belonging to the selected semantic taxonomy."""
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_cityscapes(**kwargs: object) -> None:
+        calls.append(("cityscapes", kwargs))
+
+    def _fake_ade20k(**kwargs: object) -> None:
+        calls.append(("ade20k", kwargs))
+
+    import mblt_model_zoo.cli.val as val_module
+    import mblt_model_zoo.vision.utils.datasets as dataset_utils
+
+    monkeypatch.setattr(dataset_utils, "organize_cityscapes", _fake_cityscapes)
+    monkeypatch.setattr(dataset_utils, "organize_ade20k", _fake_ade20k)
+    monkeypatch.setattr(val_module, "_dataset_ready", lambda *args: bool(calls))
+    args = Namespace(
+        data_path=str(tmp_path / taxonomy),
+        force_organize=False,
+        image_dir=str(tmp_path / "leftImg8bit_trainvaltest.zip"),
+        annotation_dir=str(tmp_path / "gtFine_trainvaltest.zip"),
+    )
+
+    assert _ensure_dataset(args, "semantic_segmentation", taxonomy) == str(tmp_path / taxonomy)
+    assert calls[0][0] == taxonomy
+    if taxonomy == "cityscapes":
+        assert calls[0][1] == {
+            "image_dir": str(tmp_path / "leftImg8bit_trainvaltest.zip"),
+            "annotation_dir": str(tmp_path / "gtFine_trainvaltest.zip"),
+            "output_dir": str(tmp_path / taxonomy),
+        }
+
+
+def test_cli_val_discovers_cityscapes_archives_near_output(tmp_path: Path) -> None:
+    """Discover both official ZIP filenames beside the organized dataset path."""
+
+    data_path = tmp_path / "datasets" / "cityscapes"
+    data_path.parent.mkdir()
+    image_archive = data_path.parent / "leftImg8bit_trainvaltest.zip"
+    annotation_archive = data_path.parent / "gtFine_trainvaltest.zip"
+    image_archive.touch()
+    annotation_archive.touch()
+    args = Namespace(image_dir=None, annotation_dir=None, force_organize=False)
+
+    assert _resolve_cityscapes_sources(args, str(data_path)) == (str(image_archive), str(annotation_archive))
+
+
+def test_cli_val_cityscapes_sources_allow_explicit_paths() -> None:
+    """Route explicit Cityscapes archive paths without requiring discovery."""
+
+    args = Namespace(image_dir="/raw/images.zip", annotation_dir="/raw/annotations.zip", force_organize=True)
+
+    assert _resolve_cityscapes_sources(args, "/organized/cityscapes") == (
+        "/raw/images.zip",
+        "/raw/annotations.zip",
+    )
+
+
+def test_cli_val_cityscapes_sources_report_download_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explain how to obtain both manually gated Cityscapes packages."""
+
+    import mblt_model_zoo.cli.val as val_module
+
+    monkeypatch.setattr(val_module, "_candidate_search_roots", lambda data_path: [Path(data_path)])
+    args = Namespace(image_dir=None, annotation_dir=None, force_organize=False)
+
+    with pytest.raises(SystemExit, match=r"csDownload -d <download-dir> gtFine_trainvaltest\.zip"):
+        _resolve_cityscapes_sources(args, str(tmp_path / "cityscapes"))
+
+
+def test_standalone_cityscapes_organizer_routes_required_archives(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pass standalone organizer arguments through to the public API."""
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_organize_cityscapes(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    import mblt_model_zoo.vision.utils.datasets as dataset_utils
+
+    monkeypatch.setattr(dataset_utils, "organize_cityscapes", _fake_organize_cityscapes)
+    script_path = Path(__file__).parents[2] / "benchmark" / "vision" / "organize_cityscapes.py"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(script_path),
+            "--image-dir",
+            "/raw/leftImg8bit_trainvaltest.zip",
+            "--annotation-dir",
+            "/raw/gtFine_trainvaltest.zip",
+            "--output-dir",
+            str(tmp_path / "cityscapes"),
+        ],
+    )
+
+    runpy.run_path(str(script_path), run_name="__main__")
+
+    assert calls == [
+        {
+            "image_dir": "/raw/leftImg8bit_trainvaltest.zip",
+            "annotation_dir": "/raw/gtFine_trainvaltest.zip",
+            "output_dir": str(tmp_path / "cityscapes"),
+        }
+    ]
+
+
+def test_cli_val_detects_original_dotav1_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
     data_path = tmp_path / "dotav1"
-    (data_path / "images" / "val").mkdir(parents=True)
+    (data_path / "images").mkdir(parents=True)
     (data_path / "labels" / "val_original").mkdir(parents=True)
+    (data_path / "images" / "P0001.png").write_bytes(b"image")
+    (data_path / "labels" / "val_original" / "P0001.txt").write_bytes(b"label")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
 
     assert _dataset_ready("obb", str(data_path))
+
+
+@pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
+def test_dotav1_loader_supports_flat_and_legacy_images(tmp_path: Path, relative_image_dir: str) -> None:
+    """Load current flat and legacy nested DOTAv1 image layouts."""
+
+    image_dir = tmp_path / "dotav1" / relative_image_dir
+    image_dir.mkdir(parents=True)
+    assert cv2.imwrite(str(image_dir / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+
+    dataset = CustomDOTAv1(str(tmp_path / "dotav1"))
+
+    assert dataset.image_root == str(image_dir)
+    assert dataset.ids == ["P0001"]
+    image, image_id, height, width = dataset[0]
+    assert image.shape == (8, 12, 3)
+    assert (image_id, height, width) == ("P0001", 8, 12)
+
+
+def test_dotav1_loader_rejects_empty_image_layout(tmp_path: Path) -> None:
+    """Reject empty DOTAv1 layouts instead of reporting zero metrics."""
+
+    (tmp_path / "dotav1" / "images" / "val").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="DOTAv1 validation images not found"):
+        CustomDOTAv1(str(tmp_path / "dotav1"))
 
 
 def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) -> None:
@@ -458,6 +800,51 @@ def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) ->
         construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
 
 
+def test_google_drive_dotav1_archives_reject_traversal_members(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reject tar members that would write outside the temporary extraction tree."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    image_archive = tmp_path / "part1.tar"
+    label_archive = tmp_path / "labelTxt.tar"
+    outside_marker = tmp_path / "outside-marker.txt"
+    with tarfile.open(image_archive, "w") as archive:
+        archive.add(image_source, arcname="images/P0001.png")
+        traversal = tarfile.TarInfo(str(outside_marker))
+        traversal.size = len(b"outside")
+        archive.addfile(traversal, io.BytesIO(b"outside"))
+    with tarfile.open(label_archive, "w") as archive:
+        archive.add(label_source, arcname="labelTxt/P0001.txt")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    with pytest.raises(ValueError, match="Unsafe archive member path"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+    assert not outside_marker.exists()
+
+
+def test_google_drive_dotav1_archives_reject_link_members(tmp_path: Path) -> None:
+    """Reject tar symlinks before archive extraction can follow them."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    image_archive = tmp_path / "part1.tar"
+    label_archive = tmp_path / "labelTxt.tar"
+    with tarfile.open(image_archive, "w") as archive:
+        archive.add(image_source, arcname="images/P0001.png")
+        link = tarfile.TarInfo("images/link.png")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside-marker.txt"
+        archive.addfile(link)
+    with tarfile.open(label_archive, "w"):
+        pass
+
+    with pytest.raises(ValueError, match="Unsafe archive member type"):
+        construct_dotav1_from_archives(str(image_archive), str(label_archive), str(tmp_path / "dotav1"))
+
+
 def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -467,6 +854,7 @@ def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
     assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
     label_source = tmp_path / "P0001.txt"
     label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
     image_archive = tmp_path / "part1.zip"
     label_archive = tmp_path / "labelTxt.zip"
     with zipfile.ZipFile(image_archive, "w") as archive:
@@ -488,6 +876,133 @@ def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
 
     assert old_image.read_bytes() == b"old"
     assert old_label.is_file()
+
+
+def test_google_drive_dotav1_archives_install_flat_validation_layout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Install flat DOTAv1 validation data without difficult normalized labels."""
+
+    image_source = tmp_path / "P0001.png"
+    assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
+    label_source = tmp_path / "P0001.txt"
+    label_source.write_text(
+        "\n".join(
+            [
+                "0 0 10 0 10 10 0 10 plane 0",
+                "2 2 8 2 8 8 2 8 ship 1",
+                "4 4 6 4 6 6 4 6 storage-tank 2",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    image_archive = tmp_path / "part1.zip"
+    label_archive = tmp_path / "labelTxt.zip"
+    with zipfile.ZipFile(image_archive, "w") as archive:
+        archive.write(image_source, "images/P0001.png")
+    with zipfile.ZipFile(label_archive, "w") as archive:
+        archive.write(label_source, "labelTxt/P0001.txt")
+    monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    output_dir = tmp_path / "dotav1"
+    construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
+
+    assert (output_dir / "images" / "P0001.png").is_file()
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
+    assert (output_dir / "labels" / "val" / "P0001.txt").read_text(encoding="utf-8") == (
+        "0 0 0 0.5 0 0.5 0.625 0 0.625\n"
+    )
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").read_text(encoding="utf-8") == (
+        label_source.read_text(encoding="utf-8")
+    )
+    assert not (output_dir / "images" / "val").exists()
+
+
+def test_local_dotav1_replaces_stale_cache_with_validated_flat_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Remove stale managed files when installing a complete local DOTAv1 source."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    (source_dir / "labels" / "val_original").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    (source_dir / "labels" / "val_original" / "P0001.txt").write_text(
+        "0 0 10 0 10 6 0 6 plane 0\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "dotav1"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "labels" / "val").mkdir(parents=True)
+    (output_dir / "images" / "stale.png").write_bytes(b"stale")
+    (output_dir / "labels" / "val" / "stale.txt").write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    construct_dotav1(str(source_dir), str(output_dir))
+
+    assert sorted(path.name for path in (output_dir / "images").iterdir()) == ["P0001.png"]
+    assert not (output_dir / "labels" / "val").exists()
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
+
+
+def test_local_dotav1_preserves_cache_when_staged_source_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validate a local DOTAv1 repair before replacing an existing cache."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    output_dir = tmp_path / "dotav1"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "labels" / "val_original").mkdir(parents=True)
+    (output_dir / "images" / "old.png").write_bytes(b"old")
+    old_label = output_dir / "labels" / "val_original" / "old.txt"
+    old_label.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    with pytest.raises(ValueError, match="existing dataset cache was not replaced"):
+        construct_dotav1(str(source_dir), str(output_dir))
+
+    assert (output_dir / "images" / "old.png").read_bytes() == b"old"
+    assert old_label.read_text(encoding="utf-8") == "old"
+
+
+def test_local_dotav1_preserves_backup_when_install_and_rollback_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Leave a recoverable DOTAv1 backup when replacement rollback also fails."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    (source_dir / "labels" / "val_original").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    (source_dir / "labels" / "val_original" / "P0001.txt").write_text("label", encoding="utf-8")
+    output_dir = tmp_path / "dotav1"
+    output_dir.mkdir()
+    (output_dir / "old-marker.txt").write_text("recoverable", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+    real_replace = organizer_module.os.replace
+
+    def _fail_install_and_rollback(source: str, destination: str) -> None:
+        if destination == str(output_dir) and ".dotav1-staging-" in source:
+            raise OSError("installation failed")
+        if destination == str(output_dir) and ".dotav1-backup-" in source:
+            raise OSError("rollback failed")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(organizer_module.os, "replace", _fail_install_and_rollback)
+
+    with pytest.raises(OSError, match="backups are preserved"):
+        construct_dotav1(str(source_dir), str(output_dir))
+
+    backup_dirs = list(tmp_path.glob(".dotav1-backup-*"))
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "dotav1" / "old-marker.txt").read_text(encoding="utf-8") == "recoverable"
 
 
 def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(
@@ -558,23 +1073,115 @@ def test_google_drive_dotav1_organizer_recognizes_folder_url_variants(url: str) 
     assert organizer_module._is_google_drive_folder_url(url)
 
 
-def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:
+def test_cli_val_detects_organized_widerface(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Recognize an organized WiderFace validation layout."""
 
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
-    for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+    (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
+    _write_widerface_metadata(data_path / "wider_face_val.mat", {"0--Parade": ["sample"]})
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
+    monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
 
     assert _dataset_ready("face_detection", str(data_path))
 
 
-def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_cli_val_routes_imagenet_metrics_in_primary_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Return Top-1 and report ImageNet metrics from primary to secondary."""
+
+    data_path = tmp_path / "imagenet"
+    (data_path / "n00000001").mkdir(parents=True)
+    (data_path / "n00000001" / "ILSVRC2012_val_00000001.JPEG").write_bytes(b"image")
+    monkeypatch.setattr(readiness_module, "IMAGENET_CLASS_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "IMAGENET_IMAGES_PER_CLASS", 1)
+    calls = {}
+
+    class _FakeEngine:
+        """Minimal engine double for ImageNet validation routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "image_classification"}
+            self.postprocessor = Namespace(e2e=True)
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_imagenet(**kwargs: object) -> ImageNetResult:
+        calls["eval_kwargs"] = kwargs
+        return ImageNetResult(top1=0.75, top5=0.95)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_imagenet_metrics", _fake_eval_imagenet)
+
+    args = Namespace(
+        model="resnet50",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=8,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=True,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    output = capsys.readouterr().out
+    assert score == 0.75
+    assert "Validation score (Top-1 accuracy): 0.75000, (Top-5 accuracy): 0.95000" in output
+    assert calls["disposed"] is True
+
+
+def test_eval_imagenet_preserves_numeric_top1_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return a float from the legacy ImageNet evaluator entry point."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_imagenet")
+    monkeypatch.setattr(
+        eval_module,
+        "eval_imagenet_metrics",
+        lambda *args, **kwargs: ImageNetResult(top1=0.75, top5=0.95),
+    )
+
+    score = eval_module.eval_imagenet(object(), "/unused", 1)
+
+    assert score == 0.75
+    assert isinstance(score, float)
+
+
+def test_cli_val_routes_obb_to_dota_evaluator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Route OBB validation through the DOTAv1 evaluator."""
 
     data_path = tmp_path / "dotav1"
     (data_path / "images" / "val").mkdir(parents=True)
     (data_path / "labels" / "val").mkdir(parents=True)
+    (data_path / "images" / "val" / "P0001.png").write_bytes(b"image")
+    (data_path / "labels" / "val" / "P0001.txt").write_bytes(b"label")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 
     class _FakeEngine:
@@ -582,21 +1189,15 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
 
         def __init__(self, **kwargs: object) -> None:
             calls["engine_kwargs"] = kwargs
-            self.post_cfg = {"task": "obb"}
+            self.post_cfg = {"task": "oriented_bounding_boxes"}
             self.postprocessor = Namespace(e2e=True)
 
         def dispose(self) -> None:
             calls["disposed"] = True
 
-    class _FakeDOTAResult:
-        """Minimal DOTAv1 metric result."""
-
-        map50 = 0.234
-        map5095 = 0.123
-
-    def _fake_eval_dota(**kwargs: object) -> _FakeDOTAResult:
+    def _fake_eval_dota(**kwargs: object) -> DOTAResult:
         calls["eval_kwargs"] = kwargs
-        return _FakeDOTAResult()
+        return DOTAResult(map5095=0.123, map50=0.234)
 
     import mblt_model_zoo.vision as vision_module
     import mblt_model_zoo.vision.utils.evaluation as evaluation_module
@@ -631,11 +1232,219 @@ def test_cli_val_routes_obb_to_dota_evaluator(monkeypatch: pytest.MonkeyPatch, t
     engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == 0.123
+    assert "Validation score (rotated mAP50-95): 0.12300, (rotated mAP50): 0.23400" in capsys.readouterr().out
     assert engine_kwargs["model_cls"] == "yolov8m-obb"
     assert engine_kwargs["framework"] == "onnx"
     assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
     assert eval_kwargs["data_path"] == str(data_path)
     assert eval_kwargs["batch_size"] == 8
+    assert calls["disposed"] is True
+
+
+def test_eval_dota_accepts_oriented_bounding_boxes_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Normalize the public OBB compatibility spelling inside the evaluator."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_dota")
+
+    def _accepted_alias(_: str) -> object:
+        raise RuntimeError("alias accepted")
+
+    monkeypatch.setattr(eval_module, "CustomDOTAv1", _accepted_alias)
+    model = Namespace(post_cfg={"task": "oriented_bounding_boxes"})
+
+    with pytest.raises(RuntimeError, match="alias accepted"):
+        eval_module.eval_dota(cast("MBLT_Engine", model), str(tmp_path), 1)
+
+
+def test_cli_val_routes_semantic_segmentation_to_ade20k(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Route semantic validation through the ADE20K evaluator."""
+
+    data_path = tmp_path / "ADEChallengeData2016"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    (data_path / "images" / "ADE_val_00000001.jpg").write_bytes(b"image")
+    (data_path / "annotations" / "ADE_val_00000001.png").write_bytes(b"annotation")
+    (data_path / "objectInfo150.txt").write_bytes(b"labels")
+    (data_path / "sceneCategories.txt").write_bytes(b"scenes")
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    calls = {}
+
+    class _FakeEngine:
+        """Minimal engine double for semantic validation routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "ade20k"}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_ade20k(**kwargs: object) -> ADE20KResult:
+        calls["eval_kwargs"] = kwargs
+        return ADE20KResult(miou=0.321, pixel_accuracy=0.765)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_ade20k", _fake_eval_ade20k)
+
+    args = Namespace(
+        model="yolo26n-sem-ade20k",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./yolo26n-sem-ade20k.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=2,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    assert score == 0.321
+    assert "Validation score (mIoU): 0.32100, (pixel accuracy): 0.76500" in capsys.readouterr().out
+    assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
+    assert calls["disposed"] is True
+
+
+def test_cli_val_rejects_unsupported_semantic_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject custom semantic taxonomies instead of scoring them as ADE20K."""
+
+    data_path = tmp_path / "custom"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    calls: dict[str, object] = {}
+
+    class _FakeEngine:
+        """Minimal engine double for unsupported semantic taxonomy routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "custom", "nc": 2}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_ade20k",
+        lambda **kwargs: pytest.fail("unsupported taxonomies must not use ADE20K evaluation"),
+    )
+    args = Namespace(
+        model="custom-semantic",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./custom-semantic.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=1,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    with pytest.raises(SystemExit, match="Unsupported semantic segmentation taxonomy.*custom"):
+        _run_validation(args)
+
+    assert calls["disposed"] is True
+
+
+def test_cli_val_routes_semantic_segmentation_to_cityscapes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Route the base YOLO26 semantic family through Cityscapes evaluation."""
+
+    data_path = tmp_path / "cityscapes"
+    (data_path / "images").mkdir(parents=True)
+    (data_path / "annotations").mkdir()
+    sample_name = "frankfurt_000000_000001.png"
+    (data_path / "images" / sample_name).write_bytes(b"image")
+    (data_path / "annotations" / sample_name).write_bytes(b"annotation")
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    calls: dict[str, object] = {}
+
+    class _FakeEngine:
+        """Minimal engine double for Cityscapes routing."""
+
+        def __init__(self, **kwargs: object) -> None:
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "cityscapes"}
+            self.postprocessor = Namespace()
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    def _fake_eval_cityscapes(**kwargs: object) -> SemanticSegmentationResult:
+        calls["eval_kwargs"] = kwargs
+        return SemanticSegmentationResult(miou=0.456, pixel_accuracy=0.789)
+
+    import mblt_model_zoo.vision as vision_module
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
+    monkeypatch.setattr(evaluation_module, "eval_cityscapes", _fake_eval_cityscapes)
+    args = Namespace(
+        model="yolo26n-sem",
+        model_type="DEFAULT",
+        framework="onnx",
+        model_path="./yolo26n-sem.onnx",
+        mxq_path="",
+        onnx_path="",
+        dev_no=0,
+        core_mode="global8",
+        target_cores=None,
+        target_clusters=None,
+        data_path=str(data_path),
+        batch_size=2,
+        conf_thres=None,
+        iou_thres=None,
+        e2e=None,
+        force_organize=False,
+        image_dir=None,
+        xml_dir=None,
+        annotation_dir=None,
+    )
+
+    score = _run_validation(args)
+
+    assert score == 0.456
+    assert cast(dict[str, object], calls["eval_kwargs"])["data_path"] == str(data_path)
     assert calls["disposed"] is True
 
 
@@ -676,8 +1485,12 @@ def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPa
 
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
-    for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
+    (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
+    _write_widerface_metadata(data_path / "wider_face_val.mat", {"0--Parade": ["sample"]})
+    for file_name in ("wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
+    monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 
     class _FakeEngine:
@@ -842,7 +1655,7 @@ def test_eval_widerface_formats_predictions_and_returns_metrics(
 
 
 def test_dota_evaluator_reports_map50_and_map5095() -> None:
-    """Return both DOTAv1 mAP50 and mAP50-95 metrics."""
+    """Return DOTAv1 metrics with mAP50-95 as the primary score."""
 
     ground_truths = {
         "P0001": {
@@ -863,6 +1676,44 @@ def test_dota_evaluator_reports_map50_and_map5095() -> None:
 
     assert result.map50 > 0.99
     assert result.map5095 > 0.99
+    assert result.primary_score == result.map5095
+    assert result.secondary_score == result.map50
+
+
+def test_metric_results_preserve_tuple_compatibility() -> None:
+    """Keep legacy tuple fields while exposing primary and secondary metrics."""
+
+    imagenet_result = ImageNetResult(top1=0.75, top5=0.95)
+    coco_result = COCOResult(map5095=0.55, map50=0.75)
+    dota_result = DOTAResult(0.7, 0.45)
+    widerface_result = WiderFaceResult(0.9, 0.8, 0.7)
+
+    assert tuple(imagenet_result) == (0.75, 0.95)
+    assert imagenet_result.primary_score == imagenet_result.top1
+    assert imagenet_result.secondary_score == imagenet_result.top5
+    assert tuple(coco_result) == (0.55, 0.75)
+    assert coco_result.primary_score == coco_result.map5095
+    assert coco_result.secondary_score == coco_result.map50
+    assert tuple(dota_result) == (0.7, 0.45)
+    assert dota_result.map50 == 0.7
+    assert dota_result.map5095 == 0.45
+    assert dota_result.primary_score == dota_result.map5095
+    assert dota_result.secondary_score == dota_result.map50
+    assert widerface_result.primary_score == widerface_result.mean_ap
+    assert widerface_result.secondary_score == widerface_result.hard_ap
+
+
+def test_eval_coco_preserves_numeric_compatibility(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep eval_coco returning its historical mAP50-95 float."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_coco")
+    monkeypatch.setattr(
+        eval_module,
+        "eval_coco_metrics",
+        lambda *args, **kwargs: COCOResult(map5095=0.55, map50=0.75),
+    )
+
+    assert eval_module.eval_coco(object(), "dataset", 1) == 0.55
 
 
 def test_dota_matching_uses_one_to_one_duplicates() -> None:

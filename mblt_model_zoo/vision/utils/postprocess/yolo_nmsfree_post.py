@@ -9,10 +9,10 @@ from typing import Any, cast
 import torch
 
 from .common import dist2bbox, dual_topk
-from .yolo_anchorless_post import YOLOAnchorlessPost
+from .yolo_anchorless_post import YOLOAnchorlessDetectionPost, _AnchorlessNMSInput
 
 
-class YOLONMSFreePost(YOLOAnchorlessPost):
+class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO NMS-free models."""
 
     max_det = 300
@@ -131,22 +131,28 @@ class YOLONMSFreePost(YOLOAnchorlessPost):
 
     def nms(
         self,
-        x: torch.Tensor | list[torch.Tensor],
+        x: _AnchorlessNMSInput | torch.Tensor | list[torch.Tensor],
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
+        multi_label: bool = False,
     ) -> list[torch.Tensor]:
         """Perform Non-Maximum Suppression (no-op for NMS-free models).
 
         Args:
-            x (list[torch.Tensor]): Decoded detections.
+            x: Decoded detections, optionally with source-layout provenance.
             max_det (int, optional): Maximum number of detections to keep. Defaults to 300.
             max_nms (int, optional): Maximum candidates for NMS. Defaults to 30000.
             max_wh (int, optional): Maximum box width/height. Defaults to 7680.
+            multi_label: Ignored because NMS-free outputs already select one
+                class per candidate.
 
         Returns:
             list[torch.Tensor]: Per-image detections with padded zero rows removed.
         """
+        del max_det, max_nms, max_wh, multi_label
+        if isinstance(x, _AnchorlessNMSInput):
+            x = x.detections
         if isinstance(x, list):
             return x
         return [xi[xi[:, 4] > 0] for xi in x]

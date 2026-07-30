@@ -36,7 +36,7 @@ def test_model_name_aliasing_reports_compact_ambiguity() -> None:
 
     engine = MBLT_Engine.__new__(MBLT_Engine)
 
-    with pytest.raises(ValueError, match="ambiguous"):
+    with pytest.raises(ValueError, match="Ambiguous model name"):
         engine.model_name_aliasing("regnetx16gf")
 
 

@@ -8,9 +8,12 @@ import concurrent.futures
 import os
 import re
 import shutil
+import stat
+import tarfile
 import xml.etree.ElementTree as ET
+import zipfile
 from collections.abc import Iterable
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from time import sleep
 from typing import Protocol, TypeGuard
 from urllib.parse import urlparse
@@ -18,9 +21,19 @@ from urllib.parse import urlparse
 import requests
 from gdown.download import download
 from gdown.download_folder import download_folder
+from PIL import Image
 from tqdm import tqdm
 
 from ...datasets import get_dataset_config
+from .readiness import (
+    ADE20K_METADATA_FILES,
+    ADE20K_VALIDATION_SAMPLE_COUNT,
+    CITYSCAPES_SAMPLE_ID_PATTERN,
+    CITYSCAPES_VALIDATION_SAMPLE_COUNT,
+    DOTAV1_VALIDATION_SAMPLE_COUNT,
+    NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    dataset_ready,
+)
 
 DOWNLOAD_CHUNK_SIZE = 1 * 1024 * 1024
 DOWNLOAD_RETRY_LIMIT = 4
@@ -31,6 +44,85 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
     DOTAV1_DOWNLOAD_CONFIG["images_archive"],
     DOTAV1_DOWNLOAD_CONFIG["labels_archive"],
 }
+DOTAV1_CLASS_TO_IDX = {name: int(index) for index, name in get_dataset_config("dotav1")["names"].items()}
+NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
+ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
+CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
+CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
+
+
+def _replace_staged_directories(
+    replacements: Iterable[tuple[str, str]],
+    output_parent_dir: str,
+    backup_prefix: str,
+) -> None:
+    """Atomically install staged directories while preserving failed rollback backups.
+
+    Args:
+        replacements: Pairs of staged and destination directories.
+        output_parent_dir: Parent directory where the backup directory is created.
+        backup_prefix: Prefix identifying the temporary backup directory.
+
+    Raises:
+        OSError: If installation or rollback fails. A failed rollback leaves its
+            backup directory in place and includes its path in the error.
+    """
+
+    replacement_list = list(replacements)
+    backup_dir = mkdtemp(dir=output_parent_dir, prefix=backup_prefix)
+    backups: dict[str, str] = {}
+    installed_dirs: list[str] = []
+    try:
+        for _, destination_dir in replacement_list:
+            if os.path.lexists(destination_dir):
+                backup_path = os.path.join(backup_dir, os.path.basename(destination_dir))
+                os.replace(destination_dir, backup_path)
+                backups[destination_dir] = backup_path
+        for staged_dir, destination_dir in replacement_list:
+            os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
+            os.replace(staged_dir, destination_dir)
+            installed_dirs.append(destination_dir)
+    except OSError:
+        try:
+            for directory in installed_dirs:
+                if os.path.isdir(directory) and not os.path.islink(directory):
+                    shutil.rmtree(directory)
+                elif os.path.lexists(directory):
+                    os.remove(directory)
+            for destination_dir, backup_path in backups.items():
+                os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
+                os.replace(backup_path, destination_dir)
+        except OSError as rollback_error:
+            raise OSError(
+                f"Dataset installation rollback failed; backups are preserved at {backup_dir}."
+            ) from rollback_error
+        shutil.rmtree(backup_dir)
+        raise
+    shutil.rmtree(backup_dir)
+
+
+def _validate_staged_dataset(
+    staged_output_dir: str,
+    dataset: str,
+    tasks: Iterable[str],
+) -> None:
+    """Validate a complete staged dataset before replacing its managed cache.
+
+    Args:
+        staged_output_dir: Root of the staged organized dataset.
+        dataset: Validation dataset taxonomy.
+        tasks: Tasks whose required metadata and files must all be ready.
+
+    Raises:
+        ValueError: If the staged dataset is incomplete or has mismatched identity.
+    """
+
+    if all(dataset_ready(staged_output_dir, task, dataset) for task in tasks):
+        return
+    raise ValueError(
+        f"Staged {dataset} validation dataset is incomplete or has mismatched metadata; "
+        "the existing dataset cache was not replaced."
+    )
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -216,13 +308,13 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 
     Raises:
         ValueError: If an XML file has no objects or contains multiple object names.
-        AssertionError: If the number of XML files and images do not match.
+        ValueError: If the number of XML files and images do not match.
     """
 
-    assert len(os.listdir(xml_dir + "/val")) == len(os.listdir(image_dir)), (
-        f"Number of XML and image files do not match: "
-        f"{len(os.listdir(xml_dir + '/val'))} != {len(os.listdir(image_dir))}"
-    )
+    xml_count = len(os.listdir(xml_dir + "/val"))
+    image_count = len(os.listdir(image_dir))
+    if xml_count != image_count:
+        raise ValueError(f"Number of XML and image files do not match: {xml_count} != {image_count}.")
 
     # validate the XML files
     pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Validating XML files")
@@ -244,31 +336,44 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 
     pbar.close()
 
-    # construct the ImageNet dataset
-    pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Constructing ImageNet dataset")
-    for xml_file in pbar:
-        xml_path = os.path.join(xml_dir + "/val", xml_file)
-        xml_tree = ET.parse(xml_path)
-        root = xml_tree.getroot()
-        object_name = _get_object_name(root.findall("object")[0], xml_file)
-        image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
-        assert os.path.exists(image_path), f"Image file not found: {image_path}"
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".imagenet-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "imagenet")
 
-        os.makedirs(os.path.join(output_dir, object_name), exist_ok=True)  # create the directory for the object
-        shutil.copy(
-            image_path,
-            os.path.join(output_dir, object_name, os.path.basename(image_path)),
-        )  # copy the image to the directory with the same name
-    pbar.close()
+        # construct the ImageNet dataset
+        pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Constructing ImageNet dataset")
+        for xml_file in pbar:
+            xml_path = os.path.join(xml_dir + "/val", xml_file)
+            xml_tree = ET.parse(xml_path)
+            root = xml_tree.getroot()
+            object_name = _get_object_name(root.findall("object")[0], xml_file)
+            image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
+            if not os.path.isfile(image_path):
+                raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    # validate the ImageNet dataset
-    pbar = tqdm(os.listdir(output_dir), desc="Validating ImageNet dataset")
-    print(f"Number of categories: {len(os.listdir(output_dir))}")
-    for object_name in pbar:
-        num_images = len(os.listdir(os.path.join(output_dir, object_name)))
-        if num_images != 50:
-            raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
-    pbar.close()
+            os.makedirs(os.path.join(staged_output_dir, object_name), exist_ok=True)
+            shutil.copy(
+                image_path,
+                os.path.join(staged_output_dir, object_name, os.path.basename(image_path)),
+            )
+        pbar.close()
+
+        # validate the staged ImageNet dataset before replacing the managed output root
+        pbar = tqdm(os.listdir(staged_output_dir), desc="Validating ImageNet dataset")
+        print(f"Number of categories: {len(os.listdir(staged_output_dir))}")
+        for object_name in pbar:
+            num_images = len(os.listdir(os.path.join(staged_output_dir, object_name)))
+            if num_images != 50:
+                raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
+        pbar.close()
+        _validate_staged_dataset(staged_output_dir, "imagenet", ("image_classification",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".imagenet-backup-",
+        )
     print("Each category has 50 images")
     print("ImageNet dataset constructed successfully")
 
@@ -291,8 +396,8 @@ def organize_imagenet(
 
         if local_image_dir.endswith(".tar") and local_xml_dir.endswith(".tgz"):
             print("Unpacking image and XML files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
-            shutil.unpack_archive(local_xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
+            _safe_unpack_archive(local_image_dir, os.path.join(temp_dir, "ILSVRC2012_img_val"))
+            _safe_unpack_archive(local_xml_dir, os.path.join(temp_dir, "ILSVRC2012_bbox_val_v3"))
             print("Unpacking completed")
             construct_imagenet(
                 os.path.join(temp_dir, "ILSVRC2012_img_val"),
@@ -313,17 +418,28 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
         output_dir (str): Directory where the organized dataset will be stored.
     """
     print(f"Constructing COCO dataset from {image_dir} and {annotation_dir} to {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copytree(
-        image_dir, os.path.join(output_dir, "val2017"), dirs_exist_ok=True
-    )  # copy the image directory to the output directory
-    # copy *_val2017.json to the output directory
-    for file in os.listdir(os.path.join(annotation_dir, "annotations")):
-        if file.endswith("_val2017.json"):
-            shutil.copy(
-                os.path.join(annotation_dir, "annotations", file),
-                os.path.join(output_dir, file),
-            )
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".coco-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "coco")
+        shutil.copytree(image_dir, os.path.join(staged_output_dir, "val2017"))
+        for file in os.listdir(os.path.join(annotation_dir, "annotations")):
+            if file.endswith("_val2017.json"):
+                shutil.copy(
+                    os.path.join(annotation_dir, "annotations", file),
+                    os.path.join(staged_output_dir, file),
+                )
+        _validate_staged_dataset(
+            staged_output_dir,
+            "coco",
+            ("object_detection", "pose_estimation"),
+        )
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".coco-backup-",
+        )
     print("Constructing COCO dataset completed")
 
 
@@ -345,8 +461,8 @@ def organize_coco(
 
         if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, temp_dir)
-            shutil.unpack_archive(local_annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
+            _safe_unpack_archive(local_image_dir, temp_dir)
+            _safe_unpack_archive(local_annotation_dir, os.path.join(temp_dir, "annotations_trainval2017"))
             print("Unpacking completed")
             construct_coco(
                 os.path.join(temp_dir, "val2017"),
@@ -367,15 +483,24 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) ->
         output_dir (str): Directory where the organized dataset will be stored.
     """
     print(f"Constructing WiderFace dataset from {image_dir} and {annotation_dir} to {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copytree(
-        os.path.join(image_dir, "images"),
-        os.path.join(output_dir, "images"),
-        dirs_exist_ok=True,
-    )
-    for file in os.listdir(annotation_dir):
-        if "_val" in file:
-            shutil.copy(os.path.join(annotation_dir, file), output_dir)
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".widerface-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "widerface")
+        shutil.copytree(
+            os.path.join(image_dir, "images"),
+            os.path.join(staged_output_dir, "images"),
+        )
+        for file in os.listdir(annotation_dir):
+            if "_val" in file:
+                shutil.copy(os.path.join(annotation_dir, file), staged_output_dir)
+        _validate_staged_dataset(staged_output_dir, "widerface", ("face_detection",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".widerface-backup-",
+        )
     print("Constructing WiderFace dataset completed")
 
 
@@ -397,8 +522,8 @@ def organize_widerface(
 
         if local_image_dir.endswith(".zip") and local_annotation_dir.endswith(".zip"):
             print("Unpacking image and annotation files to temporary directory...")
-            shutil.unpack_archive(local_image_dir, temp_dir)
-            shutil.unpack_archive(local_annotation_dir, temp_dir)
+            _safe_unpack_archive(local_image_dir, temp_dir)
+            _safe_unpack_archive(local_annotation_dir, temp_dir)
             print("Unpacking completed")
             construct_widerface(
                 os.path.join(temp_dir, "WIDER_val"),
@@ -408,6 +533,351 @@ def organize_widerface(
             return
 
         construct_widerface(local_image_dir, local_annotation_dir, output_dir)
+
+
+def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
+    """Resolves NYU Depth validation image and depth directories.
+
+    Args:
+        dataset_dir: Directory containing the NYU Depth root or its parent.
+
+    Returns:
+        Paths to the validation image and depth directories.
+
+    Raises:
+        ValueError: If the expected NYU Depth layout is not present.
+    """
+
+    roots = (os.path.join(dataset_dir, "nyu-depth"), dataset_dir)
+    for root in roots:
+        candidates = (
+            (os.path.join(root, "images", "val"), os.path.join(root, "depth", "val")),
+            (os.path.join(root, "val", "images"), os.path.join(root, "val", "depth")),
+            (os.path.join(root, "images"), os.path.join(root, "depth")),
+        )
+        for image_dir, depth_dir in candidates:
+            if os.path.isdir(image_dir) and os.path.isdir(depth_dir):
+                return image_dir, depth_dir
+    raise ValueError(f"NYU Depth dataset must contain matching images/ and depth/ directories: {dataset_dir}")
+
+
+def _collect_nyu_depth_validation_files(image_dir: str, depth_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Validates and returns matching NYU Depth validation image/depth pairs."""
+
+    images = {
+        os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
+    }
+    depths = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(depth_dir, [".npy"])}
+    missing_depths = sorted(set(images) - set(depths))
+    missing_images = sorted(set(depths) - set(images))
+    if missing_depths or missing_images:
+        details = []
+        if missing_depths:
+            details.append(f"images without depth maps: {', '.join(missing_depths[:5])}")
+        if missing_images:
+            details.append(f"depth maps without images: {', '.join(missing_images[:5])}")
+        raise ValueError(f"NYU Depth validation image/depth mismatch ({'; '.join(details)}).")
+    if len(images) != NYU_DEPTH_VALIDATION_SAMPLE_COUNT:
+        raise ValueError(
+            "NYU Depth validation dataset must contain "
+            f"{NYU_DEPTH_VALIDATION_SAMPLE_COUNT} matching image/depth pairs, found {len(images)}."
+        )
+    return images, depths
+
+
+def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
+    """Constructs the NYU Depth layout from an extracted dataset directory.
+
+    Args:
+        dataset_dir: Directory containing the NYU Depth root or its parent.
+        output_dir: Directory where the organized dataset will be stored.
+    """
+
+    image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
+    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir)
+    print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
+
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-staging-") as staging_dir:
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_depth_dir = os.path.join(staging_dir, "depth")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_depth_dir)
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, os.path.basename(images[sample_id])))
+            shutil.copy2(depths[sample_id], os.path.join(staged_depth_dir, os.path.basename(depths[sample_id])))
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_depth_dir, os.path.join(output_dir, "depth")),
+        )
+        _replace_staged_directories(replacements, output_parent_dir, ".nyu-depth-backup-")
+    print(f"Constructed NYU Depth validation dataset with {len(images)} image/depth pairs")
+
+
+def organize_nyu_depth(
+    dataset_path: str = NYU_DEPTH_URL,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/nyu-depth"),
+) -> None:
+    """Organizes NYU Depth, downloading and unpacking an archive when necessary.
+
+    Args:
+        dataset_path: Path or URL to the NYU Depth zip file or extracted dataset directory.
+        output_dir: Directory to store the organized dataset.
+    """
+
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+        if local_dataset_path.endswith(".zip"):
+            print("Unpacking NYU Depth files to temporary directory...")
+            _safe_unpack_archive(local_dataset_path, temp_dir)
+            print("Unpacking completed")
+            construct_nyu_depth(temp_dir, output_dir)
+            return
+
+        construct_nyu_depth(local_dataset_path, output_dir)
+
+
+def _resolve_ade20k_validation_dirs(dataset_dir: str) -> tuple[str, str, str]:
+    """Resolves the ADE20K root and validation image/mask directories."""
+
+    for root in (os.path.join(dataset_dir, "ADEChallengeData2016"), dataset_dir):
+        for image_dir, annotation_dir in (
+            (os.path.join(root, "images", "validation"), os.path.join(root, "annotations", "validation")),
+            (os.path.join(root, "images"), os.path.join(root, "annotations")),
+        ):
+            if os.path.isdir(image_dir) and os.path.isdir(annotation_dir):
+                return root, image_dir, annotation_dir
+    raise ValueError(f"ADE20K dataset must contain matching images/ and annotations/ directories: {dataset_dir}")
+
+
+def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
+    """Constructs the flat ADE20K validation layout from an extracted dataset.
+
+    Args:
+        dataset_dir: Directory containing the ADE20K root or its parent.
+        output_dir: Directory where the organized validation dataset will be stored.
+
+    Raises:
+        ValueError: If the source does not contain 2,000 matched validation image/mask pairs.
+    """
+
+    dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
+    images = {
+        os.path.splitext(file_name)[0]: os.path.join(image_dir, file_name)
+        for file_name in os.listdir(image_dir)
+        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
+    }
+    annotations = {
+        os.path.splitext(file_name)[0]: os.path.join(annotation_dir, file_name)
+        for file_name in os.listdir(annotation_dir)
+        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
+    }
+    if set(images) != set(annotations):
+        raise ValueError("ADE20K validation images and annotations must have matching file stems.")
+    if len(images) != ADE20K_VALIDATION_SAMPLE_COUNT:
+        raise ValueError(
+            f"ADE20K validation dataset must contain {ADE20K_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
+        )
+    missing_metadata = [
+        file_name for file_name in ADE20K_METADATA_FILES if not os.path.isfile(os.path.join(dataset_root, file_name))
+    ]
+    if missing_metadata:
+        raise ValueError(f"ADE20K dataset is missing required metadata files: {', '.join(missing_metadata)}.")
+
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".ade20k-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "ade20k")
+        staged_image_dir = os.path.join(staged_output_dir, "images")
+        staged_annotation_dir = os.path.join(staged_output_dir, "annotations")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_annotation_dir)
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, os.path.basename(images[sample_id])))
+            shutil.copy2(
+                annotations[sample_id], os.path.join(staged_annotation_dir, os.path.basename(annotations[sample_id]))
+            )
+        for file_name in ADE20K_METADATA_FILES:
+            shutil.copy2(
+                os.path.join(dataset_root, file_name),
+                os.path.join(staged_output_dir, file_name),
+            )
+
+        _validate_staged_dataset(staged_output_dir, "ade20k", ("semantic_segmentation",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".ade20k-backup-",
+        )
+    print(f"Constructed ADE20K validation dataset with {len(images)} image/mask pairs")
+
+
+def organize_ade20k(
+    dataset_path: str = ADE20K_URL,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/ADEChallengeData2016"),
+) -> None:
+    """Organizes ADE20K validation data, downloading and unpacking when necessary."""
+
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+        if local_dataset_path.endswith(".zip"):
+            _safe_unpack_archive(local_dataset_path, temp_dir)
+            construct_ade20k(temp_dir, output_dir)
+            return
+        construct_ade20k(local_dataset_path, output_dir)
+
+
+def _validate_cityscapes_zip(archive_path: str, source_name: str) -> str:
+    """Validate one official Cityscapes ZIP source.
+
+    Args:
+        archive_path: Path to the raw Cityscapes archive.
+        source_name: Human-readable source description for errors.
+
+    Returns:
+        Expanded absolute archive path.
+
+    Raises:
+        ValueError: If the path is missing, is not a file, is not a ZIP, or contains duplicate members.
+    """
+
+    resolved_path = os.path.abspath(os.path.expanduser(archive_path))
+    if not os.path.isfile(resolved_path):
+        raise ValueError(f"Cityscapes {source_name} archive does not exist or is not a file: {resolved_path}.")
+    if not zipfile.is_zipfile(resolved_path):
+        raise ValueError(f"Cityscapes {source_name} source must be a valid ZIP archive: {resolved_path}.")
+
+    with zipfile.ZipFile(resolved_path) as archive:
+        seen_members: set[str] = set()
+        duplicate_members: set[str] = set()
+        for member in archive.infolist():
+            if member.filename in seen_members:
+                duplicate_members.add(member.filename)
+            seen_members.add(member.filename)
+    if duplicate_members:
+        raise ValueError(
+            f"Cityscapes {source_name} archive contains duplicate members: {', '.join(sorted(duplicate_members)[:3])}."
+        )
+    return resolved_path
+
+
+def _collect_cityscapes_validation_files(
+    split_dir: str,
+    suffix: str,
+    source_name: str,
+) -> dict[str, str]:
+    """Collect official Cityscapes validation files keyed by shared sample ID.
+
+    Args:
+        split_dir: Extracted ``leftImg8bit/val`` or ``gtFine/val`` directory.
+        suffix: Required official file suffix.
+        source_name: Human-readable source description for errors.
+
+    Returns:
+        Mapping from ``<city>_<sequence>_<frame>`` to source path.
+
+    Raises:
+        ValueError: If a candidate filename is malformed, misplaced, or duplicates an ID.
+    """
+
+    files: dict[str, str] = {}
+    if not os.path.isdir(split_dir):
+        return files
+
+    for current_root, _, file_names in os.walk(split_dir):
+        relative_root = os.path.relpath(current_root, split_dir)
+        for file_name in file_names:
+            if not file_name.endswith(suffix):
+                continue
+            if relative_root == "." or os.sep in relative_root:
+                raise ValueError(
+                    f"Malformed Cityscapes {source_name} path: "
+                    f"{os.path.relpath(os.path.join(current_root, file_name), split_dir)}."
+                )
+            sample_id = file_name.removesuffix(suffix)
+            match = CITYSCAPES_SAMPLE_ID_PATTERN.fullmatch(sample_id)
+            if match is None or match.group("city") != relative_root:
+                raise ValueError(f"Malformed Cityscapes {source_name} filename: {file_name}.")
+            if sample_id in files:
+                raise ValueError(f"Duplicate Cityscapes {source_name} sample ID: {sample_id}.")
+            files[sample_id] = os.path.join(current_root, file_name)
+    return files
+
+
+def organize_cityscapes(
+    image_dir: str,
+    annotation_dir: str,
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/cityscapes"),
+) -> None:
+    """Install official Cityscapes validation archives as lossless flat PNG pairs.
+
+    Only validation RGB images and ``gtFine_labelIds`` masks are selected.
+    Training, test, and auxiliary annotation files remain excluded.
+
+    Args:
+        image_dir: Path to ``leftImg8bit_trainvaltest.zip``.
+        annotation_dir: Path to ``gtFine_trainvaltest.zip``.
+        output_dir: Directory where the organized validation dataset is stored.
+
+    Raises:
+        ValueError: If either source is invalid or does not contain exactly 500 matching pairs.
+        OSError: If extraction, copying, or atomic installation fails.
+    """
+
+    image_archive = _validate_cityscapes_zip(image_dir, "image")
+    annotation_archive = _validate_cityscapes_zip(annotation_dir, "annotation")
+    output_dir = os.path.abspath(os.path.expanduser(output_dir))
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".cityscapes-staging-") as staging_dir:
+        extracted_image_dir = os.path.join(staging_dir, "raw-images")
+        extracted_annotation_dir = os.path.join(staging_dir, "raw-annotations")
+        _safe_unpack_archive(image_archive, extracted_image_dir)
+        _safe_unpack_archive(annotation_archive, extracted_annotation_dir)
+        images = _collect_cityscapes_validation_files(
+            os.path.join(extracted_image_dir, "leftImg8bit", "val"),
+            CITYSCAPES_IMAGE_SUFFIX,
+            "image",
+        )
+        annotations = _collect_cityscapes_validation_files(
+            os.path.join(extracted_annotation_dir, "gtFine", "val"),
+            CITYSCAPES_ANNOTATION_SUFFIX,
+            "annotation",
+        )
+        missing_annotations = sorted(images.keys() - annotations.keys())
+        missing_images = sorted(annotations.keys() - images.keys())
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(f"missing annotations for {', '.join(missing_annotations[:3])}")
+            if missing_images:
+                details.append(f"missing images for {', '.join(missing_images[:3])}")
+            raise ValueError(f"Cityscapes validation image/annotation mismatch ({'; '.join(details)}).")
+        if len(images) != CITYSCAPES_VALIDATION_SAMPLE_COUNT:
+            raise ValueError(
+                "Cityscapes validation archives must contain "
+                f"{CITYSCAPES_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
+            )
+
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_annotation_dir = os.path.join(staging_dir, "annotations")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_annotation_dir)
+        for sample_id in sorted(images):
+            shutil.copy2(images[sample_id], os.path.join(staged_image_dir, f"{sample_id}.png"))
+            shutil.copy2(annotations[sample_id], os.path.join(staged_annotation_dir, f"{sample_id}.png"))
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_annotation_dir, os.path.join(output_dir, "annotations")),
+        )
+        os.makedirs(output_dir, exist_ok=True)
+        _replace_staged_directories(replacements, output_parent_dir, ".cityscapes-backup-")
+    print(f"Constructed Cityscapes validation dataset with {len(images)} image/mask pairs")
 
 
 def _resolve_dotav1_root(dataset_dir: str) -> str:
@@ -497,8 +967,113 @@ def _iter_files(root: str, extensions: Iterable[str]) -> Iterable[str]:
                 yield os.path.join(current_root, file_name)
 
 
+def _safe_archive_member_path(member_name: str, destination: str) -> str:
+    """Return an archive member destination after enforcing staging-directory containment.
+
+    Args:
+        member_name: Path stored in an archive member.
+        destination: Archive extraction directory.
+
+    Returns:
+        Absolute destination path for the member.
+
+    Raises:
+        ValueError: If the member path is absolute or escapes the extraction directory.
+    """
+
+    root = os.path.abspath(destination)
+    target = os.path.abspath(os.path.join(root, member_name))
+    if os.path.commonpath((root, target)) != root:
+        raise ValueError(f"Unsafe archive member path: {member_name!r}.")
+    return target
+
+
+def _safe_unpack_archive(archive_path: str, destination: str) -> None:
+    """Extract an archive while rejecting links, special files, and escaping paths.
+
+    Args:
+        archive_path: ZIP or tar-family dataset archive.
+        destination: Empty staging directory where archive members are written.
+
+    Raises:
+        ValueError: If the archive format or any member is unsafe or unsupported.
+        OSError: If a validated archive cannot be read or written.
+    """
+
+    if zipfile.is_zipfile(archive_path):
+        with zipfile.ZipFile(archive_path) as archive:
+            members = archive.infolist()
+            for member in members:
+                _safe_archive_member_path(member.filename, destination)
+                file_type = stat.S_IFMT(member.external_attr >> 16)
+                if file_type and not (stat.S_ISREG(file_type) or stat.S_ISDIR(file_type)):
+                    raise ValueError(f"Unsafe archive member type: {member.filename!r}.")
+            for member in members:
+                target = _safe_archive_member_path(member.filename, destination)
+                if member.is_dir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with archive.open(member) as source, open(target, "wb") as output_file:
+                    shutil.copyfileobj(source, output_file)
+        return
+
+    if tarfile.is_tarfile(archive_path):
+        with tarfile.open(archive_path) as archive:
+            members = archive.getmembers()
+            for member in members:
+                _safe_archive_member_path(member.name, destination)
+                if not (member.isfile() or member.isdir()):
+                    raise ValueError(f"Unsafe archive member type: {member.name!r}.")
+            for member in members:
+                target = _safe_archive_member_path(member.name, destination)
+                if member.isdir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ValueError(f"Unable to read archive member: {member.name!r}.")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with source, open(target, "wb") as output_file:
+                    shutil.copyfileobj(source, output_file)
+        return
+
+    raise ValueError(f"Unsupported archive format: {archive_path}.")
+
+
+def _write_dotav1_yolo_labels(image_path: str, original_label_path: str, output_path: str) -> None:
+    """Converts one official DOTAv1 label file into normalized OBB label format."""
+
+    with Image.open(image_path) as image:
+        width, height = image.size
+    converted_lines: list[str] = []
+    with open(original_label_path, encoding="utf-8") as label_file:
+        for line in label_file:
+            fields = line.split()
+            if len(fields) < 10 or fields[0].startswith("imagesource:") or fields[0].startswith("gsd:"):
+                continue
+            # Official DOTAv1 labels use ``1`` for difficult objects. Keep ``2``
+            # ignored for compatibility with previously supported label exports.
+            if fields[9] in {"1", "2"}:
+                continue
+            class_name = fields[8]
+            if class_name not in DOTAV1_CLASS_TO_IDX:
+                raise ValueError(f"Unsupported DOTAv1 class in {original_label_path}: {class_name}")
+            coordinates = [float(value) for value in fields[:8]]
+            normalized = [
+                coordinate / (width if index % 2 == 0 else height) for index, coordinate in enumerate(coordinates)
+            ]
+            converted_lines.append(
+                f"{DOTAV1_CLASS_TO_IDX[class_name]} " + " ".join(f"{coordinate:.8g}" for coordinate in normalized)
+            )
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        output_file.write("\n".join(converted_lines))
+        if converted_lines:
+            output_file.write("\n")
+
+
 def construct_dotav1_from_archives(image_archive: str, label_archive: str, output_dir: str) -> None:
-    """Constructs the legacy DOTAv1 validation layout from the Google Drive archives.
+    """Constructs the DOTAv1 validation layout from the Google Drive archives.
 
     Args:
         image_archive: Path to the DOTAv1 validation-image archive.
@@ -513,8 +1088,8 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
     with TemporaryDirectory() as extract_dir:
         image_dir = os.path.join(extract_dir, "images")
         label_dir = os.path.join(extract_dir, "labels")
-        shutil.unpack_archive(image_archive, image_dir)
-        shutil.unpack_archive(label_archive, label_dir)
+        _safe_unpack_archive(image_archive, image_dir)
+        _safe_unpack_archive(label_archive, label_dir)
 
         labels = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(label_dir, [".txt"])}
         if not labels:
@@ -536,14 +1111,22 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
                 details.append(f"labels without images: {', '.join(missing_images[:5])}")
             raise ValueError(f"DOTAv1 archive stem mismatch ({'; '.join(details)}).")
         matching_ids = sorted(image_ids)
+        if len(matching_ids) != DOTAV1_VALIDATION_SAMPLE_COUNT:
+            raise ValueError(
+                "DOTAv1 validation dataset must contain "
+                f"{DOTAV1_VALIDATION_SAMPLE_COUNT} matching image/label pairs, found {len(matching_ids)}."
+            )
 
         output_dir = os.path.abspath(output_dir)
         output_parent_dir = os.path.dirname(output_dir)
         os.makedirs(output_parent_dir, exist_ok=True)
         with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
-            staged_image_dir = os.path.join(staging_dir, "images", "val")
-            staged_original_label_dir = os.path.join(staging_dir, "labels", "val_original")
+            staged_output_dir = os.path.join(staging_dir, "dotav1")
+            staged_image_dir = os.path.join(staged_output_dir, "images")
+            staged_label_dir = os.path.join(staged_output_dir, "labels", "val")
+            staged_original_label_dir = os.path.join(staged_output_dir, "labels", "val_original")
             os.makedirs(staged_image_dir)
+            os.makedirs(staged_label_dir)
             os.makedirs(staged_original_label_dir)
 
             for image_id in matching_ids:
@@ -552,42 +1135,56 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
 
             for image_id in matching_ids:
                 shutil.copy2(labels[image_id], os.path.join(staged_original_label_dir, f"{image_id}.txt"))
+                _write_dotav1_yolo_labels(
+                    images[image_id], labels[image_id], os.path.join(staged_label_dir, f"{image_id}.txt")
+                )
 
-            image_output_dir = os.path.join(output_dir, "images", "val")
-            label_output_dir = os.path.join(output_dir, "labels", "val")
-            original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
-            replacements = (
-                (staged_image_dir, image_output_dir),
-                (staged_original_label_dir, original_label_output_dir),
+            _validate_staged_dataset(staged_output_dir, "dotav1", ("obb",))
+            _replace_staged_directories(
+                ((staged_output_dir, output_dir),),
+                output_parent_dir,
+                ".dotav1-backup-",
             )
-            existing_dirs = (image_output_dir, label_output_dir, original_label_output_dir)
-            with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-backup-") as backup_dir:
-                backups: dict[str, str] = {}
-                installed_dirs: list[str] = []
-                try:
-                    for directory in existing_dirs:
-                        if os.path.lexists(directory):
-                            backup_path = os.path.join(backup_dir, os.path.relpath(directory, output_dir))
-                            os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                            os.replace(directory, backup_path)
-                            backups[directory] = backup_path
-
-                    for staged_dir, output_subdir in replacements:
-                        os.makedirs(os.path.dirname(output_subdir), exist_ok=True)
-                        os.replace(staged_dir, output_subdir)
-                        installed_dirs.append(output_subdir)
-                except OSError:
-                    for directory in installed_dirs:
-                        if os.path.isdir(directory) and not os.path.islink(directory):
-                            shutil.rmtree(directory)
-                        elif os.path.lexists(directory):
-                            os.remove(directory)
-                    for directory, backup_path in backups.items():
-                        os.makedirs(os.path.dirname(directory), exist_ok=True)
-                        os.replace(backup_path, directory)
-                    raise
 
     print(f"Constructed DOTAv1 validation dataset with {len(matching_ids)} images")
+
+
+def _copy_dotav1_layout_to_staging(dataset_root: str, staged_output_dir: str) -> None:
+    """Copy a flat or legacy DOTAv1 validation layout into canonical staging."""
+
+    image_root = os.path.join(dataset_root, "images")
+    supported_image_suffixes = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
+    flat_image_files = (
+        [
+            file_name
+            for file_name in os.listdir(image_root)
+            if os.path.isfile(os.path.join(image_root, file_name))
+            and file_name.lower().endswith(supported_image_suffixes)
+        ]
+        if os.path.isdir(image_root)
+        else []
+    )
+    source_image_dir = image_root if flat_image_files else os.path.join(image_root, "val")
+    if not os.path.isdir(source_image_dir):
+        raise ValueError(f"No DOTAv1 validation images found in {dataset_root}")
+
+    staged_image_dir = os.path.join(staged_output_dir, "images")
+    os.makedirs(staged_image_dir)
+    for file_name in os.listdir(source_image_dir):
+        source_path = os.path.join(source_image_dir, file_name)
+        if os.path.isfile(source_path) and file_name.lower().endswith(supported_image_suffixes):
+            shutil.copy2(source_path, os.path.join(staged_image_dir, file_name))
+
+    for label_directory in ("val", "val_original"):
+        source_label_dir = os.path.join(dataset_root, "labels", label_directory)
+        if not os.path.isdir(source_label_dir):
+            continue
+        staged_label_dir = os.path.join(staged_output_dir, "labels", label_directory)
+        os.makedirs(staged_label_dir, exist_ok=True)
+        for file_name in os.listdir(source_label_dir):
+            source_path = os.path.join(source_label_dir, file_name)
+            if os.path.isfile(source_path) and file_name.lower().endswith(".txt"):
+                shutil.copy2(source_path, os.path.join(staged_label_dir, file_name))
 
 
 def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
@@ -598,40 +1195,24 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized validation dataset will be stored.
 
     Raises:
-        ValueError: If no validation files or directories are found.
+        ValueError: If the staged validation dataset is incomplete or mismatched.
+        OSError: If staging or replacing the organized dataset files fails.
     """
     dataset_root = _resolve_dotav1_root(dataset_dir)
     print(f"Constructing DOTAv1 validation dataset from {dataset_root} to {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-
-    copied_count = 0
-    for root, dirs, files in os.walk(dataset_root):
-        for dir_name in list(dirs):
-            if "val" not in dir_name:
-                continue
-
-            src_dir = os.path.join(root, dir_name)
-            relative_dir = os.path.relpath(src_dir, dataset_root)
-            dst_dir = os.path.join(output_dir, relative_dir)
-            if os.path.abspath(src_dir) != os.path.abspath(dst_dir):
-                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
-            copied_count += 1
-            dirs.remove(dir_name)
-
-        for file_name in files:
-            if "val" not in file_name:
-                continue
-
-            src_file = os.path.join(root, file_name)
-            relative_file = os.path.relpath(src_file, dataset_root)
-            dst_file = os.path.join(output_dir, relative_file)
-            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-            if os.path.abspath(src_file) != os.path.abspath(dst_file):
-                shutil.copy2(src_file, dst_file)
-            copied_count += 1
-
-    if copied_count == 0:
-        raise ValueError(f"No DOTAv1 validation files or directories found in {dataset_root}")
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "dotav1")
+        os.makedirs(staged_output_dir)
+        _copy_dotav1_layout_to_staging(dataset_root, staged_output_dir)
+        _validate_staged_dataset(staged_output_dir, "dotav1", ("obb",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".dotav1-backup-",
+        )
 
     print("Constructing DOTAv1 validation dataset completed")
 
@@ -656,7 +1237,7 @@ def organize_dotav1(
 
         if local_dataset_path.endswith(".zip"):
             print("Unpacking DOTAv1 files to temporary directory...")
-            shutil.unpack_archive(local_dataset_path, temp_dir)
+            _safe_unpack_archive(local_dataset_path, temp_dir)
             print("Unpacking completed")
             construct_dotav1(temp_dir, output_dir)
             return

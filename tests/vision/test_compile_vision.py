@@ -18,6 +18,8 @@ from mblt_model_zoo.compile.vision import (
     resolve_quantization_values,
     select_calibration_images,
 )
+from mblt_model_zoo.vision.utils import datasets as dataset_utils
+from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 from mblt_model_zoo.vision.wrapper import resolve_model_config
 
 
@@ -52,11 +54,42 @@ def test_resolve_model_config_handles_alias_and_updated_variant() -> None:
     assert default_config["post_cfg"]["task"] == variant_config["post_cfg"]["task"]
 
 
+def test_resolve_model_config_derives_onnx_filename() -> None:
+    """Derive ONNX artifact names consistently from MXQ artifact names."""
+
+    hub_config = resolve_model_config("alexnet")
+    direct_config = resolve_model_config(
+        {
+            "file_cfg": {
+                "filename": "example.mxq",
+            },
+            "pre_cfg": {},
+            "post_cfg": {},
+        }
+    )
+    custom_config = resolve_model_config(
+        {
+            "file_cfg": {
+                "filename": "example.mxq",
+                "onnx_filename": "exported-model.onnx",
+            },
+            "pre_cfg": {},
+            "post_cfg": {},
+        }
+    )
+
+    assert hub_config["file_cfg"]["onnx_filename"] == "alexnet_IMAGENET1K_V1.onnx"
+    assert direct_config["file_cfg"]["onnx_filename"] == "example.onnx"
+    assert custom_config["file_cfg"]["onnx_filename"] == "exported-model.onnx"
+
+
 @pytest.mark.parametrize(
     ("task", "relative_dir"),
     [
+        ("depth_estimation", "images"),
         ("object_detection", "val2017"),
-        ("obb", "images/val"),
+        ("semantic_segmentation", "images"),
+        ("obb", "images"),
     ],
 )
 def test_non_imagenet_selection_is_deterministic(task: str, relative_dir: str, tmp_path: Path) -> None:
@@ -71,13 +104,28 @@ def test_non_imagenet_selection_is_deterministic(task: str, relative_dir: str, t
     assert len(first) == 3
 
 
+def test_legacy_obb_alias_selects_calibration_images(tmp_path: Path) -> None:
+    """Normalize the legacy OBB task name in exported sampling helpers."""
+
+    images = _write_images(tmp_path / "images", ["P0001.png", "P0002.png"])
+
+    assert select_calibration_images(
+        "oriented_bounding_boxes",
+        tmp_path,
+        subset_size=2,
+    ) == select_calibration_images("obb", tmp_path, subset_size=2)
+    assert set(select_calibration_images("oriented_bounding_boxes", tmp_path, subset_size=2)) == set(images)
+
+
 @pytest.mark.parametrize(
     ("task", "relative_dir"),
     [
+        ("depth_estimation", "images"),
         ("object_detection", "val2017"),
         ("instance_segmentation", "val2017"),
+        ("semantic_segmentation", "images"),
         ("pose_estimation", "val2017"),
-        ("obb", "images/val"),
+        ("obb", "images"),
     ],
 )
 def test_selection_defaults_to_seed_zero(task: str, relative_dir: str, tmp_path: Path) -> None:
@@ -135,6 +183,33 @@ def test_selection_rejects_invalid_sizes(subset_size: int, tmp_path: Path) -> No
         select_calibration_images("object_detection", tmp_path, subset_size=subset_size)
 
 
+def test_selection_rejects_symlinked_images(tmp_path: Path) -> None:
+    """Reject image-looking symlinks instead of sampling their targets."""
+
+    external_image = _write_images(tmp_path / "external", ["secret.jpg"])[0]
+    image_dir = tmp_path / "dataset" / "val2017"
+    image_dir.mkdir(parents=True)
+    (image_dir / "stolen.jpg").symlink_to(external_image)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        select_calibration_images("object_detection", tmp_path / "dataset", subset_size=1)
+
+
+def test_copy_rejects_symlinked_or_outside_images(tmp_path: Path) -> None:
+    """Defend direct copy callers against symlink and outside-root sources."""
+
+    dataset = tmp_path / "dataset"
+    external_image = _write_images(tmp_path / "external", ["secret.jpg"])[0]
+    symlink = dataset / "stolen.jpg"
+    dataset.mkdir()
+    symlink.symlink_to(external_image)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        copy_calibration_subset([symlink], dataset, tmp_path / "subset")
+    with pytest.raises(ValueError, match="must remain within dataset root"):
+        copy_calibration_subset([external_image], dataset, tmp_path / "subset")
+
+
 def test_flat_subset_names_are_collision_safe(tmp_path: Path) -> None:
     """Preserve images with duplicate basenames from nested source directories."""
 
@@ -181,6 +256,148 @@ def test_imagenet_readiness_rejects_partial_class_tree(tmp_path: Path) -> None:
     _write_images(tmp_path / "class-a", ["image.jpg"])
 
     assert not compile_module._dataset_ready("image_classification", tmp_path)
+
+
+def test_depth_dataset_readiness_requires_complete_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Require all paired NYU samples before sampling calibration images."""
+
+    monkeypatch.setattr(readiness_module, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    _write_images(tmp_path / "images", ["image.png"])
+    (tmp_path / "depth").mkdir()
+    assert not compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
+
+    (tmp_path / "depth" / "image.npy").write_bytes(b"depth")
+    assert compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
+
+
+@pytest.mark.parametrize(
+    ("dataset", "image_name", "other_dataset"),
+    [
+        ("ade20k", "ADE_val_00000001.jpg", "cityscapes"),
+        ("cityscapes", "frankfurt_000000_000001.png", "ade20k"),
+    ],
+)
+def test_semantic_dataset_readiness_checks_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+    image_name: str,
+    other_dataset: str,
+) -> None:
+    """Require complete pairs with filenames belonging to the selected taxonomy."""
+
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    image_path = _write_images(tmp_path / "images", [image_name])[0]
+    (tmp_path / "annotations").mkdir()
+    assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
+
+    (tmp_path / "annotations" / f"{image_path.stem}.png").write_bytes(b"annotation")
+    if dataset == "ade20k":
+        (tmp_path / "objectInfo150.txt").write_bytes(b"labels")
+        (tmp_path / "sceneCategories.txt").write_bytes(b"scenes")
+    assert compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
+    assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, other_dataset)
+
+
+def test_obb_dataset_readiness_accepts_flat_images(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Accept the flat image layout produced by the DOTAv1 organizer."""
+
+    data_path = tmp_path / "dotav1"
+    monkeypatch.setattr(
+        compile_module,
+        "get_dataset_config_for_task",
+        lambda task, dataset=None: {
+            "name": "dotav1",
+            "path": str(data_path),
+            "download": {"url": "https://example.test/dotav1.zip"},
+        },
+    )
+
+    def _organize_dotav1(**kwargs: str) -> None:
+        assert kwargs["output_dir"] == str(data_path)
+        _write_images(data_path / "images", ["P0001.png"])
+        (data_path / "labels" / "val_original").mkdir(parents=True)
+        (data_path / "labels" / "val_original" / "P0001.txt").write_bytes(b"label")
+
+    monkeypatch.setattr(dataset_utils, "organize_dotav1", _organize_dotav1)
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    assert compile_module.ensure_calibration_dataset("oriented_bounding_boxes", dataset="dotav1") == data_path
+
+
+def test_dense_dataset_organizers_follow_model_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Route dense compilation through the matching registry-backed organizer."""
+
+    data_path = tmp_path / "dataset"
+    cityscapes_images = tmp_path / "leftImg8bit_trainvaltest.zip"
+    cityscapes_annotations = tmp_path / "gtFine_trainvaltest.zip"
+    cityscapes_images.write_bytes(b"images")
+    cityscapes_annotations.write_bytes(b"annotations")
+    configs = {
+        "nyu-depth": {"name": "nyu-depth", "download": {"url": "https://example.test/nyu.zip"}},
+        "ade20k": {"name": "ade20k", "download": {"url": "https://example.test/ade.zip"}},
+        "cityscapes": {
+            "name": "cityscapes",
+            "download": {
+                "images_archive": cityscapes_images.name,
+                "annotations_archive": cityscapes_annotations.name,
+            },
+        },
+    }
+    calls: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        compile_module,
+        "get_dataset_config_for_task",
+        lambda task, dataset=None: configs[str(dataset)],
+    )
+    monkeypatch.setattr(
+        dataset_utils,
+        "organize_nyu_depth",
+        lambda **kwargs: calls.append(("nyu-depth", kwargs)),
+    )
+    monkeypatch.setattr(
+        dataset_utils,
+        "organize_ade20k",
+        lambda **kwargs: calls.append(("ade20k", kwargs)),
+    )
+    monkeypatch.setattr(
+        dataset_utils,
+        "organize_cityscapes",
+        lambda **kwargs: calls.append(("cityscapes", kwargs)),
+    )
+
+    compile_module._organize_dataset("depth_estimation", data_path, "nyu-depth")
+    compile_module._organize_dataset("semantic_segmentation", data_path, "ade20k")
+    compile_module._organize_dataset("semantic_segmentation", data_path, "cityscapes")
+
+    assert calls == [
+        (
+            "nyu-depth",
+            {"dataset_path": "https://example.test/nyu.zip", "output_dir": str(data_path)},
+        ),
+        (
+            "ade20k",
+            {"dataset_path": "https://example.test/ade.zip", "output_dir": str(data_path)},
+        ),
+        (
+            "cityscapes",
+            {
+                "image_dir": str(cityscapes_images),
+                "annotation_dir": str(cityscapes_annotations),
+                "output_dir": str(data_path),
+            },
+        ),
+    ]
 
 
 def test_prepare_calibration_arrays_preserves_preprocess_output(tmp_path: Path) -> None:
@@ -296,6 +513,7 @@ def _run_fake_compile(
     task: str,
     model_path: Path | None,
     entry_level: str = "data",
+    dataset: str | None = None,
     fail: bool = False,
     calls: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Path]:
@@ -307,6 +525,7 @@ def _run_fake_compile(
         task: Fake model task.
         model_path: Optional user-supplied model path.
         entry_level: Calibration pipeline level to supply.
+        dataset: Optional fake model dataset taxonomy.
         fail: Whether the fake compiler should fail.
         calls: Optional mapping populated even when compilation fails.
 
@@ -318,8 +537,23 @@ def _run_fake_compile(
     hosted_onnx = tmp_path / "hosted-model.onnx"
     hosted_onnx.write_bytes(b"onnx")
     dataset_path = tmp_path / "dataset"
+    dataset = (
+        dataset
+        or {
+            "image_classification": "imagenet",
+            "depth_estimation": "nyu-depth",
+            "object_detection": "coco",
+            "instance_segmentation": "coco",
+            "semantic_segmentation": "ade20k",
+            "pose_estimation": "coco",
+            "face_detection": "widerface",
+            "obb": "dotav1",
+        }[task]
+    )
     if task == "image_classification":
         _write_images(dataset_path / "class-a", ["one.jpg"])
+    elif task in {"depth_estimation", "semantic_segmentation"}:
+        _write_images(dataset_path / "images", ["one.jpg"])
     else:
         _write_images(dataset_path / "val2017", ["one.jpg"])
 
@@ -363,7 +597,7 @@ def _run_fake_compile(
                 "filename": "hosted-model.mxq",
                 "onnx_path": str(hosted_onnx),
             },
-            "post_cfg": {"task": task},
+            "post_cfg": {"task": task, "dataset": dataset},
         },
     )
     monkeypatch.setattr(compile_module, "resolve_quantization_values", lambda *args: (0.99, 0.02))
@@ -382,8 +616,8 @@ def _run_fake_compile(
     elif entry_level != "data":
         raise ValueError(f"Unsupported test entry level: {entry_level}")
 
-    def _ensure_dataset(task: str, data_path: str | Path | None) -> Path:
-        calls["ensure_dataset"] = True
+    def _ensure_dataset(task: str, data_path: str | Path | None, dataset: str | None) -> Path:
+        calls["ensure_dataset"] = (task, dataset)
         if entry_level != "data":
             pytest.fail(f"{entry_level} input must skip original dataset preparation")
         return dataset_path
@@ -433,6 +667,24 @@ def test_compile_uses_local_onnx_and_exact_options(monkeypatch: pytest.MonkeyPat
     assert not calls["temporary_root"].exists()
 
 
+def test_compile_normalizes_legacy_obb_task_from_model_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Compile legacy custom model metadata through the canonical OBB task."""
+
+    calls, _ = _run_fake_compile(
+        monkeypatch,
+        tmp_path,
+        task="oriented_bounding_boxes",
+        model_path=None,
+        dataset="dotav1",
+        entry_level="calibration",
+    )
+
+    assert calls["calibration_kwargs"]["output"] == 1
+
+
 def test_compile_ignores_missing_local_path_and_uses_hosted_onnx(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -451,6 +703,24 @@ def test_compile_ignores_missing_local_path_and_uses_hosted_onnx(
     assert calls["compile_kwargs"]["model"] == str(hosted_onnx)
     assert calls["compile_kwargs"]["save_path"] == str(model_dir / "hosted-model.mxq")
     assert calls["calibration_kwargs"]["output"] == 1
+
+
+def test_compile_routes_semantic_calibration_by_model_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Use postprocess taxonomy to distinguish ADE20K and Cityscapes compilation."""
+
+    calls, _ = _run_fake_compile(
+        monkeypatch,
+        tmp_path,
+        task="semantic_segmentation",
+        dataset="cityscapes",
+        model_path=None,
+    )
+
+    assert calls["ensure_dataset"] == ("semantic_segmentation", "cityscapes")
+    assert calls["preprocessed"]
 
 
 def test_compile_starts_from_provided_image_subset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

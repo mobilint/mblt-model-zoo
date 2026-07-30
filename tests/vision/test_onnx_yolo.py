@@ -11,6 +11,7 @@ from mblt_model_zoo.vision import MBLT_Engine
 
 TEST_DIR = Path(__file__).parent
 TMP_DIR = TEST_DIR / "tmp"
+pytestmark = pytest.mark.requires_network
 
 
 @pytest.mark.parametrize(

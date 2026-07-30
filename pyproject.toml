@@ -29,6 +29,8 @@ dependencies = [
     "tqdm",
     "mblt-tracker>=1.0.1",
     "PyYAML",
+    "matplotlib",
+    "cityscapesScripts",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -62,6 +64,7 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 [project.optional-dependencies]
 transformers = [
     "transformers[serving]>=4.54.0, <=5.12.1",
+    "datasets>=3.2.0,<=3.6.0",
     "sentencepiece",
     "torchvision",
 ]
@@ -112,9 +115,7 @@ version = { attr = "mblt_model_zoo.__version__" }
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
-    "datasets>=3.2.0, <=3.6.0",
     "jiwer>=3.0.0",
-    "matplotlib",
     "librosa>=0.11.0, <=0.11.0",
     "numba>=0.60.0, <=0.60.0",
     "hf_xet",
@@ -128,6 +129,8 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
+    "requires_network: test downloads models, datasets, or other remote artifacts.",
+    "requires_npu: test requires a configured Mobilint NPU runtime and device.",
     "upstream_contract: pins invariants of upstream HF transformers classes that our wrappers depend on; deselect with '-m \"not upstream_contract\"' in fast CI.",
 ]
 filterwarnings = [

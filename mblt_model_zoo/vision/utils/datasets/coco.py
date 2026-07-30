@@ -158,9 +158,10 @@ def get_coco_label(idx: int) -> str:
         str: Descriptive label for the class (e.g., "person").
 
     Raises:
-        AssertionError: If index is out of range.
+        ValueError: If index is out of range.
     """
-    assert 0 <= idx < get_coco_class_num(), f"Invalid index: {idx}"
+    if not 0 <= idx < get_coco_class_num():
+        raise ValueError(f"COCO class index must be in [0, {get_coco_class_num() - 1}], got {idx}.")
 
     return get_dataset_class_names("coco")[idx]
 

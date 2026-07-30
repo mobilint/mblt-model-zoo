@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import torch
 
-from .base import YOLOPostBase
+from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
@@ -19,7 +19,7 @@ from .common import (
 )
 
 
-class YOLODFLFreePost(YOLOPostBase):
+class YOLODFLFreeDetectionPost(YOLODetectionPostBase):
     """Postprocessing for YOLO DFL-free models."""
 
     max_det = 300
@@ -360,7 +360,7 @@ class YOLODFLFreePost(YOLOPostBase):
         return [xi[xi[:, 4] > 0] for xi in x]
 
 
-class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
+class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreeDetectionPost):
     """Postprocessing for YOLO NMS-free segmentation models."""
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
@@ -465,7 +465,8 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         proto = y_ext.pop(0).permute(0, 2, 3, 1)
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
+        if not len(y_cls) == len(y_det) == len(y_ext):
+            raise ValueError("Classification, detection, and extra output counts must match.")
         y = torch.cat(
             [
                 torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
@@ -476,7 +477,7 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreePost):
         return y, proto
 
 
-class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
+class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
     """Postprocessing for YOLO NMS-free pose estimation models."""
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
@@ -611,7 +612,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreePost):
         )
 
 
-class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreePost):
+class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
     """Postprocessing for DFL-free YOLO OBB models."""
 
     def _pre_process(self, x: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:

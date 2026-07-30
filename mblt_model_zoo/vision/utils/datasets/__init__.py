@@ -4,6 +4,8 @@ Datasets utilities and loaders.
 
 from __future__ import annotations
 
+from .ade20k import get_ade20k_palette
+from .cityscapes import get_cityscapes_palette
 from .coco import (
     get_coco_class_num,
     get_coco_det_palette,
@@ -14,25 +16,38 @@ from .coco import (
     get_coco_pose_skeleton,
 )
 from .dataloader import (
+    CustomADE20K,
+    CustomCityscapes,
     CustomCocodata,
+    CustomCOCODataset,
     CustomDOTAv1,
     CustomImageFolder,
+    CustomNYUDepth,
     CustomWiderface,
+    CustomWiderFaceDataset,
+    get_ade20k_loader,
+    get_cityscapes_loader,
     get_coco_loader,
     get_dota_loader,
     get_imagenet_loader,
+    get_nyu_depth_loader,
     get_widerface_loader,
 )
-from .dotav1 import get_dotav1_class_num, get_dotav1_label
+from .dotav1 import get_dotav1_class_num, get_dotav1_label, get_dotav1_palette
 from .imagenet import get_imagenet_label
 from .organizer import (
+    organize_ade20k,
+    organize_cityscapes,
     organize_coco,
     organize_dotav1,
     organize_imagenet,
+    organize_nyu_depth,
     organize_widerface,
 )
 
 __all__: list[str] = [
+    "get_ade20k_palette",
+    "get_cityscapes_palette",
     "get_coco_class_num",
     "get_coco_det_palette",
     "get_coco_inv",
@@ -42,17 +57,29 @@ __all__: list[str] = [
     "get_coco_pose_skeleton",
     "get_dotav1_class_num",
     "get_dotav1_label",
+    "get_dotav1_palette",
+    "CustomADE20K",
+    "CustomCityscapes",
+    "CustomCOCODataset",
     "CustomCocodata",
     "CustomDOTAv1",
     "CustomImageFolder",
+    "CustomNYUDepth",
+    "CustomWiderFaceDataset",
     "CustomWiderface",
+    "get_ade20k_loader",
+    "get_cityscapes_loader",
     "get_coco_loader",
     "get_dota_loader",
     "get_imagenet_loader",
+    "get_nyu_depth_loader",
     "get_widerface_loader",
     "get_imagenet_label",
     "organize_coco",
+    "organize_ade20k",
+    "organize_cityscapes",
     "organize_dotav1",
     "organize_imagenet",
+    "organize_nyu_depth",
     "organize_widerface",
 ]

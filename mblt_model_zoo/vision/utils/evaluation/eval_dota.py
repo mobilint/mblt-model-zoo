@@ -13,8 +13,15 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from ..._tasks import normalize_vision_task
 from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
-from ..postprocess.common import RatioPad, batch_probiou, rotated_nms, xywhr2xyxyxyxy, xyxyxyxy2xywhr
+from ..letterbox import RatioPad, resolve_ratio_pad
+from ..postprocess.common import (
+    batch_probiou,
+    rotated_nms,
+    xywhr2xyxyxyxy,
+    xyxyxyxy2xywhr,
+)
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -24,10 +31,20 @@ DOTAV1_CLASS_TO_IDX = {get_dotav1_label(index): index for index in range(get_dot
 
 
 class DOTAResult(NamedTuple):
-    """DOTAv1 rotated detection metrics."""
+    """DOTAv1 rotated detection metrics in the legacy tuple order."""
 
     map50: float
     map5095: float
+
+    @property
+    def primary_score(self) -> float:
+        """Return the primary DOTAv1 validation metric."""
+        return self.map5095
+
+    @property
+    def secondary_score(self) -> float:
+        """Return the secondary DOTAv1 validation metric."""
+        return self.map50
 
 
 def _label_to_index(label: str) -> int:
@@ -259,15 +276,11 @@ def _ratio_pad_for_shape(
     ratio_pad: RatioPad | None,
 ) -> tuple[float, tuple[float, float]]:
     """Return letterbox gain and padding for an image."""
-    if ratio_pad is not None:
-        return float(ratio_pad[0][0]), (float(ratio_pad[1][0]), float(ratio_pad[1][1]))
     if len(input_shape) < 2:
         raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
-    gain = min(input_shape[0] / org_shape[0], input_shape[1] / org_shape[1])
-    pad_x = round((input_shape[1] - round(org_shape[1] * gain)) / 2 - 0.1)
-    pad_y = round((input_shape[0] - round(org_shape[0] * gain)) / 2 - 0.1)
-    return float(gain), (float(pad_x), float(pad_y))
+    ratio, pad = resolve_ratio_pad((input_shape[0], input_shape[1]), org_shape, ratio_pad)
+    return float(ratio[0]), (float(pad[0]), float(pad[1]))
 
 
 def _ground_truth_to_input_space(
@@ -313,18 +326,18 @@ def _process_image_stats(
 
 
 def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAResult:
-    """Compute DOTAv1 mAP metrics from accumulated validator statistics."""
+    """Compute DOTAv1 metrics in legacy tuple order: mAP50, then mAP50-95."""
     target_cls = np.concatenate(stats["target_cls"], 0) if stats["target_cls"] else np.zeros(0, dtype=np.float64)
     if target_cls.size == 0:
-        return DOTAResult(map50=0.0, map5095=0.0)
+        return DOTAResult(map5095=0.0, map50=0.0)
 
     tp = np.concatenate(stats["tp"], 0) if stats["tp"] else np.zeros((0, niou), dtype=bool)
     conf = np.concatenate(stats["conf"], 0) if stats["conf"] else np.zeros(0, dtype=np.float64)
     pred_cls = np.concatenate(stats["pred_cls"], 0) if stats["pred_cls"] else np.zeros(0, dtype=np.float64)
     ap = _ap_per_class(tp, conf, pred_cls, target_cls)
     if ap.size == 0:
-        return DOTAResult(map50=0.0, map5095=0.0)
-    return DOTAResult(map50=float(ap[:, 0].mean()), map5095=float(ap.mean()))
+        return DOTAResult(map5095=0.0, map50=0.0)
+    return DOTAResult(map5095=float(ap.mean()), map50=float(ap[:, 0].mean()))
 
 
 def evaluate_dota_predictions(
@@ -338,7 +351,9 @@ def evaluate_dota_predictions(
         predictions: Formatted prediction dictionaries.
 
     Returns:
-        Rotated mAP at IoU ``0.50`` and averaged across ``0.50:0.95``.
+        Rotated mAP at IoU ``0.50`` followed by mAP averaged across ``0.50:0.95``.
+        The ``primary_score`` and ``secondary_score`` properties expose mAP50-95
+        and mAP50, respectively.
     """
     iouv = torch.linspace(0.5, 0.95, 10)
     stats = _empty_stats()
@@ -467,7 +482,7 @@ def eval_dota(
     Returns:
         Local rotated mAP scores.
     """
-    if model.post_cfg["task"] != "obb":
+    if normalize_vision_task(model.post_cfg["task"]) != "obb":
         raise NotImplementedError(f"Task {model.post_cfg['task']} is not supported for DOTAv1 evaluation.")
 
     dataset = CustomDOTAv1(data_path)

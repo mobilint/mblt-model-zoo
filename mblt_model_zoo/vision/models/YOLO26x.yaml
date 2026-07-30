@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: object_detection
+    dataset: coco
     nl: 3
     dflfree: true
     conf_thres: 0.001

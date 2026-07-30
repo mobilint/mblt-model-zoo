@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: instance_segmentation
+    dataset: coco
     nl: 3
     n_extra: 32
     dflfree: true

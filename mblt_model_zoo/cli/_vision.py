@@ -10,7 +10,21 @@ from typing import Any
 
 import torch
 
+from mblt_model_zoo.vision._tasks import normalize_vision_task
+
 DEFAULT_OUTPUT_DIR = Path("runs") / "vision"
+
+
+def parse_unit_interval(value: str) -> float:
+    """Parse a floating-point value strictly between zero and one."""
+
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a number in the open interval (0, 1)") from exc
+    if not 0 < parsed < 1:
+        raise argparse.ArgumentTypeError(f"expected a number in the open interval (0, 1), got {value}")
+    return parsed
 
 
 def parse_target_cores(value: str | None) -> list[str] | None:
@@ -92,8 +106,8 @@ def add_threshold_args(
 ) -> None:
     """Adds postprocess threshold arguments for dense vision tasks."""
 
-    parser.add_argument("--conf-thres", type=float, default=conf_default, help="Confidence threshold.")
-    parser.add_argument("--iou-thres", type=float, default=iou_default, help="IoU threshold.")
+    parser.add_argument("--conf-thres", type=parse_unit_interval, default=conf_default, help="Confidence threshold.")
+    parser.add_argument("--iou-thres", type=parse_unit_interval, default=iou_default, help="IoU threshold.")
 
 
 def parse_bool(value: str) -> bool:
@@ -222,14 +236,20 @@ def run_vision_inference(
     require_source_file(args.source)
     model = create_vision_engine(args)
     try:
-        actual_task = str(model.post_cfg.get("task", "")).lower()
+        actual_task = normalize_vision_task(model.post_cfg.get("task", ""))
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk
         elif actual_task in {"object_detection", "face_detection", "instance_segmentation", "pose_estimation", "obb"}:
             model.set_postprocess_thresholds(conf_thres=args.conf_thres, iou_thres=args.iou_thres)
 
-        input_img = model.preprocess(args.source)
+        postprocess_kwargs: dict[str, Any] = {}
+        if actual_task == "semantic_segmentation":
+            input_img, metadata = model.preprocess_with_metadata(args.source)
+            postprocess_kwargs["img0_shape"] = metadata["img0_shape"]
+            postprocess_kwargs["ratio_pad"] = metadata.get("ratio_pad")
+        else:
+            input_img = model.preprocess(args.source)
         output = model(input_img)
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             if args.output:
@@ -246,7 +266,7 @@ def run_vision_inference(
                 print("Generated raw export-style postprocess output. Use `--raw-output` to save it.")
             return raw_output
 
-        result = model.postprocess(output)
+        result = model.postprocess(output, **postprocess_kwargs)
 
         save_path = resolve_output_path(args.output, command, args.source, args.model)
         result.plot(source_path=args.source, save_path=save_path, **plot_kwargs)

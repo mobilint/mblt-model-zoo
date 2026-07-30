@@ -22,8 +22,11 @@ class SetOrder(PreOps):
                 Defaults to "HWC".
         """
         super().__init__()
-        assert shape.lower() in ["hwc", "chw"], f"Got unsupported shape={shape}."
-        self.shape = shape
+        if not isinstance(shape, str):
+            raise TypeError(f"SetOrder shape must be a string, got {type(shape).__name__}.")
+        if shape.lower() not in {"hwc", "chw"}:
+            raise ValueError(f"Unsupported channel order {shape!r}; expected 'HWC' or 'CHW'.")
+        self.shape = shape.lower()
 
     def __call__(self, x: TensorLike) -> TensorLike:
         """Reorders the dimensions of the input image.
@@ -34,18 +37,25 @@ class SetOrder(PreOps):
         Returns:
             TensorLike: Image with the specified channel order.
         """
-        assert x.ndim == 3, "Assume that x is a color image"
-        if x.shape[0] == 3:
+        if not isinstance(x, (np.ndarray, torch.Tensor)):
+            raise TypeError(f"SetOrder expects a NumPy array or tensor, got {type(x).__name__}.")
+        if x.ndim != 3:
+            raise ValueError(f"SetOrder expects a three-dimensional color image, got shape {x.shape}.")
+        channels_first = x.shape[0] == 3
+        channels_last = x.shape[-1] == 3
+        if channels_first and channels_last:
+            raise ValueError(f"SetOrder cannot infer channel order from ambiguous shape {x.shape}.")
+        if channels_first:
             cdim = 0
-        elif x.shape[-1] == 3:
+        elif channels_last:
             cdim = 2
         else:
-            raise ValueError(f"Only assume HWC or CHW with 3 channels, but got shape {x.shape}")
-        if cdim == 0 and self.shape.lower() == "hwc":
+            raise ValueError(f"SetOrder expects HWC or CHW data with three channels, got shape {x.shape}.")
+        if cdim == 0 and self.shape == "hwc":
             if isinstance(x, torch.Tensor):
                 return torch.permute(x, (1, 2, 0))
             return np.transpose(x, (1, 2, 0))
-        elif cdim == 2 and self.shape.lower() == "chw":
+        elif cdim == 2 and self.shape == "chw":
             if isinstance(x, torch.Tensor):
                 return torch.permute(x, (2, 0, 1))
             return np.transpose(x, (2, 0, 1))

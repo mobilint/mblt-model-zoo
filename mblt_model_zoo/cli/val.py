@@ -7,7 +7,9 @@ import os
 import sys
 from pathlib import Path
 
+from mblt_model_zoo.vision._tasks import normalize_vision_task
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
+from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 
 from ._vision import add_e2e_arg, add_threshold_args, create_vision_engine, parse_target_clusters, parse_target_cores
 
@@ -18,6 +20,11 @@ DEFAULT_COCO_ANNOTATION_SOURCE = get_dataset_config("coco")["download"]["annotat
 DEFAULT_WIDERFACE_IMAGE_SOURCE = get_dataset_config("widerface")["download"]["images"]
 DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"]["annotations"]
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
+DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
+DEFAULT_ADE20K_SOURCE = get_dataset_config("ade20k")["download"]["url"]
+CITYSCAPES_DOWNLOAD_CONFIG = get_dataset_config("cityscapes")["download"]
+CITYSCAPES_IMAGE_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["images_archive"]
+CITYSCAPES_ANNOTATION_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["annotations_archive"]
 
 
 def _candidate_search_roots(data_path: str) -> list[Path]:
@@ -116,53 +123,85 @@ def _resolve_dotav1_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_DOTAV1_SOURCE
 
 
-def _default_data_path_for_task(task: str) -> str:
+def _resolve_nyu_depth_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolve a local archive or URL for NYU Depth organization."""
+
+    dataset_path = args.annotation_dir or args.image_dir
+    if not args.force_organize:
+        dataset_path = dataset_path or _find_existing_source(data_path, ["nyu-depth.zip", "nyu-depth"])
+    return dataset_path or DEFAULT_NYU_DEPTH_SOURCE
+
+
+def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolve a local archive, extracted directory, or URL for ADE20K organization."""
+
+    dataset_path = args.annotation_dir or args.image_dir
+    if not args.force_organize:
+        dataset_path = dataset_path or _find_existing_source(
+            data_path,
+            ["ADEChallengeData2016.zip", "ADEChallengeData2016"],
+        )
+    return dataset_path or DEFAULT_ADE20K_SOURCE
+
+
+def _resolve_cityscapes_sources(args: argparse.Namespace, data_path: str) -> tuple[str, str]:
+    """Resolve the two manually downloaded official Cityscapes archives.
+
+    Args:
+        args: Parsed validation CLI arguments.
+        data_path: Organized Cityscapes output path used as a discovery anchor.
+
+    Returns:
+        Image and annotation ZIP paths.
+
+    Raises:
+        SystemExit: If either required archive cannot be found.
+    """
+
+    image_dir = args.image_dir or _find_existing_source(data_path, [CITYSCAPES_IMAGE_ARCHIVE])
+    annotation_dir = args.annotation_dir or _find_existing_source(data_path, [CITYSCAPES_ANNOTATION_ARCHIVE])
+    if image_dir is None or annotation_dir is None:
+        raise SystemExit(
+            "Cityscapes organization requires the official image and annotation ZIP archives. "
+            "Register at https://www.cityscapes-dataset.com/, then download them with:\n"
+            "  csDownload -d <download-dir> gtFine_trainvaltest.zip leftImg8bit_trainvaltest.zip\n"
+            "Pass the resulting files with --image-dir and --annotation-dir, or place them near the dataset path."
+        )
+    return image_dir, annotation_dir
+
+
+def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
     """Returns the default organized dataset path for a vision task."""
 
     try:
-        return str(get_dataset_config_for_task(task)["path"])
+        return str(get_dataset_config_for_task(task, dataset)["path"])
     except ValueError as exc:
         raise SystemExit(f"Unsupported vision task for validation: {task}") from exc
 
 
-def _dataset_ready(task: str, data_path: str) -> bool:
+def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> bool:
     """Checks whether the organized dataset appears ready for validation."""
 
-    root = Path(data_path).expanduser()
-    if task == "image_classification":
-        return root.is_dir() and any(child.is_dir() for child in root.iterdir()) if root.exists() else False
-    if task in {"object_detection", "instance_segmentation"}:
-        return (root / "val2017").is_dir() and (root / "instances_val2017.json").is_file()
-    if task == "pose_estimation":
-        return (root / "val2017").is_dir() and (root / "person_keypoints_val2017.json").is_file()
-    if task == "face_detection":
-        required_files = (
-            "wider_face_val.mat",
-            "wider_easy_val.mat",
-            "wider_medium_val.mat",
-            "wider_hard_val.mat",
-        )
-        return (root / "images").is_dir() and all((root / file_name).is_file() for file_name in required_files)
-    if task == "obb":
-        return (root / "images" / "val").is_dir() and (
-            (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
-        )
-    return False
+    return dataset_ready(data_path, task, dataset)
 
 
-def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
+def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = None) -> str:
     """Organizes the dataset automatically when the expected layout is missing."""
 
-    data_path = os.path.expanduser(args.data_path or _default_data_path_for_task(task))
-    if _dataset_ready(task, data_path) and not args.force_organize:
+    task = normalize_vision_task(task)
+    data_path = os.path.expanduser(args.data_path or _default_data_path_for_task(task, dataset))
+    if _dataset_ready(task, data_path, dataset) and not args.force_organize:
         print(f"Using organized dataset at {data_path}")
         return data_path
 
     try:
         from mblt_model_zoo.vision.utils.datasets import (
+            organize_ade20k,
+            organize_cityscapes,
             organize_coco,
             organize_dotav1,
             organize_imagenet,
+            organize_nyu_depth,
             organize_widerface,
         )
     except ImportError as exc:
@@ -196,9 +235,32 @@ def _ensure_dataset(args: argparse.Namespace, task: str) -> str:
             dataset_path=_resolve_dotav1_source(args, data_path),
             output_dir=data_path,
         )
+    elif task == "depth_estimation":
+        organize_nyu_depth(
+            dataset_path=_resolve_nyu_depth_source(args, data_path),
+            output_dir=data_path,
+        )
+    elif task == "semantic_segmentation":
+        if dataset == "cityscapes":
+            image_dir, annotation_dir = _resolve_cityscapes_sources(args, data_path)
+            organize_cityscapes(
+                image_dir=image_dir,
+                annotation_dir=annotation_dir,
+                output_dir=data_path,
+            )
+        else:
+            organize_ade20k(
+                dataset_path=_resolve_ade20k_source(args, data_path),
+                output_dir=data_path,
+            )
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
+    if not _dataset_ready(task, data_path, dataset):
+        raise SystemExit(
+            f"Organized validation dataset at {data_path} is incomplete or does not match "
+            f"the expected {dataset or task} dataset."
+        )
     return data_path
 
 
@@ -206,7 +268,15 @@ def _run_validation(args: argparse.Namespace) -> float:
     """Runs model validation on the dataset associated with the model task."""
 
     try:
-        from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
+        from mblt_model_zoo.vision.utils.evaluation import (
+            eval_ade20k,
+            eval_cityscapes,
+            eval_coco_metrics,
+            eval_dota,
+            eval_imagenet_metrics,
+            eval_nyu_depth,
+            eval_widerface,
+        )
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -216,24 +286,59 @@ def _run_validation(args: argparse.Namespace) -> float:
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             raise SystemExit("Validation requires end-to-end YOLO postprocessing. Use `--e2e true` or omit the option.")
 
-        task = str(model.post_cfg.get("task", "")).lower()
-        data_path = _ensure_dataset(args, task)
+        task = normalize_vision_task(model.post_cfg.get("task", ""))
+        dataset = model.post_cfg.get("dataset")
+        taxonomy = str(dataset).lower() if isinstance(dataset, str) else None
+        if task == "semantic_segmentation" and taxonomy not in {"ade20k", "cityscapes"}:
+            raise SystemExit(
+                f"Unsupported semantic segmentation taxonomy for validation: {taxonomy!r}. "
+                "Expected `ade20k` or `cityscapes`."
+            )
+        data_path = _ensure_dataset(args, task, taxonomy)
 
         if task == "image_classification":
-            score = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
-            print(f"Validation score (Top-1 accuracy): {score:.5f}")
-            return score
+            imagenet_result = eval_imagenet_metrics(model=model, data_path=data_path, batch_size=args.batch_size)
+            print(
+                "Validation score "
+                f"(Top-1 accuracy): {imagenet_result.top1:.5f}, "
+                f"(Top-5 accuracy): {imagenet_result.top5:.5f}"
+            )
+            return imagenet_result.primary_score
+
+        if task == "depth_estimation":
+            depth_result = eval_nyu_depth(model=model, data_path=data_path, batch_size=args.batch_size)
+            print(
+                "Validation score "
+                f"(delta1): {depth_result.delta1:.5f}, "
+                f"(abs_rel): {depth_result.abs_rel:.5f}, "
+                f"(rmse): {depth_result.rmse:.5f}"
+            )
+            return depth_result.primary_score
+
+        if task == "semantic_segmentation":
+            if taxonomy == "cityscapes":
+                semantic_result = eval_cityscapes(model=model, data_path=data_path, batch_size=args.batch_size)
+            elif taxonomy == "ade20k":
+                semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
+            else:
+                raise AssertionError(f"Unexpected validated semantic taxonomy: {taxonomy!r}")
+            print(
+                "Validation score "
+                f"(mIoU): {semantic_result.miou:.5f}, "
+                f"(pixel accuracy): {semantic_result.pixel_accuracy:.5f}"
+            )
+            return semantic_result.primary_score
 
         if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
-            score = eval_coco(
+            coco_result = eval_coco_metrics(
                 model=model,
                 data_path=data_path,
                 batch_size=args.batch_size,
                 conf_thres=args.conf_thres,
                 iou_thres=args.iou_thres,
             )
-            print(f"Validation score (mAP 50-95): {score:.5f}")
-            return score
+            print(f"Validation score (mAP50-95): {coco_result.map5095:.5f}, (mAP50): {coco_result.map50:.5f}")
+            return coco_result.primary_score
 
         if task == "obb":
             dota_result = eval_dota(
@@ -245,10 +350,10 @@ def _run_validation(args: argparse.Namespace) -> float:
             )
             print(
                 "Validation score "
-                f"(rotated mAP test 50): {dota_result.map50:.5f}, "
-                f"(rotated mAP test 50-95): {dota_result.map5095:.5f}"
+                f"(rotated mAP50-95): {dota_result.map5095:.5f}, "
+                f"(rotated mAP50): {dota_result.map50:.5f}"
             )
-            return dota_result.map5095
+            return dota_result.primary_score
 
         if task == "face_detection":
             widerface_result = eval_widerface(
@@ -265,7 +370,7 @@ def _run_validation(args: argparse.Namespace) -> float:
                 f"(Hard AP): {widerface_result.hard_ap:.5f}, "
                 f"(Mean AP): {widerface_result.mean_ap:.5f}"
             )
-            return widerface_result.mean_ap
+            return widerface_result.primary_score
 
         raise SystemExit(f"Unsupported vision task for validation: {task}")
     finally:
@@ -344,7 +449,9 @@ def add_val_parser(
     )
     parser.add_argument(
         "--image-dir",
-        help="Local archive path or download URL for the dataset images used by automatic organization.",
+        help=(
+            "Local archive path or download URL for dataset images. Cityscapes requires leftImg8bit_trainvaltest.zip."
+        ),
     )
     parser.add_argument(
         "--xml-dir",
@@ -352,7 +459,9 @@ def add_val_parser(
     )
     parser.add_argument(
         "--annotation-dir",
-        help="Local archive path or download URL for dataset annotations used by automatic organization.",
+        help=(
+            "Local archive path or download URL for dataset annotations. Cityscapes requires gtFine_trainvaltest.zip."
+        ),
     )
     add_threshold_args(parser, conf_default=None, iou_default=None)
     add_e2e_arg(parser)

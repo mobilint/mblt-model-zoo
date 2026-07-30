@@ -1,7 +1,8 @@
 # Vision Framework
 
-The Mobilint Model Zoo vision framework provides image classification, object detection, instance
-segmentation, and pose estimation pipelines backed by pre-trained NPU model artifacts.
+The Mobilint Model Zoo vision framework provides image classification, depth estimation, object and face detection,
+oriented bounding box (OBB) detection, instance segmentation, semantic segmentation, and pose estimation pipelines
+backed by pre-trained NPU model artifacts.
 
 Further usage examples can be found in the [tests](../../tests/vision) directory.
 
@@ -33,6 +34,16 @@ default. Pass `onnx_providers` to select another provider order explicitly when 
 `model_path` or `file_cfg.model_path` ends
 with `.mxq` or `.onnx`, the engine auto-detects the framework from that suffix when `framework` is
 omitted.
+
+For Hub-backed models, `file_cfg.filename` is the canonical MXQ artifact name. The engine derives
+the corresponding ONNX artifact by replacing its `.mxq` suffix with `.onnx`, so every model uses
+the same ONNX loading path. Set `file_cfg.onnx_filename` only when a Hub repository uses a
+non-matching ONNX filename.
+
+Every model configuration also declares `post_cfg.dataset`. This identifies the output taxonomy,
+not merely the broad task: COCO detection uses 80 classes, Cityscapes semantic segmentation uses
+19, and ADE20K semantic segmentation uses 150. YOLO postprocessing resolves shape-sensitive class
+counts from the dataset and task together.
 
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
@@ -81,14 +92,17 @@ mblt-model-zoo predict --source ./cat.png --model resnet50 --output ./result_cat
 mblt-model-zoo predict --source ./street.jpg --model yolo11m --output ./result_detect.jpg
 mblt-model-zoo predict --source ./person.jpg --model yolo11l-pose --output ./result_pose.jpg
 mblt-model-zoo predict --source ./street.jpg --model yolo11m-seg --output ./result_segment.jpg
+mblt-model-zoo predict --source ./room.jpg --model yolo26n-depth --framework onnx --output ./result_depth.jpg
+mblt-model-zoo predict --source ./room.jpg --model yolo26n-sem-ade20k --framework onnx --output ./result_semantic.jpg
 ```
 
 The `predict` command accepts classification and dense prediction options. `--topk` is used for
 image classification models. `--conf-thres` and `--iou-thres` are used for object detection,
-instance segmentation, and pose estimation models. For dense prediction tasks, each model loads its
-default thresholds from its YAML file under [models](models/), and the CLI overrides those values
-when you pass explicit threshold arguments. The default CLI behavior is to use `0.25` for
-confidence and keep the model's YAML IoU threshold.
+face detection, instance segmentation, OBB, and pose estimation models; depth and semantic segmentation ignore these
+detection-only options and save colorized overlays. Detection-style models load default thresholds from
+their YAML file under [models](models/), and the CLI overrides those values when you pass explicit
+threshold arguments. The default CLI behavior is to use `0.25` for confidence and keep the model's
+YAML IoU threshold.
 
 ```bash
 mblt-model-zoo predict --source ./cat.png --model resnet50 --topk 5
@@ -173,18 +187,38 @@ mblt-model-zoo val --model resnet50 --framework onnx --onnx-path ./resnet50.onnx
 
 The command loads the model, infers its task, and validates it on the associated benchmark dataset:
 
-- Image classification models use ImageNet.
+- Image classification models use ImageNet and report Top-1 accuracy as the primary metric and
+  Top-5 accuracy as the secondary metric.
 - Object detection, instance segmentation, and pose estimation models use COCO.
+- Oriented bounding-box models use DOTAv1 and report rotated mAP50-95 as the primary metric and
+  rotated mAP50 as the secondary metric.
+- YOLO26 depth-estimation models use NYU Depth V2. The organizer retains its validation-only `images/` and `depth/`
+  layout. Validation stretches inputs and targets to 768×768, median-aligns each prediction, pools statistics over all
+  valid pixels, and reports `delta1` (primary), `abs_rel`, and `rmse`.
+- YOLO26 ADE20K semantic-segmentation models use paired `images/` and `annotations/`. Validation applies matching
+  640×640 letterbox geometry, ignores source label `0`, maps labels `1..150` to classes `0..149`, and reports mIoU
+  (primary) with pixel accuracy.
+- YOLO26 `*-sem` models use 500 validation pairs from the official Cityscapes
+  `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` packages. Validation maps source IDs
+  `7,8,11,12,13,17,19..28,31..33` to classes `0..18`, ignores other IDs, and reports mIoU with pixel accuracy.
 
 If the organized dataset is not already available under the default cache directory, the CLI
-automatically prepares it before validation. Before downloading anything, it first looks for raw
-archives or extracted dataset directories near the target dataset path, including the dataset
-directory itself, its parent directory, and the current working directory. You can also point the
-command to an already organized dataset with `--data-path`.
+automatically prepares it before validation. Archive-backed organizers first look for raw archives
+or extracted dataset directories near the target dataset path, including the dataset directory
+itself, its parent directory, and the current working directory. Cityscapes requires the two official ZIP packages
+downloaded with `csDownload` and selects only their validation images and `gtFine_labelIds` masks. You can also point
+the command to an already organized dataset with `--data-path`.
 
 ```bash
 mblt-model-zoo val --model resnet50 --data-path ~/.mblt_model_zoo/datasets/imagenet
 mblt-model-zoo val --model yolo11m --batch-size 8 --conf-thres 0.001 --iou-thres 0.7
+mblt-model-zoo val --model yolo26n-depth --framework onnx --data-path ~/.mblt_model_zoo/datasets/nyu-depth
+mblt-model-zoo val --model yolo26n-sem-ade20k --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+mblt-model-zoo val --model yolo26n-sem --framework onnx \
+  --image-dir /path/to/leftImg8bit_trainvaltest.zip \
+  --annotation-dir /path/to/gtFine_trainvaltest.zip \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes
 ```
 
 If you omit `--conf-thres` and `--iou-thres`, validation uses the model's YAML thresholds. Pass
@@ -364,7 +398,9 @@ This section lists the publicly pre-trained models supported by the vision frame
 <details>
 <summary>Image Classification (ImageNet)</summary>
 
-- Acc<sup>Top1</sup> values are model accuracies on the [ImageNet](https://www.image-net.org/index.php) dataset validation set.
+- Acc<sup>Top1</sup> values are the primary model accuracies on the
+  [ImageNet](https://www.image-net.org/index.php) validation set. Validation also reports
+  Acc<sup>Top5</sup> as the secondary metric.
 
 </details>
 
@@ -505,6 +541,9 @@ This section lists the publicly pre-trained models supported by the vision frame
 <details>
 <summary>Oriented Bounding Boxes (DOTA v1.0)</summary>
 
-- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ values are for single-model single-scale on the [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset.
+- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ is the primary metric
+  for single-model single-scale validation on the
+  [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset. Validation also reports
+  rotated mAP50 as the secondary metric.
 
 </details>

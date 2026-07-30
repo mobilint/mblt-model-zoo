@@ -8,15 +8,15 @@ from typing import Any, cast
 
 import torch
 
-from .base import YOLOPostBase
+from .base import YOLODetectionPostBase
 from .common import YOLOSegPostMixin, non_max_suppression
 
 
-class YOLOAnchorPost(YOLOPostBase):
+class YOLOAnchorDetectionPost(YOLODetectionPostBase):
     """Postprocessing for YOLO models with anchors."""
 
     def __init__(self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs: Any) -> None:
-        """Initialize YOLOAnchorPost.
+        """Initialize anchor-based YOLO detection postprocessing.
 
         Args:
             pre_cfg (dict): Preprocessing configuration.
@@ -87,7 +87,8 @@ class YOLOAnchorPost(YOLOPostBase):
                 ``(batch, anchors, no)`` format, optionally paired with prototype masks in
                 segmentation subclasses.
         """
-        assert len(x) == self.nl, f"Got unsupported number of detection heads: {len(x)}."
+        if len(x) != self.nl:
+            raise ValueError(f"Expected {self.nl} detection heads, got {len(x)}.")
         y = []
         for i in range(self.nl):
             tmp = x[i]
@@ -261,7 +262,7 @@ class YOLOAnchorPost(YOLOPostBase):
         return xy, wh, conf, scores, extra
 
 
-class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorPost):
+class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorDetectionPost):
     """Postprocessing for YOLO segmentation models with anchors."""
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:

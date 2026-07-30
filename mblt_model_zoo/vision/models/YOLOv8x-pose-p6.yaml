@@ -16,6 +16,7 @@ DEFAULT:
       style: cv
   post_cfg:
     task: pose_estimation
+    dataset: coco
     nl: 4
     n_extra: 51
     reg_max: 16

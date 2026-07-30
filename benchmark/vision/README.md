@@ -8,8 +8,8 @@ task-specific scripts have been replaced by the standard runner below.
 ## Quick CLI Validation
 
 Use `mblt-model-zoo val` when you want to validate one vision model without manually selecting a
-dataset evaluator. The CLI infers the model task, selects ImageNet, COCO, WiderFace, or DOTAv1 as
-appropriate, and organizes the default dataset cache if it is missing.
+dataset evaluator. The CLI infers the model task and taxonomy, selects ImageNet, COCO, WiderFace, DOTAv1, NYU Depth,
+Cityscapes, or ADE20K as appropriate, and organizes the default dataset cache if it is missing.
 
 ```bash
 mblt-model-zoo val --help
@@ -28,9 +28,10 @@ mblt-model-zoo val \
   --data-path ~/.mblt_model_zoo/datasets/coco
 ```
 
-Image classification validation displays Top-1 and Top-5 accuracy. Other tasks report their
-task-specific score, such as COCO mAP, WiderFace AP, or DOTAv1 rotated mAP. For a local ONNX model,
-use `--model-path ./model.onnx`; pass `--framework onnx` only when an explicit override is needed.
+Image classification validation uses Top-1 accuracy as its primary score and Top-5 accuracy as its
+secondary metric. Other tasks report their task-specific score, such as COCO mAP, WiderFace AP, DOTAv1 rotated mAP,
+or semantic mIoU and pixel accuracy. For a local ONNX model, use `--model-path ./model.onnx`; pass
+`--framework onnx` only when an explicit override is needed.
 
 ## Standard Multi-Model Runner
 
@@ -57,6 +58,28 @@ The runner writes the following reproducible artifacts:
 
 Use `--collect-host-info` to include `mblt-tracker collect` output in the summary. A local
 `--model-path`, `--mxq-path`, or `--onnx-path` applies to exactly one model target.
+The runner auto-detects `.onnx` passed through `--model-path`; ONNX benchmarks execute once with
+the neutral `onnx` runtime label even when `--core-mode all` is requested.
+Task names in generated artifacts are always canonical; the compatibility input
+`oriented_bounding_boxes` is normalized to `obb`.
+
+Depth-estimation runs record `delta1` as the primary score together with `abs_rel` and `rmse`.
+Semantic-segmentation runs dispatch from the model's `post_cfg.dataset`: ADE20K and Cityscapes both
+record `miou` as primary and `pixel_accuracy` as secondary.
+
+```bash
+python benchmark/vision/benchmark_vision_models.py \
+  --models yolo26m-depth \
+  --task depth_estimation \
+  --data-path ~/.mblt_model_zoo/datasets/nyu-depth \
+  --results-dir benchmark/vision/results/yolo26m_depth
+
+python benchmark/vision/benchmark_vision_models.py \
+  --models yolo26m-sem \
+  --task semantic_segmentation \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes \
+  --results-dir benchmark/vision/results/yolo26m_sem
+```
 
 You can run the benchmark as the following steps:
 
@@ -120,8 +143,8 @@ If you want to try with your own model, refer to the [tutorial guide](https://gi
 
 ### Run the ImageNet Benchmark
 
-Use the standard runner. It reports Top-1 and Top-5 accuracy during ImageNet evaluation and records the Top-1
-score in the result artifacts.
+Use the standard runner. It records Top-1 as the primary score and Top-5 as the secondary metric in
+the result artifacts.
 
 ```bash
 python benchmark/vision/benchmark_vision_models.py \
@@ -283,10 +306,9 @@ This keeps only the validation split and organizes the dataset into the followin
 ```text
 ~/.mblt_model_zoo/datasets/dotav1/
 ├── images/
-│   └── val/
-│       ├── P0003.png
-│       ├── P0006.png
-│       ├── ...
+│   ├── P0003.png
+│   ├── P0006.png
+│   └── ...
 ├── labels/
 │   ├── val/
 │   │   ├── P0003.txt
@@ -312,8 +334,106 @@ python benchmark/vision/benchmark_vision_models.py \
   --results-dir benchmark/vision/results/yolov8s_obb_dotav1
 ```
 
-The benchmark records local rotated `mAP test 50` and `mAP test 50-95`; DOTA Task1 prediction files are
-stored under the corresponding `runs/` directory.
+The benchmark records rotated `mAP test 50-95` as the primary score and `mAP test 50` as the
+secondary metric; DOTA Task1 prediction files are stored under the corresponding `runs/`
+directory.
+
+## Organize NYU Depth Dataset
+
+The NYU Depth organizer downloads the published archive by default and installs only its 654 validation image/depth
+pairs under `images/` and `depth/` in the selected output directory. You can also give it a local ZIP file or
+extracted dataset root; when `val` directories are present, training data is excluded.
+
+```bash
+python benchmark/vision/organize_nyu_depth.py \
+  --output-dir ~/.mblt_model_zoo/datasets/nyu-depth
+```
+
+```text
+~/.mblt_model_zoo/datasets/nyu-depth/
+├── images/
+│   ├── nyu_0000.jpg
+│   └── ...
+└── depth/
+    ├── nyu_0000.npy
+    └── ...
+```
+
+## Organize Cityscapes Dataset
+
+Register at the [Cityscapes dataset website](https://www.cityscapes-dataset.com/) and use the `csDownload` command
+installed by `cityscapesScripts` to download the two official train/validation/test ZIP packages:
+
+```bash
+csDownload -d <download-dir> gtFine_trainvaltest.zip leftImg8bit_trainvaltest.zip
+```
+
+The organizer reads only the 500 validation RGB images and matching `gtFine_labelIds` masks. It excludes train/test
+files and auxiliary color, instance-ID, polygon, and train-ID annotations, then copies each PNG losslessly into the
+flat validation layout:
+
+```bash
+python benchmark/vision/organize_cityscapes.py \
+  --image-dir <download-dir>/leftImg8bit_trainvaltest.zip \
+  --annotation-dir <download-dir>/gtFine_trainvaltest.zip \
+  --output-dir ~/.mblt_model_zoo/datasets/cityscapes
+```
+
+```text
+~/.mblt_model_zoo/datasets/cityscapes/
+├── images/
+│   ├── frankfurt_000000_000294.png
+│   └── ...
+└── annotations/
+    ├── frankfurt_000000_000294.png
+    └── ...
+```
+
+The organized masks retain source label IDs; the validation loader maps the 19 canonical source IDs to train IDs and
+treats every other ID as `255`. The validation CLI discovers the two official archive filenames in the dataset
+directory, its parent, or the current working directory. You can also pass them explicitly:
+
+```bash
+mblt-model-zoo val \
+  --model yolo26n-sem \
+  --framework onnx \
+  --image-dir <download-dir>/leftImg8bit_trainvaltest.zip \
+  --annotation-dir <download-dir>/gtFine_trainvaltest.zip \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes
+```
+
+## Organize ADE20K Dataset
+
+The ADE20K organizer downloads the official archive by default, then retains only the 2,000 validation image/mask
+pairs. It installs them as flat `images/` and `annotations/` directories and preserves `objectInfo150.txt` and
+`sceneCategories.txt` when supplied by the source.
+
+Semantic validation applies the model's 640×640 letterbox transform to both images and masks, ignores source label
+`0`, maps labels `1..150` to model classes `0..149`, and reports mIoU followed by pixel accuracy.
+
+```bash
+python benchmark/vision/organize_ade20k.py \
+  --output-dir ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+```
+
+```bash
+mblt-model-zoo val \
+  --model yolo26n-sem-ade20k \
+  --framework onnx \
+  --data-path ~/.mblt_model_zoo/datasets/ADEChallengeData2016
+```
+
+```text
+~/.mblt_model_zoo/datasets/ADEChallengeData2016/
+├── annotations/
+│   ├── ADE_val_00000001.png
+│   └── ...
+├── images/
+│   ├── ADE_val_00000001.jpg
+│   └── ...
+├── objectInfo150.txt
+└── sceneCategories.txt
+```
 
 ## Compare Vision Benchmark Results
 

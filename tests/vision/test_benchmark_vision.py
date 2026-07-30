@@ -2,12 +2,131 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 from pathlib import Path
 
 import pytest
 
 from benchmark.vision import benchmark_vision_models, compare_benchmark_results
+from mblt_model_zoo.vision.utils.evaluation import (
+    DOTAResult,
+    ImageNetResult,
+    NYUDepthResult,
+    SemanticSegmentationResult,
+)
+
+
+def test_benchmark_records_imagenet_metrics_in_primary_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Use Top-1 as the score while retaining Top-5 in benchmark metrics."""
+
+    class FakeModel:
+        """Minimal classification model double."""
+
+        post_cfg = {"task": "image_classification"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_imagenet_metrics",
+        lambda *args, **kwargs: ImageNetResult(top1=0.75, top5=0.95),
+    )
+    args = argparse.Namespace(
+        task="image_classification",
+        data_path=str(tmp_path),
+        batch_size=1,
+    )
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert score == 0.75
+    assert score_name == "top1_accuracy"
+    assert metrics == {"top1_accuracy": 0.75, "top5_accuracy": 0.95}
+
+
+def test_benchmark_records_depth_metrics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Record all NYU depth metrics with delta1 as primary."""
+
+    class FakeModel:
+        post_cfg = {"task": "depth_estimation", "dataset": "nyu-depth"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_nyu_depth",
+        lambda *args, **kwargs: NYUDepthResult(delta1=0.8, abs_rel=0.1, rmse=0.2),
+    )
+    args = argparse.Namespace(task="depth_estimation", data_path=str(tmp_path), batch_size=1)
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.8, "delta1")
+    assert metrics == {"delta1": 0.8, "abs_rel": 0.1, "rmse": 0.2}
+
+
+@pytest.mark.parametrize(
+    ("dataset", "evaluator_name"),
+    [("ade20k", "eval_ade20k"), ("cityscapes", "eval_cityscapes")],
+)
+def test_benchmark_dispatches_semantic_taxonomy(
+    dataset: str,
+    evaluator_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Dispatch semantic evaluation explicitly from the configured taxonomy."""
+
+    class FakeModel:
+        post_cfg = {"task": "semantic_segmentation", "dataset": dataset}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        evaluator_name,
+        lambda *args, **kwargs: SemanticSegmentationResult(miou=0.6, pixel_accuracy=0.9),
+    )
+    args = argparse.Namespace(task="semantic_segmentation", data_path=str(tmp_path), batch_size=1)
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.6, "miou")
+    assert metrics == {"miou": 0.6, "pixel_accuracy": 0.9}
+
+
+def test_benchmark_accepts_oriented_bounding_boxes_model_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Dispatch an alias-configured OBB model through DOTAv1 evaluation."""
+
+    class FakeModel:
+        post_cfg = {"task": "oriented_bounding_boxes", "dataset": "dotav1"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_dota",
+        lambda *args, **kwargs: DOTAResult(map50=0.7, map5095=0.5),
+    )
+    args = argparse.Namespace(
+        task="obb",
+        data_path=str(tmp_path),
+        batch_size=1,
+        conf_thres=None,
+        iou_thres=None,
+    )
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.5, "map50_95")
+    assert metrics == {"map50_95": 0.5, "map50": 0.7}
 
 
 def test_benchmark_continues_after_evaluator_type_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -74,7 +193,19 @@ def test_comparison_rejects_matching_metrics_from_different_tasks(tmp_path: Path
         compare_benchmark_results.main([str(tmp_path / "detection"), str(tmp_path / "segmentation")])
 
 
-def test_onnx_benchmark_uses_one_neutral_runtime_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "framework_args",
+    [
+        ["--framework", "onnx"],
+        ["--model-path", "model.onnx"],
+        ["--model-path", "MODEL.ONNX"],
+    ],
+)
+def test_onnx_benchmark_uses_one_neutral_runtime_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    framework_args: list[str],
+) -> None:
     """Avoid recording repeated NPU core-mode runs for ONNX inference."""
 
     captured_modes: list[str] = []
@@ -101,8 +232,7 @@ def test_onnx_benchmark_uses_one_neutral_runtime_target(monkeypatch: pytest.Monk
                 "model-a",
                 "--task",
                 "image_classification",
-                "--framework",
-                "onnx",
+                *framework_args,
                 "--core-mode",
                 "all",
                 "--data-path",
@@ -139,5 +269,11 @@ def test_comparison_uses_result_directory_names(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(chart_utils, "plot_grouped_scalar_barh", lambda **kwargs: captured.update(kwargs))
 
     assert compare_benchmark_results.main([str(tmp_path / "baseline"), str(tmp_path / "candidate")]) == 0
-    assert [path.name for path in captured["sources"]] == ["baseline", "candidate"]
+    sources = captured["sources"]
+    assert isinstance(sources, list)
+    source_paths: list[Path] = []
+    for source in sources:
+        assert isinstance(source, Path)
+        source_paths.append(source)
+    assert [path.name for path in source_paths] == ["baseline", "candidate"]
     assert captured["group_labels"] == ["baseline", "candidate"]

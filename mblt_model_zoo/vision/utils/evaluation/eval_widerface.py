@@ -5,16 +5,19 @@ from __future__ import annotations
 import math
 import os
 from time import time
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 from scipy.io import loadmat
 from tqdm import tqdm
 
-from ..datasets import CustomWiderface, get_widerface_loader
+from ..datasets import CustomWiderFaceDataset, get_widerface_loader
+from ..postprocess.base import YOLODetectionPostBase
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
+
+CustomWiderface = CustomWiderFaceDataset
 
 
 class WiderFaceResult(NamedTuple):
@@ -30,6 +33,18 @@ class WiderFaceResult(NamedTuple):
 
         return (self.easy_ap + self.medium_ap + self.hard_ap) / 3.0
 
+    @property
+    def primary_score(self) -> float:
+        """Return mean AP across the three validation splits."""
+
+        return self.mean_ap
+
+    @property
+    def secondary_score(self) -> float:
+        """Return Hard-set AP."""
+
+        return self.hard_ap
+
 
 def _empty_prediction() -> np.ndarray:
     """Return an empty WiderFace prediction array."""
@@ -37,7 +52,7 @@ def _empty_prediction() -> np.ndarray:
     return np.zeros((0, 5), dtype=np.float32)
 
 
-def _initialize_predictions(dataset: CustomWiderface) -> dict[str, dict[str, np.ndarray]]:
+def _initialize_predictions(dataset: CustomWiderFaceDataset) -> dict[str, dict[str, np.ndarray]]:
     """Initialize empty predictions for every WiderFace sample."""
 
     predictions: dict[str, dict[str, np.ndarray]] = {}
@@ -98,9 +113,10 @@ def eval_widerface(
         out_npu = model(input_npu)
         inference_time += time() - tic
         nms_outs = model.postprocess(out_npu)
-        input_shape = tuple(int(value) for value in input_npu.shape[1:-1])
+        input_shape = (int(input_npu.shape[1]), int(input_npu.shape[2]))
         img0_shapes = [(int(shape[0]), int(shape[1])) for shape in org_shape.tolist()]
-        _, boxes_list, scores_list = model.postprocessor.nmsout2eval(
+        postprocessor = cast(YOLODetectionPostBase, model.postprocessor)
+        _, boxes_list, scores_list = postprocessor.nmsout2eval(
             nms_outs.output,
             input_shape,
             img0_shapes,

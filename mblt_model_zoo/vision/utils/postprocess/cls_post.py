@@ -42,7 +42,8 @@ class ClsPost(PostBase):
             torch.Tensor: Softmax probabilities of shape (N, C).
         """
         if isinstance(x, Sequence):
-            assert len(x) == 1, "assume that classification model only returns pre-softmax tensor"
+            if len(x) != 1:
+                raise ValueError(f"Classification postprocessing expects one output tensor, got {len(x)}.")
             x = x[0]
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x).to(self.device)
@@ -54,8 +55,9 @@ class ClsPost(PostBase):
             x = x.unsqueeze(-1).unsqueeze(-1)
         elif x.ndim == 3:
             x = x.unsqueeze(0)
-        assert x.ndim == 4, f"Assume that the result is always in form of NCHW. But the shape is {x.shape}"
-        x = x.flatten(1)  # assume that the shape can be made to (b, 1000)
+        if x.ndim != 4:
+            raise ValueError(f"Classification output must be convertible to NCHW, got shape {tuple(x.shape)}.")
+        x = x.flatten(1)  # Classification heads may retain singleton spatial dimensions.
         if self.softmax:
             return x
         return x.softmax(dim=-1)

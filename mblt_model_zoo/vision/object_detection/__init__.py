@@ -16,10 +16,15 @@ __all__: list[str] = [
     "YOLO12s",
     "YOLO12x",
     "YOLO26l",
+    "YOLO26lDistill",
     "YOLO26m",
+    "YOLO26mDistill",
     "YOLO26n",
+    "YOLO26nDistill",
     "YOLO26s",
+    "YOLO26sDistill",
     "YOLO26x",
+    "YOLO26xDistill",
     "YOLOv3",
     "YOLOv3_spp",
     "YOLOv3_sppu",
@@ -85,10 +90,15 @@ YOLO12n = create_model_class("YOLO12n", __name__)
 YOLO12s = create_model_class("YOLO12s", __name__)
 YOLO12x = create_model_class("YOLO12x", __name__)
 YOLO26l = create_model_class("YOLO26l", __name__)
+YOLO26lDistill = create_model_class("YOLO26lDistill", __name__)
 YOLO26m = create_model_class("YOLO26m", __name__)
+YOLO26mDistill = create_model_class("YOLO26mDistill", __name__)
 YOLO26n = create_model_class("YOLO26n", __name__)
+YOLO26nDistill = create_model_class("YOLO26nDistill", __name__)
 YOLO26s = create_model_class("YOLO26s", __name__)
+YOLO26sDistill = create_model_class("YOLO26sDistill", __name__)
 YOLO26x = create_model_class("YOLO26x", __name__)
+YOLO26xDistill = create_model_class("YOLO26xDistill", __name__)
 YOLOv3 = create_model_class("YOLOv3", __name__)
 YOLOv3_spp = create_model_class("YOLOv3_spp", __name__)
 YOLOv3_sppu = create_model_class("YOLOv3_sppu", __name__)

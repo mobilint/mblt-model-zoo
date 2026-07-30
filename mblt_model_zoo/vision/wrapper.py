@@ -38,6 +38,39 @@ ONNXRUNTIME_INSTALL_GUIDE = (
 __all__ = ["CoreMode", "normalize_core_mode", "resolve_model_config", "MBLT_Engine"]
 
 
+def _derive_onnx_filename(file_cfg: dict[str, Any]) -> str | None:
+    """Return the configured or MXQ-derived ONNX artifact filename.
+
+    ``onnx_filename`` is only required when the Hub ONNX artifact does not share
+    the MXQ artifact stem. Otherwise every model configuration follows the same
+    ``.mxq`` to ``.onnx`` convention.
+    """
+
+    onnx_filename = file_cfg.get("onnx_filename")
+    if isinstance(onnx_filename, str) and onnx_filename:
+        return onnx_filename
+
+    filename = file_cfg.get("filename")
+    if not isinstance(filename, str) or not filename:
+        return None
+
+    return f"{Path(filename).stem}.onnx"
+
+
+def _normalize_model_artifacts(model_config: dict[str, Any]) -> dict[str, Any]:
+    """Populate the derived ONNX artifact name in a resolved model configuration."""
+
+    normalized = copy.deepcopy(model_config)
+    file_cfg = normalized.get("file_cfg")
+    if not isinstance(file_cfg, dict):
+        return normalized
+
+    onnx_filename = _derive_onnx_filename(file_cfg)
+    if onnx_filename is not None:
+        file_cfg["onnx_filename"] = onnx_filename
+    return normalized
+
+
 def _default_cache_dir() -> str:
     """Returns a writable cache directory for downloaded vision artifacts."""
 
@@ -49,9 +82,7 @@ def _default_cache_dir() -> str:
         test_file.unlink(missing_ok=True)
         return str(preferred)
     except OSError:
-        fallback = Path(tempfile.gettempdir()) / "mblt_model_zoo"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return str(fallback)
+        return tempfile.mkdtemp(prefix="mblt_model_zoo-", dir=tempfile.gettempdir())
 
 
 MOBILINT_CACHE_DIR = _default_cache_dir()
@@ -145,6 +176,7 @@ def resolve_model_config(model_cls: str | dict[str, Any], model_type: str = "DEF
 
     Returns:
         A deep copy of the resolved ``file_cfg``, ``pre_cfg``, and ``post_cfg`` mapping.
+        ``file_cfg`` always includes an ONNX filename when an MXQ filename is available.
 
     Raises:
         TypeError: If the YAML or resolved configuration is not a mapping.
@@ -152,7 +184,7 @@ def resolve_model_config(model_cls: str | dict[str, Any], model_type: str = "DEF
     """
 
     if isinstance(model_cls, dict):
-        return copy.deepcopy(model_cls)
+        return _normalize_model_artifacts(model_cls)
 
     config_path = Path(model_cls)
     if not config_path.is_file():
@@ -197,7 +229,7 @@ def resolve_model_config(model_cls: str | dict[str, Any], model_type: str = "DEF
         finally:
             resolving.remove(variant)
 
-    return copy.deepcopy(_resolve_variant(model_type))
+    return _normalize_model_artifacts(_resolve_variant(model_type))
 
 
 class MBLT_Engine:
@@ -347,17 +379,10 @@ class MBLT_Engine:
     def _derive_onnx_filename(self) -> str | None:
         """Returns the ONNX filename associated with the configured MXQ artifact."""
 
-        onnx_filename = self.file_cfg.get("onnx_filename")
-        if onnx_filename:
-            return onnx_filename
-
-        filename = self.file_cfg.get("filename")
-        if not filename:
-            return None
-
-        derived_name = f"{Path(filename).stem}.onnx"
-        self.file_cfg["onnx_filename"] = derived_name
-        return derived_name
+        onnx_filename = _derive_onnx_filename(self.file_cfg)
+        if onnx_filename is not None:
+            self.file_cfg["onnx_filename"] = onnx_filename
+        return onnx_filename
 
     def _resolve_local_onnx_path(self, mxq_path: str) -> str | None:
         """Tries to resolve a sibling ONNX file next to a local MXQ artifact."""
@@ -409,7 +434,7 @@ class MBLT_Engine:
             f"{subfolder}/{filename}" if subfolder else filename for subfolder in normalized_subfolders
         )
         raise RuntimeError(
-            f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
+            f"Failed to download model from Hugging Face. Tried repo '{repo_id}' at: {attempted_paths}."
         ) from last_error
 
     def file_config_cleansing(self) -> None:

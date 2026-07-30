@@ -13,24 +13,114 @@ from huggingface_hub.errors import EntryNotFoundError
 import mblt_model_zoo.vision.wrapper as wrapper
 from mblt_model_zoo.vision._compat import create_model_class
 from mblt_model_zoo.vision.utils.datasets import CustomCocodata
+from mblt_model_zoo.vision.utils.letterbox import resolve_ratio_pad
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import YOLOPostBase
+from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
 from mblt_model_zoo.vision.utils.postprocess.common import (
     crop_mask,
     dual_topk,
     nmsout2eval,
+    normalize_image_shapes,
+    normalize_ratio_pads,
     scale_coords,
     scale_masks,
 )
 from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import (
     AnchorlessOutputLayout,
+    YOLOAnchorlessDetectionPost,
+    YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
-    YOLOAnchorlessPost,
     _AnchorlessNMSInput,
 )
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine
+
+
+@pytest.mark.parametrize(
+    ("model_name", "output_shape", "expected_shape", "expected_class"),
+    [
+        ("yolo26m-depth", (1, 192, 192), (1, 768, 768), None),
+        ("yolo26m-sem", (1024, 2048, 19), (1, 1024, 2048), 8),
+    ],
+)
+def test_local_mxq_dense_pipeline_uses_normalized_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    model_name: str,
+    output_shape: tuple[int, ...],
+    expected_shape: tuple[int, int, int],
+    expected_class: int | None,
+) -> None:
+    """Exercise preprocessing, MXQ output normalization, and ``Results`` without an NPU."""
+
+    mxq_path = tmp_path / f"{model_name}.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["mxq_path"] == str(mxq_path)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def __call__(self, input_value: np.ndarray) -> np.ndarray:
+            assert input_value.ndim == 3
+            output = np.zeros(output_shape, dtype=np.float32)
+            if expected_class is not None:
+                output[..., expected_class] = 1.0
+            else:
+                output[...] = 1.0
+            return output
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    engine = MBLT_Engine(model_name, model_path=str(mxq_path))
+    try:
+        preprocessed = engine.preprocess(np.zeros((20, 40, 3), dtype=np.uint8))
+        raw_output = engine(preprocessed)
+        result = engine.postprocess(raw_output)
+        if expected_class is None:
+            assert isinstance(result.depth, torch.Tensor)
+            assert tuple(result.depth.shape) == expected_shape
+            assert torch.isfinite(result.depth).all()
+        else:
+            assert isinstance(result.semantic_mask, torch.Tensor)
+            assert tuple(result.semantic_mask.shape) == expected_shape
+            assert set(result.semantic_mask.unique().tolist()) == {expected_class}
+    finally:
+        engine.dispose()
+
+
+def test_default_cache_dir_uses_private_temporary_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Avoid a predictable shared cache when the preferred cache cannot be created."""
+
+    shared_cache = tmp_path / "mblt_model_zoo"
+    shared_cache.mkdir()
+    (shared_cache / "poisoned.onnx").write_bytes(b"untrusted")
+
+    def _fail_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        del self, args, kwargs
+        raise OSError("home cache is unavailable")
+
+    monkeypatch.setattr(wrapper.Path, "mkdir", _fail_mkdir)
+    monkeypatch.setattr(wrapper.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    cache_dir = Path(wrapper._default_cache_dir())
+
+    assert cache_dir.parent == tmp_path
+    assert cache_dir.name.startswith("mblt_model_zoo-")
+    assert cache_dir != shared_cache
+    assert not (cache_dir / "poisoned.onnx").exists()
+    assert cache_dir.stat().st_mode & 0o777 == 0o700
 
 
 def test_onnx_runtime_defaults_to_cpu_provider() -> None:
@@ -165,6 +255,55 @@ def test_engine_init_accepts_local_mxq_model_path(
     try:
         assert engine.file_cfg["mxq_path"] == str(mxq_path)
         assert backend_kwargs["mxq_path"] == str(mxq_path)
+    finally:
+        engine.dispose()
+
+
+def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Construct the canonical OBB postprocessor from the compatibility task spelling."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {},
+            "pre_cfg": {"LetterBox": {"img_size": [640, 640]}},
+            "post_cfg": {
+                "task": "oriented_bounding_boxes",
+                "dataset": "dotav1",
+                "nl": 3,
+                "reg_max": 16,
+                "n_extra": 1,
+            },
+        },
+        model_path=str(mxq_path),
+    )
+
+    try:
+        assert isinstance(engine.postprocessor, YOLOAnchorlessOBBPost)
+        assert engine.postprocessor.task == "obb"
     finally:
         engine.dispose()
 
@@ -672,7 +811,7 @@ def test_final_onnx_detections_apply_confidence_threshold() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     final_output = np.array(
         [
             [
@@ -691,6 +830,27 @@ def test_final_onnx_detections_apply_confidence_threshold() -> None:
     assert torch.all(result[0][:, 4] > 0.5)
 
 
+def test_nmsfree_postprocess_supports_multilabel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep COCO's multi-label postprocess path compatible with NMS-free models."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    decoded = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0, 0.9, 2.0], [11.0, 21.0, 31.0, 41.0, 0.0, 1.0]]],
+        dtype=torch.float32,
+    )
+    monkeypatch.setattr(postprocessor, "extract_final_outputs", lambda _: (None, None))
+    monkeypatch.setattr(postprocessor, "check_input", lambda x: x)
+    monkeypatch.setattr(postprocessor, "_pre_process", lambda _: (decoded, None))
+
+    result = postprocessor([torch.empty(1)], multi_label=True)
+
+    assert len(result) == 1
+    assert torch.equal(result[0], decoded[0, :1])
+
+
 def test_final_onnx_detections_normalize_singleton_and_channel_first() -> None:
     """Accept common ONNX final-detection layouts without decoding them again."""
 
@@ -707,7 +867,7 @@ def test_final_onnx_detections_normalize_singleton_and_channel_first() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     final_output = torch.tensor(
         [
             [
@@ -741,7 +901,7 @@ def test_anchorless_pose_nms_uses_converted_provenance_for_ambiguous_shape() -> 
         "conf_thres": 0.001,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     row_major = torch.zeros((56, 56), dtype=torch.float32)
     row_major[:, :4] = torch.tensor([10.0, 10.0, 20.0, 20.0])
     row_major[:, 4] = torch.linspace(0.9, 0.1, 56)
@@ -770,7 +930,7 @@ def test_final_onnx_segmentation_normalizes_detections_and_proto() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     final_output = torch.zeros((1, 1, 2, 38), dtype=torch.float32)
     final_output[0, 0, 0, :6] = torch.tensor([10.0, 20.0, 30.0, 40.0, 0.90, 2.0])
     final_output[0, 0, 1, :6] = torch.tensor([11.0, 21.0, 31.0, 41.0, 0.40, 1.0])
@@ -799,7 +959,7 @@ def test_final_onnx_pose_normalizes_detections() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     final_output = torch.zeros((1, 2, 57), dtype=torch.float32)
     final_output[0, 0, :6] = torch.tensor([10.0, 20.0, 30.0, 40.0, 0.90, 0.0])
     final_output[0, 1, :6] = torch.tensor([11.0, 21.0, 31.0, 41.0, 0.40, 0.0])
@@ -894,7 +1054,7 @@ def test_dflfree_detection_accepts_decode_true_mxq_parts_with_reducemax() -> Non
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values
@@ -924,7 +1084,7 @@ def test_dflfree_detection_accepts_batched_decode_true_mxq_parts_with_reducemax(
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor(
         [
             [[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]],
@@ -972,7 +1132,7 @@ def test_dflfree_detection_distinguishes_equal_width_box_and_score_parts() -> No
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2, 0.3], [0.2, 0.3, 0.4, 0.1]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values
@@ -1003,7 +1163,7 @@ def test_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducemax() -> 
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values
@@ -1034,7 +1194,7 @@ def test_dflfree_segmentation_accepts_approximate_reducemax_scores() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values - 0.01
@@ -1065,7 +1225,7 @@ def test_dflfree_segmentation_excludes_reducemax_from_proto_candidates() -> None
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values
@@ -1097,7 +1257,7 @@ def test_non_e2e_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducem
         "iou_thres": 0.7,
         "e2e": False,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.1, 0.9, 0.2], [0.2, 0.3, 0.4]]], dtype=torch.float32)
     reducemax = scores.max(dim=-1, keepdim=True).values
@@ -1132,7 +1292,7 @@ def test_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
     reducemax = scores.clone()
@@ -1163,7 +1323,7 @@ def test_dflfree_pose_prefers_score_tensor_over_reducemax_duplicate() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     reducemax = torch.tensor([[[0.88], [0.39]]], dtype=torch.float32)
     scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
@@ -1196,7 +1356,7 @@ def test_non_e2e_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> 
         "iou_thres": 0.7,
         "e2e": False,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0], [11.0, 21.0, 31.0, 41.0]]], dtype=torch.float32)
     scores = torch.tensor([[[0.9], [0.4]]], dtype=torch.float32)
     reducemax = scores.clone()
@@ -1232,7 +1392,7 @@ def test_non_e2e_dflfree_obb_preserves_canonical_row_width() -> None:
         "dflfree": True,
         "e2e": False,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
 
     result = postprocessor(_make_converted_obb_parts())
 
@@ -1259,7 +1419,7 @@ def test_raw_mxq_like_outputs_are_not_final_detections() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     raw_outputs: ListTensorLike = [
         torch.zeros((1, 80, 80, 4), dtype=torch.float32),
         torch.zeros((1, 80, 80, 80), dtype=torch.float32),
@@ -1371,7 +1531,7 @@ def test_obb_accepts_single_converted_output(dflfree: bool) -> None:
     else:
         post_cfg["reg_max"] = 16
 
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     result = postprocessor(_make_converted_obb_rows().transpose(1, 2))
 
     assert len(result) == 1
@@ -1402,7 +1562,7 @@ def test_obb_accepts_decode_true_converted_mxq_parts(dflfree: bool, class_first:
     else:
         post_cfg["reg_max"] = 16
 
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     result = postprocessor(_make_converted_obb_parts())
     split_result = postprocessor(_make_split_converted_obb_parts(class_first))
 
@@ -1434,7 +1594,7 @@ def test_anchorless_obb_accepts_channel_first_mxq_heads_and_plots_airport(tmp_pa
     image_path = Path(__file__).parent / "rc" / "airport.jpg"
     save_path = tmp_path / "anchorless_obb_airport.jpg"
 
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     result = postprocessor(_make_anchorless_obb_mxq_heads())
 
     assert len(result) == 1
@@ -1467,7 +1627,7 @@ def test_dflfree_obb_accepts_channel_first_mxq_heads_and_plots_airport(tmp_path:
     image_path = Path(__file__).parent / "rc" / "airport.jpg"
     save_path = tmp_path / "dflfree_obb_airport.jpg"
 
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     result = postprocessor(_make_dflfree_obb_mxq_heads())
 
     assert len(result) == 1
@@ -1500,7 +1660,7 @@ def test_anchor_segmentation_ignores_auxiliary_onnx_heads() -> None:
         "conf_thres": 0.5,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOPostBase, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLODetectionPostBase, build_postprocess(pre_cfg, post_cfg))
     det = torch.zeros((1, 2, 117), dtype=torch.float32)
     proto = torch.zeros((1, 32, 160, 160), dtype=torch.float32)
     aux_heads = [
@@ -1569,7 +1729,7 @@ def test_anchorless_prediction_nms_keeps_best_class_per_box() -> None:
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     decoded = torch.tensor(
         [
             [
@@ -1618,7 +1778,7 @@ def test_anchorless_nms_normalizes_known_layout_before_suppression(
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     canonical = torch.arange(candidate_count * 116, dtype=torch.float32).reshape(candidate_count, 116)
     source = canonical.transpose(0, 1) if layout == "channels_first" else canonical
     captured: list[torch.Tensor] = []
@@ -1648,7 +1808,7 @@ def test_anchorless_nms_shape_fallback_prefers_raw_layout_for_square_tensor(
         "nc": 80,
         "n_extra": 32,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     source = torch.arange(116 * 116, dtype=torch.float32).reshape(116, 116)
     captured: list[torch.Tensor] = []
 
@@ -1676,7 +1836,7 @@ def test_anchorless_segmentation_preprocess_preserves_layout_provenance(
         "nc": 80,
         "n_extra": 32,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     decoded = torch.zeros((116, 116), dtype=torch.float32)
     converted = decoded.transpose(0, 1).unsqueeze(0)
     proto = torch.zeros((1, 160, 160, 32), dtype=torch.float32)
@@ -1714,7 +1874,7 @@ def test_anchorless_nms_normalizes_detection_without_extra_channels(
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     source = torch.arange(84 * 91, dtype=torch.float32).reshape(84, 91)
     captured: list[torch.Tensor] = []
 
@@ -1744,7 +1904,7 @@ def test_anchorless_nonambiguous_layouts_keep_identical_nms_results() -> None:
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     canonical = torch.zeros((2, 116), dtype=torch.float32)
     canonical[0, :4] = torch.tensor([10.0, 10.0, 20.0, 20.0])
     canonical[1, :4] = torch.tensor([40.0, 40.0, 60.0, 60.0])
@@ -1774,7 +1934,7 @@ def test_anchorless_validation_nms_keeps_multilabel_candidates() -> None:
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     decoded = torch.tensor(
         [
             [10.0, 10.0, 20.0, 20.0, 0.90, 0.80, 0.10],
@@ -1807,7 +1967,7 @@ def test_anchorless_segmentation_validation_duplicates_mask_coefficients_per_cla
         "conf_thres": 0.25,
         "iou_thres": 0.7,
     }
-    postprocessor = cast(YOLOAnchorlessPost, build_postprocess(pre_cfg, post_cfg))
+    postprocessor = cast(YOLOAnchorlessDetectionPost, build_postprocess(pre_cfg, post_cfg))
     decoded = torch.tensor(
         [[10.0, 10.0, 20.0, 20.0, 0.90, 0.80, 0.10, 0.25, -0.50]],
         dtype=torch.float32,
@@ -1852,12 +2012,35 @@ def test_anchorless_pose_single_and_batch_decode_are_equivalent() -> None:
 def test_scale_coords_matches_ultralytics_rounding() -> None:
     """Match upstream letterbox padding rounding for keypoint scaling."""
 
-    coords = torch.tensor([[[160.0, 0.0, 1.0], [480.0, 640.0, 1.0]]], dtype=torch.float32)
+    coords = torch.tensor([[[160.0, 100.0, 1.0], [480.0, 500.0, 1.0]]], dtype=torch.float32)
 
-    scaled = scale_coords((640, 640), coords.clone(), (481, 640))
+    ratio_pad = resolve_ratio_pad((640, 640), (581, 640))
+    scaled = scale_coords((640, 640), coords.clone(), (581, 640))
 
-    expected = torch.tensor([[[160.0, 0.0, 1.0], [480.0, 481.0, 1.0]]], dtype=torch.float32)
-    assert torch.allclose(scaled, expected)
+    expected = torch.tensor([[[160.0, 71.0, 1.0], [480.0, 471.0, 1.0]]], dtype=torch.float32)
+    assert ratio_pad == ((1.0, 1.0), (0, 29))
+    torch.testing.assert_close(scaled, expected)
+
+
+def test_letterbox_metadata_normalization_is_batch_aware() -> None:
+    """Share consistent shape and ratio-pad normalization across postprocessors."""
+
+    ratio_pad = ((1.0, 1.0), (0.0, 80.0))
+
+    assert normalize_image_shapes((481, 640), batch_size=2) == [(481, 640), (481, 640)]
+    assert normalize_ratio_pads(ratio_pad, batch_size=2) == [ratio_pad, ratio_pad]
+    assert normalize_ratio_pads((ratio_pad, ratio_pad), batch_size=2) == [ratio_pad, ratio_pad]
+    labels, boxes, scores = nmsout2eval(
+        [torch.zeros((0, 6)), torch.zeros((0, 6))],
+        (640, 640),
+        (481, 640),
+        ratio_pads=ratio_pad,
+    )
+    assert labels == boxes == scores == [[], []]
+    with pytest.raises(ValueError, match="Expected 2 image shapes"):
+        normalize_image_shapes([(481, 640)], batch_size=2)
+    with pytest.raises(ValueError, match="Expected 2 ratio_pad values"):
+        normalize_ratio_pads([ratio_pad], batch_size=2)
 
 
 def test_scale_masks_matches_ultralytics_rounding() -> None:
@@ -1890,6 +2073,7 @@ def test_preprocess_with_metadata_returns_letterbox_ratio_pad() -> None:
     processed, metadata = engine.preprocess_with_metadata(image)
 
     assert processed.shape == (640, 640, 3)
+    assert metadata["img0_shape"] == (481, 640)
     assert metadata["ratio_pad"] == ((1.0, 1.0), (0, 79))
 
 
