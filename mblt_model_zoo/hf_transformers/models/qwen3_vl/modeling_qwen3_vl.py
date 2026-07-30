@@ -101,26 +101,43 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         # trivially small extra weight-load cost. Detection below drives *how*
         # the encoder is called, not what modules exist.
         self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
-        # Trust the compiled vision MXQ over any config attr: 1-input builds
-        # take a single folded pixel tensor (static path), 3-input builds take
-        # ``[rope, pos, folded]`` (dynamic path). Silent config/MXQ mismatch
-        # would ship the wrong shape to the NPU.
         num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
-        if num_mxq_inputs == 1:
-            self._uses_dynamic_vision = False
-        elif num_mxq_inputs == 3:
-            self._uses_dynamic_vision = True
-        else:
-            raise ValueError(
-                f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
-                f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
-            )
+        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs, config)
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
         kwargs["_internal_call"] = True
         return super()._from_config(config, **kwargs)
+
+    @staticmethod
+    def _resolve_dynamic_vision_flag(num_mxq_inputs: int, config: MobilintQwen3VLVisionConfig) -> bool:
+        """Trust the compiled vision MXQ over any config attr and warn on mismatch.
+
+        1-input builds take a single folded pixel tensor (static path);
+        3-input builds take ``[rope, pos, folded]`` (dynamic path). Silent
+        config/MXQ divergence would ship the wrong shape to the NPU, so we
+        raise on unrecognized shapes and log when the config disagrees.
+        """
+        if num_mxq_inputs == 1:
+            detected = False
+        elif num_mxq_inputs == 3:
+            detected = True
+        else:
+            raise ValueError(
+                f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
+                f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
+            )
+        config_hint = bool(getattr(config, "dynamic_vision", False))
+        if config_hint != detected:
+            logger.warning_once(
+                "Qwen3-VL config.dynamic_vision=%s disagrees with vision MXQ "
+                "detection (%s); trusting the MXQ. Update the config or the "
+                "shipped MXQ to match.",
+                config_hint,
+                detected,
+            )
+        return detected
 
     @property
     def dtype(self) -> torch.dtype:

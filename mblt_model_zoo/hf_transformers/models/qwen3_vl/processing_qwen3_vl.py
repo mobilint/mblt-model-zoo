@@ -8,6 +8,7 @@ from cv2 import resize as cv2_resize
 from PIL import Image
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import ImageInput, load_image
+from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.video_processing_auto import AutoVideoProcessor
 from transformers.models.qwen3_vl.processing_qwen3_vl import (
@@ -95,14 +96,47 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if isinstance(vp, MobilintQwen3VLVideoProcessor):
             vp.dynamic_vision = bool(self.dynamic_vision)
 
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
+        processor = super().from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
+        if not isinstance(processor, cls):
+            # AutoProcessor resolved a different class; leave it untouched.
+            return processor
+        config_kwargs = {
+            k: kwargs[k]
+            for k in ("revision", "cache_dir", "token", "trust_remote_code")
+            if k in kwargs
+        }
+        try:
+            config = AutoConfig.from_pretrained(pretrained_model_name_or_path, **config_kwargs)
+            vision_dyn = bool(getattr(getattr(config, "vision_config", None), "dynamic_vision", False))
+        except Exception as exc:
+            logger.debug(
+                "Falling back to processor default dynamic_vision (config load failed: %s)",
+                exc,
+            )
+            vision_dyn = False
+        processor.dynamic_vision = vision_dyn
+        processor._sync_dynamic_vision_to_video_processor()
+        return processor
+
     def sync_dynamic_vision_from_model(self, model) -> None:
         """Adopt ``dynamic_vision`` from a loaded Qwen3-VL model's vision MXQ.
 
+        In the typical flow, ``dynamic_vision`` is populated automatically by
+        :meth:`from_pretrained` reading ``vision_config.dynamic_vision`` from
+        the shipped ``config.json``, so calling this helper is unnecessary.
+
+        Use it only when the processor and model have diverged at runtime —
+        e.g. the model was loaded with an explicit ``vision_mxq_path=`` kwarg
+        pointing at an MXQ whose signature (static/dynamic) doesn't match the
+        config the processor was built from.
+
         The vision submodule detects its own signature from
         ``get_input_buffer_info()`` and stores the result on
-        ``visual._uses_dynamic_vision``. Mirror that here so the processor's
-        resize / max-pixel clamp stays in lock-step with what the compiled
-        model can actually consume.
+        ``visual._uses_dynamic_vision``. This mirrors that value onto the
+        processor so its resize / max-pixel clamp stays in lock-step with
+        what the compiled model can actually consume.
 
         If the processor was previously assigned an explicit
         ``dynamic_vision`` that disagrees with the model's detection this

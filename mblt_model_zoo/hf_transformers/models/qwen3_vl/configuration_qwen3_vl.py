@@ -16,6 +16,10 @@ from ...utils.configuration_utils import (
 class MobilintQwen3VLVisionConfig(MobilintConfigMixin, Qwen3VLVisionConfig):
     model_type = "mobilint-qwen3_vl"
 
+    def __init__(self, dynamic_vision: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self.dynamic_vision = dynamic_vision
+
 
 class MobilintQwen3VLTextConfig(MobilintConfigMixin, Qwen3VLTextConfig):
     model_type = "mobilint-qwen3_vl_text"
