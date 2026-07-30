@@ -35,6 +35,7 @@ from mblt_model_zoo.vision.datasets import (
 )
 from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, get_dotav1_label, get_imagenet_label
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
+from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation import (
@@ -490,14 +491,30 @@ def test_cli_val_supports_semantic_segmentation_defaults() -> None:
     )
 
 
-def test_cli_val_detects_organized_ade20k(tmp_path: Path) -> None:
-    """Recognize the flat ADE20K validation layout."""
+def test_cli_val_validates_dense_dataset_taxonomy_and_completeness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject incomplete dense datasets and roots from another taxonomy."""
 
     data_path = tmp_path / "ADEChallengeData2016"
     (data_path / "images").mkdir(parents=True)
     (data_path / "annotations").mkdir()
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
 
-    assert _dataset_ready("semantic_segmentation", str(data_path))
+    for index in range(2):
+        stem = f"ADE_val_{index + 1:08d}"
+        (data_path / "images" / f"{stem}.jpg").write_bytes(b"image")
+        if index == 0:
+            (data_path / "annotations" / f"{stem}.png").write_bytes(b"annotation")
+
+    assert not _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
+
+    (data_path / "annotations" / "ADE_val_00000002.png").write_bytes(b"annotation")
+
+    assert _dataset_ready("semantic_segmentation", str(data_path), "ade20k")
+    assert not _dataset_ready("semantic_segmentation", str(data_path), "cityscapes")
 
 
 @pytest.mark.parametrize("taxonomy", ["cityscapes", "ade20k"])
@@ -1027,6 +1044,9 @@ def test_cli_val_routes_semantic_segmentation_to_ade20k(
     data_path = tmp_path / "ADEChallengeData2016"
     (data_path / "images").mkdir(parents=True)
     (data_path / "annotations").mkdir()
+    (data_path / "images" / "ADE_val_00000001.jpg").write_bytes(b"image")
+    (data_path / "annotations" / "ADE_val_00000001.png").write_bytes(b"annotation")
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 
     class _FakeEngine:
@@ -1147,6 +1167,10 @@ def test_cli_val_routes_semantic_segmentation_to_cityscapes(
     data_path = tmp_path / "cityscapes"
     (data_path / "images").mkdir(parents=True)
     (data_path / "annotations").mkdir()
+    sample_name = "frankfurt_000000_000001.png"
+    (data_path / "images" / sample_name).write_bytes(b"image")
+    (data_path / "annotations" / sample_name).write_bytes(b"annotation")
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
     calls: dict[str, object] = {}
 
     class _FakeEngine:

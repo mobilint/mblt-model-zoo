@@ -25,6 +25,12 @@ from PIL import Image
 from tqdm import tqdm
 
 from ...datasets import get_dataset_config
+from .readiness import (
+    ADE20K_VALIDATION_SAMPLE_COUNT,
+    CITYSCAPES_SAMPLE_ID_PATTERN,
+    CITYSCAPES_VALIDATION_SAMPLE_COUNT,
+    NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+)
 
 DOWNLOAD_CHUNK_SIZE = 1 * 1024 * 1024
 DOWNLOAD_RETRY_LIMIT = 4
@@ -38,13 +44,9 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
 DOTAV1_CLASS_TO_IDX = {name: int(index) for index, name in get_dataset_config("dotav1")["names"].items()}
 DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
-NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
-ADE20K_VALIDATION_SAMPLE_COUNT = 2000
-CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
-CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$")
 
 
 class _GoogleDriveDownloadEntry(Protocol):

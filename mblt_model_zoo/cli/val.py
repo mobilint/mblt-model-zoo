@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
+from mblt_model_zoo.vision.utils.datasets.readiness import dense_dataset_ready
 
 from ._vision import add_e2e_arg, add_threshold_args, create_vision_engine, parse_target_clusters, parse_target_cores
 
@@ -180,7 +181,6 @@ def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
 def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> bool:
     """Checks whether the organized dataset appears ready for validation."""
 
-    del dataset
     root = Path(data_path).expanduser()
     if task == "image_classification":
         return root.is_dir() and any(child.is_dir() for child in root.iterdir()) if root.exists() else False
@@ -201,9 +201,9 @@ def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> boo
             (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
         )
     if task == "depth_estimation":
-        return (root / "images").is_dir() and (root / "depth").is_dir()
+        return dense_dataset_ready(root, dataset or "nyu-depth")
     if task == "semantic_segmentation":
-        return (root / "images").is_dir() and (root / "annotations").is_dir()
+        return dense_dataset_ready(root, dataset or "ade20k")
     return False
 
 

@@ -42,5 +42,7 @@
 - Cityscapes organization selects only 500 validation PNG pairs from the two official train/validation/test ZIP
   packages; validation maps the 19 canonical source IDs to train IDs and ignores all other labels. Reject semantic
   validation taxonomies other than `ade20k` and `cityscapes`.
+- Reuse dense validation and calibration roots only after checking taxonomy-specific filenames,
+  matched targets, and the complete validation sample count.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

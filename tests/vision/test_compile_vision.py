@@ -19,6 +19,7 @@ from mblt_model_zoo.compile.vision import (
     select_calibration_images,
 )
 from mblt_model_zoo.vision.utils import datasets as dataset_utils
+from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 from mblt_model_zoo.vision.wrapper import resolve_model_config
 
 
@@ -244,21 +245,46 @@ def test_imagenet_readiness_rejects_partial_class_tree(tmp_path: Path) -> None:
     assert not compile_module._dataset_ready("image_classification", tmp_path)
 
 
+def test_depth_dataset_readiness_requires_complete_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Require all paired NYU samples before sampling calibration images."""
+
+    monkeypatch.setattr(readiness_module, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    _write_images(tmp_path / "images", ["image.png"])
+    (tmp_path / "depth").mkdir()
+    assert not compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
+
+    (tmp_path / "depth" / "image.npy").write_bytes(b"depth")
+    assert compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
+
+
 @pytest.mark.parametrize(
-    ("task", "target_dir"),
+    ("dataset", "image_name", "other_dataset"),
     [
-        ("depth_estimation", "depth"),
-        ("semantic_segmentation", "annotations"),
+        ("ade20k", "ADE_val_00000001.jpg", "cityscapes"),
+        ("cityscapes", "frankfurt_000000_000001.png", "ade20k"),
     ],
 )
-def test_dense_dataset_readiness_requires_paired_targets(task: str, target_dir: str, tmp_path: Path) -> None:
-    """Require the organized dense dataset layout before sampling calibration images."""
+def test_semantic_dataset_readiness_checks_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+    image_name: str,
+    other_dataset: str,
+) -> None:
+    """Require complete pairs with filenames belonging to the selected taxonomy."""
 
-    _write_images(tmp_path / "images", ["image.png"])
-    assert not compile_module._dataset_ready(task, tmp_path)
+    monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    image_path = _write_images(tmp_path / "images", [image_name])[0]
+    (tmp_path / "annotations").mkdir()
+    assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
 
-    (tmp_path / target_dir).mkdir()
-    assert compile_module._dataset_ready(task, tmp_path)
+    (tmp_path / "annotations" / f"{image_path.stem}.png").write_bytes(b"annotation")
+    assert compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
+    assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, other_dataset)
 
 
 def test_obb_dataset_readiness_accepts_flat_images(

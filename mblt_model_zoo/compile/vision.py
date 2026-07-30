@@ -18,6 +18,7 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import HfHubHTTPError
 
 from mblt_model_zoo.vision.datasets import get_dataset_config_for_task
+from mblt_model_zoo.vision.utils.datasets.readiness import dense_dataset_ready
 from mblt_model_zoo.vision.wrapper import MOBILINT_CACHE_DIR, MBLT_Engine, resolve_model_config
 
 DEFAULT_PERCENTILE = 0.9999
@@ -56,12 +57,13 @@ def _normalize_task(task: str) -> str:
     return normalized
 
 
-def _dataset_ready(task: str, data_path: Path) -> bool:
+def _dataset_ready(task: str, data_path: Path, dataset: str | None = None) -> bool:
     """Return whether an organized dataset contains calibration images.
 
     Args:
         task: Canonical vision task name.
         data_path: Organized dataset root.
+        dataset: Optional dense dataset taxonomy.
 
     Returns:
         Whether the expected image layout exists and is non-empty.
@@ -74,19 +76,9 @@ def _dataset_ready(task: str, data_path: Path) -> bool:
             for class_dir in class_dirs
         )
     if task == "depth_estimation":
-        image_dir = data_path / "images"
-        return (
-            image_dir.is_dir()
-            and (data_path / "depth").is_dir()
-            and any(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in image_dir.rglob("*"))
-        )
+        return dense_dataset_ready(data_path, dataset or "nyu-depth")
     if task == "semantic_segmentation":
-        image_dir = data_path / "images"
-        return (
-            image_dir.is_dir()
-            and (data_path / "annotations").is_dir()
-            and any(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in image_dir.rglob("*"))
-        )
+        return dense_dataset_ready(data_path, dataset or "ade20k")
     image_dir = {
         "object_detection": data_path / "val2017",
         "instance_segmentation": data_path / "val2017",
@@ -201,10 +193,11 @@ def ensure_calibration_dataset(
 
     normalized_task = _normalize_task(task)
     config = get_dataset_config_for_task(normalized_task, dataset)
+    dataset_name = str(config["name"])
     resolved_path = Path(data_path if data_path is not None else config["path"]).expanduser()
-    if not _dataset_ready(normalized_task, resolved_path):
+    if not _dataset_ready(normalized_task, resolved_path, dataset_name):
         _organize_dataset(normalized_task, resolved_path, dataset)
-    if not _dataset_ready(normalized_task, resolved_path):
+    if not _dataset_ready(normalized_task, resolved_path, dataset_name):
         raise ValueError(f"Organized calibration dataset is missing images at {resolved_path}.")
     return resolved_path
 
