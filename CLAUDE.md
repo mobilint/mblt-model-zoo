@@ -25,7 +25,8 @@
   artifact is derived unless `onnx_filename` explicitly names an exception.
 - Every model YAML declares `post_cfg.dataset`; postprocessing uses it with `task` to resolve the
   model's output taxonomy and class count.
-- Use `obb` consistently as the vision task key for oriented bounding boxes.
+- Use `obb` as the canonical vision task key for oriented bounding boxes; retain
+  `oriented_bounding_boxes` as a compatibility alias.
 - Preserve anchorless decoded-output layout provenance through NMS. If provenance is unavailable
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared forward and inverse letterbox

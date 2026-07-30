@@ -7,6 +7,8 @@ also supporting legacy top-level model imports such as
 
 from __future__ import annotations
 
+import sys
+
 from . import depth_estimation as depth_estimation
 from . import face_detection as face_detection
 from . import image_classification as image_classification
@@ -18,6 +20,10 @@ from . import semantic_segmentation as semantic_segmentation
 from ._api import list_models as list_models
 from ._api import list_tasks as list_tasks
 from .wrapper import MBLT_Engine as MBLT_Engine
+
+# ``obb`` is canonical; retain the package attribute published before the rename.
+oriented_bounding_boxes = obb
+sys.modules[f"{__name__}.oriented_bounding_boxes"] = obb
 
 _TASK_MODULES = (
     face_detection,
@@ -47,6 +53,7 @@ _PUBLIC_EXPORTS = [
     "instance_segmentation",
     "object_detection",
     "obb",
+    "oriented_bounding_boxes",
     "pose_estimation",
     "semantic_segmentation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)

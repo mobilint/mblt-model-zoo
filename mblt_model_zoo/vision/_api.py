@@ -30,6 +30,10 @@ _TASK_MODULES = {
     "face_detection": "face_detection",
 }
 
+_TASK_ALIASES = {
+    "oriented_bounding_boxes": "obb",
+}
+
 _DEFAULT_TASKS = [
     "image_classification",
     "depth_estimation",
@@ -68,13 +72,14 @@ def list_models(tasks: str | Iterable[str] | None = None) -> dict[str, list[str]
     else:
         task_list = list(tasks)
 
-    invalid_tasks = sorted(set(task_list) - set(TASKS))
+    supported_tasks = set(TASKS) | set(_TASK_ALIASES)
+    invalid_tasks = sorted(set(task_list) - supported_tasks)
     if invalid_tasks:
-        raise ValueError(f"mblt_model_zoo.vision supports tasks in {TASKS}, got {invalid_tasks}.")
+        raise ValueError(f"mblt_model_zoo.vision supports tasks in {sorted(supported_tasks)}, got {invalid_tasks}.")
 
     available_models: dict[str, list[str]] = {}
     for task in task_list:
-        module_name = _TASK_MODULES[task]
+        module_name = _TASK_MODULES[_TASK_ALIASES.get(task, task)]
         module = importlib.import_module(f".{module_name}", package=__name__.replace("._api", ""))
         available_models[task] = sorted(
             name

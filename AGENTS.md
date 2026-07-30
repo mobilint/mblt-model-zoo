@@ -80,7 +80,8 @@ truth when this snapshot becomes stale.
   identifier. Dataset-aware postprocessing resolves class counts from the `(dataset, task)` pair.
 - The supported discovery tasks are `image_classification`, `depth_estimation`, `object_detection`,
   `instance_segmentation`, `semantic_segmentation`, `obb`, `pose_estimation`, and `face_detection`.
-  Use `obb` consistently for oriented bounding boxes.
+  Use `obb` as the canonical oriented-bounding-box task key while retaining
+  `oriented_bounding_boxes` as a compatibility alias.
 - Keep model configuration shape (`model_cfg`, `pre_cfg`, and `post_cfg`) stable unless changing
   the public contract deliberately.
 - Preserve anchorless decoded-output layout provenance through NMS. When provenance is unavailable

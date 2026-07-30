@@ -379,3 +379,7 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorDetectionPost):
         xy, wh, conf, scores, masks = torch.split(npu_out, [2, 2, 1, self.nc, self.n_extra], dim=-1)
         masks = masks * conf.sigmoid()
         return xy, wh, conf, scores, masks
+
+
+# Compatibility alias for the class name published before detection specializations were named explicitly.
+YOLOAnchorPost = YOLOAnchorDetectionPost

@@ -550,3 +550,7 @@ class YOLODetectionPostBase(PostBase):
                 continue
             masks.append(process_mask_upsample(proto, pred[:, 6:], pred[:, :4], [self.imh, self.imw]))
         return [[xi, mask] for xi, mask in zip(x, masks)]
+
+
+# Compatibility alias for the class name published before detection specializations were named explicitly.
+YOLOPostBase = YOLODetectionPostBase

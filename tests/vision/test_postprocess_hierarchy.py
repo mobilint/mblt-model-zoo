@@ -59,14 +59,14 @@ def test_dense_task_postprocessors_are_independent_postbase_descendants() -> Non
     assert not issubclass(SemanticSegPost, DepthPost)
 
 
-def test_legacy_detector_class_names_are_not_exposed() -> None:
-    """Keep internal detector modules limited to canonical class names."""
+def test_legacy_detector_class_names_alias_canonical_classes() -> None:
+    """Keep published detector class imports compatible after explicit renaming."""
 
-    assert not hasattr(base_module, "YOLOPostBase")
-    assert not hasattr(anchor_module, "YOLOAnchorPost")
-    assert not hasattr(anchorless_module, "YOLOAnchorlessPost")
-    assert not hasattr(dflfree_module, "YOLODFLFreePost")
-    assert not hasattr(nmsfree_module, "YOLONMSFreePost")
+    assert base_module.YOLOPostBase is YOLODetectionPostBase
+    assert anchor_module.YOLOAnchorPost is YOLOAnchorDetectionPost
+    assert anchorless_module.YOLOAnchorlessPost is YOLOAnchorlessDetectionPost
+    assert dflfree_module.YOLODFLFreePost is YOLODFLFreeDetectionPost
+    assert nmsfree_module.YOLONMSFreePost is YOLONMSFreeDetectionPost
 
 
 @pytest.mark.parametrize(

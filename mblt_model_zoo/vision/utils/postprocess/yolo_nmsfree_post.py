@@ -156,3 +156,7 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         if isinstance(x, list):
             return x
         return [xi[xi[:, 4] > 0] for xi in x]
+
+
+# Compatibility alias for the class name published before detection specializations were named explicitly.
+YOLONMSFreePost = YOLONMSFreeDetectionPost

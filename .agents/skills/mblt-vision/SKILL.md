@@ -33,7 +33,8 @@ description: >-
   artifact. Use `onnx_filename` only when the published ONNX artifact has a different filename.
 - Require `post_cfg.dataset` in every model YAML and resolve class counts from the dataset-task
   pair. Do not assume all models for one task share a taxonomy.
-- Use `obb` consistently as the vision task key for oriented bounding boxes.
+- Use `obb` as the canonical vision task key for oriented bounding boxes while retaining
+  `oriented_bounding_boxes` as a compatibility alias.
 - Preserve anchorless decoded-output layout provenance through NMS. If a decoded tensor is
   ambiguous without provenance, prioritize raw channels-first normalization before candidates-first.
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for forward resize/padding metadata and inverse

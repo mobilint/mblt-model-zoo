@@ -20,7 +20,8 @@ Model YAMLs derive same-stem ONNX Hub artifact names from `file_cfg.filename`; u
 Every model YAML declares `post_cfg.dataset`; dataset-aware postprocessing combines it with
 `task` to resolve the output taxonomy and class count.
 
-Use `obb` consistently as the vision task key for oriented bounding boxes.
+Use `obb` as the canonical vision task key for oriented bounding boxes and retain
+`oriented_bounding_boxes` as a compatibility alias.
 
 Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared resize, padding, metadata, and inverse
 crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes from
