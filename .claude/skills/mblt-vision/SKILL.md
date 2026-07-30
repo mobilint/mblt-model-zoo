@@ -19,6 +19,8 @@ Auto-detect `.onnx` benchmark model paths before core-mode expansion and record 
 target instead of repeated NPU-mode rows.
 
 DOTAv1 loaders prefer flat `images/` validation files and accept legacy `images/val` as a fallback.
+Local and archive organizers validate a complete staged DOTAv1 root before atomically replacing
+the cache; successful installs remove stale files and failed rollbacks retain recoverable backups.
 
 Model YAMLs derive same-stem ONNX Hub artifact names from `file_cfg.filename`; use
 `onnx_filename` only for a non-matching artifact name.
@@ -27,13 +29,15 @@ Every model YAML declares `post_cfg.dataset`; dataset-aware postprocessing combi
 `task` to resolve the output taxonomy and class count.
 
 Use `obb` as the canonical vision task key for oriented bounding boxes and retain
-`oriented_bounding_boxes` as a compatibility alias.
+`oriented_bounding_boxes` as a compatibility alias. Normalize the alias inside CLI, benchmark, and
+DOTAv1 evaluator dispatch.
 
 Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared resize, padding, metadata, and inverse
 crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes from
 `post_cfg.dataset` and samples their organized RGB images.
-Require `pre_cfg.LetterBox` for YOLO detection postprocessors and `(image, metadata)` callbacks with
-`ratio_pad` for semantic validation loaders.
+Require `pre_cfg.LetterBox` for YOLO detection postprocessors. Semantic preprocessing metadata
+contains original `img0_shape` and `ratio_pad`; prediction restores spatial logits before `argmax`,
+and validation loaders reuse the same geometry for targets.
 
 Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
 upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW

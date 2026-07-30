@@ -1073,7 +1073,7 @@ def _write_dotav1_yolo_labels(image_path: str, original_label_path: str, output_
 
 
 def construct_dotav1_from_archives(image_archive: str, label_archive: str, output_dir: str) -> None:
-    """Constructs the legacy DOTAv1 validation layout from the Google Drive archives.
+    """Constructs the DOTAv1 validation layout from the Google Drive archives.
 
     Args:
         image_archive: Path to the DOTAv1 validation-image archive.
@@ -1121,9 +1121,10 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
         output_parent_dir = os.path.dirname(output_dir)
         os.makedirs(output_parent_dir, exist_ok=True)
         with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
-            staged_image_dir = os.path.join(staging_dir, "images", "val")
-            staged_label_dir = os.path.join(staging_dir, "labels", "val")
-            staged_original_label_dir = os.path.join(staging_dir, "labels", "val_original")
+            staged_output_dir = os.path.join(staging_dir, "dotav1")
+            staged_image_dir = os.path.join(staged_output_dir, "images")
+            staged_label_dir = os.path.join(staged_output_dir, "labels", "val")
+            staged_original_label_dir = os.path.join(staged_output_dir, "labels", "val_original")
             os.makedirs(staged_image_dir)
             os.makedirs(staged_label_dir)
             os.makedirs(staged_original_label_dir)
@@ -1138,42 +1139,52 @@ def construct_dotav1_from_archives(image_archive: str, label_archive: str, outpu
                     images[image_id], labels[image_id], os.path.join(staged_label_dir, f"{image_id}.txt")
                 )
 
-            image_output_dir = os.path.join(output_dir, "images")
-            label_output_dir = os.path.join(output_dir, "labels", "val")
-            original_label_output_dir = os.path.join(output_dir, "labels", "val_original")
-            replacements = (
-                (staged_image_dir, image_output_dir),
-                (staged_label_dir, label_output_dir),
-                (staged_original_label_dir, original_label_output_dir),
+            _validate_staged_dataset(staged_output_dir, "dotav1", ("obb",))
+            _replace_staged_directories(
+                ((staged_output_dir, output_dir),),
+                output_parent_dir,
+                ".dotav1-backup-",
             )
-            existing_dirs = (image_output_dir, label_output_dir, original_label_output_dir)
-            with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-backup-") as backup_dir:
-                backups: dict[str, str] = {}
-                installed_dirs: list[str] = []
-                try:
-                    for directory in existing_dirs:
-                        if os.path.lexists(directory):
-                            backup_path = os.path.join(backup_dir, os.path.relpath(directory, output_dir))
-                            os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                            os.replace(directory, backup_path)
-                            backups[directory] = backup_path
-
-                    for staged_dir, output_subdir in replacements:
-                        os.makedirs(os.path.dirname(output_subdir), exist_ok=True)
-                        os.replace(staged_dir, output_subdir)
-                        installed_dirs.append(output_subdir)
-                except OSError:
-                    for directory in installed_dirs:
-                        if os.path.isdir(directory) and not os.path.islink(directory):
-                            shutil.rmtree(directory)
-                        elif os.path.lexists(directory):
-                            os.remove(directory)
-                    for directory, backup_path in backups.items():
-                        os.makedirs(os.path.dirname(directory), exist_ok=True)
-                        os.replace(backup_path, directory)
-                    raise
 
     print(f"Constructed DOTAv1 validation dataset with {len(matching_ids)} images")
+
+
+def _copy_dotav1_layout_to_staging(dataset_root: str, staged_output_dir: str) -> None:
+    """Copy a flat or legacy DOTAv1 validation layout into canonical staging."""
+
+    image_root = os.path.join(dataset_root, "images")
+    supported_image_suffixes = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
+    flat_image_files = (
+        [
+            file_name
+            for file_name in os.listdir(image_root)
+            if os.path.isfile(os.path.join(image_root, file_name))
+            and file_name.lower().endswith(supported_image_suffixes)
+        ]
+        if os.path.isdir(image_root)
+        else []
+    )
+    source_image_dir = image_root if flat_image_files else os.path.join(image_root, "val")
+    if not os.path.isdir(source_image_dir):
+        raise ValueError(f"No DOTAv1 validation images found in {dataset_root}")
+
+    staged_image_dir = os.path.join(staged_output_dir, "images")
+    os.makedirs(staged_image_dir)
+    for file_name in os.listdir(source_image_dir):
+        source_path = os.path.join(source_image_dir, file_name)
+        if os.path.isfile(source_path) and file_name.lower().endswith(supported_image_suffixes):
+            shutil.copy2(source_path, os.path.join(staged_image_dir, file_name))
+
+    for label_directory in ("val", "val_original"):
+        source_label_dir = os.path.join(dataset_root, "labels", label_directory)
+        if not os.path.isdir(source_label_dir):
+            continue
+        staged_label_dir = os.path.join(staged_output_dir, "labels", label_directory)
+        os.makedirs(staged_label_dir, exist_ok=True)
+        for file_name in os.listdir(source_label_dir):
+            source_path = os.path.join(source_label_dir, file_name)
+            if os.path.isfile(source_path) and file_name.lower().endswith(".txt"):
+                shutil.copy2(source_path, os.path.join(staged_label_dir, file_name))
 
 
 def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
@@ -1184,58 +1195,24 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized validation dataset will be stored.
 
     Raises:
-        ValueError: If no validation files or directories are found.
+        ValueError: If the staged validation dataset is incomplete or mismatched.
+        OSError: If staging or replacing the organized dataset files fails.
     """
     dataset_root = _resolve_dotav1_root(dataset_dir)
     print(f"Constructing DOTAv1 validation dataset from {dataset_root} to {output_dir}")
-    flat_image_dir = os.path.join(dataset_root, "images")
-    flat_label_dir = os.path.join(dataset_root, "labels")
-    has_flat_images = os.path.isdir(flat_image_dir) and any(
-        file_name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"))
-        for file_name in os.listdir(flat_image_dir)
-    )
-    if has_flat_images and os.path.isdir(os.path.join(flat_label_dir, "val_original")):
-        os.makedirs(output_dir, exist_ok=True)
-        if os.path.abspath(flat_image_dir) != os.path.abspath(os.path.join(output_dir, "images")):
-            shutil.copytree(flat_image_dir, os.path.join(output_dir, "images"), dirs_exist_ok=True)
-        for label_directory in ("val", "val_original"):
-            source_dir = os.path.join(flat_label_dir, label_directory)
-            if os.path.isdir(source_dir):
-                shutil.copytree(source_dir, os.path.join(output_dir, "labels", label_directory), dirs_exist_ok=True)
-        return
-    os.makedirs(output_dir, exist_ok=True)
-
-    copied_count = 0
-    for root, dirs, files in os.walk(dataset_root):
-        for dir_name in list(dirs):
-            if "val" not in dir_name:
-                continue
-
-            src_dir = os.path.join(root, dir_name)
-            relative_dir = os.path.relpath(src_dir, dataset_root)
-            if relative_dir == os.path.join("images", "val"):
-                dst_dir = os.path.join(output_dir, "images")
-            else:
-                dst_dir = os.path.join(output_dir, relative_dir)
-            if os.path.abspath(src_dir) != os.path.abspath(dst_dir):
-                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
-            copied_count += 1
-            dirs.remove(dir_name)
-
-        for file_name in files:
-            if "val" not in file_name:
-                continue
-
-            src_file = os.path.join(root, file_name)
-            relative_file = os.path.relpath(src_file, dataset_root)
-            dst_file = os.path.join(output_dir, relative_file)
-            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-            if os.path.abspath(src_file) != os.path.abspath(dst_file):
-                shutil.copy2(src_file, dst_file)
-            copied_count += 1
-
-    if copied_count == 0:
-        raise ValueError(f"No DOTAv1 validation files or directories found in {dataset_root}")
+    output_dir = os.path.abspath(output_dir)
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    with TemporaryDirectory(dir=output_parent_dir, prefix=".dotav1-staging-") as staging_dir:
+        staged_output_dir = os.path.join(staging_dir, "dotav1")
+        os.makedirs(staged_output_dir)
+        _copy_dotav1_layout_to_staging(dataset_root, staged_output_dir)
+        _validate_staged_dataset(staged_output_dir, "dotav1", ("obb",))
+        _replace_staged_directories(
+            ((staged_output_dir, output_dir),),
+            output_parent_dir,
+            ".dotav1-backup-",
+        )
 
     print("Constructing DOTAv1 validation dataset completed")
 

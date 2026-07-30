@@ -92,7 +92,9 @@ truth when this snapshot becomes stale.
   `mblt_model_zoo/vision/utils/letterbox.py`; task-specific code selects interpolation and padding
   values without duplicating resize, border, or crop calculations.
 - YOLO detection postprocessors require `pre_cfg.LetterBox`. Semantic validation preprocessors
-  must return image data with LetterBox `ratio_pad` metadata so loaders can apply identical target geometry.
+  must return image data with original `img0_shape` and LetterBox `ratio_pad` metadata. Semantic
+  prediction passes both values through postprocessing so spatial logits are inverse-letterboxed
+  before `argmax`; loaders use the same metadata to apply identical target geometry.
 - Normalize dense MXQ outputs before inverse letterboxing: bilinearly upsample depth
   `[1, H/4, W/4]` maps by four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to
   NCHW before bilinear restoration and `argmax`. Preserve full-resolution ONNX depth, NCHW
@@ -139,7 +141,12 @@ truth when this snapshot becomes stale.
   record one neutral `onnx` target even when `--core-mode all` is requested.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
   use `labels/val_original`, which retains difficult-object filtering. Its loader also accepts
-  legacy validation images under `images/val`.
+  legacy validation images under `images/val`. Stage and validate complete local and archive
+  DOTAv1 roots before atomically replacing the cache; successful replacement removes stale files,
+  failed validation preserves the cache, and failed rollback preserves a recoverable backup.
+- Normalize Vision task aliases at evaluator boundaries. CLI and benchmark DOTAv1 evaluation must
+  accept `oriented_bounding_boxes` from external model configuration as the compatibility spelling
+  of canonical `obb`.
 - Expose a seed with default `0` for vision APIs, CLIs, benchmarks, and compatibility helpers that
   sample or otherwise use randomness.
 - Keep qbcompiler imports inside the compilation path. Base imports, vision imports, the compile

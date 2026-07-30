@@ -243,7 +243,13 @@ def run_vision_inference(
         elif actual_task in {"object_detection", "face_detection", "instance_segmentation", "pose_estimation", "obb"}:
             model.set_postprocess_thresholds(conf_thres=args.conf_thres, iou_thres=args.iou_thres)
 
-        input_img = model.preprocess(args.source)
+        postprocess_kwargs: dict[str, Any] = {}
+        if actual_task == "semantic_segmentation":
+            input_img, metadata = model.preprocess_with_metadata(args.source)
+            postprocess_kwargs["img0_shape"] = metadata["img0_shape"]
+            postprocess_kwargs["ratio_pad"] = metadata.get("ratio_pad")
+        else:
+            input_img = model.preprocess(args.source)
         output = model(input_img)
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             if args.output:
@@ -260,7 +266,7 @@ def run_vision_inference(
                 print("Generated raw export-style postprocess output. Use `--raw-output` to save it.")
             return raw_output
 
-        result = model.postprocess(output)
+        result = model.postprocess(output, **postprocess_kwargs)
 
         save_path = resolve_output_path(args.output, command, args.source, args.model)
         result.plot(source_path=args.source, save_path=save_path, **plot_kwargs)

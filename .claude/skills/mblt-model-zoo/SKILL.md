@@ -12,7 +12,8 @@ Read and follow the canonical skill at
 Keep shared workflow content there so Codex and Claude Code stay synchronized.
 
 Preserve model `post_cfg.dataset` metadata so vision output taxonomies are not inferred from task alone.
-Require explicit YOLO LetterBox configuration and metadata-enabled semantic validation preprocessing.
+Require explicit YOLO LetterBox configuration. Semantic preprocessing exposes original `img0_shape`
+and `ratio_pad`, and prediction restores spatial logits before `argmax`.
 
 ADE20K organization atomically installs its 2,000 flat validation pairs only after staged readiness
 verifies `objectInfo150.txt` and `sceneCategories.txt` with `images/` and `annotations/`.
@@ -31,6 +32,9 @@ required metadata and targets, and the complete official split.
 Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
 preserves the existing cache; require exact WiderFace event/image identity agreement with
 `wider_face_val.mat`.
+Stage and validate local and archive DOTAv1 roots before atomic cache replacement; successful
+installs remove stale files and failed rollbacks retain recoverable backups.
+Normalize `oriented_bounding_boxes` to canonical `obb` at CLI, benchmark, and evaluator boundaries.
 Keep TPS printed tables and JSON output synchronized through the shared
 `mblt_model_zoo/cli/tps_table.py` schema.
 Keep Vision evaluator primary and secondary score properties aligned; the standard benchmark

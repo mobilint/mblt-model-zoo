@@ -40,8 +40,9 @@ description: >-
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for forward resize/padding metadata and inverse
   dense-output crops. Keep image interpolation/padding and target interpolation/ignore padding
   task-specific.
-- Require `pre_cfg.LetterBox` for YOLO detection postprocessors. Semantic validation loader
-  callbacks must return `(image, metadata)` with `ratio_pad`; use the metadata-enabled preprocess path.
+- Require `pre_cfg.LetterBox` for YOLO detection postprocessors. Semantic metadata-enabled
+  preprocessing returns original `img0_shape` and `ratio_pad`; prediction uses both to restore
+  spatial logits before `argmax`, and validation loaders use the same geometry for targets.
 - Normalize dense MXQ outputs before inverse letterboxing: depth accepts single-image
   `[1, H/4, W/4]` maps and bilinearly upsamples them by four; Cityscapes semantic segmentation
   accepts `[H, W, 19]` or `[B, H, W, 19]` logits and converts them to NCHW before bilinear
@@ -70,7 +71,9 @@ description: >-
 - Auto-detect `.onnx` benchmark model paths before core-mode expansion and record one neutral
   `onnx` target instead of repeated NPU-mode rows.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
-  label layouts. Keep loader compatibility with legacy `images/val` datasets.
+  label layouts. Keep loader compatibility with legacy `images/val` datasets. Stage and validate
+  complete local and archive roots before atomically replacing the managed cache; remove stale
+  files on success and retain a recoverable backup if rollback fails.
 - Atomically install ADE20K's 2,000 flat validation pairs only after staged readiness verifies
   `objectInfo150.txt` and `sceneCategories.txt` with the `images/` and `annotations/` directories.
 - Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only when
@@ -84,6 +87,8 @@ description: >-
   official ZIP packages, map canonical source IDs to classes `0..18`, pad ignored labels with `255`, and keep its
   pipeline independent from ADE20K. Reject other semantic validation taxonomies.
 - Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.
+- Normalize `oriented_bounding_boxes` to canonical `obb` inside DOTAv1 evaluation so CLI and
+  benchmark validation accept alias-configured external models.
 - Do not duplicate dataset URLs, paths, or long test commands owned by the registry or local guide.
 
 ## Validate Proportionately

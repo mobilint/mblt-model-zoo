@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from ..._tasks import normalize_vision_task
 from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
 from ..letterbox import RatioPad, resolve_ratio_pad
 from ..postprocess.common import (
@@ -481,7 +482,7 @@ def eval_dota(
     Returns:
         Local rotated mAP scores.
     """
-    if model.post_cfg["task"] != "obb":
+    if normalize_vision_task(model.post_cfg["task"]) != "obb":
         raise NotImplementedError(f"Task {model.post_cfg['task']} is not supported for DOTAv1 evaluation.")
 
     dataset = CustomDOTAv1(data_path)

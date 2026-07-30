@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 
 from benchmark.vision import benchmark_vision_models, compare_benchmark_results
-from mblt_model_zoo.vision.utils.evaluation import ImageNetResult, NYUDepthResult, SemanticSegmentationResult
+from mblt_model_zoo.vision.utils.evaluation import (
+    DOTAResult,
+    ImageNetResult,
+    NYUDepthResult,
+    SemanticSegmentationResult,
+)
 
 
 def test_benchmark_records_imagenet_metrics_in_primary_order(
@@ -92,6 +97,36 @@ def test_benchmark_dispatches_semantic_taxonomy(
 
     assert (score, score_name) == (0.6, "miou")
     assert metrics == {"miou": 0.6, "pixel_accuracy": 0.9}
+
+
+def test_benchmark_accepts_oriented_bounding_boxes_model_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Dispatch an alias-configured OBB model through DOTAv1 evaluation."""
+
+    class FakeModel:
+        post_cfg = {"task": "oriented_bounding_boxes", "dataset": "dotav1"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_dota",
+        lambda *args, **kwargs: DOTAResult(map50=0.7, map5095=0.5),
+    )
+    args = argparse.Namespace(
+        task="obb",
+        data_path=str(tmp_path),
+        batch_size=1,
+        conf_thres=None,
+        iou_thres=None,
+    )
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.5, "map50_95")
+    assert metrics == {"map50_95": 0.5, "map50": 0.7}
 
 
 def test_benchmark_continues_after_evaluator_type_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

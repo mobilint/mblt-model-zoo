@@ -2073,6 +2073,7 @@ def test_preprocess_with_metadata_returns_letterbox_ratio_pad() -> None:
     processed, metadata = engine.preprocess_with_metadata(image)
 
     assert processed.shape == (640, 640, 3)
+    assert metadata["img0_shape"] == (481, 640)
     assert metadata["ratio_pad"] == ((1.0, 1.0), (0, 79))
 
 

@@ -40,7 +40,8 @@ description: >-
 - Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.
 - Normalize quarter-resolution MXQ depth and channel-last Cityscapes MXQ logits before inverse
   letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
-- Require explicit YOLO LetterBox configuration and metadata-enabled semantic validation preprocessing.
+- Require explicit YOLO LetterBox configuration. Metadata-enabled semantic preprocessing exposes
+  original shape and `ratio_pad`; prediction restores spatial logits before `argmax`.
 - Route dense compilation through `post_cfg.dataset`: NYU Depth for depth models and ADE20K or
   Cityscapes for semantic models.
 - Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels
@@ -49,6 +50,9 @@ description: >-
   layout, required metadata and targets, and full official split count.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
   preserves the existing cache; validate WiderFace event/image identities against `wider_face_val.mat`.
+- Stage and validate complete local or archive DOTAv1 roots before atomic replacement. Remove stale
+  managed files on success and preserve recoverable backups when rollback fails.
+- Normalize `oriented_bounding_boxes` to canonical `obb` at CLI, benchmark, and evaluator boundaries.
 - Keep `mblt-model-zoo tps` printed tables and JSON output driven by the shared
   `mblt_model_zoo/cli/tps_table.py` schema.
 - Keep Vision evaluator results aligned on primary and secondary score properties. The standard

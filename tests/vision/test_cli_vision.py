@@ -38,7 +38,7 @@ from mblt_model_zoo.vision.utils.datasets import get_coco_inv, get_coco_label, g
 from mblt_model_zoo.vision.utils.datasets import organizer as organizer_module
 from mblt_model_zoo.vision.utils.datasets import readiness as readiness_module
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
-from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
+from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1, construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation import (
     ADE20KResult,
     COCOResult,
@@ -388,6 +388,95 @@ def test_cli_predict_applies_obb_thresholds(monkeypatch: pytest.MonkeyPatch, tmp
     run_vision_inference(args, command="predict")
 
     assert calls["thresholds"] == (0.25, 0.6)
+    assert calls["disposed"] is True
+
+
+def test_cli_predict_restores_semantic_logits_with_preprocess_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Restore non-square semantic logits before selecting their classes."""
+
+    from mblt_model_zoo.vision.utils.postprocess.semantic_seg_post import SemanticSegPost
+
+    source_path = tmp_path / "street.png"
+    source_path.write_bytes(b"fake")
+    calls: dict[str, object] = {}
+
+    class _FakeResult:
+        def __init__(self, semantic_mask: torch.Tensor) -> None:
+            self.semantic_mask = semantic_mask
+
+        def plot(self, source_path: str, save_path: str, **kwargs: object) -> None:
+            calls["plot"] = (source_path, save_path, kwargs)
+
+    class _FakeEngine:
+        def __init__(self, **kwargs: object) -> None:
+            calls["engine_kwargs"] = kwargs
+            self.post_cfg = {"task": "semantic_segmentation", "dataset": "cityscapes"}
+            self.postprocessor = SemanticSegPost(
+                {"LetterBox": {"img_size": [8, 8]}},
+                {"task": "semantic_segmentation", "dataset": "cityscapes"},
+            )
+
+        def preprocess_with_metadata(self, source: str) -> tuple[torch.Tensor, dict[str, object]]:
+            calls["preprocess"] = source
+            return torch.zeros((8, 8, 3)), {
+                "img0_shape": (2, 4),
+                "ratio_pad": ((2.0, 2.0), (0, 2)),
+            }
+
+        def __call__(self, input_img: torch.Tensor) -> torch.Tensor:
+            calls["forward_shape"] = tuple(input_img.shape)
+            logits = torch.zeros((1, 19, 8, 8), dtype=torch.float32)
+            logits[:, 0] = 0.5
+            logits[:, 1] = torch.linspace(0.0, 1.0, 64).reshape(8, 8)
+            return logits
+
+        def postprocess(self, output: torch.Tensor, **kwargs: object) -> _FakeResult:
+            calls["postprocess_kwargs"] = kwargs
+            return _FakeResult(cast(torch.Tensor, self.postprocessor(output, **kwargs)))
+
+        def dispose(self) -> None:
+            calls["disposed"] = True
+
+    import mblt_model_zoo.cli._vision as vision_cli_module
+
+    monkeypatch.setattr(vision_cli_module, "require_source_file", lambda source: None)
+    monkeypatch.setattr(
+        vision_cli_module,
+        "resolve_output_path",
+        lambda output, command, source, model: str(tmp_path / "out.png"),
+    )
+    monkeypatch.setattr("mblt_model_zoo.vision.MBLT_Engine", _FakeEngine)
+
+    args = Namespace(
+        source=str(source_path),
+        model="yolo26m-sem",
+        output="",
+        framework="onnx",
+        model_path="/models/yolo26m-sem.onnx",
+        mxq_path="",
+        onnx_path="",
+        model_type="DEFAULT",
+        core_mode="global8",
+        dev_no=0,
+        target_cores=None,
+        target_clusters=None,
+        topk=5,
+        conf_thres=0.25,
+        iou_thres=0.6,
+        e2e=True,
+    )
+
+    result = run_vision_inference(args, command="predict")
+
+    assert calls["postprocess_kwargs"] == {
+        "img0_shape": (2, 4),
+        "ratio_pad": ((2.0, 2.0), (0, 2)),
+    }
+    assert result.semantic_mask.shape == (2, 4)
+    assert set(result.semantic_mask.unique().tolist()) == {0, 1}
     assert calls["disposed"] is True
 
 
@@ -814,6 +903,7 @@ def test_google_drive_dotav1_archives_install_flat_validation_layout(
     with zipfile.ZipFile(label_archive, "w") as archive:
         archive.write(label_source, "labelTxt/P0001.txt")
     monkeypatch.setattr(organizer_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
 
     output_dir = tmp_path / "dotav1"
     construct_dotav1_from_archives(str(image_archive), str(label_archive), str(output_dir))
@@ -827,6 +917,92 @@ def test_google_drive_dotav1_archives_install_flat_validation_layout(
         label_source.read_text(encoding="utf-8")
     )
     assert not (output_dir / "images" / "val").exists()
+
+
+def test_local_dotav1_replaces_stale_cache_with_validated_flat_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Remove stale managed files when installing a complete local DOTAv1 source."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    (source_dir / "labels" / "val_original").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    (source_dir / "labels" / "val_original" / "P0001.txt").write_text(
+        "0 0 10 0 10 6 0 6 plane 0\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "dotav1"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "labels" / "val").mkdir(parents=True)
+    (output_dir / "images" / "stale.png").write_bytes(b"stale")
+    (output_dir / "labels" / "val" / "stale.txt").write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    construct_dotav1(str(source_dir), str(output_dir))
+
+    assert sorted(path.name for path in (output_dir / "images").iterdir()) == ["P0001.png"]
+    assert not (output_dir / "labels" / "val").exists()
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
+
+
+def test_local_dotav1_preserves_cache_when_staged_source_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validate a local DOTAv1 repair before replacing an existing cache."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    output_dir = tmp_path / "dotav1"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "labels" / "val_original").mkdir(parents=True)
+    (output_dir / "images" / "old.png").write_bytes(b"old")
+    old_label = output_dir / "labels" / "val_original" / "old.txt"
+    old_label.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+
+    with pytest.raises(ValueError, match="existing dataset cache was not replaced"):
+        construct_dotav1(str(source_dir), str(output_dir))
+
+    assert (output_dir / "images" / "old.png").read_bytes() == b"old"
+    assert old_label.read_text(encoding="utf-8") == "old"
+
+
+def test_local_dotav1_preserves_backup_when_install_and_rollback_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Leave a recoverable DOTAv1 backup when replacement rollback also fails."""
+
+    source_dir = tmp_path / "source"
+    (source_dir / "images").mkdir(parents=True)
+    (source_dir / "labels" / "val_original").mkdir(parents=True)
+    assert cv2.imwrite(str(source_dir / "images" / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+    (source_dir / "labels" / "val_original" / "P0001.txt").write_text("label", encoding="utf-8")
+    output_dir = tmp_path / "dotav1"
+    output_dir.mkdir()
+    (output_dir / "old-marker.txt").write_text("recoverable", encoding="utf-8")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
+    real_replace = organizer_module.os.replace
+
+    def _fail_install_and_rollback(source: str, destination: str) -> None:
+        if destination == str(output_dir) and ".dotav1-staging-" in source:
+            raise OSError("installation failed")
+        if destination == str(output_dir) and ".dotav1-backup-" in source:
+            raise OSError("rollback failed")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(organizer_module.os, "replace", _fail_install_and_rollback)
+
+    with pytest.raises(OSError, match="backups are preserved"):
+        construct_dotav1(str(source_dir), str(output_dir))
+
+    backup_dirs = list(tmp_path.glob(".dotav1-backup-*"))
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "dotav1" / "old-marker.txt").read_text(encoding="utf-8") == "recoverable"
 
 
 def test_google_drive_dotav1_organizer_selects_root_prefixed_archives(
@@ -1013,7 +1189,7 @@ def test_cli_val_routes_obb_to_dota_evaluator(
 
         def __init__(self, **kwargs: object) -> None:
             calls["engine_kwargs"] = kwargs
-            self.post_cfg = {"task": "obb"}
+            self.post_cfg = {"task": "oriented_bounding_boxes"}
             self.postprocessor = Namespace(e2e=True)
 
         def dispose(self) -> None:
@@ -1063,6 +1239,24 @@ def test_cli_val_routes_obb_to_dota_evaluator(
     assert eval_kwargs["data_path"] == str(data_path)
     assert eval_kwargs["batch_size"] == 8
     assert calls["disposed"] is True
+
+
+def test_eval_dota_accepts_oriented_bounding_boxes_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Normalize the public OBB compatibility spelling inside the evaluator."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_dota")
+
+    def _accepted_alias(_: str) -> object:
+        raise RuntimeError("alias accepted")
+
+    monkeypatch.setattr(eval_module, "CustomDOTAv1", _accepted_alias)
+    model = Namespace(post_cfg={"task": "oriented_bounding_boxes"})
+
+    with pytest.raises(RuntimeError, match="alias accepted"):
+        eval_module.eval_dota(cast("MBLT_Engine", model), str(tmp_path), 1)
 
 
 def test_cli_val_routes_semantic_segmentation_to_ade20k(

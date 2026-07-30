@@ -26,19 +26,23 @@
   neutral `onnx` target for `--core-mode all`.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
 - DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts;
-  its loader also accepts legacy `images/val` datasets.
+  its loader also accepts legacy `images/val` datasets. Local and archive organizers validate a
+  complete staged root before atomic replacement, remove stale files on success, and preserve a
+  recoverable backup if rollback fails.
 - Model YAMLs use `file_cfg.filename` as the canonical MXQ artifact; the matching same-stem ONNX
   artifact is derived unless `onnx_filename` explicitly names an exception.
 - Every model YAML declares `post_cfg.dataset`; postprocessing uses it with `task` to resolve the
   model's output taxonomy and class count.
 - Use `obb` as the canonical vision task key for oriented bounding boxes; retain
-  `oriented_bounding_boxes` as a compatibility alias.
+  `oriented_bounding_boxes` as a compatibility alias and normalize it at CLI, benchmark, and
+  evaluator boundaries.
 - Preserve anchorless decoded-output layout provenance through NMS. If provenance is unavailable
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared forward and inverse letterbox
   geometry.
-- Require `pre_cfg.LetterBox` for YOLO detection postprocessing, and use metadata-enabled
-  preprocessing callbacks for semantic validation loaders.
+- Require `pre_cfg.LetterBox` for YOLO detection postprocessing, and use metadata-enabled semantic
+  preprocessing that exposes original `img0_shape` and `ratio_pad`. Prediction restores spatial
+  logits with this geometry before `argmax`, while validation loaders reuse it for targets.
 - Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[1, H/4, W/4]` maps by
   four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
   and `argmax`. Preserve existing ONNX layouts and baked class maps.

@@ -28,9 +28,9 @@ jobs:
     with:
       post_untrusted_notice: true
       skip_draft_pr: true
-      max_files: 200
-      max_diff_chars: 200000
+      max_files: 500
+      max_diff_chars: 1000000
       official_review_wait_minutes: 5
       review_on_pr_synchronize: false
       allow_unsafe_no_sandbox_fallback: false
-      max_concurrent_mention_reviews: 5
+      max_concurrent_mention_reviews: 10

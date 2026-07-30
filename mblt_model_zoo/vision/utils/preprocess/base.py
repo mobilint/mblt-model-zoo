@@ -6,6 +6,19 @@ from typing import Any
 import torch
 
 
+def _spatial_shape(value: Any) -> tuple[int, int] | None:
+    """Return the height and width of image-like preprocessing input."""
+
+    shape = getattr(value, "shape", None)
+    if shape is None or len(shape) < 2:
+        return None
+    if len(shape) == 2:
+        return int(shape[0]), int(shape[1])
+    if len(shape) == 3 and int(shape[-1]) in {1, 3, 4}:
+        return int(shape[0]), int(shape[1])
+    return int(shape[-2]), int(shape[-1])
+
+
 class PreOps(ABC):
     """Abstract base class for individual preprocessing operations.
 
@@ -108,8 +121,15 @@ class PreBase:
                 A tuple of the processed data and collected metadata.
         """
         metadata: dict[str, Any] = {}
+        img0_shape = _spatial_shape(x)
+        if img0_shape is not None:
+            metadata["img0_shape"] = img0_shape
         for op in self.Ops:
             x = op(x)
+            if "img0_shape" not in metadata:
+                img0_shape = _spatial_shape(x)
+                if img0_shape is not None:
+                    metadata["img0_shape"] = img0_shape
             ratio_pad = getattr(op, "ratio_pad", None)
             if ratio_pad is not None:
                 metadata["ratio_pad"] = ratio_pad
