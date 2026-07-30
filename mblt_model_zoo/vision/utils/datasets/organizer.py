@@ -282,13 +282,13 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 
     Raises:
         ValueError: If an XML file has no objects or contains multiple object names.
-        AssertionError: If the number of XML files and images do not match.
+        ValueError: If the number of XML files and images do not match.
     """
 
-    assert len(os.listdir(xml_dir + "/val")) == len(os.listdir(image_dir)), (
-        f"Number of XML and image files do not match: "
-        f"{len(os.listdir(xml_dir + '/val'))} != {len(os.listdir(image_dir))}"
-    )
+    xml_count = len(os.listdir(xml_dir + "/val"))
+    image_count = len(os.listdir(image_dir))
+    if xml_count != image_count:
+        raise ValueError(f"Number of XML and image files do not match: {xml_count} != {image_count}.")
 
     # validate the XML files
     pbar = tqdm(os.listdir(xml_dir + "/val"), desc="Validating XML files")
@@ -318,7 +318,8 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
         root = xml_tree.getroot()
         object_name = _get_object_name(root.findall("object")[0], xml_file)
         image_path = os.path.join(image_dir, xml_file.replace(".xml", ".JPEG"))
-        assert os.path.exists(image_path), f"Image file not found: {image_path}"
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(f"Image file not found: {image_path}")
 
         os.makedirs(os.path.join(output_dir, object_name), exist_ok=True)  # create the directory for the object
         shutil.copy(
@@ -554,30 +555,7 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
             (staged_image_dir, os.path.join(output_dir, "images")),
             (staged_depth_dir, os.path.join(output_dir, "depth")),
         )
-        with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-backup-") as backup_dir:
-            backups: dict[str, str] = {}
-            installed_dirs: list[str] = []
-            try:
-                for _, destination_dir in replacements:
-                    if os.path.lexists(destination_dir):
-                        backup_path = os.path.join(backup_dir, os.path.basename(destination_dir))
-                        os.replace(destination_dir, backup_path)
-                        backups[destination_dir] = backup_path
-
-                for staged_dir, destination_dir in replacements:
-                    os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
-                    os.replace(staged_dir, destination_dir)
-                    installed_dirs.append(destination_dir)
-            except OSError:
-                for directory in installed_dirs:
-                    if os.path.isdir(directory) and not os.path.islink(directory):
-                        shutil.rmtree(directory)
-                    elif os.path.lexists(directory):
-                        os.remove(directory)
-                for directory, backup_path in backups.items():
-                    os.makedirs(os.path.dirname(directory), exist_ok=True)
-                    os.replace(backup_path, directory)
-                raise
+        _replace_staged_directories(replacements, output_parent_dir, ".nyu-depth-backup-")
     print(f"Constructed NYU Depth validation dataset with {len(images)} image/depth pairs")
 
 

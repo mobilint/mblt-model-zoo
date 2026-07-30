@@ -17,7 +17,7 @@ from ..preprocess.letterbox import letterbox_semantic_mask
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 
 
-class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
+class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
     """Custom COCO dataset class for loading images and metadata.
 
     This class provides a simple interface for accessing COCO formatted data
@@ -30,7 +30,7 @@ class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]])
     """
 
     def __init__(self, root: str, annFile: str, min_keypoints: int | None = None) -> None:
-        """Initializes the CustomCocodata instance.
+        """Initialize the custom COCO dataset.
 
         Args:
             root (str): Path to the directory containing images.
@@ -72,11 +72,18 @@ class CustomCocodata(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]])
         return len(self.ids)
 
 
-def get_coco_loader(dataset: CustomCocodata, batch_size: int, preprocess_fn: Callable) -> torch.utils.data.DataLoader:
+CustomCocodata = CustomCOCODataset
+
+
+def get_coco_loader(
+    dataset: CustomCOCODataset,
+    batch_size: int,
+    preprocess_fn: Callable,
+) -> torch.utils.data.DataLoader:
     """Creates a DataLoader for the COCO dataset.
 
     Args:
-        dataset (CustomCocodata): The dataset instance to load from.
+        dataset (CustomCOCODataset): The dataset instance to load from.
         batch_size (int): Number of samples per batch.
         preprocess_fn (Callable): Function used to preprocess images.
 
@@ -664,7 +671,7 @@ def get_imagenet_loader(
     )
 
 
-class CustomWiderface(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
+class CustomWiderFaceDataset(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
     """Custom dataset class for the WiderFace dataset.
 
     Attributes:
@@ -674,7 +681,7 @@ class CustomWiderface(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
     """
 
     def __init__(self, root: str) -> None:
-        """Initializes the CustomWiderface instance.
+        """Initialize the custom WiderFace dataset.
 
         Args:
             root (str): Path to the directory containing WiderFace images.
@@ -742,13 +749,16 @@ class CustomWiderface(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
         return len(self.samples)
 
 
+CustomWiderface = CustomWiderFaceDataset
+
+
 def get_widerface_loader(
-    dataset: CustomWiderface, batch_size: int, preprocess_fn: Callable
+    dataset: CustomWiderFaceDataset, batch_size: int, preprocess_fn: Callable
 ) -> torch.utils.data.DataLoader:
     """Creates a DataLoader for the WiderFace dataset.
 
     Args:
-        dataset (CustomWiderface): The dataset instance to load from.
+        dataset (CustomWiderFaceDataset): The dataset instance to load from.
         batch_size (int): Number of samples per batch.
         preprocess_fn (Callable): Function used to preprocess images.
 

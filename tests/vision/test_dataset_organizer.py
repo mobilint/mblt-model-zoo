@@ -202,6 +202,47 @@ def test_organize_nyu_depth_extracts_only_validation_layout(
     assert not (output_dir / "depth" / "train").exists()
 
 
+def test_nyu_depth_install_preserves_backups_when_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Leave recoverable NYU backups outside staging when rollback fails."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = tmp_path / "source"
+    (dataset_dir / "images").mkdir(parents=True)
+    (dataset_dir / "depth").mkdir()
+    (dataset_dir / "images" / "sample.jpg").write_bytes(b"new image")
+    (dataset_dir / "depth" / "sample.npy").write_bytes(b"new depth")
+
+    output_dir = tmp_path / "organized"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "depth").mkdir()
+    (output_dir / "images" / "keep.jpg").write_bytes(b"old image")
+    (output_dir / "depth" / "keep.npy").write_bytes(b"old depth")
+
+    real_replace = organizer.os.replace
+
+    def _fail_install_and_rollback(source: str, destination: str) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if source_path.parent.name.startswith(".nyu-depth-staging-") and source_path.name == "depth":
+            raise OSError("simulated install failure")
+        if source_path.parent.name.startswith(".nyu-depth-backup-") and destination_path == output_dir / "images":
+            raise OSError("simulated rollback failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(organizer.os, "replace", _fail_install_and_rollback)
+
+    with pytest.raises(OSError, match="backups are preserved"):
+        organizer.construct_nyu_depth(str(dataset_dir), str(output_dir))
+
+    backup_dirs = list(tmp_path.glob(".nyu-depth-backup-*"))
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "images" / "keep.jpg").read_bytes() == b"old image"
+    assert (backup_dirs[0] / "depth" / "keep.npy").read_bytes() == b"old depth"
+
+
 def test_organize_ade20k_extracts_flat_validation_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Install only ADE20K validation image/mask pairs in the reference layout."""
 

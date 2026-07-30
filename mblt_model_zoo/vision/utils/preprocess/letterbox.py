@@ -6,6 +6,7 @@ import torch
 
 from ..letterbox import LetterBoxGeometry, RatioPad
 from ..types import TensorLike
+from ._validation import normalize_image_size
 from .base import PreOps
 
 
@@ -86,7 +87,7 @@ class LetterBox(PreOps):
             img_size (list[int]): Target image size [h, w].
         """
         super().__init__()
-        self.img_size = img_size
+        self.img_size = normalize_image_size(img_size, name="img_size")
         self.ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None
 
     def __call__(self, x: TensorLike) -> torch.Tensor:
@@ -100,6 +101,10 @@ class LetterBox(PreOps):
         """
         if isinstance(x, torch.Tensor):
             x = x.cpu().numpy()
+        elif not isinstance(x, np.ndarray):
+            raise TypeError(f"LetterBox expects a NumPy array or tensor, got {type(x).__name__}.")
+        if x.ndim != 3:
+            raise ValueError(f"LetterBox expects an HWC image, got shape {x.shape}.")
         img, self.ratio_pad = _apply_letterbox(
             x,
             self.img_size,

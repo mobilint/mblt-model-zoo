@@ -7,6 +7,8 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from ..._tasks import normalize_vision_task
+from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
 from .common import RatioPad, nmsout2eval, process_mask_upsample
 
@@ -85,16 +87,12 @@ class YOLODetectionPostBase(PostBase):
         img_size = letterbox_cfg["img_size"]
         self.imh: int
         self.imw: int
-        if isinstance(img_size, int):
-            self.imh = self.imw = img_size
-        elif isinstance(img_size, list):
-            assert len(img_size) == 2, "img_size should be a list of two integers"
-            self.imh, self.imw = img_size
+        self.imh, self.imw = normalize_image_size(img_size, name="pre_cfg.LetterBox.img_size")
         task = post_cfg.get("task")
         if task is None:
             raise ValueError("task should be provided in post_cfg")
-        self.task: str = task
-        task_key = self.task.lower()
+        self.task = normalize_vision_task(task)
+        task_key = self.task
         dataset = post_cfg.get("dataset")
         self.dataset = dataset.lower() if isinstance(dataset, str) else None
         dataset_nc = self.NC_BY_DATASET_TASK.get((self.dataset, task_key)) if self.dataset is not None else None
@@ -133,7 +131,8 @@ class YOLODetectionPostBase(PostBase):
                 self.stride = [2 ** (3 + i) for i in range(self.nl)]
             self.make_anchors()
         else:
-            assert isinstance(self.anchors, list), "anchors should be a list"
+            if not isinstance(self.anchors, list):
+                raise TypeError(f"anchors must be a list, got {type(self.anchors).__name__}.")
             self.nl = len(self.anchors)
             self.na = len(self.anchors[0]) // 2
         self.n_extra: int = post_cfg.get("n_extra", 0)
@@ -375,10 +374,16 @@ class YOLODetectionPostBase(PostBase):
         """
         conf_thres = self.conf_thres if conf_thres is None else conf_thres
         iou_thres = self.iou_thres if iou_thres is None else iou_thres
-        assert 0 < conf_thres < 1, "conf_thres should be in (0, 1)"
-        assert 0 < iou_thres < 1, "iou_thres should be in (0, 1)"
-        self.conf_thres = conf_thres
-        self.iou_thres = iou_thres
+        if isinstance(conf_thres, bool) or not isinstance(conf_thres, (int, float)):
+            raise TypeError(f"conf_thres must be numeric, got {type(conf_thres).__name__}.")
+        if isinstance(iou_thres, bool) or not isinstance(iou_thres, (int, float)):
+            raise TypeError(f"iou_thres must be numeric, got {type(iou_thres).__name__}.")
+        if not 0 < conf_thres < 1:
+            raise ValueError(f"conf_thres must be in (0, 1), got {conf_thres}.")
+        if not 0 < iou_thres < 1:
+            raise ValueError(f"iou_thres must be in (0, 1), got {iou_thres}.")
+        self.conf_thres = float(conf_thres)
+        self.iou_thres = float(iou_thres)
         self.inv_conf_thres = -np.log(1 / conf_thres - 1)
 
     def check_input(self, x: TensorLike | ListTensorLike) -> list[torch.Tensor]:
@@ -492,7 +497,8 @@ class YOLODetectionPostBase(PostBase):
             A converted detection tensor, or a ``(detections, prototypes)`` tuple
             for segmentation-style subclasses.
         """
-        assert len(x) == 1, f"Assume return is a single output, but got {len(x)} outputs"
+        if len(x) != 1:
+            raise ValueError(f"Expected exactly one converted model output, got {len(x)}.")
         return x[0]
 
     @abstractmethod

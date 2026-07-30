@@ -47,6 +47,8 @@ description: >-
   layout, required metadata and targets, and full official split count.
 - Keep `mblt-model-zoo tps` printed tables and JSON output driven by the shared
   `mblt_model_zoo/cli/tps_table.py` schema.
+- Keep Vision evaluator results aligned on primary and secondary score properties. The standard
+  benchmark runner owns depth and taxonomy-dispatched semantic metrics.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

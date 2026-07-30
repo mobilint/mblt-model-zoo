@@ -94,7 +94,7 @@ model = MBLT_Engine(
 - `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine uses `CPUExecutionProvider`; pass this option to select another provider order explicitly.
 - `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
 
-Model files are also available on our [HuggingFace Hub](https://huggingface.co/mobilint).
+Model files are also available on our [Hugging Face Hub](https://huggingface.co/mobilint).
 
 ### Running Inference
 
@@ -206,7 +206,7 @@ Currently, these optional functions are only available on environment equipped w
 |-------|------|------|
 |onnxruntime|For running vision models with `framework="onnx"` on CPU|Install with `pip install mblt-model-zoo[onnxruntime]`|
 |onnxruntime-gpu|For running vision models with `framework="onnx"` with GPU-enabled ONNX Runtime|Install with `pip install mblt-model-zoo[onnxruntime-gpu]`|
-|transformers|For using HuggingFace transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
+|transformers|For using Hugging Face Transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 |qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
 

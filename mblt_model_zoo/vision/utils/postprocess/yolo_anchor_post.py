@@ -87,7 +87,8 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
                 ``(batch, anchors, no)`` format, optionally paired with prototype masks in
                 segmentation subclasses.
         """
-        assert len(x) == self.nl, f"Got unsupported number of detection heads: {len(x)}."
+        if len(x) != self.nl:
+            raise ValueError(f"Expected {self.nl} detection heads, got {len(x)}.")
         y = []
         for i in range(self.nl):
             tmp = x[i]

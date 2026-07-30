@@ -68,16 +68,20 @@ class SemanticMetricAccumulator:
             raise ValueError(
                 f"Semantic prediction and target shapes must match, got {prediction.shape} and {target.shape}."
             )
-        valid = (
-            (target != self.ignore_label)
-            & (target >= 0)
-            & (target < self.nc)
-            & (prediction >= 0)
-            & (prediction < self.nc)
+        valid_target = (target != self.ignore_label) & (target >= 0) & (target < self.nc)
+        valid_prediction = (
+            np.isfinite(prediction) & (prediction >= 0) & (prediction < self.nc) & (prediction == np.floor(prediction))
         )
-        if valid.any():
+        invalid_prediction = valid_target & ~valid_prediction
+        if invalid_prediction.any():
+            invalid_values = np.unique(prediction[invalid_prediction])
+            raise ValueError(
+                f"Semantic predictions at valid target pixels must be finite class IDs in [0, {self.nc - 1}], "
+                f"got {invalid_values.tolist()}."
+            )
+        if valid_target.any():
             histogram = np.bincount(
-                self.nc * target[valid].astype(np.int64) + prediction[valid].astype(np.int64),
+                self.nc * target[valid_target].astype(np.int64) + prediction[valid_target].astype(np.int64),
                 minlength=self.nc**2,
             )
             self.matrix += histogram.reshape(self.nc, self.nc)

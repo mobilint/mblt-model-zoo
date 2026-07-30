@@ -434,7 +434,7 @@ class MBLT_Engine:
             f"{subfolder}/{filename}" if subfolder else filename for subfolder in normalized_subfolders
         )
         raise RuntimeError(
-            f"Failed to download model from HuggingFace. Tried repo '{repo_id}' at: {attempted_paths}."
+            f"Failed to download model from Hugging Face. Tried repo '{repo_id}' at: {attempted_paths}."
         ) from last_error
 
     def file_config_cleansing(self) -> None:

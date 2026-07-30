@@ -58,6 +58,26 @@ The runner writes the following reproducible artifacts:
 
 Use `--collect-host-info` to include `mblt-tracker collect` output in the summary. A local
 `--model-path`, `--mxq-path`, or `--onnx-path` applies to exactly one model target.
+Task names in generated artifacts are always canonical; the compatibility input
+`oriented_bounding_boxes` is normalized to `obb`.
+
+Depth-estimation runs record `delta1` as the primary score together with `abs_rel` and `rmse`.
+Semantic-segmentation runs dispatch from the model's `post_cfg.dataset`: ADE20K and Cityscapes both
+record `miou` as primary and `pixel_accuracy` as secondary.
+
+```bash
+python benchmark/vision/benchmark_vision_models.py \
+  --models yolo26m-depth \
+  --task depth_estimation \
+  --data-path ~/.mblt_model_zoo/datasets/nyu-depth \
+  --results-dir benchmark/vision/results/yolo26m_depth
+
+python benchmark/vision/benchmark_vision_models.py \
+  --models yolo26m-sem \
+  --task semantic_segmentation \
+  --data-path ~/.mblt_model_zoo/datasets/cityscapes \
+  --results-dir benchmark/vision/results/yolo26m_sem
+```
 
 You can run the benchmark as the following steps:
 

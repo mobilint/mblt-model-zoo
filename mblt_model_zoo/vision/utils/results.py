@@ -4,8 +4,8 @@ Results processing and plotting.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import cast
 
 import cv2
@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .._tasks import normalize_vision_task
 from .datasets import (
     get_ade20k_palette,
     get_cityscapes_palette,
@@ -55,7 +56,7 @@ class Results:
         """
         self.pre_cfg = pre_cfg
         self.post_cfg = post_cfg
-        self.task = post_cfg["task"]
+        self.task = normalize_vision_task(post_cfg["task"])
         self.conf_thres = kwargs.get("conf_thres", 0.25)
         self.acc: torch.Tensor | np.ndarray | None = None
         self.box_cls: torch.Tensor | np.ndarray | None = None
@@ -70,7 +71,7 @@ class Results:
         self.kpts: torch.Tensor | None = None
         self.set_output(output)
 
-    def _read_image(self, source_path: str | np.ndarray | Image.Image) -> np.ndarray:
+    def _read_image(self, source_path: str | Path | np.ndarray | Image.Image) -> np.ndarray:
         """
         Internal method to read an image from various input types and convert to BGR format.
         Args:
@@ -84,16 +85,29 @@ class Results:
             source_img = np.array(source_img)
             source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
         elif isinstance(source_path, np.ndarray):
-            source_img = np.array(source_path)  # assume imread or video read is made in BGR format
-            assert source_img.shape[2] == 3, f"Got unexpected shape for source_img={source_img.shape}."
-        else:  # str image path
-            assert os.path.exists(source_path) and os.path.isfile(source_path), (
-                f"File {source_path} does not exist or is not a file."
-            )
-            source_img = cv2.imread(source_path, cv2.IMREAD_COLOR)
+            source_img = np.array(source_path)
+            if source_img.ndim != 3 or source_img.shape[2] != 3:
+                raise ValueError(f"Image arrays must have HWC shape with three channels, got {source_img.shape}.")
+        elif isinstance(source_path, (str, Path)):
+            image_path = Path(source_path)
+            if not image_path.is_file():
+                raise FileNotFoundError(f"Image file not found: {image_path}")
+            source_img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        else:
+            raise TypeError(f"Unsupported image source type: {type(source_path).__name__}.")
         if source_img is None:
-            raise ValueError(f"Failed to read image from {type(source_path)}.")
+            raise ValueError(f"Failed to decode image from {source_path!r}.")
         return source_img
+
+    @staticmethod
+    def _save_image(save_path: str | Path, image: np.ndarray) -> None:
+        """Save an image and report encoder or filesystem failures."""
+
+        path = Path(save_path)
+        if path.parent != Path("."):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(path), image):
+            raise OSError(f"Failed to write result image: {path}")
 
     def set_output(self, output: TensorLike | ListTensorLike | NestedListTensorLike) -> None:
         """
@@ -108,33 +122,53 @@ class Results:
         self.mask = None
         self.depth = None
         self.semantic_mask = None
-        if self.task.lower() == "image_classification":
-            if isinstance(output, Sequence):
-                raise TypeError(f"Expected tensor output for task {self.task}, got {type(output)}.")
-            self.acc = output
-        elif self.task.lower() in {"object_detection", "face_detection", "pose_estimation", "obb"}:
+        if self.task == "image_classification":
+            if not isinstance(output, (np.ndarray, torch.Tensor)):
+                raise TypeError(f"Expected tensor output for task {self.task}, got {type(output).__name__}.")
+            self.acc = cast(TensorLike, output)
+        elif self.task in {"object_detection", "face_detection", "pose_estimation", "obb"}:
             if not isinstance(output, Sequence):
-                raise TypeError(f"Expected list output for task {self.task}, got {type(output)}.")
+                raise TypeError(f"Expected list output for task {self.task}, got {type(output).__name__}.")
+            if len(output) == 0:
+                raise ValueError(f"Expected a non-empty output list for task {self.task}.")
+            if not isinstance(output[0], (np.ndarray, torch.Tensor)):
+                raise TypeError(
+                    f"Expected a tensor as the first output for task {self.task}, got {type(output[0]).__name__}."
+                )
             self.box_cls = cast(TensorLike, output[0])
-        elif self.task.lower() == "instance_segmentation":
-            if not isinstance(output, Sequence) or not isinstance(output[0], Sequence):
-                raise TypeError(f"Expected nested list output for task {self.task}, got {type(output)}.")
+        elif self.task == "instance_segmentation":
+            if not isinstance(output, Sequence):
+                raise TypeError(f"Expected nested list output for task {self.task}, got {type(output).__name__}.")
+            if len(output) == 0:
+                raise ValueError(f"Expected a non-empty output list for task {self.task}.")
+            if not isinstance(output[0], Sequence):
+                raise TypeError(
+                    f"Expected a nested output sequence for task {self.task}, got {type(output[0]).__name__}."
+                )
+            if len(output[0]) < 2:
+                raise ValueError("Instance segmentation output must contain detections and masks.")
             seg_output = cast(ListTensorLike, output[0])
+            if not all(isinstance(item, (np.ndarray, torch.Tensor)) for item in seg_output[:2]):
+                raise TypeError("Instance segmentation detections and masks must be tensors.")
             self.box_cls = cast(TensorLike, seg_output[0])
             self.mask = cast(TensorLike, seg_output[1])
-        elif self.task.lower() == "depth_estimation":
+        elif self.task == "depth_estimation":
             if isinstance(output, Sequence) and not isinstance(output, (np.ndarray, torch.Tensor)):
+                if len(output) == 0:
+                    raise ValueError("Expected at least one depth-map tensor.")
                 if not all(isinstance(item, (np.ndarray, torch.Tensor)) for item in output):
-                    raise TypeError(f"Expected depth-map tensors for task {self.task}, got {type(output)}.")
+                    raise TypeError(f"Expected depth-map tensors for task {self.task}, got {type(output).__name__}.")
                 self.depth = [cast(TensorLike, item) for item in output]
             elif isinstance(output, (np.ndarray, torch.Tensor)):
                 self.depth = output
             else:
                 raise TypeError(f"Expected tensor depth output for task {self.task}, got {type(output)}.")
-        elif self.task.lower() == "semantic_segmentation":
+        elif self.task == "semantic_segmentation":
             if isinstance(output, Sequence) and not isinstance(output, (np.ndarray, torch.Tensor)):
+                if len(output) == 0:
+                    raise ValueError("Expected at least one semantic-map tensor.")
                 if not all(isinstance(item, (np.ndarray, torch.Tensor)) for item in output):
-                    raise TypeError(f"Expected semantic-map tensors for task {self.task}, got {type(output)}.")
+                    raise TypeError(f"Expected semantic-map tensors for task {self.task}, got {type(output).__name__}.")
                 self.semantic_mask = [cast(TensorLike, item) for item in output]
             elif isinstance(output, (np.ndarray, torch.Tensor)):
                 self.semantic_mask = output
@@ -146,8 +180,8 @@ class Results:
 
     def plot(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray | None:
         """Plot inference results on the source image.
@@ -163,29 +197,27 @@ class Results:
         Raises:
             NotImplementedError: If the task is not supported for plotting.
         """
-        if save_path is not None:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        if self.task.lower() == "image_classification":
+        if self.task == "image_classification":
             return self._plot_image_classification(source_path, save_path, **kwargs)
-        elif self.task.lower() in {"object_detection", "face_detection"}:
+        elif self.task in {"object_detection", "face_detection"}:
             return self._plot_object_detection(source_path, save_path, **kwargs)
-        elif self.task.lower() == "instance_segmentation":
+        elif self.task == "instance_segmentation":
             return self._plot_instance_segmentation(source_path, save_path, **kwargs)
-        elif self.task.lower() == "depth_estimation":
+        elif self.task == "depth_estimation":
             return self._plot_depth_estimation(source_path, save_path, **kwargs)
-        elif self.task.lower() == "semantic_segmentation":
+        elif self.task == "semantic_segmentation":
             return self._plot_semantic_segmentation(source_path, save_path, **kwargs)
-        elif self.task.lower() == "pose_estimation":
+        elif self.task == "pose_estimation":
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
-        elif self.task.lower() == "obb":
+        elif self.task == "obb":
             return self._plot_obb(source_path, save_path, **kwargs)
         else:
             raise NotImplementedError(f"Task {self.task} is not supported for plotting results.")
 
     def _plot_depth_estimation(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         """Colorize the first depth map with near objects in red and blend it over the original image."""
@@ -217,13 +249,13 @@ class Results:
         overlay[~valid] = 0
         result = cv2.addWeighted(image, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0)
         if save_path is not None:
-            cv2.imwrite(save_path, result)
+            self._save_image(save_path, result)
         return result
 
     def _plot_semantic_segmentation(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         """Colorize a semantic class map and blend it over the original image."""
@@ -243,7 +275,8 @@ class Results:
         image_shape = (int(image.shape[0]), int(image.shape[1]))
         if tuple(class_map.shape) != image_shape:
             class_map = self._restore_semantic_map(class_map, image_shape)
-        dataset = self.post_cfg.get("dataset")
+        dataset_value = self.post_cfg.get("dataset")
+        dataset = dataset_value.lower() if isinstance(dataset_value, str) else dataset_value
         if dataset == "ade20k":
             default_nc = 150
             palette_getter = get_ade20k_palette
@@ -263,7 +296,7 @@ class Results:
         result = image.copy()
         result[valid] = blended[valid]
         if save_path is not None:
-            cv2.imwrite(save_path, result)
+            self._save_image(save_path, result)
         return result
 
     def _restore_semantic_map(self, class_map: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
@@ -299,18 +332,28 @@ class Results:
 
     def _plot_image_classification(
         self,
-        source_path: str | np.ndarray | Image.Image | None = None,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image | None = None,
+        save_path: str | Path | None = None,
         topk: int = 5,
         **kwargs,
     ) -> np.ndarray | None:
         if self.acc is None:
             raise ValueError("No accuracy output found.")
+        if isinstance(topk, bool) or not isinstance(topk, int):
+            raise TypeError(f"topk must be an integer, got {type(topk).__name__}.")
+        if topk <= 0:
+            raise ValueError(f"topk must be positive, got {topk}.")
         if isinstance(self.acc, np.ndarray):
             self.acc = torch.tensor(self.acc)
-        topk_probs, topk_indices = torch.topk(self.acc, topk)
-        topk_probs = np.atleast_1d(topk_probs.squeeze().numpy())
-        topk_indices = np.atleast_1d(topk_indices.squeeze().numpy())
+        scores = self.acc.squeeze()
+        if scores.ndim != 1:
+            raise ValueError(
+                f"Classification plotting expects one class-score vector, got shape {tuple(self.acc.shape)}."
+            )
+        topk = min(topk, int(scores.numel()))
+        topk_probs, topk_indices = torch.topk(scores, topk)
+        topk_probs = np.atleast_1d(topk_probs.squeeze().detach().cpu().numpy())
+        topk_indices = np.atleast_1d(topk_indices.squeeze().detach().cpu().numpy())
         # load labels
         labels = [get_imagenet_label(i) for i in topk_indices]
         comments = []
@@ -343,21 +386,23 @@ class Results:
                     thickness=1,
                     lineType=cv2.LINE_AA,
                 )
-                cv2.imwrite(save_path, img)
+            self._save_image(save_path, img)
             return img
         else:
             return None
 
     def _plot_object_detection(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         box_cls = self._box_cls_tensor()
-        assert box_cls.shape[1] == 6 + self.post_cfg.get("n_extra", 0), (
-            f"Got unexpected shape for object detection box_cls={box_cls.shape}."
-        )
+        expected_columns = 6 + self.post_cfg.get("n_extra", 0)
+        if box_cls.ndim != 2 or box_cls.shape[1] != expected_columns:
+            raise ValueError(
+                f"Object detection output must have shape [N, {expected_columns}], got {tuple(box_cls.shape)}."
+            )
         img = self._read_image(source_path)
         img1_shape = cast(tuple[int, int], self.pre_cfg["LetterBox"]["img_size"])
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
@@ -405,19 +450,22 @@ class Results:
                     LW,
                 )
         if save_path is not None:
-            cv2.imwrite(save_path, img)
+            self._save_image(save_path, img)
         return img
 
     def _plot_instance_segmentation(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         img = self._plot_object_detection(source_path, None, **kwargs)
-        assert self.mask is not None, "No mask output found."
-        assert self.boxes is not None, "No boxes output found."
-        assert self.labels is not None, "No labels output found."
+        if self.mask is None:
+            raise RuntimeError("Instance segmentation output has no mask tensor.")
+        if self.boxes is None:
+            raise RuntimeError("Instance segmentation boxes were not initialized.")
+        if self.labels is None:
+            raise RuntimeError("Instance segmentation labels were not initialized.")
         mask = self._mask_tensor()
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         masks = (
@@ -439,13 +487,13 @@ class Results:
         inv_mask = 1 - ALPHA * total_mask / 255
         img = (img * inv_mask + overlay * ALPHA).astype(np.uint8)
         if save_path is not None:
-            cv2.imwrite(save_path, img)
+            self._save_image(save_path, img)
         return img
 
     def _plot_pose_estimation(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         img = self._plot_object_detection(source_path, None, **kwargs)
@@ -488,13 +536,13 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
         if save_path is not None:
-            cv2.imwrite(save_path, img)
+            self._save_image(save_path, img)
         return img
 
     def _plot_obb(
         self,
-        source_path: str | np.ndarray | Image.Image,
-        save_path: str | None = None,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
         """Plots oriented bounding boxes on an image.
@@ -509,7 +557,8 @@ class Results:
         """
         del kwargs
         box_cls = self._box_cls_tensor()
-        assert box_cls.shape[1] == 7, f"Got unexpected shape for OBB box_cls={box_cls.shape}."
+        if box_cls.ndim != 2 or box_cls.shape[1] != 7:
+            raise ValueError(f"OBB output must have shape [N, 7], got {tuple(box_cls.shape)}.")
         img = self._read_image(source_path)
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.labels = box_cls[:, 5].to(torch.int64)
@@ -536,7 +585,7 @@ class Results:
             )
             cv2.drawContours(img, [polygon.reshape(-1, 1, 2)], -1, color, LW)
         if save_path is not None:
-            cv2.imwrite(save_path, img)
+            self._save_image(save_path, img)
         return img
 
     def _box_cls_tensor(self) -> torch.Tensor:
@@ -549,7 +598,7 @@ class Results:
 
     def _get_detection_label(self, label_idx: int) -> str:
         """Return the display label for detection-style tasks."""
-        if self.task.lower() == "face_detection":
+        if self.task == "face_detection":
             if label_idx != 0:
                 raise ValueError(f"Unexpected face_detection class index: {label_idx}.")
             return "face"
@@ -557,7 +606,7 @@ class Results:
 
     def _get_detection_palette(self, label_idx: int) -> tuple[int, int, int]:
         """Return the display color for detection-style tasks."""
-        if self.task.lower() == "face_detection":
+        if self.task == "face_detection":
             return get_coco_det_palette(0)
         return get_coco_det_palette(label_idx)
 

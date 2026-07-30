@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ..._tasks import normalize_vision_task
+
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
 IMAGENET_IMAGES_PER_CLASS = 50
@@ -65,11 +67,13 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
     image_records = annotation.get("images") if isinstance(annotation, dict) else None
     if not isinstance(image_records, list) or len(image_records) != COCO_VALIDATION_SAMPLE_COUNT:
         return None
-    names = [
-        record.get("file_name")
-        for record in image_records
-        if isinstance(record, dict) and isinstance(record.get("file_name"), str)
-    ]
+    names: list[str] = []
+    for record in image_records:
+        if not isinstance(record, dict):
+            continue
+        file_name = record.get("file_name")
+        if isinstance(file_name, str):
+            names.append(file_name)
     return set(names) if len(names) == len(image_records) == len(set(names)) else None
 
 
@@ -196,7 +200,7 @@ def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) 
     """
 
     root = Path(data_path).expanduser()
-    normalized_task = task.lower()
+    normalized_task = normalize_vision_task(task)
     expected_dataset = {
         "image_classification": "imagenet",
         "object_detection": "coco",

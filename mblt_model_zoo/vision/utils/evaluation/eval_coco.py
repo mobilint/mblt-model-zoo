@@ -6,19 +6,38 @@ import logging
 import math
 import os
 from time import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
-from ..datasets import CustomCocodata, get_coco_loader
+from ..._tasks import normalize_vision_task
+from ..datasets import CustomCOCODataset, get_coco_loader
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
     from ..results import Results
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
+
+
+class COCOResult(NamedTuple):
+    """COCO mAP metrics."""
+
+    map5095: float
+    map50: float
+
+    @property
+    def primary_score(self) -> float:
+        """Return mAP50-95."""
+
+        return self.map5095
+
+    @property
+    def secondary_score(self) -> float:
+        """Return mAP50."""
+
+        return self.map50
 
 
 def format_coco_results(
@@ -32,6 +51,7 @@ def format_coco_results(
     postprocess: Any,
 ) -> list[dict[str, Any]]:
     """Format the results for COCO evaluation.
+
     Args:
         task (str): The task to evaluate.
         nms_outs (Results): The output of the postprocessing.
@@ -117,7 +137,19 @@ def eval_coco(
     conf_thres: float | None = None,
     iou_thres: float | None = None,
 ) -> float:
-    """Evaluates a model on the COCO dataset.
+    """Evaluate a model on COCO and return the legacy numeric mAP50-95 score."""
+
+    return eval_coco_metrics(model, data_path, batch_size, conf_thres, iou_thres).primary_score
+
+
+def eval_coco_metrics(
+    model: MBLT_Engine,
+    data_path: str,
+    batch_size: int,
+    conf_thres: float | None = None,
+    iou_thres: float | None = None,
+) -> COCOResult:
+    """Evaluate a model on COCO and return structured mAP metrics.
 
     Args:
         model (MBLT_Engine): The model engine to evaluate.
@@ -127,21 +159,23 @@ def eval_coco(
         iou_thres (float | None): Optional IoU threshold override.
 
     Returns:
-        float: The mAP score (average precision at IoU=0.50:0.95).
+        Structured mAP50-95 primary and mAP50 secondary metrics.
     """
-    if model.post_cfg["task"] in ["object_detection", "instance_segmentation"]:
-        dataset = CustomCocodata(
+    task = normalize_vision_task(
+        model.post_cfg["task"],
+        supported=("object_detection", "instance_segmentation", "pose_estimation"),
+    )
+    if task in {"object_detection", "instance_segmentation"}:
+        dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "instances_val2017.json"),
         )
-    elif model.post_cfg["task"] == "pose_estimation":
-        dataset = CustomCocodata(
+    else:
+        dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "person_keypoints_val2017.json"),
             min_keypoints=0,
         )
-    else:
-        raise NotImplementedError(f"Task {model.post_cfg['task']} is not supported")
 
     dataloader = get_coco_loader(dataset, batch_size, model.preprocess_with_metadata)
     model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)
@@ -152,9 +186,6 @@ def eval_coco(
     pbar = tqdm(dataloader, total=total_iter, desc="Evaluating COCO")
 
     inference_time = 0.0
-    infer_post_time = 0.0
-    total_time = 0.0
-
     cum_num_data = 0
 
     for input_npu, org_shape, ratio_pad, idx in pbar:
@@ -164,10 +195,9 @@ def eval_coco(
         inference_time += time() - tic
 
         nms_outs = model.postprocess(out_npu, multi_label=True)
-        infer_post_time += time() - tic
         results.extend(
             format_coco_results(
-                model.post_cfg["task"],
+                task,
                 nms_outs,
                 input_npu.shape[1:-1],
                 org_shape,
@@ -178,14 +208,13 @@ def eval_coco(
             )
         )
 
-        total_time += time() - tic
         pbar.set_postfix_str(f"NPU FPS: {cum_num_data / inference_time:.3f}")
 
     pbar.close()
-    res = evaluate_predictions_on_coco(dataset.coco, results, model.post_cfg["task"], img_ids=dataset.ids)
+    res = evaluate_predictions_on_coco(dataset.coco, results, task, img_ids=dataset.ids)
 
     print("COCO evaluation completed")
-    return float(res.stats[0].item())
+    return COCOResult(map5095=float(res.stats[0].item()), map50=float(res.stats[1].item()))
 
 
 def evaluate_predictions_on_coco(
@@ -205,25 +234,24 @@ def evaluate_predictions_on_coco(
     Returns:
         COCOeval_faster: The COCO evaluation object containing results.
     """
-    assert task.lower() in [
-        "object_detection",
-        "instance_segmentation",
-        "pose_estimation",
-    ], f"task should be included in [detection, seg, pose] but we got {task.lower()}"
+    normalized_task = normalize_vision_task(
+        task,
+        supported=("object_detection", "instance_segmentation", "pose_estimation"),
+    )
 
     if coco_results:
         coco_dt = coco_gt.loadRes(coco_results)
     else:
         coco_dt = COCO()
 
-    if task.lower() == "object_detection":
+    if normalized_task == "object_detection":
         coco_eval = COCOeval_faster(coco_gt, coco_dt, "bbox", print_function=logger.info)
-    elif task.lower() == "instance_segmentation":
+    elif normalized_task == "instance_segmentation":
         coco_eval = COCOeval_faster(coco_gt, coco_dt, "segm", print_function=logger.info)
-    elif task.lower() == "pose_estimation":
+    elif normalized_task == "pose_estimation":
         coco_eval = COCOeval_faster(coco_gt, coco_dt, "keypoints", print_function=logger.info)
     else:
-        raise NotImplementedError(f"Task {task} is not supported")
+        raise RuntimeError(f"Unexpected validated COCO task: {normalized_task}")
 
     if img_ids is not None:
         coco_eval.params.imgIds = img_ids

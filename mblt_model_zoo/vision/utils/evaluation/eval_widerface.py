@@ -11,11 +11,13 @@ import numpy as np
 from scipy.io import loadmat
 from tqdm import tqdm
 
-from ..datasets import CustomWiderface, get_widerface_loader
+from ..datasets import CustomWiderFaceDataset, get_widerface_loader
 from ..postprocess.base import YOLODetectionPostBase
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
+
+CustomWiderface = CustomWiderFaceDataset
 
 
 class WiderFaceResult(NamedTuple):
@@ -31,6 +33,18 @@ class WiderFaceResult(NamedTuple):
 
         return (self.easy_ap + self.medium_ap + self.hard_ap) / 3.0
 
+    @property
+    def primary_score(self) -> float:
+        """Return mean AP across the three validation splits."""
+
+        return self.mean_ap
+
+    @property
+    def secondary_score(self) -> float:
+        """Return Hard-set AP."""
+
+        return self.hard_ap
+
 
 def _empty_prediction() -> np.ndarray:
     """Return an empty WiderFace prediction array."""
@@ -38,7 +52,7 @@ def _empty_prediction() -> np.ndarray:
     return np.zeros((0, 5), dtype=np.float32)
 
 
-def _initialize_predictions(dataset: CustomWiderface) -> dict[str, dict[str, np.ndarray]]:
+def _initialize_predictions(dataset: CustomWiderFaceDataset) -> dict[str, dict[str, np.ndarray]]:
     """Initialize empty predictions for every WiderFace sample."""
 
     predictions: dict[str, dict[str, np.ndarray]] = {}

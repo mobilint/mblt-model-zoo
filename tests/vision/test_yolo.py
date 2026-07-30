@@ -21,6 +21,7 @@ from mblt_model_zoo.vision.wrapper import normalize_core_mode
 from tests.npu_backend_options import BaseNpuParams, build_vision_engine_kwargs
 
 TEST_DIR = Path(__file__).parent
+pytestmark = [pytest.mark.requires_network, pytest.mark.requires_npu]
 
 
 @pytest.fixture

@@ -17,6 +17,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import HfHubHTTPError
 
+from mblt_model_zoo.vision._tasks import normalize_vision_task
 from mblt_model_zoo.vision.datasets import get_dataset_config_for_task
 from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 from mblt_model_zoo.vision.wrapper import MOBILINT_CACHE_DIR, MBLT_Engine, resolve_model_config
@@ -36,7 +37,6 @@ DEFAULT_SUBSET_SIZES = {
     "obb": 100,
 }
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
-TASK_ALIASES = {"oriented_bounding_boxes": "obb"}
 
 
 def _normalize_task(task: str) -> str:
@@ -52,11 +52,7 @@ def _normalize_task(task: str) -> str:
         ValueError: If the task is not supported by vision compilation.
     """
 
-    normalized = task.lower()
-    normalized = TASK_ALIASES.get(normalized, normalized)
-    if normalized not in DEFAULT_SUBSET_SIZES:
-        raise ValueError(f"Vision compilation does not support task `{task}`.")
-    return normalized
+    return normalize_vision_task(task, supported=DEFAULT_SUBSET_SIZES)
 
 
 def _dataset_ready(task: str, data_path: Path, dataset: str | None = None) -> bool:

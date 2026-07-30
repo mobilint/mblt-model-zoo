@@ -54,8 +54,6 @@ def eval_imagenet_metrics(model: MBLT_Engine, data_path: str, batch_size: int) -
     total_iter = math.ceil(num_data / batch_size)
     pbar = tqdm(dataloader, total=total_iter, desc="Evaluating ImageNet")
     inference_time = 0.0
-    infer_post_time = 0.0
-    total_time = 0.0
     cum_num_data = 0
     cum_top1_correct = 0
     cum_top5_correct = 0
@@ -67,7 +65,6 @@ def eval_imagenet_metrics(model: MBLT_Engine, data_path: str, batch_size: int) -
         out_npu = model(input_npu)
         inference_time += time() - tic
         result = model.postprocess(out_npu)
-        infer_post_time += time() - tic
         output = result.output
         if isinstance(output, np.ndarray):
             prediction = output.argmax(-1)
@@ -85,7 +82,6 @@ def eval_imagenet_metrics(model: MBLT_Engine, data_path: str, batch_size: int) -
         cum_top5_correct += np.any(top5_prediction == label_array[:, np.newaxis], axis=-1).sum().item()
         top1_acc = cum_top1_correct / cum_num_data
         top5_acc = cum_top5_correct / cum_num_data
-        total_time += time() - tic
         pbar.set_postfix_str(
             f"Top 1 Acc.: {100 * top1_acc:.3f}%, Top 5 Acc.: {100 * top5_acc:.3f}%, "
             f"NPU FPS: {cum_num_data / inference_time:.3f}"

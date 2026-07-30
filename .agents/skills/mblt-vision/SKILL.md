@@ -63,6 +63,10 @@ description: >-
 - Keep `eval_imagenet()` returning Top-1 as a float for compatibility, and use
   `eval_imagenet_metrics()` when structured Top-1 primary and Top-5 secondary metrics are needed.
   For DOTAv1, return rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
+- Keep structured evaluator results aligned on `primary_score` and `secondary_score`. Preserve
+  numeric `eval_coco()` compatibility and use `eval_coco_metrics()` for mAP50-95 and mAP50.
+- Use the standard benchmark runner for dense tasks: record `delta1`, `abs_rel`, and `rmse` for
+  depth, and dispatch ADE20K or Cityscapes semantic evaluation from `post_cfg.dataset`.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts. Keep loader compatibility with legacy `images/val` datasets.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.

@@ -12,6 +12,7 @@ import torch
 import mblt_model_zoo.vision.utils.results as results_module
 from mblt_model_zoo.vision.utils.datasets import get_dotav1_palette
 from mblt_model_zoo.vision.utils.results import Results
+from mblt_model_zoo.vision.utils.types import NestedListTensorLike
 
 
 def test_image_classification_plot_saves_without_gui_cleanup(
@@ -103,3 +104,66 @@ def test_dotav1_palette_wraps_class_indices() -> None:
     """Match the modulo behavior used by the other visualization palettes."""
 
     assert get_dotav1_palette(15) == get_dotav1_palette(0)
+
+
+def test_results_accept_path_and_basename_save_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Accept pathlib inputs and avoid creating an empty parent directory."""
+
+    source_path = tmp_path / "source.jpg"
+    assert cv2.imwrite(str(source_path), np.zeros((8, 8, 3), dtype=np.uint8))
+    monkeypatch.chdir(tmp_path)
+    result = Results({}, {"task": "image_classification"}, torch.arange(3, dtype=torch.float32))
+
+    result.plot(source_path, Path("result.jpg"), topk=10)
+
+    assert (tmp_path / "result.jpg").is_file()
+
+
+def test_results_report_failed_image_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Raise OSError when OpenCV cannot encode or write the requested image."""
+
+    monkeypatch.setattr(cv2, "imwrite", lambda *args, **kwargs: False)
+    result = Results({}, {"task": "image_classification"}, torch.ones(2))
+
+    with pytest.raises(OSError, match="Failed to write"):
+        result.plot(np.zeros((8, 8, 3), dtype=np.uint8), "result.jpg", topk=1)
+
+
+@pytest.mark.parametrize("topk", [0, -1, 1.5, True])
+def test_results_validate_classification_topk(topk: object) -> None:
+    """Reject invalid classification Top-K values."""
+
+    result = Results({}, {"task": "image_classification"}, torch.ones(2))
+    with pytest.raises((TypeError, ValueError)):
+        result.plot(np.zeros((8, 8, 3), dtype=np.uint8), topk=topk)
+
+
+@pytest.mark.parametrize(
+    ("task", "output"),
+    [
+        ("object_detection", []),
+        ("instance_segmentation", []),
+        ("instance_segmentation", [[]]),
+    ],
+)
+def test_results_reject_empty_structured_outputs(task: str, output: NestedListTensorLike) -> None:
+    """Validate structured result containers before indexing."""
+
+    with pytest.raises(ValueError):
+        Results({}, {"task": task}, output)
+
+
+def test_results_normalize_task_alias_and_semantic_taxonomy_case() -> None:
+    """Normalize OBB aliases and semantic palette taxonomy casing."""
+
+    obb = Results({}, {"task": "oriented_bounding_boxes"}, [torch.zeros((0, 7))])
+    semantic = Results(
+        {},
+        {"task": "semantic_segmentation", "dataset": "CityScapes"},
+        np.zeros((1, 4, 4), dtype=np.uint8),
+    )
+
+    assert obb.task == "obb"
+    plotted = semantic.plot(np.zeros((4, 4, 3), dtype=np.uint8))
+    assert plotted is not None
+    assert plotted.shape == (4, 4, 3)

@@ -123,7 +123,12 @@ truth when this snapshot becomes stale.
   validation taxonomies other than `ade20k` and `cityscapes`.
 - Keep `eval_imagenet()` numerically compatible by returning Top-1 as a float. Use
   `eval_imagenet_metrics()` for structured Top-1 primary and Top-5 secondary metrics.
+- Keep evaluator result objects aligned on `primary_score` and `secondary_score`. Preserve numeric
+  `eval_coco()` compatibility while using `eval_coco_metrics()` for structured mAP50-95 and mAP50.
 - DOTAv1 validation reports rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
+- The standard Vision benchmark runner supports depth and semantic segmentation. Record `delta1`,
+  `abs_rel`, and `rmse` for depth; dispatch semantic evaluation from `post_cfg.dataset` and record
+  `miou` and `pixel_accuracy`.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
   use `labels/val_original`, which retains difficult-object filtering. Its loader also accepts
   legacy validation images under `images/val`.

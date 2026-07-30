@@ -465,7 +465,8 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreeDetectionPost):
         proto = y_ext.pop(0).permute(0, 2, 3, 1)
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
+        if not len(y_cls) == len(y_det) == len(y_ext):
+            raise ValueError("Classification, detection, and extra output counts must match.")
         y = torch.cat(
             [
                 torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)

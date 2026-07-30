@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from benchmark.vision import benchmark_vision_models, compare_benchmark_results
-from mblt_model_zoo.vision.utils.evaluation import ImageNetResult
+from mblt_model_zoo.vision.utils.evaluation import ImageNetResult, NYUDepthResult, SemanticSegmentationResult
 
 
 def test_benchmark_records_imagenet_metrics_in_primary_order(
@@ -41,6 +41,57 @@ def test_benchmark_records_imagenet_metrics_in_primary_order(
     assert score == 0.75
     assert score_name == "top1_accuracy"
     assert metrics == {"top1_accuracy": 0.75, "top5_accuracy": 0.95}
+
+
+def test_benchmark_records_depth_metrics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Record all NYU depth metrics with delta1 as primary."""
+
+    class FakeModel:
+        post_cfg = {"task": "depth_estimation", "dataset": "nyu-depth"}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_nyu_depth",
+        lambda *args, **kwargs: NYUDepthResult(delta1=0.8, abs_rel=0.1, rmse=0.2),
+    )
+    args = argparse.Namespace(task="depth_estimation", data_path=str(tmp_path), batch_size=1)
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.8, "delta1")
+    assert metrics == {"delta1": 0.8, "abs_rel": 0.1, "rmse": 0.2}
+
+
+@pytest.mark.parametrize(
+    ("dataset", "evaluator_name"),
+    [("ade20k", "eval_ade20k"), ("cityscapes", "eval_cityscapes")],
+)
+def test_benchmark_dispatches_semantic_taxonomy(
+    dataset: str,
+    evaluator_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Dispatch semantic evaluation explicitly from the configured taxonomy."""
+
+    class FakeModel:
+        post_cfg = {"task": "semantic_segmentation", "dataset": dataset}
+
+    import mblt_model_zoo.vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        evaluator_name,
+        lambda *args, **kwargs: SemanticSegmentationResult(miou=0.6, pixel_accuracy=0.9),
+    )
+    args = argparse.Namespace(task="semantic_segmentation", data_path=str(tmp_path), batch_size=1)
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(FakeModel(), args, tmp_path)
+
+    assert (score, score_name) == (0.6, "miou")
+    assert metrics == {"miou": 0.6, "pixel_accuracy": 0.9}
 
 
 def test_benchmark_continues_after_evaluator_type_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 from ..types import TensorLike
+from ._validation import normalize_image_size
 from .base import PreOps
 
 PIL_INTERP_CODES = {
@@ -42,7 +43,13 @@ class Resize(PreOps):
         """
         # Note that this behaves different for npy image and PIL image
         super().__init__()
-        self.size = size  # h, w
+        self.size = size if isinstance(size, int) and not isinstance(size, bool) else normalize_image_size(size)
+        if isinstance(self.size, int) and self.size <= 0:
+            raise ValueError(f"size must be positive, got {self.size}.")
+        if interpolation not in PIL_INTERP_CODES:
+            raise ValueError(
+                f"Unsupported resize interpolation {interpolation!r}; expected one of {sorted(PIL_INTERP_CODES)}."
+            )
         self.interpolation = interpolation
 
     def __call__(self, x: TensorLike | Image.Image) -> np.ndarray | torch.Tensor | Image.Image:
@@ -120,10 +127,10 @@ class Resize(PreOps):
             else:
                 new_h = self.size
                 new_w = int(self.size * img_w / img_h)
-        elif isinstance(self.size, list) and len(self.size) == 2:
+        elif isinstance(self.size, list):
             new_h, new_w = self.size
         else:
-            raise ValueError(f"Got unexpected size={self.size}.")
+            raise RuntimeError(f"Resize has an invalid validated size: {self.size!r}.")
         return [new_h, new_w]
 
     def _cast_squeeze_in(

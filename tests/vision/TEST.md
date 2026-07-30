@@ -19,6 +19,14 @@ Execute the entire Vision test matrix (this may take a while because it loads ev
 pytest tests/vision
 ```
 
+## Run Offline Unit Tests
+
+Exclude tests that download model artifacts or require an NPU:
+
+```bash
+pytest tests/vision -m "not requires_network and not requires_npu"
+```
+
 ## Run a Single Test File
 
 Target a specific test file to focus on one model family:

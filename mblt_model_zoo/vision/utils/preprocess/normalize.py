@@ -38,7 +38,10 @@ class Normalize(PreOps):
         """
         super().__init__()
 
-        assert style.lower() in STYLE_LIST, f"Got unexpected style={style}. The style must be one of {STYLE_LIST}."
+        if not isinstance(style, str):
+            raise TypeError(f"Normalize style must be a string, got {type(style).__name__}.")
+        if style.lower() not in STYLE_LIST:
+            raise ValueError(f"Unsupported Normalize style {style!r}; expected one of {STYLE_LIST}.")
 
         self.style = style.lower()
         mean, std = STYLE_PARAMS[self.style]
@@ -58,6 +61,10 @@ class Normalize(PreOps):
             x = x.cpu().numpy()
         elif isinstance(x, Image.Image):
             x = np.array(x)
+        elif not isinstance(x, np.ndarray):
+            raise TypeError(f"Normalize expects a NumPy array, tensor, or PIL image, got {type(x).__name__}.")
+        if x.ndim != 3:
+            raise ValueError(f"Normalize expects a three-dimensional image, got shape {x.shape}.")
         x = x.astype(np.float32) / 255.0
         x = (x - self.mean) / self.std
         return x.astype(np.float32)

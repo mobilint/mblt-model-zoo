@@ -10,6 +10,7 @@ import pytest
 from mblt_model_zoo.vision.image_classification import AlexNet, CAFormer_B36, YOLO26sCls
 
 TEST_DIR = Path(__file__).parent
+pytestmark = pytest.mark.requires_network
 
 
 @pytest.mark.parametrize(

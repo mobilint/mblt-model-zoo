@@ -29,6 +29,8 @@ Reuse organized validation and calibration datasets only after validating taxono
 required metadata and targets, and the complete official split.
 Keep TPS printed tables and JSON output synchronized through the shared
 `mblt_model_zoo/cli/tps_table.py` schema.
+Keep Vision evaluator primary and secondary score properties aligned; the standard benchmark
+runner owns depth and taxonomy-dispatched semantic metrics.
 
 Use the focused entry points for Vision and Transformers work:
 

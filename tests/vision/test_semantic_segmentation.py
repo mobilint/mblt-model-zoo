@@ -281,6 +281,30 @@ def test_semantic_metrics_ignore_void_pixels_and_pool_counts() -> None:
     assert pooled.pixel_accuracy == pytest.approx(5 / 6)
 
 
+@pytest.mark.parametrize("invalid_prediction", [255, -1, 0.5, np.nan, np.inf])
+def test_semantic_metrics_reject_invalid_predictions_at_valid_targets(invalid_prediction: float) -> None:
+    """Do not omit invalid predictions from the semantic metric denominator."""
+
+    prediction = np.array([[0, invalid_prediction]], dtype=np.float64)
+    target = np.array([[0, 1]], dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="valid target pixels"):
+        calculate_semantic_metrics(prediction, target, nc=2)
+
+
+def test_semantic_metrics_ignore_predictions_at_void_targets() -> None:
+    """Allow arbitrary predictions where the target explicitly requests ignore."""
+
+    result = calculate_semantic_metrics(
+        np.array([[0, 255]], dtype=np.int64),
+        np.array([[0, 255]], dtype=np.uint8),
+        nc=2,
+    )
+
+    assert result.miou == 1.0
+    assert result.pixel_accuracy == 1.0
+
+
 def test_semantic_results_plot_restores_original_shape(tmp_path: Path) -> None:
     """Save a semantic overlay at the source image dimensions."""
 

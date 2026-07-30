@@ -6,50 +6,14 @@ import importlib
 import inspect
 from typing import Iterable
 
+from ._tasks import VISION_TASKS, normalize_vision_task
 from .wrapper import MBLT_Engine
-
-TASKS = [
-    "image_classification",
-    "depth_estimation",
-    "object_detection",
-    "instance_segmentation",
-    "semantic_segmentation",
-    "obb",
-    "pose_estimation",
-    "face_detection",
-]
-
-_TASK_MODULES = {
-    "image_classification": "image_classification",
-    "depth_estimation": "depth_estimation",
-    "object_detection": "object_detection",
-    "instance_segmentation": "instance_segmentation",
-    "semantic_segmentation": "semantic_segmentation",
-    "obb": "obb",
-    "pose_estimation": "pose_estimation",
-    "face_detection": "face_detection",
-}
-
-_TASK_ALIASES = {
-    "oriented_bounding_boxes": "obb",
-}
-
-_DEFAULT_TASKS = [
-    "image_classification",
-    "depth_estimation",
-    "object_detection",
-    "instance_segmentation",
-    "semantic_segmentation",
-    "obb",
-    "pose_estimation",
-    "face_detection",
-]
 
 
 def list_tasks() -> list[str]:
     """Lists the available vision tasks."""
 
-    return TASKS.copy()
+    return list(VISION_TASKS)
 
 
 def list_models(tasks: str | Iterable[str] | None = None) -> dict[str, list[str]]:
@@ -66,20 +30,15 @@ def list_models(tasks: str | Iterable[str] | None = None) -> dict[str, list[str]
     """
 
     if tasks is None:
-        task_list = _DEFAULT_TASKS
+        task_list = list(VISION_TASKS)
     elif isinstance(tasks, str):
         task_list = [tasks]
     else:
         task_list = list(tasks)
 
-    supported_tasks = set(TASKS) | set(_TASK_ALIASES)
-    invalid_tasks = sorted(set(task_list) - supported_tasks)
-    if invalid_tasks:
-        raise ValueError(f"mblt_model_zoo.vision supports tasks in {sorted(supported_tasks)}, got {invalid_tasks}.")
-
     available_models: dict[str, list[str]] = {}
     for task in task_list:
-        module_name = _TASK_MODULES[_TASK_ALIASES.get(task, task)]
+        module_name = normalize_vision_task(task)
         module = importlib.import_module(f".{module_name}", package=__name__.replace("._api", ""))
         available_models[task] = sorted(
             name

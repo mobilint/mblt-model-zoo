@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from .._tasks import normalize_vision_task
+
 DATASET_CONFIG_DIR = Path(__file__).parent
 
 
@@ -109,17 +111,19 @@ def get_dataset_config_for_task(task: str, dataset: str | None = None) -> dict[s
         ValueError: If no configured dataset supports the task.
     """
 
+    normalized_task = normalize_vision_task(task)
     if dataset is not None:
         try:
             config = get_dataset_config(dataset)
         except FileNotFoundError as exc:
             raise ValueError(f"No vision dataset definition exists for taxonomy `{dataset}`.") from exc
-        if task not in config["tasks"]:
+        configured_tasks = {normalize_vision_task(configured_task) for configured_task in config["tasks"]}
+        if normalized_task not in configured_tasks:
             raise ValueError(f"Vision dataset `{dataset}` does not support task `{task}`.")
         return config
 
     for config_path in sorted(DATASET_CONFIG_DIR.glob("*.yaml")):
         config = get_dataset_config(config_path.stem)
-        if task in config["tasks"]:
+        if normalized_task in {normalize_vision_task(configured_task) for configured_task in config["tasks"]}:
             return config
     raise ValueError(f"No vision dataset definition supports task `{task}`.")

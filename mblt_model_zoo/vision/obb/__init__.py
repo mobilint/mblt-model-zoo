@@ -1,3 +1,5 @@
+"""Oriented-bounding-box Vision model exports."""
+
 from __future__ import annotations
 
 from .._compat import create_model_class

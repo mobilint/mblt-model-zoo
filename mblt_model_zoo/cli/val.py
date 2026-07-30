@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from mblt_model_zoo.vision._tasks import normalize_vision_task
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
 from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 
@@ -187,6 +188,7 @@ def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> boo
 def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = None) -> str:
     """Organizes the dataset automatically when the expected layout is missing."""
 
+    task = normalize_vision_task(task)
     data_path = os.path.expanduser(args.data_path or _default_data_path_for_task(task, dataset))
     if _dataset_ready(task, data_path, dataset) and not args.force_organize:
         print(f"Using organized dataset at {data_path}")
@@ -269,7 +271,7 @@ def _run_validation(args: argparse.Namespace) -> float:
         from mblt_model_zoo.vision.utils.evaluation import (
             eval_ade20k,
             eval_cityscapes,
-            eval_coco,
+            eval_coco_metrics,
             eval_dota,
             eval_imagenet_metrics,
             eval_nyu_depth,
@@ -284,7 +286,7 @@ def _run_validation(args: argparse.Namespace) -> float:
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             raise SystemExit("Validation requires end-to-end YOLO postprocessing. Use `--e2e true` or omit the option.")
 
-        task = str(model.post_cfg.get("task", "")).lower()
+        task = normalize_vision_task(model.post_cfg.get("task", ""))
         dataset = model.post_cfg.get("dataset")
         taxonomy = str(dataset).lower() if isinstance(dataset, str) else None
         if task == "semantic_segmentation" and taxonomy not in {"ade20k", "cityscapes"}:
@@ -311,7 +313,7 @@ def _run_validation(args: argparse.Namespace) -> float:
                 f"(abs_rel): {depth_result.abs_rel:.5f}, "
                 f"(rmse): {depth_result.rmse:.5f}"
             )
-            return depth_result.delta1
+            return depth_result.primary_score
 
         if task == "semantic_segmentation":
             if taxonomy == "cityscapes":
@@ -319,7 +321,7 @@ def _run_validation(args: argparse.Namespace) -> float:
             elif taxonomy == "ade20k":
                 semantic_result = eval_ade20k(model=model, data_path=data_path, batch_size=args.batch_size)
             else:
-                raise AssertionError(f"Unexpected validated semantic taxonomy: {taxonomy!r}.")
+                raise AssertionError(f"Unexpected validated semantic taxonomy: {taxonomy!r}")
             print(
                 "Validation score "
                 f"(mIoU): {semantic_result.miou:.5f}, "
@@ -328,15 +330,15 @@ def _run_validation(args: argparse.Namespace) -> float:
             return semantic_result.primary_score
 
         if task in {"object_detection", "instance_segmentation", "pose_estimation"}:
-            score = eval_coco(
+            coco_result = eval_coco_metrics(
                 model=model,
                 data_path=data_path,
                 batch_size=args.batch_size,
                 conf_thres=args.conf_thres,
                 iou_thres=args.iou_thres,
             )
-            print(f"Validation score (mAP 50-95): {score:.5f}")
-            return score
+            print(f"Validation score (mAP50-95): {coco_result.map5095:.5f}, (mAP50): {coco_result.map50:.5f}")
+            return coco_result.primary_score
 
         if task == "obb":
             dota_result = eval_dota(
@@ -348,8 +350,8 @@ def _run_validation(args: argparse.Namespace) -> float:
             )
             print(
                 "Validation score "
-                f"(rotated mAP test 50-95): {dota_result.map5095:.5f}, "
-                f"(rotated mAP test 50): {dota_result.map50:.5f}"
+                f"(rotated mAP50-95): {dota_result.map5095:.5f}, "
+                f"(rotated mAP50): {dota_result.map50:.5f}"
             )
             return dota_result.primary_score
 
@@ -368,7 +370,7 @@ def _run_validation(args: argparse.Namespace) -> float:
                 f"(Hard AP): {widerface_result.hard_ap:.5f}, "
                 f"(Mean AP): {widerface_result.mean_ap:.5f}"
             )
-            return widerface_result.mean_ap
+            return widerface_result.primary_score
 
         raise SystemExit(f"Unsupported vision task for validation: {task}")
     finally:

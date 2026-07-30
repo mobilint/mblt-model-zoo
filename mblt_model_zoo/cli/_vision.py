@@ -10,7 +10,21 @@ from typing import Any
 
 import torch
 
+from mblt_model_zoo.vision._tasks import normalize_vision_task
+
 DEFAULT_OUTPUT_DIR = Path("runs") / "vision"
+
+
+def parse_unit_interval(value: str) -> float:
+    """Parse a floating-point value strictly between zero and one."""
+
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a number in the open interval (0, 1)") from exc
+    if not 0 < parsed < 1:
+        raise argparse.ArgumentTypeError(f"expected a number in the open interval (0, 1), got {value}")
+    return parsed
 
 
 def parse_target_cores(value: str | None) -> list[str] | None:
@@ -92,8 +106,8 @@ def add_threshold_args(
 ) -> None:
     """Adds postprocess threshold arguments for dense vision tasks."""
 
-    parser.add_argument("--conf-thres", type=float, default=conf_default, help="Confidence threshold.")
-    parser.add_argument("--iou-thres", type=float, default=iou_default, help="IoU threshold.")
+    parser.add_argument("--conf-thres", type=parse_unit_interval, default=conf_default, help="Confidence threshold.")
+    parser.add_argument("--iou-thres", type=parse_unit_interval, default=iou_default, help="IoU threshold.")
 
 
 def parse_bool(value: str) -> bool:
@@ -222,7 +236,7 @@ def run_vision_inference(
     require_source_file(args.source)
     model = create_vision_engine(args)
     try:
-        actual_task = str(model.post_cfg.get("task", "")).lower()
+        actual_task = normalize_vision_task(model.post_cfg.get("task", ""))
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk

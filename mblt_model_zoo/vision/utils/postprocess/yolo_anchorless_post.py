@@ -381,7 +381,8 @@ class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
         """
         if self.reg_max == 0:  # skip dfl for yolov6 s, n models
             return x
-        assert x.ndim == 3, "Input must be a 3D tensor (B, 4 * reg_max, A)"
+        if x.ndim != 3:
+            raise ValueError(f"DFL input must have shape (B, 4 * reg_max, A), got {tuple(x.shape)}.")
         B, _, A = x.shape
         x = x.view(B, 4, self.reg_max, A).softmax(dim=2)
         return (x * self.dfl_weight.view(1, 1, self.reg_max, 1)).sum(dim=2)
@@ -481,7 +482,8 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessDetectionPost):
         proto = y_ext.pop(0).permute(0, 2, 3, 1)
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        assert len(y_cls) == len(y_det) == len(y_ext), "output arguments are not in a proper form"
+        if not len(y_cls) == len(y_det) == len(y_ext):
+            raise ValueError("Classification, detection, and extra output counts must match.")
         y = torch.cat(
             [
                 torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)

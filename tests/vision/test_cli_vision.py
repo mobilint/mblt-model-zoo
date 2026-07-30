@@ -40,6 +40,7 @@ from mblt_model_zoo.vision.utils.datasets.dataloader import CustomDOTAv1
 from mblt_model_zoo.vision.utils.datasets.organizer import construct_dotav1_from_archives
 from mblt_model_zoo.vision.utils.evaluation import (
     ADE20KResult,
+    COCOResult,
     DOTAResult,
     ImageNetResult,
     SemanticSegmentationResult,
@@ -1040,9 +1041,7 @@ def test_cli_val_routes_obb_to_dota_evaluator(
     engine_kwargs = cast(dict[str, object], calls["engine_kwargs"])
     eval_kwargs = cast(dict[str, object], calls["eval_kwargs"])
     assert score == 0.123
-    assert (
-        "Validation score (rotated mAP test 50-95): 0.12300, (rotated mAP test 50): 0.23400" in capsys.readouterr().out
-    )
+    assert "Validation score (rotated mAP50-95): 0.12300, (rotated mAP50): 0.23400" in capsys.readouterr().out
     assert engine_kwargs["model_cls"] == "yolov8m-obb"
     assert engine_kwargs["framework"] == "onnx"
     assert engine_kwargs["postprocess_kwargs"] == {"e2e": True}
@@ -1473,16 +1472,36 @@ def test_metric_results_preserve_tuple_compatibility() -> None:
     """Keep legacy tuple fields while exposing primary and secondary metrics."""
 
     imagenet_result = ImageNetResult(top1=0.75, top5=0.95)
+    coco_result = COCOResult(map5095=0.55, map50=0.75)
     dota_result = DOTAResult(0.7, 0.45)
+    widerface_result = WiderFaceResult(0.9, 0.8, 0.7)
 
     assert tuple(imagenet_result) == (0.75, 0.95)
     assert imagenet_result.primary_score == imagenet_result.top1
     assert imagenet_result.secondary_score == imagenet_result.top5
+    assert tuple(coco_result) == (0.55, 0.75)
+    assert coco_result.primary_score == coco_result.map5095
+    assert coco_result.secondary_score == coco_result.map50
     assert tuple(dota_result) == (0.7, 0.45)
     assert dota_result.map50 == 0.7
     assert dota_result.map5095 == 0.45
     assert dota_result.primary_score == dota_result.map5095
     assert dota_result.secondary_score == dota_result.map50
+    assert widerface_result.primary_score == widerface_result.mean_ap
+    assert widerface_result.secondary_score == widerface_result.hard_ap
+
+
+def test_eval_coco_preserves_numeric_compatibility(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep eval_coco returning its historical mAP50-95 float."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_coco")
+    monkeypatch.setattr(
+        eval_module,
+        "eval_coco_metrics",
+        lambda *args, **kwargs: COCOResult(map5095=0.55, map50=0.75),
+    )
+
+    assert eval_module.eval_coco(object(), "dataset", 1) == 0.55
 
 
 def test_dota_matching_uses_one_to_one_duplicates() -> None:

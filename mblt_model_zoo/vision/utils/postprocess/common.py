@@ -1128,16 +1128,16 @@ def nmsout2eval_seg(
         h, w = seg_result.shape[1:3]
         seg_result = seg_result.permute(0, 2, 1).contiguous().view(seg_result.shape[0], h * w).byte()
         counts = multi_encode(seg_result)
-        assert len(counts) == seg_result.shape[0], "The number of encoded masks must match the mask tensor batch size."
+        if len(counts) != seg_result.shape[0]:
+            raise RuntimeError(f"Encoded {len(counts)} masks for a mask tensor batch of {seg_result.shape[0]}.")
         for c in counts:
             extra.append({"size": [h, w], "counts": to_string(c)})
         return extra
 
     extra_list = [mask_encode(seg_result) for seg_result in scaled_seg_results]
     for labels, boxes, scores, extra in zip(labels_list, boxes_list, scores_list, extra_list):
-        assert len(labels) == len(boxes) == len(scores) == len(extra), (
-            "Segmentation evaluation outputs must have matching detection and mask counts."
-        )
+        if not len(labels) == len(boxes) == len(scores) == len(extra):
+            raise RuntimeError("Segmentation evaluation produced mismatched label, box, score, and mask counts.")
     return labels_list, boxes_list, scores_list, extra_list
 
 

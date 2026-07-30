@@ -18,6 +18,10 @@
   it rejects non-finite predictions at those pixels and reports `delta1`, `abs_rel`, and `rmse`.
 - `eval_imagenet()` returns Top-1 as a float for compatibility; `eval_imagenet_metrics()` exposes
   structured Top-1 primary and Top-5 secondary metrics.
+- Evaluator result objects expose `primary_score` and `secondary_score`; `eval_coco()` remains
+  numeric while `eval_coco_metrics()` exposes structured mAP50-95 and mAP50.
+- The standard Vision benchmark runner records NYU depth metrics and dispatches ADE20K or
+  Cityscapes semantic metrics from `post_cfg.dataset`.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
 - DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts;
   its loader also accepts legacy `images/val` datasets.

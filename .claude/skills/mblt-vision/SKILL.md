@@ -11,6 +11,10 @@ Read and follow the canonical skill at
 `eval_imagenet()` returns Top-1 as a float for compatibility, while `eval_imagenet_metrics()`
 exposes structured Top-1 primary and Top-5 secondary metrics. DOTAv1 validation treats rotated
 mAP50-95 as primary and rotated mAP50 as secondary.
+Structured evaluator results expose primary and secondary score properties. Keep `eval_coco()`
+numeric and use `eval_coco_metrics()` for structured mAP50-95 and mAP50.
+The standard benchmark runner records NYU depth metrics and dispatches ADE20K or Cityscapes
+semantic evaluation from `post_cfg.dataset`.
 
 DOTAv1 loaders prefer flat `images/` validation files and accept legacy `images/val` as a fallback.
 

@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 
 from ..types import TensorLike
+from ._validation import normalize_image_size
 from .base import PreOps
 
 
@@ -18,18 +19,14 @@ class CenterCrop(PreOps):
     Center crop the image to a specified size.
     """
 
-    def __init__(self, size: int | list[int]) -> None:
+    def __init__(self, size: int | list[int] | tuple[int, int]) -> None:
         """Initializes the CenterCrop operation.
 
         Args:
             size (int | list[int]): Target size [h, w]. If int, size is [size, size].
         """
         super().__init__()
-        if isinstance(size, list):
-            assert len(size) == 2, f"Got unexpected size={size}."
-            self.size = size
-        elif isinstance(size, int):
-            self.size = [size, size]
+        self.size = normalize_image_size(size)
 
     def __call__(self, x: TensorLike | Image.Image) -> np.ndarray:
         """Applies center crop to the image.
@@ -44,8 +41,12 @@ class CenterCrop(PreOps):
             image = x.cpu().numpy()
         elif isinstance(x, Image.Image):
             image = np.array(x)
-        else:
+        elif isinstance(x, np.ndarray):
             image = x
+        else:
+            raise TypeError(f"CenterCrop expects a NumPy array, tensor, or PIL image, got {type(x).__name__}.")
+        if image.ndim != 3:
+            raise ValueError(f"CenterCrop expects a three-dimensional image, got shape {image.shape}.")
         H, W = image.shape[:2]
         if (self.size[0] == H) and (self.size[1] == W):
             return image
