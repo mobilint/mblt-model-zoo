@@ -112,8 +112,8 @@ def test_should_download_serially_for_same_host_urls() -> None:
     )
 
 
-def test_construct_imagenet_replaces_stale_output(tmp_path: Path) -> None:
-    """Replace the managed ImageNet root so stale categories cannot survive repair."""
+def _create_imagenet_source(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a small structurally valid ImageNet organizer source."""
 
     image_dir = tmp_path / "source-images"
     xml_dir = tmp_path / "source-xml" / "val"
@@ -126,19 +126,11 @@ def test_construct_imagenet_replaces_stale_output(tmp_path: Path) -> None:
             "<annotation><object><name>n00000001</name></object></annotation>",
             encoding="utf-8",
         )
-
-    output_dir = tmp_path / "imagenet"
-    (output_dir / "stale-class").mkdir(parents=True)
-    (output_dir / "stale-class" / "stale.JPEG").write_bytes(b"stale")
-
-    organizer.construct_imagenet(str(image_dir), str(xml_dir.parent), str(output_dir))
-
-    assert {path.name for path in output_dir.iterdir()} == {"n00000001"}
-    assert len(list((output_dir / "n00000001").iterdir())) == 50
+    return image_dir, xml_dir.parent
 
 
-def test_construct_coco_replaces_stale_output(tmp_path: Path) -> None:
-    """Replace the managed COCO root so stale images and annotations are removed."""
+def _create_coco_source(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a small COCO organizer source."""
 
     image_dir = tmp_path / "source-images"
     annotation_dir = tmp_path / "source-annotations" / "annotations"
@@ -146,20 +138,11 @@ def test_construct_coco_replaces_stale_output(tmp_path: Path) -> None:
     annotation_dir.mkdir(parents=True)
     (image_dir / "000000000001.jpg").write_bytes(b"image")
     (annotation_dir / "instances_val2017.json").write_text("{}", encoding="utf-8")
-
-    output_dir = tmp_path / "coco"
-    (output_dir / "val2017").mkdir(parents=True)
-    (output_dir / "val2017" / "stale.jpg").write_bytes(b"stale")
-    (output_dir / "stale_val2017.json").write_text("{}", encoding="utf-8")
-
-    organizer.construct_coco(str(image_dir), str(annotation_dir.parent), str(output_dir))
-
-    assert {path.name for path in (output_dir / "val2017").iterdir()} == {"000000000001.jpg"}
-    assert {path.name for path in output_dir.iterdir()} == {"val2017", "instances_val2017.json"}
+    return image_dir, annotation_dir.parent
 
 
-def test_construct_widerface_replaces_stale_output(tmp_path: Path) -> None:
-    """Replace the managed WiderFace root so stale event images cannot survive repair."""
+def _create_widerface_source(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a small WiderFace organizer source."""
 
     image_dir = tmp_path / "source-images" / "images" / "0--Parade"
     annotation_dir = tmp_path / "source-annotations"
@@ -167,16 +150,119 @@ def test_construct_widerface_replaces_stale_output(tmp_path: Path) -> None:
     annotation_dir.mkdir()
     (image_dir / "sample.jpg").write_bytes(b"image")
     (annotation_dir / "wider_face_val.mat").write_bytes(b"metadata")
+    return image_dir.parent.parent, annotation_dir
+
+
+def test_construct_imagenet_replaces_stale_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Replace a managed ImageNet root only after staged readiness succeeds."""
+
+    image_dir, xml_dir = _create_imagenet_source(tmp_path)
+    readiness_calls: list[tuple[str, str]] = []
+
+    def _dataset_ready(_: str, task: str, dataset: str) -> bool:
+        readiness_calls.append((task, dataset))
+        return True
+
+    monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
+
+    output_dir = tmp_path / "imagenet"
+    (output_dir / "stale-class").mkdir(parents=True)
+    (output_dir / "stale-class" / "stale.JPEG").write_bytes(b"stale")
+
+    organizer.construct_imagenet(str(image_dir), str(xml_dir), str(output_dir))
+
+    assert {path.name for path in output_dir.iterdir()} == {"n00000001"}
+    assert len(list((output_dir / "n00000001").iterdir())) == 50
+    assert readiness_calls == [("image_classification", "imagenet")]
+
+
+def test_construct_coco_replaces_stale_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Replace a managed COCO root only after staged readiness succeeds."""
+
+    image_dir, annotation_dir = _create_coco_source(tmp_path)
+    readiness_calls: list[tuple[str, str]] = []
+
+    def _dataset_ready(_: str, task: str, dataset: str) -> bool:
+        readiness_calls.append((task, dataset))
+        return True
+
+    monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
+
+    output_dir = tmp_path / "coco"
+    (output_dir / "val2017").mkdir(parents=True)
+    (output_dir / "val2017" / "stale.jpg").write_bytes(b"stale")
+    (output_dir / "stale_val2017.json").write_text("{}", encoding="utf-8")
+
+    organizer.construct_coco(str(image_dir), str(annotation_dir), str(output_dir))
+
+    assert {path.name for path in (output_dir / "val2017").iterdir()} == {"000000000001.jpg"}
+    assert {path.name for path in output_dir.iterdir()} == {"val2017", "instances_val2017.json"}
+    assert readiness_calls == [
+        ("object_detection", "coco"),
+        ("pose_estimation", "coco"),
+    ]
+
+
+def test_construct_widerface_replaces_stale_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Replace a managed WiderFace root only after staged readiness succeeds."""
+
+    image_dir, annotation_dir = _create_widerface_source(tmp_path)
+    readiness_calls: list[tuple[str, str]] = []
+
+    def _dataset_ready(_: str, task: str, dataset: str) -> bool:
+        readiness_calls.append((task, dataset))
+        return True
+
+    monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
 
     output_dir = tmp_path / "widerface"
     (output_dir / "images" / "stale-event").mkdir(parents=True)
     (output_dir / "images" / "stale-event" / "stale.jpg").write_bytes(b"stale")
     (output_dir / "stale_val.mat").write_bytes(b"stale")
 
-    organizer.construct_widerface(str(image_dir.parent.parent), str(annotation_dir), str(output_dir))
+    organizer.construct_widerface(str(image_dir), str(annotation_dir), str(output_dir))
 
     assert {path.name for path in (output_dir / "images").iterdir()} == {"0--Parade"}
     assert {path.name for path in output_dir.iterdir()} == {"images", "wider_face_val.mat"}
+    assert readiness_calls == [("face_detection", "widerface")]
+
+
+@pytest.mark.parametrize("dataset", ["imagenet", "coco", "widerface"])
+def test_incomplete_staged_dataset_preserves_existing_cache(
+    tmp_path: Path,
+    dataset: str,
+) -> None:
+    """Reject incomplete staged roots before replacing any existing cache."""
+
+    source_builders = {
+        "imagenet": _create_imagenet_source,
+        "coco": _create_coco_source,
+        "widerface": _create_widerface_source,
+    }
+    constructors = {
+        "imagenet": organizer.construct_imagenet,
+        "coco": organizer.construct_coco,
+        "widerface": organizer.construct_widerface,
+    }
+    first_source, second_source = source_builders[dataset](tmp_path)
+
+    output_dir = tmp_path / dataset
+    output_dir.mkdir()
+    (output_dir / "valid-cache-marker").write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="existing dataset cache was not replaced"):
+        constructors[dataset](str(first_source), str(second_source), str(output_dir))
+
+    assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
 
 
 def test_safe_unpack_archive_preserves_regular_tar_layout(tmp_path: Path) -> None:

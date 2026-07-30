@@ -31,6 +31,7 @@ from .readiness import (
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
     DOTAV1_VALIDATION_SAMPLE_COUNT,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    dataset_ready,
 )
 
 DOWNLOAD_CHUNK_SIZE = 1 * 1024 * 1024
@@ -97,6 +98,30 @@ def _replace_staged_directories(
         shutil.rmtree(backup_dir)
         raise
     shutil.rmtree(backup_dir)
+
+
+def _validate_staged_dataset(
+    staged_output_dir: str,
+    dataset: str,
+    tasks: Iterable[str],
+) -> None:
+    """Validate a complete staged dataset before replacing its managed cache.
+
+    Args:
+        staged_output_dir: Root of the staged organized dataset.
+        dataset: Validation dataset taxonomy.
+        tasks: Tasks whose required metadata and files must all be ready.
+
+    Raises:
+        ValueError: If the staged dataset is incomplete or has mismatched identity.
+    """
+
+    if all(dataset_ready(staged_output_dir, task, dataset) for task in tasks):
+        return
+    raise ValueError(
+        f"Staged {dataset} validation dataset is incomplete or has mismatched metadata; "
+        "the existing dataset cache was not replaced."
+    )
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -342,6 +367,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
             if num_images != 50:
                 raise ValueError(f"Object {object_name} has {num_images} images, but expected 50")
         pbar.close()
+        _validate_staged_dataset(staged_output_dir, "imagenet", ("image_classification",))
         _replace_staged_directories(
             ((staged_output_dir, output_dir),),
             output_parent_dir,
@@ -403,6 +429,11 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
                     os.path.join(annotation_dir, "annotations", file),
                     os.path.join(staged_output_dir, file),
                 )
+        _validate_staged_dataset(
+            staged_output_dir,
+            "coco",
+            ("object_detection", "pose_estimation"),
+        )
         _replace_staged_directories(
             ((staged_output_dir, output_dir),),
             output_parent_dir,
@@ -463,6 +494,7 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) ->
         for file in os.listdir(annotation_dir):
             if "_val" in file:
                 shutil.copy(os.path.join(annotation_dir, file), staged_output_dir)
+        _validate_staged_dataset(staged_output_dir, "widerface", ("face_detection",))
         _replace_staged_directories(
             ((staged_output_dir, output_dir),),
             output_parent_dir,

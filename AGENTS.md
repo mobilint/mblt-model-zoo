@@ -113,9 +113,10 @@ truth when this snapshot becomes stale.
 - Reuse an organized validation or calibration root only when its taxonomy-specific layout,
   required metadata and targets, and full official validation sample count are all valid. Apply
   this consistently to ImageNet, COCO, DOTAv1, WiderFace, and dense datasets.
-- Install managed ImageNet, COCO, and WiderFace roots by atomically replacing staged output so
-  readiness repair removes stale files. Match WiderFace event and image identities exactly to
-  `wider_face_val.mat`, not only its aggregate counts.
+- Validate complete staged ImageNet, COCO, and WiderFace roots before atomically replacing managed
+  output so failed readiness repair preserves a valid cache and successful repair removes stale
+  files. Match WiderFace event and image identities exactly to `wider_face_val.mat`, not only its
+  aggregate counts.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over target-valid NYU Depth V2 pixels, rejects non-finite predictions at those
   pixels, and reports `delta1` as the primary score with `abs_rel` and `rmse` as auxiliary metrics.

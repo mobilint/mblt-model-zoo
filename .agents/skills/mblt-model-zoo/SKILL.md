@@ -45,8 +45,8 @@ description: >-
   before median alignment.
 - Reuse organized validation and calibration datasets only after checking their taxonomy-specific
   layout, required metadata and targets, and full official split count.
-- Atomically replace staged ImageNet, COCO, and WiderFace roots during organization, and validate
-  WiderFace event/image identities against `wider_face_val.mat`.
+- Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
+  preserves the existing cache; validate WiderFace event/image identities against `wider_face_val.mat`.
 - Keep `mblt-model-zoo tps` printed tables and JSON output driven by the shared
   `mblt_model_zoo/cli/tps_table.py` schema.
 - Keep Vision evaluator results aligned on primary and secondary score properties. The standard
