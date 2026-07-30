@@ -92,7 +92,7 @@ def _dataset_ready(task: str, data_path: Path) -> bool:
         "instance_segmentation": data_path / "val2017",
         "pose_estimation": data_path / "val2017",
         "face_detection": data_path / "images",
-        "obb": data_path / "images" / "val",
+        "obb": data_path / "images",
     }[task]
     return image_dir.is_dir() and any(
         path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in image_dir.rglob("*")

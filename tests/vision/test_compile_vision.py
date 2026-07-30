@@ -261,6 +261,32 @@ def test_dense_dataset_readiness_requires_paired_targets(task: str, target_dir: 
     assert compile_module._dataset_ready(task, tmp_path)
 
 
+def test_obb_dataset_readiness_accepts_flat_images(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Accept the flat image layout produced by the DOTAv1 organizer."""
+
+    data_path = tmp_path / "dotav1"
+    monkeypatch.setattr(
+        compile_module,
+        "get_dataset_config_for_task",
+        lambda task, dataset=None: {
+            "name": "dotav1",
+            "path": str(data_path),
+            "download": {"url": "https://example.test/dotav1.zip"},
+        },
+    )
+
+    def _organize_dotav1(**kwargs: str) -> None:
+        assert kwargs["output_dir"] == str(data_path)
+        _write_images(data_path / "images", ["P0001.png"])
+
+    monkeypatch.setattr(dataset_utils, "organize_dotav1", _organize_dotav1)
+
+    assert compile_module.ensure_calibration_dataset("obb", dataset="dotav1") == data_path
+
+
 def test_dense_dataset_organizers_follow_model_taxonomy(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
