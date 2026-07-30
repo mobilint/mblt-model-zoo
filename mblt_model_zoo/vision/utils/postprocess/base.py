@@ -57,7 +57,6 @@ class YOLODetectionPostBase(PostBase):
         ("coco", "instance_segmentation"): 80,
         ("coco", "pose_estimation"): 1,
         ("dotav1", "obb"): 15,
-        ("open-images-v7", "object_detection"): 601,
         ("widerface", "face_detection"): 1,
     }
     DEFAULT_NC_BY_TASK: dict[str, int] = {

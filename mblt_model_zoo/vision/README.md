@@ -41,9 +41,9 @@ the same ONNX loading path. Set `file_cfg.onnx_filename` only when a Hub reposit
 non-matching ONNX filename.
 
 Every model configuration also declares `post_cfg.dataset`. This identifies the output taxonomy,
-not merely the broad task: COCO detection uses 80 classes, Open Images V7 detection uses 601,
-Cityscapes semantic segmentation uses 19, and ADE20K semantic segmentation uses 150. YOLO
-postprocessing resolves shape-sensitive class counts from the dataset and task together.
+not merely the broad task: COCO detection uses 80 classes, Cityscapes semantic segmentation uses
+19, and ADE20K semantic segmentation uses 150. YOLO postprocessing resolves shape-sensitive class
+counts from the dataset and task together.
 
 ```python
 from mblt_model_zoo.vision.image_classification import ResNet50
