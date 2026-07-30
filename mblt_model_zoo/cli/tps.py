@@ -2708,30 +2708,18 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         )
         if total is not None:
             total_npu_latency_pct_last.append(float(total))
-    prefill_last_tpj: list[float] = []
-    decode_last_tpj: list[float] = []
-    prefill_last_jpt: list[float] = []
-    decode_last_jpt: list[float] = []
-    for i, p_tps in enumerate(prefill_last):
-        phase_power = None
-        if i < len(run_phase_device):
-            v = run_phase_device[i].get("prefill", {}).get("avg_power_w")
-            if isinstance(v, (int, float)):
-                phase_power = float(v)
-        if phase_power is not None and phase_power > 0:
-            tpj = p_tps / phase_power
-            prefill_last_tpj.append(tpj)
-            prefill_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
-    for i, d_tps in enumerate(decode_last):
-        phase_power = None
-        if i < len(run_phase_device):
-            v = run_phase_device[i].get("decode", {}).get("avg_power_w")
-            if isinstance(v, (int, float)):
-                phase_power = float(v)
-        if phase_power is not None and phase_power > 0:
-            tpj = d_tps / phase_power
-            decode_last_tpj.append(tpj)
-            decode_last_jpt.append(1.0 / tpj if tpj > 0 else 0.0)
+    prefill_tps_per_w = [
+        r.prefill_tps_per_w for r in runs if getattr(r, "prefill_tps_per_w", None) is not None
+    ]
+    decode_tps_per_w = [
+        r.decode_tps_per_w for r in runs if getattr(r, "decode_tps_per_w", None) is not None
+    ]
+    prefill_j_per_token = [
+        r.prefill_j_per_token for r in runs if getattr(r, "prefill_j_per_token", None) is not None
+    ]
+    decode_j_per_token = [
+        r.decode_j_per_token for r in runs if getattr(r, "decode_j_per_token", None) is not None
+    ]
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
@@ -2783,10 +2771,10 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
                 "prefill_energy": prefill_energy_last,
                 "decode_energy": decode_energy_last,
                 "total_energy": run_total_energy,
-                "prefill_tps_per_w": prefill_last_tpj,
-                "decode_tps_per_w": decode_last_tpj,
-                "prefill_j_per_tok": prefill_last_jpt,
-                "decode_j_per_tok": decode_last_jpt,
+                "prefill_tps_per_w": prefill_tps_per_w,
+                "decode_tps_per_w": decode_tps_per_w,
+                "prefill_j_per_tok": prefill_j_per_token,
+                "decode_j_per_tok": decode_j_per_token,
             }
         )
     _print_summary_header()
