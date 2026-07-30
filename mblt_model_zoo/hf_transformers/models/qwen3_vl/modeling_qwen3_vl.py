@@ -458,9 +458,9 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         for i, inp in enumerate(npu_inputs):
             if isinstance(inp, list):
                 shapes = [np.asarray(x).shape for x in inp]
-                print(f"[Vision] Input[{i}] (dynamic, {len(inp)} tensors): {shapes}")
+                logger.debug("[Vision] Input[%d] (dynamic, %d tensors): %s", i, len(inp), shapes)
             else:
-                print(f"[Vision] Input[{i}] shape: {np.asarray(inp).shape}")
+                logger.debug("[Vision] Input[%d] shape: %s", i, np.asarray(inp).shape)
         if not is_dynamic and core_mode == "multi" and len(npu_inputs) > 1:
             encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
             if encoder_outputs is None:
@@ -487,7 +487,8 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
     """Pre-computed MRoPE for Qwen3-VL on MXQ.
 
     Builds a 1-D ``position_table[max_pos, peSize]`` at init (rotateTensor
-    format, same as ``LlamaRotaryEmbedding`` in draftMXQ) and three
+    format, same layout as ``CachedRotaryEmbedding`` in
+    ``mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils``) and three
     dimension masks derived from ``mrope_section``.  At forward time the
     table is indexed by the per-dimension position ids and merged via the
     masks — no matmul, cos/sin, or interleave at runtime.

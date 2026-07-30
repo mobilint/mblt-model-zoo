@@ -15,9 +15,12 @@ from transformers.models.qwen3_vl.processing_qwen3_vl import (
 )
 from transformers.processing_utils import Unpack
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
+from transformers.utils.generic import logging
 from transformers.video_utils import VideoInput
 
 from .configuration_qwen3_vl import MobilintQwen3VLConfig
+
+logger = logging.get_logger(__name__)
 
 # NPU vision model fixed input shape: (H_npu, W_npu, C_npu) = (1024, 64, 6)
 _NPU_H, _NPU_W = 1024, 64
@@ -138,9 +141,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if ip.size["longest_edge"] <= limit:
             return
 
-        print(
-            f"[dynamic-vision] capped max_pixels {ip.size['longest_edge']} -> {limit} "
-            f"(<= {self.max_vision_tokens} vision tokens)"
+        logger.info(
+            "[dynamic-vision] capped max_pixels %d -> %d (<= %d vision tokens)",
+            ip.size["longest_edge"],
+            limit,
+            self.max_vision_tokens,
         )
         ip.size = {
             **ip.size,
@@ -161,7 +166,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             if self.dynamic_vision:
                 # Keep the aspect ratio, but stay inside the NPU sequence limit.
                 self._clamp_dynamic_image_size()
-                print("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
+                logger.debug("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
             else:
                 images = self._resize_images(images)
 
