@@ -27,7 +27,7 @@ def test_benchmark_records_imagenet_metrics_in_primary_order(
 
     monkeypatch.setattr(
         evaluation_module,
-        "eval_imagenet",
+        "eval_imagenet_metrics",
         lambda *args, **kwargs: ImageNetResult(top1=0.75, top5=0.95),
     )
     args = argparse.Namespace(

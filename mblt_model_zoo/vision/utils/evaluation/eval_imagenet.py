@@ -35,7 +35,7 @@ class ImageNetResult(NamedTuple):
         return self.top5
 
 
-def eval_imagenet(model: MBLT_Engine, data_path: str, batch_size: int) -> ImageNetResult:
+def eval_imagenet_metrics(model: MBLT_Engine, data_path: str, batch_size: int) -> ImageNetResult:
     """Evaluates a classification model on the ImageNet validation set.
 
     Computes Top-1 and Top-5 accuracy and inference speed (FPS) on the NPU.
@@ -98,3 +98,18 @@ def eval_imagenet(model: MBLT_Engine, data_path: str, batch_size: int) -> ImageN
         f"NPU FPS: {cum_num_data / inference_time:.3f}"
     )
     return ImageNetResult(top1=top1_acc, top5=top5_acc)
+
+
+def eval_imagenet(model: MBLT_Engine, data_path: str, batch_size: int) -> float:
+    """Evaluate ImageNet and return Top-1 accuracy for numeric API compatibility.
+
+    Args:
+        model: Vision engine to evaluate.
+        data_path: Path to the ImageNet validation images.
+        batch_size: Number of images per inference batch.
+
+    Returns:
+        Top-1 accuracy in the range 0.0 to 1.0.
+    """
+
+    return eval_imagenet_metrics(model, data_path, batch_size).top1

@@ -16,7 +16,8 @@
 - NYU Depth organization installs only its 654 validation image/depth pairs as `images/` and `depth/` at the output root.
 - NYU Depth evaluation uses stretched inputs, per-image median alignment, and pooled valid-pixel statistics; `delta1`
   is its primary score, with `abs_rel` and `rmse` also reported.
-- ImageNet validation uses Top-1 accuracy as its primary metric and Top-5 accuracy as its secondary metric.
+- `eval_imagenet()` returns Top-1 as a float for compatibility; `eval_imagenet_metrics()` exposes
+  structured Top-1 primary and Top-5 secondary metrics.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
 - DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts.
 - Model YAMLs use `file_cfg.filename` as the canonical MXQ artifact; the matching same-stem ONNX

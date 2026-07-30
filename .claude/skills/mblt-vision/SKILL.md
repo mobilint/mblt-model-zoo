@@ -8,8 +8,9 @@ description: Work effectively on Mobilint Model Zoo vision models, datasets, eva
 Read and follow the canonical skill at
 [`../../../.agents/skills/mblt-vision/SKILL.md`](../../../.agents/skills/mblt-vision/SKILL.md).
 
-ImageNet validation treats Top-1 accuracy as primary and Top-5 accuracy as secondary. DOTAv1
-validation treats rotated mAP50-95 as primary and rotated mAP50 as secondary.
+`eval_imagenet()` returns Top-1 as a float for compatibility, while `eval_imagenet_metrics()`
+exposes structured Top-1 primary and Top-5 secondary metrics. DOTAv1 validation treats rotated
+mAP50-95 as primary and rotated mAP50 as secondary.
 
 Model YAMLs derive same-stem ONNX Hub artifact names from `file_cfg.filename`; use
 `onnx_filename` only for a non-matching artifact name.

@@ -103,13 +103,13 @@ def _evaluate(model: Any, args: argparse.Namespace, run_dir: Path) -> tuple[floa
     Raises:
         ValueError: If the model task differs from the requested benchmark task.
     """
-    from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet, eval_widerface
+    from mblt_model_zoo.vision.utils.evaluation import eval_coco, eval_dota, eval_imagenet_metrics, eval_widerface
 
     model_task = str(model.post_cfg.get("task", "")).lower()
     if model_task != args.task:
         raise ValueError(f"Model task '{model_task}' does not match requested task '{args.task}'.")
     if args.task == "image_classification":
-        result = eval_imagenet(model, args.data_path, args.batch_size)
+        result = eval_imagenet_metrics(model, args.data_path, args.batch_size)
         return (
             float(result.primary_score),
             "top1_accuracy",

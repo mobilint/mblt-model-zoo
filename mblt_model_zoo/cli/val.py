@@ -289,7 +289,7 @@ def _run_validation(args: argparse.Namespace) -> float:
             eval_cityscapes,
             eval_coco,
             eval_dota,
-            eval_imagenet,
+            eval_imagenet_metrics,
             eval_nyu_depth,
             eval_widerface,
         )
@@ -308,7 +308,7 @@ def _run_validation(args: argparse.Namespace) -> float:
         data_path = _ensure_dataset(args, task, taxonomy)
 
         if task == "image_classification":
-            imagenet_result = eval_imagenet(model=model, data_path=data_path, batch_size=args.batch_size)
+            imagenet_result = eval_imagenet_metrics(model=model, data_path=data_path, batch_size=args.batch_size)
             print(
                 "Validation score "
                 f"(Top-1 accuracy): {imagenet_result.top1:.5f}, "

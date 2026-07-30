@@ -872,7 +872,7 @@ def test_cli_val_routes_imagenet_metrics_in_primary_order(
     import mblt_model_zoo.vision.utils.evaluation as evaluation_module
 
     monkeypatch.setattr(vision_module, "MBLT_Engine", _FakeEngine)
-    monkeypatch.setattr(evaluation_module, "eval_imagenet", _fake_eval_imagenet)
+    monkeypatch.setattr(evaluation_module, "eval_imagenet_metrics", _fake_eval_imagenet)
 
     args = Namespace(
         model="resnet50",
@@ -902,6 +902,22 @@ def test_cli_val_routes_imagenet_metrics_in_primary_order(
     assert score == 0.75
     assert "Validation score (Top-1 accuracy): 0.75000, (Top-5 accuracy): 0.95000" in output
     assert calls["disposed"] is True
+
+
+def test_eval_imagenet_preserves_numeric_top1_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return a float from the legacy ImageNet evaluator entry point."""
+
+    eval_module = importlib.import_module("mblt_model_zoo.vision.utils.evaluation.eval_imagenet")
+    monkeypatch.setattr(
+        eval_module,
+        "eval_imagenet_metrics",
+        lambda *args, **kwargs: ImageNetResult(top1=0.75, top5=0.95),
+    )
+
+    score = eval_module.eval_imagenet(object(), "/unused", 1)
+
+    assert score == 0.75
+    assert isinstance(score, float)
 
 
 def test_cli_val_routes_obb_to_dota_evaluator(

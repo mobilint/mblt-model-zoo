@@ -15,7 +15,7 @@ from .eval_ade20k import (
 from .eval_cityscapes import eval_cityscapes
 from .eval_coco import eval_coco
 from .eval_dota import DOTAResult, eval_dota
-from .eval_imagenet import ImageNetResult, eval_imagenet
+from .eval_imagenet import ImageNetResult, eval_imagenet, eval_imagenet_metrics
 from .eval_nyu_depth import NYUDepthMetricAccumulator, NYUDepthResult, calculate_nyu_depth_metrics, eval_nyu_depth
 from .eval_widerface import WiderFaceResult, eval_widerface
 
@@ -32,6 +32,7 @@ __all__: list[str] = [
     "eval_dota",
     "ImageNetResult",
     "eval_imagenet",
+    "eval_imagenet_metrics",
     "NYUDepthResult",
     "NYUDepthMetricAccumulator",
     "calculate_nyu_depth_metrics",

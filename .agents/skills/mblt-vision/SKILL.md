@@ -57,9 +57,9 @@ description: >-
   root. For NYU Depth V2 evaluation, stretch inputs and targets to the configured model size,
   median-align each prediction, pool valid pixels, return `delta1` as the primary metric, and
   report `abs_rel` and `rmse` for diagnosis.
-- For ImageNet, return Top-1 accuracy as the primary metric and Top-5 accuracy as the secondary
-  metric. For DOTAv1, return rotated mAP50-95 as the primary metric and rotated mAP50 as the
-  secondary metric.
+- Keep `eval_imagenet()` returning Top-1 as a float for compatibility, and use
+  `eval_imagenet_metrics()` when structured Top-1 primary and Top-5 secondary metrics are needed.
+  For DOTAv1, return rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
