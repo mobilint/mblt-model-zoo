@@ -29,6 +29,7 @@ from .readiness import (
     ADE20K_VALIDATION_SAMPLE_COUNT,
     CITYSCAPES_SAMPLE_ID_PATTERN,
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
+    DOTAV1_VALIDATION_SAMPLE_COUNT,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
 )
 
@@ -42,7 +43,6 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
     DOTAV1_DOWNLOAD_CONFIG["labels_archive"],
 }
 DOTAV1_CLASS_TO_IDX = {name: int(index) for index, name in get_dataset_config("dotav1")["names"].items()}
-DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"

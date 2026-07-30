@@ -64,8 +64,8 @@ description: >-
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts. Keep loader compatibility with legacy `images/val` datasets.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
-- Reuse dense validation and calibration roots only when taxonomy-specific filenames, matched targets,
-  and the complete validation sample count are valid.
+- Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only when
+  taxonomy-specific layout, required metadata and targets, and the complete official split are valid.
 - For ADE20K semantic validation, apply the same letterbox geometry to images and masks, pad masks with `255`, map
   source labels `1..150` to classes `0..149`, and report mIoU as primary with pixel accuracy secondary.
 - For Cityscapes semantic validation, select exactly 500 paired validation images and `gtFine_labelIds` masks from the

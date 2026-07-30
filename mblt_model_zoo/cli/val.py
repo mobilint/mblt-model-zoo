@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
-from mblt_model_zoo.vision.utils.datasets.readiness import dense_dataset_ready
+from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 
 from ._vision import add_e2e_arg, add_threshold_args, create_vision_engine, parse_target_clusters, parse_target_cores
 
@@ -181,30 +181,7 @@ def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
 def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> bool:
     """Checks whether the organized dataset appears ready for validation."""
 
-    root = Path(data_path).expanduser()
-    if task == "image_classification":
-        return root.is_dir() and any(child.is_dir() for child in root.iterdir()) if root.exists() else False
-    if task in {"object_detection", "instance_segmentation"}:
-        return (root / "val2017").is_dir() and (root / "instances_val2017.json").is_file()
-    if task == "pose_estimation":
-        return (root / "val2017").is_dir() and (root / "person_keypoints_val2017.json").is_file()
-    if task == "face_detection":
-        required_files = (
-            "wider_face_val.mat",
-            "wider_easy_val.mat",
-            "wider_medium_val.mat",
-            "wider_hard_val.mat",
-        )
-        return (root / "images").is_dir() and all((root / file_name).is_file() for file_name in required_files)
-    if task == "obb":
-        return (root / "images").is_dir() and (
-            (root / "labels" / "val").is_dir() or (root / "labels" / "val_original").is_dir()
-        )
-    if task == "depth_estimation":
-        return dense_dataset_ready(root, dataset or "nyu-depth")
-    if task == "semantic_segmentation":
-        return dense_dataset_ready(root, dataset or "ade20k")
-    return False
+    return dataset_ready(data_path, task, dataset)
 
 
 def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = None) -> str:
@@ -277,6 +254,11 @@ def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = N
     else:
         raise SystemExit(f"Unsupported vision task for validation: {task}")
 
+    if not _dataset_ready(task, data_path, dataset):
+        raise SystemExit(
+            f"Organized validation dataset at {data_path} is incomplete or does not match "
+            f"the expected {dataset or task} dataset."
+        )
     return data_path
 
 

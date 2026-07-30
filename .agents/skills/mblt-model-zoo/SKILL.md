@@ -40,6 +40,8 @@ description: >-
   letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
 - Route dense compilation through `post_cfg.dataset`: NYU Depth for depth models and ADE20K or
   Cityscapes for semantic models.
+- Reuse organized validation and calibration datasets only after checking their taxonomy-specific
+  layout, required metadata and targets, and full official split count.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

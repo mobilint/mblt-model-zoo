@@ -307,8 +307,11 @@ def test_obb_dataset_readiness_accepts_flat_images(
     def _organize_dotav1(**kwargs: str) -> None:
         assert kwargs["output_dir"] == str(data_path)
         _write_images(data_path / "images", ["P0001.png"])
+        (data_path / "labels" / "val_original").mkdir(parents=True)
+        (data_path / "labels" / "val_original" / "P0001.txt").write_bytes(b"label")
 
     monkeypatch.setattr(dataset_utils, "organize_dotav1", _organize_dotav1)
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
 
     assert compile_module.ensure_calibration_dataset("obb", dataset="dotav1") == data_path
 

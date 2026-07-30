@@ -533,10 +533,12 @@ def test_cli_val_organizes_selected_semantic_taxonomy(
     def _fake_ade20k(**kwargs: object) -> None:
         calls.append(("ade20k", kwargs))
 
+    import mblt_model_zoo.cli.val as val_module
     import mblt_model_zoo.vision.utils.datasets as dataset_utils
 
     monkeypatch.setattr(dataset_utils, "organize_cityscapes", _fake_cityscapes)
     monkeypatch.setattr(dataset_utils, "organize_ade20k", _fake_ade20k)
+    monkeypatch.setattr(val_module, "_dataset_ready", lambda *args: bool(calls))
     args = Namespace(
         data_path=str(tmp_path / taxonomy),
         force_organize=False,
@@ -634,12 +636,18 @@ def test_standalone_cityscapes_organizer_routes_required_archives(
     ]
 
 
-def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
+def test_cli_val_detects_original_dotav1_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Recognize DOTAv1 validation layouts that keep original labels."""
 
     data_path = tmp_path / "dotav1"
     (data_path / "images").mkdir(parents=True)
     (data_path / "labels" / "val_original").mkdir(parents=True)
+    (data_path / "images" / "P0001.png").write_bytes(b"image")
+    (data_path / "labels" / "val_original" / "P0001.txt").write_bytes(b"label")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
 
     assert _dataset_ready("obb", str(data_path))
 
@@ -874,13 +882,16 @@ def test_google_drive_dotav1_organizer_recognizes_folder_url_variants(url: str) 
     assert organizer_module._is_google_drive_folder_url(url)
 
 
-def test_cli_val_detects_organized_widerface(tmp_path: Path) -> None:
+def test_cli_val_detects_organized_widerface(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Recognize an organized WiderFace validation layout."""
 
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
+    (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
     for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
+    monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
 
     assert _dataset_ready("face_detection", str(data_path))
 
@@ -893,7 +904,10 @@ def test_cli_val_routes_imagenet_metrics_in_primary_order(
     """Return Top-1 and report ImageNet metrics from primary to secondary."""
 
     data_path = tmp_path / "imagenet"
-    (data_path / "class-0").mkdir(parents=True)
+    (data_path / "n00000001").mkdir(parents=True)
+    (data_path / "n00000001" / "ILSVRC2012_val_00000001.JPEG").write_bytes(b"image")
+    monkeypatch.setattr(readiness_module, "IMAGENET_CLASS_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "IMAGENET_IMAGES_PER_CLASS", 1)
     calls = {}
 
     class _FakeEngine:
@@ -973,6 +987,9 @@ def test_cli_val_routes_obb_to_dota_evaluator(
     data_path = tmp_path / "dotav1"
     (data_path / "images" / "val").mkdir(parents=True)
     (data_path / "labels" / "val").mkdir(parents=True)
+    (data_path / "images" / "val" / "P0001.png").write_bytes(b"image")
+    (data_path / "labels" / "val" / "P0001.txt").write_bytes(b"label")
+    monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 
     class _FakeEngine:
@@ -1258,8 +1275,11 @@ def test_cli_val_routes_face_detection_to_widerface(monkeypatch: pytest.MonkeyPa
 
     data_path = tmp_path / "widerface"
     (data_path / "images" / "0--Parade").mkdir(parents=True)
+    (data_path / "images" / "0--Parade" / "sample.jpg").write_bytes(b"image")
     for file_name in ("wider_face_val.mat", "wider_easy_val.mat", "wider_medium_val.mat", "wider_hard_val.mat"):
         (data_path / file_name).write_bytes(b"mat")
+    monkeypatch.setattr(readiness_module, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
     calls = {}
 
     class _FakeEngine:

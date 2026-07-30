@@ -108,8 +108,9 @@ truth when this snapshot becomes stale.
 - Keep the Cityscapes organizer ZIP-only and validation-only: select exactly 500 paired images and `gtFine_labelIds`
   masks from the official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` packages, then install lossless
   flat `images/` and `annotations/` PNG pairs.
-- Reuse an organized dense validation or calibration root only when its taxonomy-specific filenames,
-  matched targets, and full validation sample count are all valid.
+- Reuse an organized validation or calibration root only when its taxonomy-specific layout,
+  required metadata and targets, and full official validation sample count are all valid. Apply
+  this consistently to ImageNet, COCO, DOTAv1, WiderFace, and dense datasets.
 - Depth-estimation validation stretches RGB and depth targets to the configured input size, median-aligns each
   prediction, pools statistics over valid NYU Depth V2 pixels, and reports `delta1` as the primary score with
   `abs_rel` and `rmse` as auxiliary metrics.

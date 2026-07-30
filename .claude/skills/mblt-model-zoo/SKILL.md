@@ -22,6 +22,8 @@ packages, maps its canonical 19 source IDs to train IDs, and never installs trai
 
 Dense compilation uses `post_cfg.dataset` to select NYU Depth, ADE20K, or Cityscapes and samples
 only their organized RGB images.
+Reuse organized validation and calibration datasets only after validating taxonomy-specific layout,
+required metadata and targets, and the complete official split.
 
 Use the focused entry points for Vision and Transformers work:
 
