@@ -158,7 +158,19 @@ def test_comparison_rejects_matching_metrics_from_different_tasks(tmp_path: Path
         compare_benchmark_results.main([str(tmp_path / "detection"), str(tmp_path / "segmentation")])
 
 
-def test_onnx_benchmark_uses_one_neutral_runtime_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "framework_args",
+    [
+        ["--framework", "onnx"],
+        ["--model-path", "model.onnx"],
+        ["--model-path", "MODEL.ONNX"],
+    ],
+)
+def test_onnx_benchmark_uses_one_neutral_runtime_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    framework_args: list[str],
+) -> None:
     """Avoid recording repeated NPU core-mode runs for ONNX inference."""
 
     captured_modes: list[str] = []
@@ -185,8 +197,7 @@ def test_onnx_benchmark_uses_one_neutral_runtime_target(monkeypatch: pytest.Monk
                 "model-a",
                 "--task",
                 "image_classification",
-                "--framework",
-                "onnx",
+                *framework_args,
                 "--core-mode",
                 "all",
                 "--data-path",

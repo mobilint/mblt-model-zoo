@@ -67,6 +67,8 @@ description: >-
   numeric `eval_coco()` compatibility and use `eval_coco_metrics()` for mAP50-95 and mAP50.
 - Use the standard benchmark runner for dense tasks: record `delta1`, `abs_rel`, and `rmse` for
   depth, and dispatch ADE20K or Cityscapes semantic evaluation from `post_cfg.dataset`.
+- Auto-detect `.onnx` benchmark model paths before core-mode expansion and record one neutral
+  `onnx` target instead of repeated NPU-mode rows.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
   label layouts. Keep loader compatibility with legacy `images/val` datasets.
 - Atomically install ADE20K's 2,000 flat validation pairs only after staged readiness verifies

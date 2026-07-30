@@ -15,6 +15,8 @@ Structured evaluator results expose primary and secondary score properties. Keep
 numeric and use `eval_coco_metrics()` for structured mAP50-95 and mAP50.
 The standard benchmark runner records NYU depth metrics and dispatches ADE20K or Cityscapes
 semantic evaluation from `post_cfg.dataset`.
+Auto-detect `.onnx` benchmark model paths before core-mode expansion and record one neutral `onnx`
+target instead of repeated NPU-mode rows.
 
 DOTAv1 loaders prefer flat `images/` validation files and accept legacy `images/val` as a fallback.
 

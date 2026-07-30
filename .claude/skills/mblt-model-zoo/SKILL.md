@@ -35,6 +35,8 @@ Keep TPS printed tables and JSON output synchronized through the shared
 `mblt_model_zoo/cli/tps_table.py` schema.
 Keep Vision evaluator primary and secondary score properties aligned; the standard benchmark
 runner owns depth and taxonomy-dispatched semantic metrics.
+Auto-detect `.onnx` benchmark model paths before core-mode expansion and record one neutral `onnx`
+target instead of repeated NPU-mode rows.
 
 Use the focused entry points for Vision and Transformers work:
 

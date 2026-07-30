@@ -53,6 +53,8 @@ description: >-
   `mblt_model_zoo/cli/tps_table.py` schema.
 - Keep Vision evaluator results aligned on primary and secondary score properties. The standard
   benchmark runner owns depth and taxonomy-dispatched semantic metrics.
+- Auto-detect `.onnx` benchmark model paths before core-mode expansion and record one neutral
+  `onnx` target instead of repeated NPU-mode rows.
 - Do not force formatting standards on `hf_transformers` or `MeloTTS`; follow local style.
 
 ## Validate Proportionately

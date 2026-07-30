@@ -58,6 +58,8 @@ The runner writes the following reproducible artifacts:
 
 Use `--collect-host-info` to include `mblt-tracker collect` output in the summary. A local
 `--model-path`, `--mxq-path`, or `--onnx-path` applies to exactly one model target.
+The runner auto-detects `.onnx` passed through `--model-path`; ONNX benchmarks execute once with
+the neutral `onnx` runtime label even when `--core-mode all` is requested.
 Task names in generated artifacts are always canonical; the compatibility input
 `oriented_bounding_boxes` is normalized to `obb`.
 

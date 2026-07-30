@@ -22,6 +22,8 @@
   numeric while `eval_coco_metrics()` exposes structured mAP50-95 and mAP50.
 - The standard Vision benchmark runner records NYU depth metrics and dispatches ADE20K or
   Cityscapes semantic metrics from `post_cfg.dataset`.
+- Auto-detect `.onnx` benchmark `--model-path` values before core-mode expansion and record one
+  neutral `onnx` target for `--core-mode all`.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
 - DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts;
   its loader also accepts legacy `images/val` datasets.

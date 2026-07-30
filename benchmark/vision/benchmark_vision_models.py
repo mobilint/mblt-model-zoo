@@ -24,6 +24,7 @@ from benchmark.common.io_utils import safe_filename, write_csv, write_json
 from benchmark.common.summary_utils import collect_host_pc_info, markdown_table, write_summary_markdown
 from mblt_model_zoo.cli._vision import parse_unit_interval
 from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode
+from mblt_model_zoo.vision._model_paths import resolve_framework
 from mblt_model_zoo.vision._tasks import VISION_TASKS, normalize_vision_task
 
 CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
@@ -91,7 +92,7 @@ def _core_modes(core_mode: str, framework: str | None = None) -> tuple[str, ...]
 
     Args:
         core_mode: Requested core mode.
-        framework: Explicit inference framework, when provided.
+        framework: Resolved inference framework.
 
     Returns:
         One or more concrete core modes.
@@ -323,9 +324,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     args = _parse_args(argv)
     results_dir = args.results_dir.expanduser().resolve()
+    framework = resolve_framework(args.framework, args.model_path)
     rows: list[dict[str, Any]] = []
     for model_name in args.models:
-        for core_mode in _core_modes(args.core_mode, args.framework):
+        for core_mode in _core_modes(args.core_mode, framework):
             print(f"Benchmarking {model_name} with core mode {core_mode}...")
             row = _run_target(model_name, core_mode, args, results_dir)
             rows.append(row)

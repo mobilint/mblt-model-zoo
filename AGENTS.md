@@ -135,6 +135,8 @@ truth when this snapshot becomes stale.
 - The standard Vision benchmark runner supports depth and semantic segmentation. Record `delta1`,
   `abs_rel`, and `rmse` for depth; dispatch semantic evaluation from `post_cfg.dataset` and record
   `miou` and `pixel_accuracy`.
+- The Vision benchmark runner auto-detects `.onnx` from `--model-path` before expanding core modes;
+  record one neutral `onnx` target even when `--core-mode all` is requested.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
   use `labels/val_original`, which retains difficult-object filtering. Its loader also accepts
   legacy validation images under `images/val`.
