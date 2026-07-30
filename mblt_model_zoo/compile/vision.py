@@ -36,6 +36,7 @@ DEFAULT_SUBSET_SIZES = {
     "obb": 100,
 }
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+TASK_ALIASES = {"oriented_bounding_boxes": "obb"}
 
 
 def _normalize_task(task: str) -> str:
@@ -52,6 +53,7 @@ def _normalize_task(task: str) -> str:
     """
 
     normalized = task.lower()
+    normalized = TASK_ALIASES.get(normalized, normalized)
     if normalized not in DEFAULT_SUBSET_SIZES:
         raise ValueError(f"Vision compilation does not support task `{task}`.")
     return normalized
