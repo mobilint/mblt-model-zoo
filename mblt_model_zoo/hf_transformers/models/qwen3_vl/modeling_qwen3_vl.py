@@ -289,6 +289,12 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     config: MobilintQwen3VLTextConfig
     input_modalities = ("text",)
 
+    # Qwen3-VL text MXQ is compiled with rank-3 inputs:
+    # ``(1, -1, hidden)`` for inputs_embeds and ``(num_layers, -1, hidden)``
+    # for deepstack. The shared batched helper must not add the extra
+    # ``expand_dims(axis=1)`` it uses for LLM-style ``(1, 1, seq, hidden)``.
+    _batched_input_expand_dims = False
+
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
@@ -351,14 +357,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        if use_cache and past_key_values is None:
-            past_key_values = self._get_cache("", 0, 0)
-
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
         assert inputs_embeds is not None
+
+        # Route attention_mask through so batch>1 hits the batched deepstack path.
+        # Mirrors the plain-LLM `resolve_batched_attention_mask` convention.
+        effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
+
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        if use_cache and past_key_values is None:
+            past_key_values = self._get_cache("", 0, 0)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -375,6 +385,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             count_npu_time=count_npu_time,
             deepstack_visual_embeds=deepstack_visual_embeds,
             visual_pos_masks=visual_pos_masks,
+            attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,
         )
 
@@ -392,6 +403,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         cache_position: torch.Tensor,
         npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
+        attention_mask: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 1,
     ) -> torch.Tensor:
         """Run the dual-input MXQ decoder with HF-style ``logits_to_keep``.
@@ -409,6 +421,9 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             cache_position: Cache position range.
             npu_prefill_chunk_size: Optional chunk size.
             count_npu_time: Whether to accumulate NPU time.
+            attention_mask: Batched attention mask. When provided, dispatches to
+                :meth:`_llm_forward_batch_deepstack` so the compiled batched text
+                MXQ can process every batch row in a single infer call.
             logits_to_keep: HF-style position selector; see the shared
                 :meth:`MobilintModelMixin.llm_forward` for details.
 
@@ -417,10 +432,36 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         """
         if inputs_embeds.ndim != 3:
             raise ValueError(f"Expected inputs_embeds rank 3, got shape {tuple(inputs_embeds.shape)}")
-        if inputs_embeds.shape[0] != 1:
-            raise NotImplementedError("Mobilint Qwen3-VL currently supports batch size 1 only.")
         if past_key_values is not None and not isinstance(past_key_values, MobilintDeepStackCache):
             raise TypeError("Qwen3-VL text decoding requires MobilintDeepStackCache.")
+
+        # Reset the NPU timing accumulator before either dispatch so the
+        # batched path's `_run_batch_infer` (in the shared helper) does not
+        # trip its `self.npu_time is not None` assertion. Base LLM does the
+        # same reset up front — mirror that here so the batched deepstack
+        # path is symmetric with the single-batch fallback below.
+        self.npu_time = 0.0 if count_npu_time else None
+
+        if attention_mask is not None:
+            self._validate_batch_cache(past_key_values, attention_mask.shape[0])
+            return self._llm_forward_batch_deepstack(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                deepstack_visual_embeds=deepstack_visual_embeds,
+                visual_pos_masks=visual_pos_masks,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
+                npu_prefill_chunk_size=npu_prefill_chunk_size,
+                count_npu_time=count_npu_time,
+                logits_to_keep=logits_to_keep,
+            )
+
+        if inputs_embeds.shape[0] != 1:
+            raise NotImplementedError(
+                "Mobilint Qwen3-VL batch>1 without attention_mask is not supported; "
+                "pass an attention_mask (or configure max_batch_size>1) to use the "
+                "batched deepstack path."
+            )
 
         deepstack_tensor = self._build_deepstack_tensor(
             inputs_embeds=inputs_embeds,
@@ -436,7 +477,6 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
 
         mxq_model = self.get_mxq_model()
-        self.npu_time = 0.0 if count_npu_time else None
 
         def _do_infer(start_index: int, end_index: int) -> np.ndarray:
             # See modeling_utils.llm_forward._do_infer: without a caller cache,
@@ -522,6 +562,158 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         for layer_idx, deepstack_embed in enumerate(deepstack_visual_embeds):
             padded[layer_idx, mask, :] = deepstack_embed.to(inputs_embeds.device, inputs_embeds.dtype)
         return padded
+
+    def _build_batched_deepstack_tensors(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        visual_pos_masks: Optional[torch.Tensor],
+        deepstack_visual_embeds: Optional[list[torch.Tensor]],
+    ) -> list[torch.Tensor]:
+        """Build per-batch-item deepstack tensors sliced to their active length.
+
+        Upstream Qwen3-VL packs deepstack embeds across the whole batch:
+        ``visual_pos_masks`` is ``(batch, seq_len)`` bool and each layer's
+        ``deepstack_visual_embeds`` is ``(sum(visual_pos_masks), hidden)`` in
+        batch-major, sequence-minor row order. We split them per item so the
+        batched infer can concat per-item chunks along the token axis the
+        same way :meth:`MobilintModelMixin._assemble_batch_chunk` slices
+        ``inputs_embeds_masked``.
+
+        Returns:
+            List of length ``batch_size``. Item ``j`` has shape
+            ``(num_layers, seq_len_j, hidden_size)`` where ``seq_len_j`` is
+            the number of non-padding tokens in row ``j`` (or 1 in the
+            decode-shaped single-token path).
+        """
+        batch_size = int(inputs_embeds.shape[0])
+        hidden_size = int(inputs_embeds.shape[2])
+        num_layers = self.num_deepstack_layers
+
+        if attention_mask.shape == inputs_embeds.shape[:-1]:
+            attention_mask_bool = attention_mask.type(torch.bool)
+            sequence_lengths = [int(attention_mask_bool[j].sum()) for j in range(batch_size)]
+        else:
+            # Mirrors the decode-shaped fallback in _llm_forward_batch: no
+            # per-token attention mask, single-token rows.
+            assert inputs_embeds.shape[1] == 1
+            attention_mask_bool = None
+            sequence_lengths = [1 for _ in range(batch_size)]
+
+        if deepstack_visual_embeds is None:
+            # Decode step (new tokens are never visual tokens) or a caller
+            # that skips deepstack for this forward — zero contribution.
+            return [
+                torch.zeros(
+                    (num_layers, sequence_lengths[j], hidden_size),
+                    dtype=inputs_embeds.dtype,
+                    device=inputs_embeds.device,
+                )
+                for j in range(batch_size)
+            ]
+
+        if visual_pos_masks is None:
+            raise ValueError("visual_pos_masks must be provided when deepstack_visual_embeds is not None.")
+
+        # Trust deepstack layer count from the caller if the model attribute
+        # was not set (mirrors the single-batch branch which does the same).
+        effective_num_layers = num_layers if num_layers > 0 else len(deepstack_visual_embeds)
+
+        visual_pos_masks_bool = visual_pos_masks.to(torch.bool)
+        counts_per_item = [int(visual_pos_masks_bool[j].sum()) for j in range(batch_size)]
+        offsets = [0]
+        for count in counts_per_item[:-1]:
+            offsets.append(offsets[-1] + count)
+
+        per_item: list[torch.Tensor] = []
+        for j in range(batch_size):
+            seq_len_j = sequence_lengths[j]
+            padded = torch.zeros(
+                (effective_num_layers, seq_len_j, hidden_size),
+                dtype=inputs_embeds.dtype,
+                device=inputs_embeds.device,
+            )
+            if attention_mask_bool is not None:
+                # Restrict the visual mask to the item's active window so
+                # scatter indices align with the compacted per-item embeds.
+                active_mask = attention_mask_bool[j]
+                visual_mask_j = visual_pos_masks_bool[j][active_mask]
+            else:
+                visual_mask_j = visual_pos_masks_bool[j]
+            count_j = counts_per_item[j]
+            start = offsets[j]
+            for layer_idx, deepstack_embed in enumerate(deepstack_visual_embeds):
+                if count_j == 0:
+                    continue
+                padded[layer_idx, visual_mask_j, :] = deepstack_embed[start : start + count_j].to(
+                    inputs_embeds.device, inputs_embeds.dtype
+                )
+            per_item.append(padded)
+        return per_item
+
+    def _llm_forward_batch_deepstack(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        deepstack_visual_embeds: Optional[list[torch.Tensor]],
+        visual_pos_masks: Optional[torch.Tensor],
+        past_key_values: Optional[MobilintDeepStackCache],
+        cache_position: torch.Tensor,
+        npu_prefill_chunk_size: Optional[int] = None,
+        count_npu_time: bool = False,
+        logits_to_keep: Union[int, torch.Tensor] = 1,
+    ) -> torch.Tensor:
+        """Batched sibling of :meth:`llm_forward` that also packs deepstack chunks.
+
+        Reuses the shared 3-path dispatch in
+        :meth:`MobilintModelMixin._llm_forward_batch` and supplies a
+        ``pack_extra_inputs`` hook that slices per-item deepstack tensors
+        with the same ``[start, start + chunk_len_k)`` windows the base
+        helper uses for ``inputs_embeds_masked``. The single-input LLM path
+        already handles KV cache tracking across the batch via
+        ``update_seen_tokens`` — the shared helper does that here too, so
+        we skip ``cache.set_deepstack_tensor`` / ``update_cache_position``
+        (they are only needed by the single-batch decode replay path).
+        """
+        del cache_position  # Batched path uses `update_seen_tokens` bookkeeping.
+
+        resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
+
+        deepstack_by_item = self._build_batched_deepstack_tensors(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            visual_pos_masks=visual_pos_masks,
+            deepstack_visual_embeds=deepstack_visual_embeds,
+        )
+
+        def _pack_deepstack_extras(
+            *,
+            chunk_start: int,
+            sequence_lengths_chunks: list[int],
+            cache_ids: list[int],
+        ) -> list[np.ndarray]:
+            # Slice each active item's deepstack tensor with the same
+            # `[start, start + chunk_len_k)` window `_assemble_batch_chunk`
+            # used for its inputs_embeds row, then concat along the token
+            # axis so the packed shape matches the compiled model's
+            # `(num_layers, packed_tokens, hidden)` layout.
+            deepstack_chunks: list[torch.Tensor] = []
+            for k, cache_id in enumerate(cache_ids):
+                length = sequence_lengths_chunks[k]
+                end = chunk_start + length
+                deepstack_chunks.append(deepstack_by_item[cache_id][:, chunk_start:end, :])
+            deepstack_concat = torch.cat(deepstack_chunks, dim=1)
+            return [deepstack_concat.to(dtype=torch.float32).cpu().numpy()]
+
+        return self._llm_forward_batch(
+            inputs_embeds,
+            attention_mask,
+            past_key_values,
+            resolved_npu_prefill_chunk_size,
+            count_npu_time=count_npu_time,
+            logits_to_keep=logits_to_keep,
+            pack_extra_inputs=_pack_deepstack_extras,
+        )
 
 
 class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, Qwen3VLModel):

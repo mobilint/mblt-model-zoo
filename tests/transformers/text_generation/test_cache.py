@@ -103,6 +103,7 @@ def test_cache(model, tokenizer, generation_token_limit: int):
             prefix_input_ids,
             use_cache=True,
             past_key_values=past_key_values,
+            logits_to_keep=1,
         )
 
     past_key_values.dump_cache_memory()

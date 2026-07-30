@@ -1,4 +1,4 @@
-"""Shared fixtures for image-text-to-text tests."""
+"""Shared fixtures for non-batch image-text-to-text tests."""
 
 from __future__ import annotations
 

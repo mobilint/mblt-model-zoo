@@ -2145,6 +2145,7 @@ def test_main_measures_requested_num_samples_after_warmup(tmp_path: Path, monkey
         generate_kwargs,
         native_language=None,
         max_measured_samples=None,
+        trace_path=None,
     ):
         measured_ids.extend(sample["id"] for sample in measure_samples)
         return [], {}, {}

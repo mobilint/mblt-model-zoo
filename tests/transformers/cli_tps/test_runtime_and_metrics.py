@@ -814,18 +814,21 @@ def test_run_text_sweep_repeat_aggregates_trace_energy_scope(monkeypatch, tmp_pa
         ("run1-prefill", "run1-decode"),
         ("run2-prefill", "run2-decode"),
     ]
-    assert [run["prefill_energy_j"] for run in runs] == [pytest.approx(2.0), pytest.approx(4.0)]
-    assert [run["decode_energy_j"] for run in runs] == [pytest.approx(3.0), pytest.approx(6.0)]
-    assert [run["total_energy_j"] for run in runs] == [pytest.approx(5.0), pytest.approx(10.0)]
+    # Canonical schema uses bare, unit-free keys.
+    assert [run["prefill_energy"] for run in runs] == [pytest.approx(2.0), pytest.approx(4.0)]
+    assert [run["decode_energy"] for run in runs] == [pytest.approx(3.0), pytest.approx(6.0)]
+    assert [run["total_energy"] for run in runs] == [pytest.approx(5.0), pytest.approx(10.0)]
     assert runs[0]["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2) / 2.0)
     assert runs[0]["decode_tps_per_w"] == pytest.approx((2 * 2 * 2) / 3.0)
 
-    assert aggregate["prefill_energy_j"] == pytest.approx(6.0)
-    assert aggregate["decode_energy_j"] == pytest.approx(9.0)
-    assert aggregate["total_energy_j"] == pytest.approx(15.0)
+    assert aggregate["prefill_energy"] == pytest.approx(6.0)
+    assert aggregate["decode_energy"] == pytest.approx(9.0)
+    assert aggregate["total_energy"] == pytest.approx(15.0)
     assert aggregate["prefill_tps_per_w"] == pytest.approx(((8 + 16) * 2 * 2) / 6.0)
     assert aggregate["decode_tps_per_w"] == pytest.approx((2 * 2 * 2 * 2) / 9.0)
-    assert aggregate["total_tps_per_w"] == pytest.approx((((8 + 16) * 2 * 2) + (2 * 2 * 2 * 2)) / 15.0)
+    # total_tps_per_w is not currently in TPS_TABLE_SPEC; the aggregate
+    # continues to expose it via the raw dataclass field, but the CLI table
+    # and canonical JSON do not surface it.
     assert len(payload["device_time_series_runs"]) == 2
 
 
@@ -1577,8 +1580,8 @@ def test_run_vlm_measure_scales_total_ms_by_batch_size(monkeypatch, tmp_path):
 
     assert tps_cli._run_vlm_measure(args) == 0
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["summary"]["vision_encode_ms"]["mean"] == pytest.approx(1000.0)
-    assert payload["summary"]["total_ms"]["mean"] == pytest.approx(6000.0)
+    assert payload["summary"]["vision_encode"]["mean"] == pytest.approx(1000.0)
+    assert payload["summary"]["total"]["mean"] == pytest.approx(6000.0)
 
 
 def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, tmp_path):
@@ -1677,16 +1680,34 @@ def test_run_vlm_measure_sums_phase_trace_energy_for_total_energy(monkeypatch, t
 
     assert tps_cli._run_vlm_measure(args) == 0
     payload = json.loads(json_path.read_text(encoding="utf-8"))
+    # `device_runs` stays as the raw device-metric dict (not spec-canonical).
     assert payload["device_runs"][0]["vision_energy_j"] == pytest.approx(2.0)
-    assert payload["device_runs"][0]["llm_prefill_energy_j"] == pytest.approx(4.0)
-    assert payload["device_runs"][0]["llm_decode_energy_j"] == pytest.approx(6.0)
-    assert payload["device_runs"][0]["llm_total_energy_j"] == pytest.approx(10.0)
+    assert payload["device_runs"][0]["prefill_energy_j"] == pytest.approx(4.0)
+    assert payload["device_runs"][0]["decode_energy_j"] == pytest.approx(6.0)
+    assert payload["device_runs"][0]["llm_energy_j"] == pytest.approx(10.0)
     assert payload["device_runs"][0]["total_energy_j"] == pytest.approx(12.0)
-    assert payload["summary"]["vision_energy_j"]["mean"] == pytest.approx(2.0)
-    assert payload["summary"]["llm_prefill_energy_j"]["mean"] == pytest.approx(4.0)
-    assert payload["summary"]["llm_decode_energy_j"]["mean"] == pytest.approx(6.0)
-    assert payload["summary"]["llm_total_energy_j"]["mean"] == pytest.approx(10.0)
-    assert payload["summary"]["total_energy_j"]["mean"] == pytest.approx(12.0)
+    # The spec-canonical summary uses bare, unit-free canonical keys with an
+    # llm_ prefix on the LLM subtable inside a VLM section.
+    assert payload["summary"]["vision_energy"]["mean"] == pytest.approx(2.0)
+    assert payload["summary"]["llm_prefill_energy"]["mean"] == pytest.approx(4.0)
+    assert payload["summary"]["llm_decode_energy"]["mean"] == pytest.approx(6.0)
+    assert payload["summary"]["llm_total_energy"]["mean"] == pytest.approx(10.0)
+    assert payload["summary"]["total_energy"]["mean"] == pytest.approx(12.0)
+    # prefill_tokens = num_prefill * batch = 8 * 4 = 32; prefill_energy = 4.0
+    assert payload["summary"]["llm_prefill_tps_per_w"]["mean"] == pytest.approx(32 / 4.0)
+    # decode_tokens = num_decode * batch = 2 * 4 = 8; decode_energy = 6.0
+    assert payload["summary"]["llm_decode_tps_per_w"]["mean"] == pytest.approx(8 / 6.0)
+    assert payload["summary"]["llm_prefill_j_per_tok"]["mean"] == pytest.approx(4.0 / 32)
+    assert payload["summary"]["llm_decode_j_per_tok"]["mean"] == pytest.approx(6.0 / 8)
+    # Regression guard for Codex-review gamma: llm_total_energy must be
+    # sourced from run.llm_total_energy_j (LLM-only), NOT total_energy_j
+    # (which was overwritten with vision+LLM).
+    assert payload["summary"]["llm_total_energy"]["mean"] != payload["summary"]["total_energy"]["mean"]
+    # Per-run canonical projection: efficiency keys carry the llm_ prefix in
+    # a VLM section.
+    run = payload["runs"][0]
+    assert run["llm_prefill_tps_per_w"] == pytest.approx(32 / 4.0)
+    assert run["llm_decode_tps_per_w"] == pytest.approx(8 / 6.0)
 
 
 def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):

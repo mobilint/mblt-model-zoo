@@ -87,7 +87,7 @@ Batch text-generation tests do not participate in this sweep. They always run wi
 Prefix-specific sweeps are also supported for multi-backend models:
 
 ```bash
-pytest tests/transformers/image_text_to_text/test_qwen2_vl.py --vision-core-mode all --text-core-mode all
+pytest tests/transformers/image_text_to_text/non_batch/test_qwen2_vl.py --vision-core-mode all --text-core-mode all
 ```
 
 ## Keyword Parameters

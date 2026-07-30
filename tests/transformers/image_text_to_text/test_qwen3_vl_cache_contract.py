@@ -51,11 +51,12 @@ class _DummyQwen3VLTextModel(MobilintQwen3VLTextModel):
         cache_position: torch.Tensor,
         npu_prefill_chunk_size: int | None = None,
         count_npu_time: bool = False,
+        attention_mask: torch.Tensor | None = None,
         logits_to_keep: int | torch.Tensor = 1,
     ) -> torch.Tensor:
         """Return deterministic logits while exposing forward-time cache state."""
         del deepstack_visual_embeds, visual_pos_masks, cache_position, npu_prefill_chunk_size, count_npu_time
-        del logits_to_keep
+        del attention_mask, logits_to_keep
         self.forward_past_key_values = past_key_values
         return torch.zeros(
             inputs_embeds.shape[0],

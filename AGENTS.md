@@ -154,9 +154,9 @@ Map the touched source path to a single test file where possible:
 - `mblt_model_zoo/hf_transformers/models/exaone/**` -> `pytest tests/transformers/text_generation/non_batch/test_exaone.py -k "2.4B"`
 - `mblt_model_zoo/hf_transformers/models/exaone4/**` -> `pytest tests/transformers/text_generation/non_batch/test_exaone4.py`
 - `mblt_model_zoo/hf_transformers/models/qwen2_eagle3/**` -> `pytest tests/transformers/text_generation/eagle3/test_qwen2_eagle3.py`
-- `mblt_model_zoo/hf_transformers/models/qwen2_vl/**` -> `pytest tests/transformers/image_text_to_text/test_qwen2_vl.py`
-- `mblt_model_zoo/hf_transformers/models/qwen3_vl/**` -> `pytest tests/transformers/image_text_to_text/test_qwen3_vl.py -k "2B"`
-- `mblt_model_zoo/hf_transformers/models/aya_vision/**` -> `pytest tests/transformers/image_text_to_text/test_aya.py`
+- `mblt_model_zoo/hf_transformers/models/qwen2_vl/**` -> `pytest tests/transformers/image_text_to_text/non_batch/test_qwen2_vl.py`
+- `mblt_model_zoo/hf_transformers/models/qwen3_vl/**` -> `pytest tests/transformers/image_text_to_text/non_batch/test_qwen3_vl.py -k "2B"`
+- `mblt_model_zoo/hf_transformers/models/aya_vision/**` -> `pytest tests/transformers/image_text_to_text/non_batch/test_aya.py`
 - `mblt_model_zoo/hf_transformers/models/blip/**` -> `pytest tests/transformers/image_to_text/test_blip.py`
 - `mblt_model_zoo/hf_transformers/models/whisper/**` -> `pytest tests/transformers/automatic_speech_recognition/test_whisper.py -k "small"`
 - `mblt_model_zoo/hf_transformers/models/qwen3_asr/**` -> `pytest tests/transformers/automatic_speech_recognition/test_qwen3_asr.py`

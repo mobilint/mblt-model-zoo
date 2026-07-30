@@ -401,21 +401,43 @@ class MobilintNPUBackend:
         Cores are stored internally as ``"cluster:core"`` strings and
         converted to :class:`~qbruntime.CoreId` instances on access.
 
+        When no explicit per-core list has been set, the getter falls back
+        to expanding ``target_clusters`` into every core of each listed
+        cluster. This makes ``target_clusters=[0, 1]`` a short-hand for
+        "use all 8 cores across both clusters" in ``single`` core mode,
+        without listing ``["0:0","0:1",...,"1:3"]`` by hand.
+
         Returns:
             A list of :class:`~qbruntime.CoreId` objects representing the
             configured NPU cores.
         """
-        result = []
-        if not hasattr(self, "_target_cores_serialized"):
-            return []
+        result: List["CoreId"] = []
+        serialized = getattr(self, "_target_cores_serialized", None)
+        if serialized:
+            for s in serialized:
+                try:
+                    c_val, r_val = map(int, s.split(":"))
+                    result.append(CoreId(cluster_map[c_val], core_map[r_val]))
+                except Exception as e:
+                    logger.warning("Target cores not serialized: %s", s)
+                    logger.warning("Error: %s", e)
+            return result
 
-        for s in self._target_cores_serialized:
-            try:
-                c_val, r_val = map(int, s.split(":"))
-                result.append(CoreId(cluster_map[c_val], core_map[r_val]))
-            except Exception as e:
-                logger.warning("Target cores not serialized: %s", s)
-                logger.warning("Error: %s", e)
+        # Fallback: expand target_clusters into their full 4-core set. Only
+        # kicks in when the caller left target_cores empty — an explicit
+        # target_cores list always wins so callers can pick a proper subset.
+        cluster_serialized = getattr(self, "_target_clusters_serialized", None)
+        if cluster_serialized:
+            for cluster_str in cluster_serialized:
+                try:
+                    c_val = int(cluster_str)
+                    cluster_enum = cluster_map[c_val]
+                except Exception as e:
+                    logger.warning("Target cluster not serialized (fallback path): %s", cluster_str)
+                    logger.warning("Error: %s", e)
+                    continue
+                for core_enum in (Core.Core0, Core.Core1, Core.Core2, Core.Core3):
+                    result.append(CoreId(cluster_enum, core_enum))
         return result
 
     @target_cores.setter

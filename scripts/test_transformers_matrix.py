@@ -10,9 +10,9 @@ For each target version this script:
        to a distinct core via `--core-mode single --target-cores <cluster>:<core>`
        (and the encoder / decoder / vision / text variants) so workers do
        not contend on the same NPU core.
-     - Phase B (serial): batch text-generation tests run alone with all 8 NPU
-       cores. Their conftest already validates `--core-mode` == single and pops
-       `target_cores` unless the user provided one.
+     - Phase B (serial): batch tests (text-generation and image-text-to-text)
+       run alone with all 8 NPU cores. Their conftests already validate
+       `--core-mode` == single and pop `target_cores` unless the user provided one.
      - Phase C (serial): eagle3 text-generation tests run with
        `--core-mode=global4` because the compiled MXQ only supports that
        layout; forcing global4 explicitly keeps `--full-matrix` (which would
@@ -80,7 +80,10 @@ VERSION_MIN = (4, 54, 0)
 VERSION_MAX = (5, 12, 1)
 
 TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
-BATCH_DIR = TESTS_ROOT / "text_generation" / "batch"
+BATCH_DIRS = (
+    TESTS_ROOT / "text_generation" / "batch",
+    TESTS_ROOT / "image_text_to_text" / "batch",
+)
 EAGLE3_DIR = TESTS_ROOT / "text_generation" / "eagle3"
 DEFAULT_CORE_MAP = ("0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3")
 MAX_WORKERS = len(DEFAULT_CORE_MAP)
@@ -186,18 +189,23 @@ def install_matrix(version: str, log_file: Path) -> int:
 def collect_phase_a_test_files() -> list[Path]:
     """Return relative paths of test_*.py under tests/transformers eligible for phase A.
 
-    Excludes batch dir (phase B: all-8-core serial) and eagle3 dir (phase C: default
+    Excludes batch dirs (phase B: all-8-core serial) and eagle3 dir (phase C: default
     global4 serial). Phase A forces `--core-mode single --target-cores <c>:<c>` per
-    worker, which mismatches the compiled MXQ layout for those two suites.
+    worker, which mismatches the compiled MXQ layout for those suites.
     """
     files: list[Path] = []
     for p in sorted(TESTS_ROOT.rglob("test_*.py")):
         rel = p.relative_to(REPO_ROOT)
-        try:
-            p.relative_to(BATCH_DIR)
+        skip = False
+        for batch_dir in BATCH_DIRS:
+            try:
+                p.relative_to(batch_dir)
+                skip = True
+                break
+            except ValueError:
+                continue
+        if skip:
             continue
-        except ValueError:
-            pass
         try:
             p.relative_to(EAGLE3_DIR)
             continue
@@ -278,16 +286,17 @@ def run_phase_parallel(
 
 
 def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
-    """Run batch text-generation tests serially; batch conftest uses all 8 cores by default."""
+    """Run batch tests (text-generation + image-text-to-text) serially; batch conftests
+    use all 8 cores by default."""
     log_path = log_dir / f"pytest-{version}-batch.log"
     junit_path = log_dir / f"junit-{version}-batch.xml"
     # Runner-owned flags come after `extra_args` so a forwarded core-mode override
-    # cannot bypass the single-only invariant the batch conftest expects.
+    # cannot bypass the single-only invariant the batch conftests expect.
     cmd = [
         str(venv_python()),
         "-m",
         "pytest",
-        str(BATCH_DIR.relative_to(REPO_ROOT)),
+        *(str(d.relative_to(REPO_ROOT)) for d in BATCH_DIRS),
         *extra_args,
         "--core-mode=single",
         f"--junit-xml={junit_path}",
