@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -146,28 +148,46 @@ def test_depth_metrics_pool_valid_pixels_across_images() -> None:
     assert even_pixel_median.rmse == pytest.approx(1.2)
 
 
-def test_nyu_depth_validation_loader_stretches_rgb_and_target(tmp_path) -> None:
-    """Stretch validation images bilinearly and targets with nearest-neighbor interpolation."""
+def test_nyu_depth_validation_loader_stretches_rgb_and_target_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Stretch each original array directly to the validation input dimensions."""
 
     image_dir, depth_dir = tmp_path / "images", tmp_path / "depth"
     image_dir.mkdir()
     depth_dir.mkdir()
-    image = np.zeros((2, 4, 3), dtype=np.uint8)
+    image = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
     target = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
-    cv2.imwrite(str(image_dir / "sample.jpg"), image)
+    cv2.imwrite(str(image_dir / "sample.png"), image)
     np.save(depth_dir / "sample.npy", target)
 
+    dataset = CustomNYUDepth(str(tmp_path))
+    source_image, source_target, _ = dataset[0]
+    original_resize = cv2.resize
+    expected_image = original_resize(source_image, (3, 5), interpolation=cv2.INTER_LINEAR)
+    expected_target = original_resize(source_target, (3, 5), interpolation=cv2.INTER_NEAREST)
+    resize_calls: list[tuple[tuple[int, ...], tuple[int, int], int]] = []
+
+    def _record_resize(array: np.ndarray, size: tuple[int, int], interpolation: int) -> np.ndarray:
+        resize_calls.append((array.shape, size, interpolation))
+        return original_resize(array, size, interpolation=interpolation)
+
+    monkeypatch.setattr(cv2, "resize", _record_resize)
     loader = get_nyu_depth_loader(
-        CustomNYUDepth(str(tmp_path)),
+        dataset,
         batch_size=1,
         preprocess_fn=lambda value: value,
-        image_size=(4, 4),
+        image_size=(5, 3),
     )
     inputs, targets, shapes, ratio_pads, stems = next(iter(loader))
-    assert inputs.shape == (1, 4, 4, 3)
-    assert targets[0].shape == (4, 4)
-    assert np.array_equal(targets[0][:2], np.repeat(target[:1], 2, axis=0))
-    assert shapes == [(4, 4)]
+    assert np.array_equal(inputs[0], expected_image)
+    assert np.array_equal(targets[0], expected_target)
+    assert resize_calls == [
+        ((2, 4, 3), (3, 5), cv2.INTER_LINEAR),
+        ((2, 4), (3, 5), cv2.INTER_NEAREST),
+    ]
+    assert shapes == [(5, 3)]
     assert ratio_pads == [None]
     assert stems == ("sample",)
 

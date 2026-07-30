@@ -4,7 +4,6 @@ Custom dataloaders for vision datasets.
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Any, Callable
 
@@ -202,21 +201,6 @@ def get_nyu_depth_loader(
         for image, target in zip(images, targets):
             if image_size is not None:
                 height, width = image_size
-                source_height, source_width = image.shape[:2]
-                ratio = min(height / source_height, width / source_width)
-                resized_width = min(math.ceil(source_width * ratio), width)
-                resized_height = min(math.ceil(source_height * ratio), height)
-                if (resized_height, resized_width) != (source_height, source_width):
-                    image = cv2.resize(
-                        image,
-                        (resized_width, resized_height),
-                        interpolation=cv2.INTER_LINEAR,
-                    )
-                    target = cv2.resize(
-                        target,
-                        (resized_width, resized_height),
-                        interpolation=cv2.INTER_NEAREST,
-                    )
                 image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
                 target = cv2.resize(target, (width, height), interpolation=cv2.INTER_NEAREST)
             shapes.append(tuple(image.shape[:2]))
