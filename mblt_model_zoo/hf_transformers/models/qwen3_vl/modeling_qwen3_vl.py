@@ -500,8 +500,13 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
         self.max_seq_len = config.max_position_embeddings
         self.rope_theta = config.rope_theta
 
-        rope_scaling = getattr(config, "rope_scaling", None) or {}
-        self.mrope_section = rope_scaling.get("mrope_section", [24, 20, 20])
+        rope_scaling = getattr(config, "rope_scaling", None)
+        if rope_scaling is None or "mrope_section" not in rope_scaling:
+            raise ValueError(
+                "MobilintQwen3VLRotaryEmbedding requires config.rope_scaling.mrope_section; "
+                "check that the Qwen3-VL text config was loaded correctly."
+            )
+        self.mrope_section = rope_scaling["mrope_section"]
 
         dim = self.head_dim
         inv_freq = 1.0 / (
