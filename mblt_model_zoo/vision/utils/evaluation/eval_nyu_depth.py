@@ -23,6 +23,18 @@ class NYUDepthResult:
     abs_rel: float
     rmse: float
 
+    @property
+    def primary_score(self) -> float:
+        """Return the primary NYU Depth validation metric."""
+
+        return self.delta1
+
+    @property
+    def secondary_score(self) -> float:
+        """Return the secondary NYU Depth validation metric."""
+
+        return self.abs_rel
+
 
 class NYUDepthMetricAccumulator:
     """Accumulate median-aligned metrics over every valid NYU depth pixel."""

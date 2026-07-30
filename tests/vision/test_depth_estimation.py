@@ -109,6 +109,8 @@ def test_depth_metrics_median_align_and_ignore_invalid_targets() -> None:
     assert metrics.delta1 == pytest.approx(1.0)
     assert metrics.abs_rel == pytest.approx(0.0)
     assert metrics.rmse == pytest.approx(0.0)
+    assert metrics.primary_score == metrics.delta1
+    assert metrics.secondary_score == metrics.abs_rel
 
 
 @pytest.mark.parametrize("invalid_prediction", [np.nan, np.inf, -np.inf])

@@ -381,3 +381,49 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
 
     assert (output_dir / "images" / "keep.png").read_bytes() == b"old image"
     assert (output_dir / "annotations" / "keep.png").read_bytes() == b"old annotation"
+
+
+def test_dense_install_preserves_backups_when_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep recoverable backups outside staging when rollback cannot finish."""
+
+    staging_dir = tmp_path / ".staging"
+    staged_images = staging_dir / "images"
+    staged_annotations = staging_dir / "annotations"
+    staged_images.mkdir(parents=True)
+    staged_annotations.mkdir()
+    (staged_images / "new.png").write_bytes(b"new image")
+    (staged_annotations / "new.png").write_bytes(b"new annotation")
+
+    output_dir = tmp_path / "organized"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "annotations").mkdir()
+    (output_dir / "images" / "keep.png").write_bytes(b"old image")
+    (output_dir / "annotations" / "keep.png").write_bytes(b"old annotation")
+
+    real_replace = organizer.os.replace
+
+    def _fail_install_and_rollback(source: str, destination: str) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if source_path == staged_annotations:
+            raise OSError("simulated install failure")
+        if source_path.parent.name.startswith(".dense-backup-") and destination_path == output_dir / "images":
+            raise OSError("simulated rollback failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(organizer.os, "replace", _fail_install_and_rollback)
+
+    replacements = (
+        (str(staged_images), str(output_dir / "images")),
+        (str(staged_annotations), str(output_dir / "annotations")),
+    )
+    with pytest.raises(OSError, match="backups are preserved"):
+        organizer._replace_staged_directories(replacements, str(tmp_path), ".dense-backup-")
+
+    backup_dirs = list(tmp_path.glob(".dense-backup-*"))
+    assert len(backup_dirs) == 1
+    assert (backup_dirs[0] / "images" / "keep.png").read_bytes() == b"old image"
+    assert (backup_dirs[0] / "annotations" / "keep.png").read_bytes() == b"old annotation"

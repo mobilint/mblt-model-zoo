@@ -44,7 +44,7 @@ def get_dotav1_palette(index: int) -> tuple[int, int, int]:
         OpenCV BGR color tuple.
     """
 
-    return DOTAV1_PALETTE_BGR[index]
+    return DOTAV1_PALETTE_BGR[index % len(DOTAV1_PALETTE_BGR)]
 
 
 def get_dotav1_label(index: int) -> str:

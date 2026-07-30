@@ -97,3 +97,9 @@ def test_obb_plot_uses_dotav1_palette(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert plotted is not None
     assert np.any(np.all(plotted == get_dotav1_palette(2), axis=2))
+
+
+def test_dotav1_palette_wraps_class_indices() -> None:
+    """Match the modulo behavior used by the other visualization palettes."""
+
+    assert get_dotav1_palette(15) == get_dotav1_palette(0)

@@ -325,7 +325,7 @@ def _process_image_stats(
 
 
 def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAResult:
-    """Compute DOTAv1 mAP metrics from accumulated validator statistics."""
+    """Compute DOTAv1 metrics in legacy tuple order: mAP50, then mAP50-95."""
     target_cls = np.concatenate(stats["target_cls"], 0) if stats["target_cls"] else np.zeros(0, dtype=np.float64)
     if target_cls.size == 0:
         return DOTAResult(map5095=0.0, map50=0.0)
@@ -350,7 +350,9 @@ def evaluate_dota_predictions(
         predictions: Formatted prediction dictionaries.
 
     Returns:
-        Rotated mAP averaged across ``0.50:0.95`` followed by mAP at IoU ``0.50``.
+        Rotated mAP at IoU ``0.50`` followed by mAP averaged across ``0.50:0.95``.
+        The ``primary_score`` and ``secondary_score`` properties expose mAP50-95
+        and mAP50, respectively.
     """
     iouv = torch.linspace(0.5, 0.95, 10)
     stats = _empty_stats()

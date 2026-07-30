@@ -13,7 +13,7 @@ import tarfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from time import sleep
 from typing import Protocol, TypeGuard
 from urllib.parse import urlparse
@@ -47,6 +47,56 @@ NYU_DEPTH_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
+
+
+def _replace_staged_directories(
+    replacements: Iterable[tuple[str, str]],
+    output_parent_dir: str,
+    backup_prefix: str,
+) -> None:
+    """Atomically install staged directories while preserving failed rollback backups.
+
+    Args:
+        replacements: Pairs of staged and destination directories.
+        output_parent_dir: Parent directory where the backup directory is created.
+        backup_prefix: Prefix identifying the temporary backup directory.
+
+    Raises:
+        OSError: If installation or rollback fails. A failed rollback leaves its
+            backup directory in place and includes its path in the error.
+    """
+
+    replacement_list = list(replacements)
+    backup_dir = mkdtemp(dir=output_parent_dir, prefix=backup_prefix)
+    backups: dict[str, str] = {}
+    installed_dirs: list[str] = []
+    try:
+        for _, destination_dir in replacement_list:
+            if os.path.lexists(destination_dir):
+                backup_path = os.path.join(backup_dir, os.path.basename(destination_dir))
+                os.replace(destination_dir, backup_path)
+                backups[destination_dir] = backup_path
+        for staged_dir, destination_dir in replacement_list:
+            os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
+            os.replace(staged_dir, destination_dir)
+            installed_dirs.append(destination_dir)
+    except OSError:
+        try:
+            for directory in installed_dirs:
+                if os.path.isdir(directory) and not os.path.islink(directory):
+                    shutil.rmtree(directory)
+                elif os.path.lexists(directory):
+                    os.remove(directory)
+            for destination_dir, backup_path in backups.items():
+                os.makedirs(os.path.dirname(destination_dir), exist_ok=True)
+                os.replace(backup_path, destination_dir)
+        except OSError as rollback_error:
+            raise OSError(
+                f"Dataset installation rollback failed; backups are preserved at {backup_dir}."
+            ) from rollback_error
+        shutil.rmtree(backup_dir)
+        raise
+    shutil.rmtree(backup_dir)
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -615,26 +665,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
             (staged_annotation_dir, os.path.join(output_dir, "annotations")),
         )
         os.makedirs(output_dir, exist_ok=True)
-        backups: dict[str, str] = {}
-        installed_dirs: list[str] = []
-        try:
-            for _, destination_dir in replacements:
-                if os.path.lexists(destination_dir):
-                    backup_dir = os.path.join(staging_dir, f"backup-{os.path.basename(destination_dir)}")
-                    os.replace(destination_dir, backup_dir)
-                    backups[destination_dir] = backup_dir
-            for staged_dir, destination_dir in replacements:
-                os.replace(staged_dir, destination_dir)
-                installed_dirs.append(destination_dir)
-        except OSError:
-            for directory in installed_dirs:
-                if os.path.isdir(directory) and not os.path.islink(directory):
-                    shutil.rmtree(directory)
-                elif os.path.lexists(directory):
-                    os.remove(directory)
-            for destination_dir, backup_dir in backups.items():
-                os.replace(backup_dir, destination_dir)
-            raise
+        _replace_staged_directories(replacements, output_parent_dir, ".ade20k-backup-")
         for file_name in ("objectInfo150.txt", "sceneCategories.txt"):
             source_path = os.path.join(dataset_root, file_name)
             if os.path.isfile(source_path):
@@ -802,26 +833,7 @@ def organize_cityscapes(
             (staged_annotation_dir, os.path.join(output_dir, "annotations")),
         )
         os.makedirs(output_dir, exist_ok=True)
-        backups: dict[str, str] = {}
-        installed_dirs: list[str] = []
-        try:
-            for _, destination_dir in replacements:
-                if os.path.lexists(destination_dir):
-                    backup_dir = os.path.join(staging_dir, f"backup-{os.path.basename(destination_dir)}")
-                    os.replace(destination_dir, backup_dir)
-                    backups[destination_dir] = backup_dir
-            for staged_dir, destination_dir in replacements:
-                os.replace(staged_dir, destination_dir)
-                installed_dirs.append(destination_dir)
-        except OSError:
-            for directory in installed_dirs:
-                if os.path.isdir(directory) and not os.path.islink(directory):
-                    shutil.rmtree(directory)
-                elif os.path.lexists(directory):
-                    os.remove(directory)
-            for destination_dir, backup_dir in backups.items():
-                os.replace(backup_dir, destination_dir)
-            raise
+        _replace_staged_directories(replacements, output_parent_dir, ".cityscapes-backup-")
     print(f"Constructed Cityscapes validation dataset with {len(images)} image/mask pairs")
 
 
