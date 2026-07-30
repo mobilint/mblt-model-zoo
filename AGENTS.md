@@ -23,7 +23,7 @@ Before editing, run `git status --short`; preserve unrelated changes in a dirty 
 
 ## Current Package Snapshot
 
-- Package: `mblt-model-zoo` 2.2.1; Python `>=3.10,<3.13`.
+- Package: `mblt-model-zoo` 2.2.2; Python `>=3.10,<3.13`.
 - Runtime dependencies are declared in `pyproject.toml`; install development tools with
   `pip install -e . --group dev`.
 - Optional extras: `transformers`, `MeloTTS`, `onnxruntime`, `onnxruntime-gpu`, `qwen-asr`, and
