@@ -61,7 +61,7 @@ description: >-
   `eval_imagenet_metrics()` when structured Top-1 primary and Top-5 secondary metrics are needed.
   For DOTAv1, return rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve DOTAv1's 458 validation images directly under `images/`, with normalized and original
-  label layouts.
+  label layouts. Keep loader compatibility with legacy `images/val` datasets.
 - Preserve ADE20K's 2,000 validation image/mask pairs as flat `images/` and `annotations/` directories.
 - For ADE20K semantic validation, apply the same letterbox geometry to images and masks, pad masks with `255`, map
   source labels `1..150` to classes `0..149`, and report mIoU as primary with pixel accuracy secondary.

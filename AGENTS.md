@@ -117,7 +117,8 @@ truth when this snapshot becomes stale.
   `eval_imagenet_metrics()` for structured Top-1 primary and Top-5 secondary metrics.
 - DOTAv1 validation reports rotated mAP50-95 as the primary metric and rotated mAP50 as the secondary metric.
 - Preserve evaluator layouts. DOTAv1 stores its validation images directly in `images/` and may
-  use `labels/val_original`, which retains difficult-object filtering.
+  use `labels/val_original`, which retains difficult-object filtering. Its loader also accepts
+  legacy validation images under `images/val`.
 - Expose a seed with default `0` for vision APIs, CLIs, benchmarks, and compatibility helpers that
   sample or otherwise use randomness.
 - Keep qbcompiler imports inside the compilation path. Base imports, vision imports, the compile

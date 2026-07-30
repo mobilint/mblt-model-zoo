@@ -12,6 +12,8 @@ Read and follow the canonical skill at
 exposes structured Top-1 primary and Top-5 secondary metrics. DOTAv1 validation treats rotated
 mAP50-95 as primary and rotated mAP50 as secondary.
 
+DOTAv1 loaders prefer flat `images/` validation files and accept legacy `images/val` as a fallback.
+
 Model YAMLs derive same-stem ONNX Hub artifact names from `file_cfg.filename`; use
 `onnx_filename` only for a non-matching artifact name.
 

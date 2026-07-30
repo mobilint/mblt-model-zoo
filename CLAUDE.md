@@ -19,7 +19,8 @@
 - `eval_imagenet()` returns Top-1 as a float for compatibility; `eval_imagenet_metrics()` exposes
   structured Top-1 primary and Top-5 secondary metrics.
 - DOTAv1 validation uses rotated mAP50-95 as its primary metric and rotated mAP50 as its secondary metric.
-- DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts.
+- DOTAv1 organization installs its 458 validation images directly under `images/` and retains both label layouts;
+  its loader also accepts legacy `images/val` datasets.
 - Model YAMLs use `file_cfg.filename` as the canonical MXQ artifact; the matching same-stem ONNX
   artifact is derived unless `onnx_filename` explicitly names an exception.
 - Every model YAML declares `post_cfg.dataset`; postprocessing uses it with `task` to resolve the

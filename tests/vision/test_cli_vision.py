@@ -627,6 +627,32 @@ def test_cli_val_detects_original_dotav1_labels(tmp_path: Path) -> None:
     assert _dataset_ready("obb", str(data_path))
 
 
+@pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
+def test_dotav1_loader_supports_flat_and_legacy_images(tmp_path: Path, relative_image_dir: str) -> None:
+    """Load current flat and legacy nested DOTAv1 image layouts."""
+
+    image_dir = tmp_path / "dotav1" / relative_image_dir
+    image_dir.mkdir(parents=True)
+    assert cv2.imwrite(str(image_dir / "P0001.png"), np.zeros((8, 12, 3), dtype=np.uint8))
+
+    dataset = CustomDOTAv1(str(tmp_path / "dotav1"))
+
+    assert dataset.image_root == str(image_dir)
+    assert dataset.ids == ["P0001"]
+    image, image_id, height, width = dataset[0]
+    assert image.shape == (8, 12, 3)
+    assert (image_id, height, width) == ("P0001", 8, 12)
+
+
+def test_dotav1_loader_rejects_empty_image_layout(tmp_path: Path) -> None:
+    """Reject empty DOTAv1 layouts instead of reporting zero metrics."""
+
+    (tmp_path / "dotav1" / "images" / "val").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="DOTAv1 validation images not found"):
+        CustomDOTAv1(str(tmp_path / "dotav1"))
+
+
 def test_google_drive_dotav1_archives_reject_mismatched_stems(tmp_path: Path) -> None:
     """Reject archive pairs that would silently omit DOTAv1 validation images."""
 

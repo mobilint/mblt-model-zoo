@@ -475,21 +475,37 @@ class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
         """Initializes the DOTAv1 validation dataset.
 
         Args:
-            root: DOTAv1 root containing ``images/`` and ``labels/val``.
+            root: DOTAv1 root containing flat ``images/`` or legacy
+                ``images/val`` validation images.
 
         Raises:
             FileNotFoundError: If the validation image directory is missing.
+            ValueError: If neither supported layout contains validation images.
         """
         self.root = root
         self.image_root = os.path.join(root, "images")
         if not os.path.isdir(self.image_root):
             raise FileNotFoundError(f"DOTAv1 image directory not found: {self.image_root}")
-        self.image_paths = [
-            os.path.join(self.image_root, file_name)
-            for file_name in sorted(os.listdir(self.image_root))
+        self.image_paths = self._find_image_paths(self.image_root)
+        legacy_image_root = os.path.join(self.image_root, "val")
+        if not self.image_paths and os.path.isdir(legacy_image_root):
+            self.image_root = legacy_image_root
+            self.image_paths = self._find_image_paths(self.image_root)
+        if not self.image_paths:
+            raise ValueError(
+                f"DOTAv1 validation images not found directly under {os.path.join(root, 'images')} "
+                "or its legacy `val` subdirectory."
+            )
+        self.ids = [os.path.splitext(os.path.basename(path))[0] for path in self.image_paths]
+
+    def _find_image_paths(self, image_root: str) -> list[str]:
+        """Return supported image files directly under a DOTAv1 image directory."""
+
+        return [
+            os.path.join(image_root, file_name)
+            for file_name in sorted(os.listdir(image_root))
             if file_name.lower().endswith(self.IMG_EXTENSIONS)
         ]
-        self.ids = [os.path.splitext(os.path.basename(path))[0] for path in self.image_paths]
 
     def _load_image(self, image_path: str) -> np.ndarray:
         """Load an image as RGB."""
