@@ -207,8 +207,9 @@ class Results:
         if depth.ndim != 2:
             raise ValueError(f"Expected a 2D depth map or [B, H, W], got {depth.shape}.")
         image = self._read_image(source_path)
-        image_height, image_width = image.shape[:2]
-        depth = self._restore_depth_map(depth, (image_height, image_width))
+        image_shape = (int(image.shape[0]), int(image.shape[1]))
+        if tuple(depth.shape) != image_shape:
+            depth = self._restore_depth_map(depth, image_shape)
         valid = np.isfinite(depth) & (depth > 0)
         if not valid.any():
             raise ValueError("Depth output contains no positive finite values.")

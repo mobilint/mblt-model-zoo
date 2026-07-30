@@ -208,3 +208,23 @@ def test_depth_plot_maps_near_objects_to_red() -> None:
     assert plotted[0, 0, 2] > plotted[0, 0, 0]
     assert plotted[0, 1, 1] > max(plotted[0, 1, 0], plotted[0, 1, 2])
     assert plotted[0, 2, 0] > plotted[0, 2, 2]
+
+
+def test_depth_results_preserve_restored_non_square_maps() -> None:
+    """Avoid applying inverse letterboxing twice to restored depth maps."""
+
+    source = np.zeros((2, 4, 3), dtype=np.uint8)
+    restored_depth = torch.arange(1, 9, dtype=torch.float32).reshape(2, 4)
+    letterboxed_result = Results(
+        {"LetterBox": {"img_size": [4, 4]}},
+        {"task": "depth_estimation"},
+        restored_depth,
+    )
+    reference_result = Results({}, {"task": "depth_estimation"}, restored_depth)
+
+    plotted = letterboxed_result.plot(source)
+    reference = reference_result.plot(source)
+
+    assert plotted is not None
+    assert reference is not None
+    assert np.array_equal(plotted, reference)
