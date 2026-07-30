@@ -726,12 +726,21 @@ def test_google_drive_dotav1_archives_preserve_existing_data_when_staging_fails(
 def test_google_drive_dotav1_archives_install_flat_validation_layout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Install matching DOTAv1 validation data in the flat reference layout."""
+    """Install flat DOTAv1 validation data without difficult normalized labels."""
 
     image_source = tmp_path / "P0001.png"
     assert cv2.imwrite(str(image_source), np.zeros((16, 20, 3), dtype=np.uint8))
     label_source = tmp_path / "P0001.txt"
-    label_source.write_text("0 0 10 0 10 10 0 10 plane 0\n", encoding="utf-8")
+    label_source.write_text(
+        "\n".join(
+            [
+                "0 0 10 0 10 10 0 10 plane 0",
+                "2 2 8 2 8 8 2 8 ship 1",
+                "4 4 6 4 6 6 4 6 storage-tank 2",
+            ]
+        ),
+        encoding="utf-8",
+    )
     image_archive = tmp_path / "part1.zip"
     label_archive = tmp_path / "labelTxt.zip"
     with zipfile.ZipFile(image_archive, "w") as archive:
@@ -747,6 +756,9 @@ def test_google_drive_dotav1_archives_install_flat_validation_layout(
     assert (output_dir / "labels" / "val_original" / "P0001.txt").is_file()
     assert (output_dir / "labels" / "val" / "P0001.txt").read_text(encoding="utf-8") == (
         "0 0 0 0.5 0 0.5 0.625 0 0.625\n"
+    )
+    assert (output_dir / "labels" / "val_original" / "P0001.txt").read_text(encoding="utf-8") == (
+        label_source.read_text(encoding="utf-8")
     )
     assert not (output_dir / "images" / "val").exists()
 

@@ -995,6 +995,10 @@ def _write_dotav1_yolo_labels(image_path: str, original_label_path: str, output_
             fields = line.split()
             if len(fields) < 10 or fields[0].startswith("imagesource:") or fields[0].startswith("gsd:"):
                 continue
+            # Official DOTAv1 labels use ``1`` for difficult objects. Keep ``2``
+            # ignored for compatibility with previously supported label exports.
+            if fields[9] in {"1", "2"}:
+                continue
             class_name = fields[8]
             if class_name not in DOTAV1_CLASS_TO_IDX:
                 raise ValueError(f"Unsupported DOTAv1 class in {original_label_path}: {class_name}")
