@@ -31,6 +31,8 @@
   for an ambiguous tensor, normalize it as raw channels-first before candidates-first.
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared forward and inverse letterbox
   geometry.
+- Require `pre_cfg.LetterBox` for YOLO detection postprocessing, and use metadata-enabled
+  preprocessing callbacks for semantic validation loaders.
 - Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[1, H/4, W/4]` maps by
   four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
   and `argmax`. Preserve existing ONNX layouts and baked class maps.

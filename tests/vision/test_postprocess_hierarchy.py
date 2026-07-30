@@ -123,3 +123,13 @@ def test_builder_keeps_non_detection_routing_warning_free(
         warnings.simplefilter("error", DeprecationWarning)
         postprocessor = build_postprocess(pre_cfg, post_cfg)
     assert type(postprocessor) is expected_type
+
+
+def test_detection_postprocessor_rejects_missing_head_count() -> None:
+    """Raise a stable runtime error when anchorless metadata omits nl."""
+
+    with pytest.raises(ValueError, match="nl should be provided in post_cfg"):
+        YOLOAnchorlessDetectionPost(
+            {"LetterBox": {"img_size": [640, 640]}},
+            {"task": "object_detection", "dataset": "coco"},
+        )

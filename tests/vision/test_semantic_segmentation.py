@@ -18,7 +18,12 @@ from mblt_model_zoo.vision.utils.datasets import (
     get_cityscapes_loader,
     get_cityscapes_palette,
 )
-from mblt_model_zoo.vision.utils.evaluation import SemanticMetricAccumulator, calculate_semantic_metrics
+from mblt_model_zoo.vision.utils.evaluation import (
+    ADE20KResult,
+    SemanticMetricAccumulator,
+    SemanticSegmentationResult,
+    calculate_semantic_metrics,
+)
 from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
 from mblt_model_zoo.vision.utils.preprocess import build_preprocess
 from mblt_model_zoo.vision.utils.results import Results
@@ -76,6 +81,16 @@ def test_semantic_postprocess_supports_logits_and_baked_maps() -> None:
         post(torch.zeros((1, 19, 4, 4)))
     with pytest.raises(ValueError, match=r"must be in \[0, 149\]"):
         post(torch.full((1, 4, 4), 150))
+
+
+def test_semantic_postprocess_reports_semantic_letterbox_errors() -> None:
+    """Use semantic task labels when validating preprocessing configuration."""
+
+    with pytest.raises(
+        ValueError,
+        match=r"Semantic segmentation requires a LetterBox configuration in pre_cfg",
+    ):
+        SemanticSegPost({}, {"task": "semantic_segmentation", "dataset": "ade20k"})
 
 
 def test_semantic_postprocess_supports_mxq_hwc_and_batched_nhwc_logits() -> None:
@@ -254,6 +269,8 @@ def test_semantic_metrics_ignore_void_pixels_and_pool_counts() -> None:
     target = np.array([[0, 0, 1], [1, 255, 2]], dtype=np.uint8)
     prediction = np.array([[0, 1, 1], [1, 0, 2]], dtype=np.uint8)
     result = calculate_semantic_metrics(prediction, target, nc=3)
+    assert ADE20KResult is SemanticSegmentationResult
+    assert isinstance(result, SemanticSegmentationResult)
     assert result.miou == pytest.approx((0.5 + 2 / 3 + 1.0) / 3)
     assert result.pixel_accuracy == pytest.approx(4 / 5)
 

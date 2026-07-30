@@ -91,6 +91,8 @@ truth when this snapshot becomes stale.
 - Keep shared forward and inverse letterbox geometry in
   `mblt_model_zoo/vision/utils/letterbox.py`; task-specific code selects interpolation and padding
   values without duplicating resize, border, or crop calculations.
+- YOLO detection postprocessors require `pre_cfg.LetterBox`. Semantic validation preprocessors
+  must return image data with LetterBox `ratio_pad` metadata so loaders can apply identical target geometry.
 - Normalize dense MXQ outputs before inverse letterboxing: bilinearly upsample depth
   `[1, H/4, W/4]` maps by four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to
   NCHW before bilinear restoration and `argmax`. Preserve full-resolution ONNX depth, NCHW

@@ -16,7 +16,19 @@ def get_letterbox_input_shape(
     requirement_name: str,
     size_name: str | None = None,
 ) -> tuple[int, int]:
-    """Validate and return a dense task's configured letterbox input shape."""
+    """Validate and return a dense task's configured letterbox input shape.
+
+    Args:
+        pre_cfg: Model preprocessing configuration.
+        requirement_name: Task name used when LetterBox is absent.
+        size_name: Optional shorter name used for invalid-size errors.
+
+    Returns:
+        Configured input height and width.
+
+    Raises:
+        ValueError: If LetterBox or its two-item image size is missing or invalid.
+    """
 
     letterbox_cfg = pre_cfg.get("LetterBox")
     if not isinstance(letterbox_cfg, dict) or "img_size" not in letterbox_cfg:
@@ -33,7 +45,20 @@ def resolve_ratio_pads(
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
 ) -> list[RatioPad]:
-    """Normalize letterbox metadata and derive values missing from a dense task batch."""
+    """Normalize letterbox metadata and derive values missing from a dense task batch.
+
+    Args:
+        ratio_pad: Shared or per-image letterbox metadata.
+        batch_size: Number of images in the output batch.
+        shapes: Original image shapes.
+        input_shape: Configured model input shape.
+
+    Returns:
+        One resolved ratio/padding pair per batch item.
+
+    Raises:
+        ValueError: If ratio/padding metadata is invalid for the batch.
+    """
 
     pads = normalize_ratio_pads(ratio_pad, batch_size)
     return [resolve_ratio_pad(input_shape, shape, pad) for pad, shape in zip(pads, shapes)]
@@ -46,7 +71,21 @@ def crop_letterbox(
     input_shape: tuple[int, int],
     task_name: str,
 ) -> torch.Tensor:
-    """Crop letterbox padding from a dense two-dimensional output."""
+    """Crop letterbox padding from a dense two-dimensional output.
+
+    Args:
+        output: Dense two-dimensional model output.
+        shape: Original image height and width.
+        ratio_pad: Resize ratio and padding applied during preprocessing.
+        input_shape: Configured model input height and width.
+        task_name: Task label used in validation errors.
+
+    Returns:
+        Output with letterbox padding removed.
+
+    Raises:
+        ValueError: If inverse letterboxing produces an empty crop.
+    """
 
     geometry = LetterBoxGeometry.from_shapes(input_shape, shape)
     output_shape = (int(output.shape[0]), int(output.shape[1]))

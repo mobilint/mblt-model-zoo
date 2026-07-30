@@ -40,6 +40,16 @@ def test_image_classification_plot_saves_without_gui_cleanup(
     assert save_path.is_file()
 
 
+def test_image_classification_plot_rejects_missing_output() -> None:
+    """Raise a runtime validation error when classification output is absent."""
+
+    result = Results({}, {"task": "image_classification"}, torch.zeros(1))
+    result.acc = None
+
+    with pytest.raises(ValueError, match="No accuracy output found"):
+        result.plot(np.zeros((8, 8, 3), dtype=np.uint8), topk=1)
+
+
 def test_instance_segmentation_plot_supports_nonzero_coco_labels(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

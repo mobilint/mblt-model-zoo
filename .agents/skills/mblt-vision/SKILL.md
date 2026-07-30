@@ -40,6 +40,8 @@ description: >-
 - Reuse `vision.utils.letterbox.LetterBoxGeometry` for forward resize/padding metadata and inverse
   dense-output crops. Keep image interpolation/padding and target interpolation/ignore padding
   task-specific.
+- Require `pre_cfg.LetterBox` for YOLO detection postprocessors. Semantic validation loader
+  callbacks must return `(image, metadata)` with `ratio_pad`; use the metadata-enabled preprocess path.
 - Normalize dense MXQ outputs before inverse letterboxing: depth accepts single-image
   `[1, H/4, W/4]` maps and bilinearly upsamples them by four; Cityscapes semantic segmentation
   accepts `[H, W, 19]` or `[B, H, W, 19]` logits and converts them to NCHW before bilinear

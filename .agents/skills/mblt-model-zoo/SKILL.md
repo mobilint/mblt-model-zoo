@@ -38,6 +38,7 @@ description: >-
   packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.
 - Normalize quarter-resolution MXQ depth and channel-last Cityscapes MXQ logits before inverse
   letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
+- Require explicit YOLO LetterBox configuration and metadata-enabled semantic validation preprocessing.
 - Route dense compilation through `post_cfg.dataset`: NYU Depth for depth models and ADE20K or
   Cityscapes for semantic models.
 - Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels

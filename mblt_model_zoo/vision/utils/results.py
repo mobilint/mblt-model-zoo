@@ -36,11 +36,7 @@ DENSE_OVERLAY_ALPHA = 0.7
 
 
 class Results:
-    """
-    Class for handling and plotting model inference results.
-    Class for handling, processing, and plotting model inference results.
-    Provides methods to visualize detections, masks, and keypoints on images.
-    """
+    """Handle, process, and plot model inference results."""
 
     def __init__(
         self,
@@ -154,20 +150,17 @@ class Results:
         save_path: str | None = None,
         **kwargs,
     ) -> np.ndarray | None:
-        """
-        Plots the results on the source image.
-        Plots the inference results on the source image.
+        """Plot inference results on the source image.
+
         Args:
-            source_path (str | np.ndarray | Image.Image): Path or image object.
-            save_path (str, optional): Path to save the plotted image. Defaults to None.
-            **kwargs: Additional arguments.
-            source_path (str | np.ndarray | Image.Image): The image to plot on.
-            save_path (str, optional): If provided, the result image will be saved to this path.
+            source_path: Image path or object to plot on.
+            save_path: Optional output image path.
             **kwargs: Additional task-specific plotting options (e.g., topk for classification).
+
         Returns:
-            np.ndarray: The image with results visualized (in BGR format).
+            Image with results visualized in BGR format, or ``None`` for classification without an output path.
+
         Raises:
-            NotImplementedError: If the task is not supported.
             NotImplementedError: If the task is not supported for plotting.
         """
         if save_path is not None:
@@ -311,7 +304,8 @@ class Results:
         topk: int = 5,
         **kwargs,
     ) -> np.ndarray | None:
-        assert self.acc is not None, "No accuracy output found."
+        if self.acc is None:
+            raise ValueError("No accuracy output found.")
         if isinstance(self.acc, np.ndarray):
             self.acc = torch.tensor(self.acc)
         topk_probs, topk_indices = torch.topk(self.acc, topk)

@@ -14,25 +14,6 @@ if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
 
 
-class ADE20KResult(NamedTuple):
-    """ADE20K metrics ordered from primary to secondary."""
-
-    miou: float
-    pixel_accuracy: float
-
-    @property
-    def primary_score(self) -> float:
-        """Return mean intersection-over-union."""
-
-        return self.miou
-
-    @property
-    def secondary_score(self) -> float:
-        """Return overall valid-pixel accuracy."""
-
-        return self.pixel_accuracy
-
-
 class SemanticSegmentationResult(NamedTuple):
     """Generic semantic metrics ordered from primary to secondary."""
 
@@ -52,6 +33,9 @@ class SemanticSegmentationResult(NamedTuple):
         return self.pixel_accuracy
 
 
+ADE20KResult = SemanticSegmentationResult
+
+
 class SemanticMetricAccumulator:
     """Accumulate an ignore-aware semantic confusion matrix."""
 
@@ -68,7 +52,15 @@ class SemanticMetricAccumulator:
         self.matrix = np.zeros((nc, nc), dtype=np.int64)
 
     def update(self, prediction: np.ndarray, target: np.ndarray) -> None:
-        """Accumulate one or more predicted and target class maps."""
+        """Accumulate one or more predicted and target class maps.
+
+        Args:
+            prediction: Predicted class maps.
+            target: Target class maps with optional ignore labels.
+
+        Raises:
+            ValueError: If prediction and target shapes differ.
+        """
 
         prediction = np.asarray(prediction)
         target = np.asarray(target)
@@ -91,7 +83,14 @@ class SemanticMetricAccumulator:
             self.matrix += histogram.reshape(self.nc, self.nc)
 
     def result(self) -> SemanticSegmentationResult:
-        """Compute mIoU over present classes and overall pixel accuracy."""
+        """Compute mIoU over present classes and overall pixel accuracy.
+
+        Returns:
+            Pooled semantic-segmentation metrics.
+
+        Raises:
+            ValueError: If no valid target pixels were accumulated.
+        """
 
         ground_truth = self.matrix.sum(axis=1)
         predicted = self.matrix.sum(axis=0)
@@ -119,12 +118,24 @@ def calculate_semantic_metrics(
     nc: int = 150,
     ignore_label: int = 255,
 ) -> ADE20KResult:
-    """Calculate semantic metrics for one batch of class maps."""
+    """Calculate semantic metrics for one batch of class maps.
+
+    Args:
+        prediction: Predicted class maps.
+        target: Target class maps.
+        nc: Number of semantic classes.
+        ignore_label: Target label excluded from metrics.
+
+    Returns:
+        Semantic metrics exposed through the ADE20K compatibility alias.
+
+    Raises:
+        ValueError: If shapes differ or no valid target pixels are present.
+    """
 
     accumulator = SemanticMetricAccumulator(nc=nc, ignore_label=ignore_label)
     accumulator.update(prediction, target)
-    result = accumulator.result()
-    return ADE20KResult(result.miou, result.pixel_accuracy)
+    return accumulator.result()
 
 
 def _evaluate_semantic_loader(
@@ -133,7 +144,20 @@ def _evaluate_semantic_loader(
     nc: int,
     description: str = "Evaluating semantic segmentation",
 ) -> SemanticSegmentationResult:
-    """Evaluate input-space semantic maps from an organized validation loader."""
+    """Evaluate input-space semantic maps from an organized validation loader.
+
+    Args:
+        model: Initialized semantic-segmentation engine.
+        loader: Organized validation data loader.
+        nc: Number of semantic classes.
+        description: Progress-bar description.
+
+    Returns:
+        Pooled semantic-segmentation metrics.
+
+    Raises:
+        ValueError: If postprocessing returns no class maps or no valid targets exist.
+    """
 
     accumulator = SemanticMetricAccumulator(nc=nc)
     for inputs, targets, _, _, _ in tqdm(loader, desc=description):
@@ -162,6 +186,9 @@ def eval_semantic_segmentation(
 
     Returns:
         Generic mIoU and pixel-accuracy result.
+
+    Raises:
+        ValueError: If preprocessing metadata, image size, taxonomy, predictions, or targets are invalid.
     """
 
     letterbox_cfg = model.pre_cfg.get("LetterBox")
@@ -201,12 +228,23 @@ def eval_semantic_segmentation(
 
 
 def eval_ade20k(model: MBLT_Engine, data_path: str, batch_size: int) -> ADE20KResult:
-    """Evaluate a semantic-segmentation model on ADE20K validation masks."""
+    """Evaluate a semantic-segmentation model on ADE20K validation masks.
 
-    result = eval_semantic_segmentation(
+    Args:
+        model: Initialized semantic-segmentation engine.
+        data_path: Organized ADE20K dataset root.
+        batch_size: Number of validation samples per inference batch.
+
+    Returns:
+        ADE20K metrics through the generic semantic result type.
+
+    Raises:
+        ValueError: If the dataset, preprocessing metadata, predictions, or targets are invalid.
+    """
+
+    return eval_semantic_segmentation(
         model,
         data_path,
         batch_size,
         dataset="ade20k",
     )
-    return ADE20KResult(result.miou, result.pixel_accuracy)

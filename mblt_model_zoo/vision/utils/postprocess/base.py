@@ -124,7 +124,8 @@ class YOLODetectionPostBase(PostBase):
 
         if self.anchors is None:
             nl = post_cfg.get("nl")
-            assert nl is not None, "nl should be provided in post_cfg"
+            if nl is None:
+                raise ValueError("nl should be provided in post_cfg")
             self.nl = nl
             if self.nl == 2:
                 self.stride = [2 ** (4 + i) for i in range(self.nl)]

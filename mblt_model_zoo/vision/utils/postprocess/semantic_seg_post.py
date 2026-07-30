@@ -26,8 +26,7 @@ class SemanticSegPost(PostBase):
         """Initialize semantic output handling for a configured dataset taxonomy."""
 
         super().__init__()
-        # Preserve the validation messages previously inherited from DepthPost.
-        self.input_shape = get_letterbox_input_shape(pre_cfg, "Depth estimation", "Depth")
+        self.input_shape = get_letterbox_input_shape(pre_cfg, "Semantic segmentation", "Semantic")
         dataset = post_cfg.get("dataset")
         if not isinstance(dataset, str):
             raise ValueError("Semantic segmentation requires a string dataset in post_cfg.")

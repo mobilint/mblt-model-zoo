@@ -26,6 +26,8 @@ Use `obb` as the canonical vision task key for oriented bounding boxes and retai
 Reuse `vision.utils.letterbox.LetterBoxGeometry` for shared resize, padding, metadata, and inverse
 crop calculations. Dense compilation resolves NYU Depth, ADE20K, or Cityscapes from
 `post_cfg.dataset` and samples their organized RGB images.
+Require `pre_cfg.LetterBox` for YOLO detection postprocessors and `(image, metadata)` callbacks with
+`ratio_pad` for semantic validation loaders.
 
 Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
 upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW
