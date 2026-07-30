@@ -195,6 +195,21 @@ def eval_semantic_segmentation(
         ValueError: If preprocessing metadata, image size, taxonomy, predictions, or targets are invalid.
     """
 
+    configured_dataset = model.post_cfg.get("dataset")
+    if not isinstance(configured_dataset, str) or not configured_dataset:
+        raise ValueError("Semantic validation requires model.post_cfg.dataset to declare the model taxonomy.")
+    configured_taxonomy = configured_dataset.lower()
+    if dataset is not None:
+        if not isinstance(dataset, str) or not dataset:
+            raise ValueError("Semantic validation dataset overrides must be non-empty strings.")
+        requested_taxonomy = dataset.lower()
+        if requested_taxonomy != configured_taxonomy:
+            raise ValueError(
+                f"Requested semantic validation taxonomy {requested_taxonomy!r} conflicts with "
+                f"the model's configured taxonomy {configured_taxonomy!r}."
+            )
+    taxonomy = configured_taxonomy
+
     letterbox_cfg = model.pre_cfg.get("LetterBox")
     if not isinstance(letterbox_cfg, dict) or "img_size" not in letterbox_cfg:
         raise ValueError("Semantic validation requires a LetterBox img_size in the model preprocessing config.")
@@ -202,8 +217,6 @@ def eval_semantic_segmentation(
     if not isinstance(image_size, list) or len(image_size) != 2:
         raise ValueError("Semantic validation img_size must be a two-item [height, width] list.")
 
-    configured_dataset = model.post_cfg.get("dataset")
-    taxonomy = (dataset or configured_dataset or "ade20k").lower()
     image_size_tuple = (int(image_size[0]), int(image_size[1]))
     if taxonomy == "ade20k":
         validation_dataset = CustomADE20K(data_path)

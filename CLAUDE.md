@@ -48,7 +48,8 @@
   pixel accuracy.
 - Cityscapes organization selects only 500 validation PNG pairs from the two official train/validation/test ZIP
   packages; validation maps the 19 canonical source IDs to train IDs and ignores all other labels. Reject semantic
-  validation taxonomies other than `ade20k` and `cityscapes`.
+  validation taxonomies other than `ade20k` and `cityscapes`, including evaluator overrides that
+  differ from `model.post_cfg.dataset`.
 - Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only after
   checking taxonomy-specific layout, required metadata and targets, and the complete official split.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement, preserving

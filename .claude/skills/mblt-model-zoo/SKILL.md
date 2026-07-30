@@ -20,6 +20,7 @@ ADE20K validation ignores source label `0`, maps labels `1..150` to classes `0..
 accuracy.
 Cityscapes organization retains only 500 paired validation images and `gtFine_labelIds` masks from the official ZIP
 packages, maps its canonical 19 source IDs to train IDs, and never installs train or test data.
+Semantic evaluators reject taxonomy overrides that differ from `model.post_cfg.dataset`.
 
 Dense compilation uses `post_cfg.dataset` to select NYU Depth, ADE20K, or Cityscapes and samples
 only their organized RGB images.

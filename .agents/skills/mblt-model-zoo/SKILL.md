@@ -37,6 +37,7 @@ description: >-
 - Preserve ADE20K's `0` ignore label and `1..150` to `0..149` validation mapping; report mIoU before pixel accuracy.
 - Preserve Cityscapes's 500 validation-only lossless PNG pairs from the two official train/validation/test ZIP
   packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.
+- Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.
 - Normalize quarter-resolution MXQ depth and channel-last Cityscapes MXQ logits before inverse
   letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
 - Require explicit YOLO LetterBox configuration and metadata-enabled semantic validation preprocessing.

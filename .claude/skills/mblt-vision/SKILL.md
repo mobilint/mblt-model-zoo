@@ -51,3 +51,4 @@ mIoU before pixel accuracy.
 Cityscapes semantic validation uses only 500 paired validation images and `gtFine_labelIds` masks from the official
 ZIP packages, the canonical 19-class source-ID mapping, and `255` ignore padding independently from ADE20K. Reject
 other semantic validation taxonomies.
+Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.

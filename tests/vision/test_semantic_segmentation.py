@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -23,6 +25,8 @@ from mblt_model_zoo.vision.utils.evaluation import (
     SemanticMetricAccumulator,
     SemanticSegmentationResult,
     calculate_semantic_metrics,
+    eval_ade20k,
+    eval_cityscapes,
 )
 from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
 from mblt_model_zoo.vision.utils.preprocess import build_preprocess
@@ -261,6 +265,33 @@ def test_cityscapes_dataset_rejects_shape_and_pair_mismatches(tmp_path: Path) ->
     dataset = CustomCityscapes(str(tmp_path))
     with pytest.raises(ValueError, match="shapes must match"):
         dataset[0]
+
+
+@pytest.mark.parametrize(
+    ("evaluator", "configured_taxonomy", "requested_taxonomy"),
+    [
+        (eval_ade20k, "cityscapes", "ade20k"),
+        (eval_cityscapes, "ade20k", "cityscapes"),
+    ],
+)
+def test_semantic_evaluators_reject_model_taxonomy_mismatches(
+    tmp_path: Path,
+    evaluator: Callable[..., SemanticSegmentationResult],
+    configured_taxonomy: str,
+    requested_taxonomy: str,
+) -> None:
+    """Reject cross-taxonomy evaluation before constructing a validation dataset."""
+
+    model = SimpleNamespace(
+        post_cfg={"task": "semantic_segmentation", "dataset": configured_taxonomy},
+        pre_cfg={"LetterBox": {"img_size": [640, 640]}},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"{requested_taxonomy!r} conflicts with .*{configured_taxonomy!r}",
+    ):
+        evaluator(model, str(tmp_path / "dataset-does-not-exist"), batch_size=1)
 
 
 def test_semantic_metrics_ignore_void_pixels_and_pool_counts() -> None:

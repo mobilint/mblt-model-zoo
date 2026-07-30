@@ -125,7 +125,8 @@ truth when this snapshot becomes stale.
   label `0`, maps labels `1..150` to model classes `0..149`, and reports mIoU as primary with pixel accuracy secondary.
 - Cityscapes semantic-segmentation validation maps source IDs `7,8,11,12,13,17,19..28,31..33` to classes `0..18`,
   ignores other IDs, and reports mIoU as primary with pixel accuracy secondary. Reject semantic
-  validation taxonomies other than `ade20k` and `cityscapes`.
+  validation taxonomies other than `ade20k` and `cityscapes`, and reject evaluator taxonomy
+  overrides that differ from `model.post_cfg.dataset`.
 - Keep `eval_imagenet()` numerically compatible by returning Top-1 as a float. Use
   `eval_imagenet_metrics()` for structured Top-1 primary and Top-5 secondary metrics.
 - Keep evaluator result objects aligned on `primary_score` and `secondary_score`. Preserve numeric
