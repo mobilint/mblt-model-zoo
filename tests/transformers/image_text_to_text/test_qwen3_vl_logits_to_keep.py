@@ -110,6 +110,10 @@ class _BareQwen3VLTextModel(MobilintQwen3VLTextModel):
         self.npu_backend = _FakeBackend(mxq_model)
         self.num_deepstack_layers = 0
         self.npu_time = None
+        # Match the real 2-input `[inputs, deepstack]` MXQ signature so
+        # `_do_infer` doesn't try to append a rope tensor.
+        self._uses_rope_input = False
+        self.rotary_emb = None
 
     def get_mxq_model(self):  # noqa: D401 - trivial passthrough
         return self.npu_backend.mxq_model

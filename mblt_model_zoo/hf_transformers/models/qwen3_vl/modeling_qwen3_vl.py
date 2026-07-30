@@ -96,7 +96,25 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
         self.num_grid_per_side = int(config.num_position_embeddings**0.5)
         head_dim = config.hidden_size // config.num_heads
+        # Both pos_embed and rotary_pos_emb are unconditionally allocated: the
+        # dynamic-vision path needs them and the static path only pays a
+        # trivially small extra weight-load cost. Detection below drives *how*
+        # the encoder is called, not what modules exist.
         self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
+        # Trust the compiled vision MXQ over any config attr: 1-input builds
+        # take a single folded pixel tensor (static path), 3-input builds take
+        # ``[rope, pos, folded]`` (dynamic path). Silent config/MXQ mismatch
+        # would ship the wrong shape to the NPU.
+        num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
+        if num_mxq_inputs == 1:
+            self._uses_dynamic_vision = False
+        elif num_mxq_inputs == 3:
+            self._uses_dynamic_vision = True
+        else:
+            raise ValueError(
+                f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
+                f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
+            )
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
@@ -418,7 +436,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
-        is_dynamic = getattr(self.config, "dynamic_vision", False)
+        is_dynamic = self._uses_dynamic_vision
 
         npu_inputs: list = []
         for chunk, grid in zip(chunks, grid_thw):
@@ -614,7 +632,23 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         super().__init__(config, *args, **kwargs)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
-        self.rotary_emb = MobilintQwen3VLRotaryEmbedding(config)
+        # Trust the compiled text MXQ over any config attr: 2-input builds are
+        # [inputs, deepstack] and cannot consume a rope tensor, 3-input builds
+        # are [inputs, deepstack, rope]. Skipping the rotary_emb allocation on
+        # 2-input builds keeps them compatible with older checkpoints that were
+        # compiled before MRoPE support existed.
+        num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
+        if num_mxq_inputs == 3:
+            self._uses_rope_input = True
+            self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
+        elif num_mxq_inputs == 2:
+            self._uses_rope_input = False
+            self.rotary_emb = None
+        else:
+            raise ValueError(
+                f"Qwen3-VL text MXQ must expose 2 ([inputs, deepstack]) or 3 "
+                f"([inputs, deepstack, rope]) inputs; got {num_mxq_inputs}."
+            )
         self.num_deepstack_layers = 0
 
     def get_input_embeddings(self) -> nn.Module:
@@ -687,16 +721,20 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 torch.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device),
             )
 
-        # the hard coded `3` is for temporal, height and width.
-        if position_ids is None:
-            position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
-        elif position_ids.ndim == 2:
-            position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+        if self._uses_rope_input:
+            # the hard coded `3` is for temporal, height and width.
+            if position_ids is None:
+                position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
+            elif position_ids.ndim == 2:
+                position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
 
-        if position_ids.ndim == 3 and position_ids.shape[0] == 4:
-            position_ids = position_ids[1:]
+            if position_ids.ndim == 3 and position_ids.shape[0] == 4:
+                position_ids = position_ids[1:]
 
-        position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+            assert self.rotary_emb is not None
+            position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+        else:
+            position_embeddings = None
 
         logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
@@ -780,6 +818,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 npu_prefill_chunk_size=npu_prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 logits_to_keep=logits_to_keep,
+                position_embeddings=position_embeddings,
             )
 
         if inputs_embeds.shape[0] != 1:
@@ -824,8 +863,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                     dtype=torch.float32,
                 ).cpu().numpy()
 
-            rope_chunk = position_embeddings[:, start_index:end_index, :] if position_embeddings is not None else None
-            infer_inputs = [inputs_chunk, deepstack_chunk] + ([rope_chunk] if rope_chunk is not None else [])
+            infer_inputs = [inputs_chunk, deepstack_chunk]
+            if self._uses_rope_input:
+                assert position_embeddings is not None
+                infer_inputs.append(position_embeddings[:, start_index:end_index, :])
 
             if count_npu_time:
                 import time
@@ -980,6 +1021,32 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             per_item.append(padded)
         return per_item
 
+    def _build_batched_rope_arrays(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_embeddings: np.ndarray,
+    ) -> list[np.ndarray]:
+        """Slice a batched ``(batch, seq_len, peSize)`` rope array per active item.
+
+        Mirrors :meth:`_build_batched_deepstack_tensors`'s per-item slicing so
+        the closure in :meth:`_llm_forward_batch_deepstack` can select the
+        same ``[chunk_start, chunk_start + chunk_len_k)`` window on rope that
+        ``_assemble_batch_chunk`` selects on ``inputs_embeds_masked[j]``.
+
+        Returns:
+            List of length ``batch_size``. Item ``j`` has shape
+            ``(seq_len_j, peSize)`` where ``seq_len_j`` matches the compacted
+            per-item embed length (or 1 in the decode-shaped fallback).
+        """
+        batch_size = int(inputs_embeds.shape[0])
+        if attention_mask.shape == inputs_embeds.shape[:-1]:
+            attention_mask_bool_np = attention_mask.type(torch.bool).cpu().numpy()
+            return [position_embeddings[j, attention_mask_bool_np[j], :] for j in range(batch_size)]
+        # Decode-shaped fallback: no per-token attention mask, single-token rows.
+        assert inputs_embeds.shape[1] == 1
+        return [position_embeddings[j, :, :] for j in range(batch_size)]
+
     def _llm_forward_batch_deepstack(
         self,
         inputs_embeds: torch.Tensor,
@@ -991,6 +1058,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        position_embeddings: Optional[np.ndarray] = None,
     ) -> torch.Tensor:
         """Batched sibling of :meth:`llm_forward` that also packs deepstack chunks.
 
@@ -1003,6 +1071,13 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         ``update_seen_tokens`` — the shared helper does that here too, so
         we skip ``cache.set_deepstack_tensor`` / ``update_cache_position``
         (they are only needed by the single-batch decode replay path).
+
+        When ``self._uses_rope_input`` is True the caller supplies a shared
+        ``position_embeddings`` array of shape ``(batch, seq_len, peSize)``
+        pre-computed once in :meth:`forward`. Per-item rope rows are sliced
+        the same way as deepstack and concatenated so the packed extras
+        arrive at the compiled model as ``[deepstack, rope]`` in the same
+        order the single-batch ``_do_infer`` produces.
         """
         del cache_position  # Batched path uses `update_seen_tokens` bookkeeping.
 
@@ -1014,6 +1089,17 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             visual_pos_masks=visual_pos_masks,
             deepstack_visual_embeds=deepstack_visual_embeds,
         )
+        if self._uses_rope_input:
+            assert position_embeddings is not None, (
+                "position_embeddings must be provided for a 3-input Qwen3-VL text MXQ."
+            )
+            rope_by_item: Optional[list[np.ndarray]] = self._build_batched_rope_arrays(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                position_embeddings=position_embeddings,
+            )
+        else:
+            rope_by_item = None
 
         def _pack_deepstack_extras(
             *,
@@ -1032,7 +1118,22 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 end = chunk_start + length
                 deepstack_chunks.append(deepstack_by_item[cache_id][:, chunk_start:end, :])
             deepstack_concat = torch.cat(deepstack_chunks, dim=1)
-            return [deepstack_concat.to(dtype=torch.float32).cpu().numpy()]
+            extras: list[np.ndarray] = [deepstack_concat.to(dtype=torch.float32).cpu().numpy()]
+
+            if rope_by_item is not None:
+                # Match the single-batch `[inputs, deepstack, rope]` ordering:
+                # the shared helper concatenates every active item's chunk on
+                # axis 0, then we lift a leading batch axis so the packed
+                # shape is `(1, packed_tokens, peSize)`.
+                rope_chunks: list[np.ndarray] = []
+                for k, cache_id in enumerate(cache_ids):
+                    length = sequence_lengths_chunks[k]
+                    end = chunk_start + length
+                    rope_chunks.append(rope_by_item[cache_id][chunk_start:end, :])
+                rope_concat = np.concatenate(rope_chunks, axis=0)[np.newaxis, :, :]
+                extras.append(rope_concat.astype(np.float32, copy=False))
+
+            return extras
 
         return self._llm_forward_batch(
             inputs_embeds,

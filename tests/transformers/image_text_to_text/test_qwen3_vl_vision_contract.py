@@ -38,6 +38,9 @@ class DummyQwen3Vision:
 
     dtype = torch.float32
     spatial_merge_size = 2
+    # Match the real vision model's MXQ-detected flag (static single-input
+    # build) so `_encode_images` routes through `_prepare_npu_inputs`.
+    _uses_dynamic_vision = False
 
     def __init__(self, return_dict: bool = True, core_mode: str = "single") -> None:
         """Initialize the dummy config and MXQ backend."""

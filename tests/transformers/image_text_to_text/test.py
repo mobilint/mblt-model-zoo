@@ -19,7 +19,6 @@ def main():
     parser.add_argument("--model-name", type=str, default="mobilint/Qwen3-VL-8B-Instruct", help="Model name")
     parser.add_argument("--text-mxq-path", type=str, default="./example.mxq", help="Text MXQ path")
     parser.add_argument("--image-mxq-path", dest="vision_mxq_path", type=str, default=None, help="Vision MXQ path")
-    parser.add_argument("--dynamic-vision", action="store_true", help="Use dynamic vision (variable image size)")
     args = parser.parse_args()
 
     model_kwargs = dict(
@@ -34,12 +33,10 @@ def main():
     if args.inject_embedding:
         MobilintModelMixin._inject_custom_embeddings(model, args.embedding_path)
 
-    if args.dynamic_vision:
-        model.model.visual.config.dynamic_vision = True
-
     processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
-    if args.dynamic_vision:
-        processor.dynamic_vision = True
+    # Dynamic vs static vision is now decided by the compiled MXQ input count;
+    # mirror that onto the processor so its resize/clamp logic stays in sync.
+    processor.sync_dynamic_vision_from_model(model)
     streamer = TextStreamer(processor.tokenizer, skip_prompt=True)
 
     content = []
