@@ -837,7 +837,3 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             keep = rotated_nms(boxes, xi[:, 4], self.iou_thres)[:max_det]
             output.append(xi[keep])
         return output
-
-
-# Compatibility alias for the class name published before detection specializations were named explicitly.
-YOLODFLFreePost = YOLODFLFreeDetectionPost

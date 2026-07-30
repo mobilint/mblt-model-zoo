@@ -817,7 +817,3 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
     ) -> list[torch.Tensor]:
         """Preserve existing OBB NMS behavior outside the COCO validation scope."""
         return self.nms(x)
-
-
-# Compatibility alias for the class name published before detection specializations were named explicitly.
-YOLOAnchorlessPost = YOLOAnchorlessDetectionPost
