@@ -4,7 +4,7 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transf
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
-MODEL_PATHS = ("./Qwen3-VL-8B-Instruct-Batch16",)
+MODEL_PATHS = ("mobilint/Qwen3-VL-8B-Instruct-Batch16",)
 
 IMAGE_URLS = (
     "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
