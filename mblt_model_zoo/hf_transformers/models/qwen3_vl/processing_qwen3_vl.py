@@ -1,3 +1,4 @@
+import re
 from typing import Optional, Union, cast
 
 import numpy as np
@@ -27,6 +28,16 @@ logger = logging.get_logger(__name__)
 
 # NPU vision model fixed input shape: (H_npu, W_npu, C_npu) = (1024, 64, 6)
 _NPU_H, _NPU_W = 1024, 64
+
+# transformers 5.x's Qwen3VLProcessor.replace_video_token expands `<|video_pad|>`
+# to a per-frame string that already carries its own `<|vision_start|>...<|vision_end|>`
+# pairs, so the chat template's outer `<|vision_start|><|video_pad|><|vision_end|>`
+# wrap becomes doubly nested. tf 4.x's processor stripped that outer pair itself;
+# tf 5.x does not. We pre-normalize the text before dispatch so both versions
+# emit the same single-wrap prompt.
+_VIDEO_OUTER_WRAP_RE = re.compile(
+    r"<\|vision_start\|>\s*<\|video_pad\|>\s*<\|vision_end\|>"
+)
 
 # The dynamic vision MXQ takes the pre-merge patch sequence as `inputs[0]`. Its op
 # descriptor declares a 4096-token ceiling, but anything above 2048 hangs the NPU
@@ -205,6 +216,31 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             "shortest_edge": min(ip.size["shortest_edge"], limit),
         }
 
+    @staticmethod
+    def _strip_video_outer_wrap(text):
+        """Reduce chat-template ``<|vision_start|><|video_pad|><|vision_end|>`` to ``<|video_pad|>``.
+
+        On transformers 5.x the upstream processor only expands ``<|video_pad|>``
+        into a per-frame string (which carries its own ``<|vision_start|>``/
+        ``<|vision_end|>`` around each frame) and leaves the chat template's
+        outer pair intact, producing a double-nested vision structure that
+        breaks ``get_rope_index`` / ``visual_pos_masks`` and yields an
+        immediate-EOS response. tf 4.x's processor already did this stripping
+        via its explicit ``if <vision_start><video_pad><vision_end> in text``
+        branch, so on that version the regex is a no-op (the pattern is
+        replaced before the branch check would have matched, and the vLLM
+        fallback ``else`` produces the same final expansion at the same
+        position). Image tokens are left untouched — ``replace_image_token``
+        returns a plain ``<|image_pad|>*N`` string with no inner vision
+        markers, so the outer wrap around images is the only boundary marker
+        upstream has for the image visual region.
+        """
+        if isinstance(text, str):
+            return _VIDEO_OUTER_WRAP_RE.sub("<|video_pad|>", text)
+        if isinstance(text, list):
+            return [MobilintQwen3VLProcessor._strip_video_outer_wrap(item) for item in text]
+        return text
+
     def __call__(
         self,
         images: Optional[ImageInput] = None,
@@ -224,6 +260,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
 
         if videos is not None:
             self._sync_dynamic_vision_to_video_processor()
+            text = self._strip_video_outer_wrap(text)
 
         return super().__call__(images, text, videos, **kwargs)
 

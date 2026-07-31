@@ -149,3 +149,55 @@ def test_sync_dynamic_vision_from_model_rejects_non_qwen3_vl_model() -> None:
 
     with pytest.raises(ValueError, match="_uses_dynamic_vision"):
         proc.sync_dynamic_vision_from_model(_AlienModel())
+
+
+def test_strip_video_outer_wrap_removes_chat_template_wrap() -> None:
+    """The chat-template outer ``<|vision_start|><|video_pad|><|vision_end|>`` collapses to ``<|video_pad|>``."""
+    text = (
+        "<|im_start|>user\n"
+        "<|vision_start|><|video_pad|><|vision_end|>Describe this video."
+        "<|im_end|>\n<|im_start|>assistant\n"
+    )
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(text)
+    assert "<|vision_start|><|video_pad|><|vision_end|>" not in stripped
+    assert stripped.count("<|video_pad|>") == 1
+    assert "Describe this video." in stripped
+
+
+def test_strip_video_outer_wrap_leaves_image_wrap_untouched() -> None:
+    """Image ``<|vision_start|><|image_pad|><|vision_end|>`` must stay intact.
+
+    Upstream ``replace_image_token`` returns plain ``<|image_pad|>*N`` without
+    per-image vision markers, so the outer wrap is the only boundary marker
+    for the image's visual region.
+    """
+    text = "<|vision_start|><|image_pad|><|vision_end|>What is this?"
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(text)
+    assert stripped == text
+
+
+def test_strip_video_outer_wrap_handles_multiple_videos() -> None:
+    """Multiple video wraps in a single message all collapse."""
+    text = (
+        "<|vision_start|><|video_pad|><|vision_end|> and "
+        "<|vision_start|><|video_pad|><|vision_end|>"
+    )
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(text)
+    assert stripped == "<|video_pad|> and <|video_pad|>"
+
+
+def test_strip_video_outer_wrap_batched_list() -> None:
+    """List-of-strings batch input is normalized per-item."""
+    batch = [
+        "<|vision_start|><|video_pad|><|vision_end|>A",
+        "no wrap here",
+    ]
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(batch)
+    assert stripped == ["<|video_pad|>A", "no wrap here"]
+
+
+def test_strip_video_outer_wrap_noop_on_bare_video_pad() -> None:
+    """Bare ``<|video_pad|>`` (already normalized / vLLM-style input) is left alone."""
+    text = "prefix <|video_pad|> suffix"
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(text)
+    assert stripped == text
