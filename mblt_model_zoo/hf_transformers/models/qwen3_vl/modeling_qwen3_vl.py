@@ -462,13 +462,14 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
         is_dynamic = self._uses_dynamic_vision
 
-        # Defense-in-depth guard behind the processor-level check in
-        # `MobilintQwen3VLProcessor.__call__`: video requires the dynamic vision MXQ
-        # (per-frame RoPE + variable visual-token count in the text decoder), and
-        # feeding video frames through the static path yields silently degenerate
-        # embeddings that the language model still decodes into plausible-looking
-        # text. Fail loudly for callers that bypass the processor and drive
-        # `_encode_images` directly.
+        # Defense-in-depth guards behind the processor-level checks in
+        # `MobilintQwen3VLProcessor.__call__`: static Qwen3-VL MXQ releases bake a
+        # single image's 2D RoPE into the text decoder, so both (a) video (per-frame
+        # RoPE + variable visual-token count) and (b) multi-image (independent 2D
+        # coordinates per image) silently degrade into embeddings the language model
+        # still decodes into plausible-looking but semantically wrong text. Fail
+        # loudly for callers that bypass the processor and drive `_encode_images`
+        # directly.
         if not is_dynamic and any(int(g[0].item()) > 1 for g in grid_thw):
             raise NotImplementedError(
                 "Video input requires a dynamic-vision Qwen3-VL MXQ (3-input vision + "
@@ -476,6 +477,14 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 "vision MXQ is static (single-tensor input with fixed frame size). Use a "
                 "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
                 "inputs."
+            )
+        if not is_dynamic and len(grid_thw) > 1:
+            raise NotImplementedError(
+                "Multi-image input requires a dynamic-vision Qwen3-VL MXQ (3-input "
+                "vision + per-image 2D RoPE in the text decoder). The currently loaded "
+                "vision MXQ is static (single-tensor input baked to one image's 2D "
+                "grid). Use a Qwen3-VL release that ships a dynamic vision MXQ, or "
+                "pass a single image."
             )
 
         npu_inputs: list = []

@@ -9,7 +9,7 @@ from cv2 import INTER_CUBIC
 from cv2 import resize as cv2_resize
 from PIL import Image
 from transformers.feature_extraction_utils import BatchFeature
-from transformers.image_utils import ImageInput, load_image
+from transformers.image_utils import ImageInput, load_image, make_flat_list_of_images
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.video_processing_auto import AutoVideoProcessor
@@ -272,6 +272,22 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 self._clamp_dynamic_image_size()
                 logger.debug("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
             else:
+                # Static Qwen3-VL MXQ releases bake a single image's 2D RoPE grid into
+                # the text decoder. A second image would need its own independent 2D
+                # coordinates, which the baked rope cannot express — the decoder loses
+                # the image-boundary distinction and emits grammatically-plausible but
+                # semantically wrong output. Fail here, before ``_resize_images`` and
+                # the image_processor's patch extraction, with the same shape of
+                # message the video hard-fail uses.
+                if len(make_flat_list_of_images(images)) > 1:
+                    raise NotImplementedError(
+                        "Multi-image input requires a dynamic-vision Qwen3-VL release "
+                        "(3-input vision MXQ with per-image 2D RoPE in the text "
+                        "decoder). The currently loaded processor is in static mode "
+                        "(dynamic_vision=False), which supports exactly one image per "
+                        "prompt. Load a Qwen3-VL release that ships a dynamic vision "
+                        "MXQ, or pass a single image."
+                    )
                 images = self._resize_images(images)
 
         if videos is not None:
