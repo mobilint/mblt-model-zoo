@@ -9,7 +9,7 @@ from cv2 import INTER_CUBIC
 from cv2 import resize as cv2_resize
 from PIL import Image
 from transformers.feature_extraction_utils import BatchFeature
-from transformers.image_utils import ImageInput, load_image, make_flat_list_of_images
+from transformers.image_utils import ImageInput, load_image
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.video_processing_auto import AutoVideoProcessor
@@ -46,6 +46,27 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
 # the largest length measured to run. Override `max_vision_tokens` for an MXQ that
 # supports longer sequences.
 _NPU_MAX_VISION_TOKENS = 2048
+
+
+def _count_images(images) -> int:
+    """Count images in an ``ImageInput`` without loading/decoding.
+
+    ``make_flat_list_of_images`` requires each leaf to be a PIL image or
+    ndarray, so it rejects URL/path strings that the processor accepts as
+    valid image inputs (they are resolved later, downstream of this guard).
+    We only need the count for the multi-image hard-fail, so recurse through
+    list/tuple containers and treat every non-container leaf as one image —
+    with the standard ndarray/tensor batch axis expansion.
+    """
+    if images is None:
+        return 0
+    if isinstance(images, (list, tuple)):
+        return sum(_count_images(item) for item in images)
+    if isinstance(images, np.ndarray) and images.ndim == 4:
+        return images.shape[0]
+    if torch.is_tensor(images) and images.ndim == 4:
+        return images.shape[0]
+    return 1
 
 
 def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]:
@@ -279,7 +300,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 # semantically wrong output. Fail here, before ``_resize_images`` and
                 # the image_processor's patch extraction, with the same shape of
                 # message the video hard-fail uses.
-                if len(make_flat_list_of_images(images)) > 1:
+                if _count_images(images) > 1:
                     raise NotImplementedError(
                         "Multi-image input requires a dynamic-vision Qwen3-VL release "
                         "(3-input vision MXQ with per-image 2D RoPE in the text "
