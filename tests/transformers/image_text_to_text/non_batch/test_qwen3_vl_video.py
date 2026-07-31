@@ -10,7 +10,7 @@ MODEL_PATHS = (
     "mobilint/Qwen3-VL-8B-Instruct",
 )
 
-VIDEO_URL = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4"
+VIDEO_URL = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4"
 
 
 def test_qwen3_vl_video(pipe, generation_token_limit: int):
