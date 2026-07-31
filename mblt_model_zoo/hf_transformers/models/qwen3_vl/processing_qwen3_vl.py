@@ -260,6 +260,21 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 images = self._resize_images(images)
 
         if videos is not None:
+            # Static Qwen3-VL MXQ releases (single-input vision, fixed visual-token count in the
+            # text decoder) cannot express video: per-frame RoPE and variable-length visual
+            # regions are exactly what the dynamic vision MXQ was compiled to carry. Without
+            # that, video decoding + preprocessing would still run and the language model
+            # would emit grammatically-plausible but semantically empty output. Fail here —
+            # before the heavy torchcodec/FFmpeg video decode — with a message pointing to
+            # the release that actually supports video.
+            if not self.dynamic_vision:
+                raise NotImplementedError(
+                    "Video input requires a dynamic-vision Qwen3-VL release (3-input vision "
+                    "MXQ with variable visual-token count in the text decoder). The currently "
+                    "loaded processor is in static mode (dynamic_vision=False). Load a "
+                    "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
+                    "inputs."
+                )
             self._sync_dynamic_vision_to_video_processor()
             text = self._strip_video_outer_wrap(text)
 

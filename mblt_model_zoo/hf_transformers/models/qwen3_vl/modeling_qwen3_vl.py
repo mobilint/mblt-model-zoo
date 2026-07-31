@@ -441,21 +441,6 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected Qwen3-VL vision output shape: {tuple(np.asarray(output).shape)}")
         return torch.tensor(output_array, dtype=torch.float32, device=device)
 
-    def _split_video_into_frames(
-        self,
-        chunk: torch.Tensor,
-        grid: torch.Tensor,
-    ) -> list[np.ndarray]:
-        """Split a video chunk (gt > 1) into per-frame NPU inputs."""
-        gt, gh, gw = grid.tolist()
-        tokens_per_frame = int(gh * gw)
-        frame_grid = torch.tensor([1, gh, gw], dtype=grid.dtype, device=grid.device)
-        frames = []
-        for f in range(int(gt)):
-            frame_chunk = chunk[f * tokens_per_frame : (f + 1) * tokens_per_frame]
-            frames.append(self._prepare_npu_inputs(frame_chunk, frame_grid))
-        return frames
-
     def _split_video_into_dynamic_frames(
         self, chunk: torch.Tensor, grid: torch.Tensor
     ) -> list[list[np.ndarray]]:
@@ -477,14 +462,27 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
         is_dynamic = self._uses_dynamic_vision
 
+        # Defense-in-depth guard behind the processor-level check in
+        # `MobilintQwen3VLProcessor.__call__`: video requires the dynamic vision MXQ
+        # (per-frame RoPE + variable visual-token count in the text decoder), and
+        # feeding video frames through the static path yields silently degenerate
+        # embeddings that the language model still decodes into plausible-looking
+        # text. Fail loudly for callers that bypass the processor and drive
+        # `_encode_images` directly.
+        if not is_dynamic and any(int(g[0].item()) > 1 for g in grid_thw):
+            raise NotImplementedError(
+                "Video input requires a dynamic-vision Qwen3-VL MXQ (3-input vision + "
+                "variable visual-token count in the text decoder). The currently loaded "
+                "vision MXQ is static (single-tensor input with fixed frame size). Use a "
+                "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
+                "inputs."
+            )
+
         npu_inputs: list = []
         for chunk, grid in zip(chunks, grid_thw):
             gt = grid[0].item()
             if gt > 1:
-                if is_dynamic:
-                    npu_inputs.extend(self._split_video_into_dynamic_frames(chunk, grid))
-                else:
-                    npu_inputs.extend(self._split_video_into_frames(chunk, grid))
+                npu_inputs.extend(self._split_video_into_dynamic_frames(chunk, grid))
             else:
                 if is_dynamic:
                     npu_inputs.append(self._prepare_dynamic_npu_inputs(chunk, grid))
