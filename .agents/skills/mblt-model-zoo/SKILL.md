@@ -49,6 +49,8 @@ description: >-
   before median alignment.
 - Reuse organized validation and calibration datasets only after checking their taxonomy-specific
   layout, required metadata and targets, and full official split count.
+- Reject symlinked dense local source data and metadata, require resolved copy sources to stay
+  within the resolved dataset root, and never reuse symlinked dense managed roots.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
   preserves the existing cache; validate WiderFace event/image identities against `wider_face_val.mat`.
 - Stage and validate complete local or archive DOTAv1 roots before atomic replacement. Remove stale

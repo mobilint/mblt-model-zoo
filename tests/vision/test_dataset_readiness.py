@@ -177,3 +177,43 @@ def test_ade20k_readiness_requires_source_metadata(
 
     _write_file(tmp_path / "sceneCategories.txt")
     assert readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
+
+
+@pytest.mark.parametrize(
+    ("dataset", "task", "relative_path"),
+    [
+        ("nyu-depth", "depth_estimation", "images/sample.jpg"),
+        ("nyu-depth", "depth_estimation", "depth/sample.npy"),
+        ("nyu-depth", "depth_estimation", "images/extra.jpg"),
+        ("ade20k", "semantic_segmentation", "images/ADE_val_00000001.jpg"),
+        ("ade20k", "semantic_segmentation", "annotations/ADE_val_00000001.png"),
+        ("ade20k", "semantic_segmentation", "objectInfo150.txt"),
+    ],
+)
+def test_dense_readiness_rejects_symlinked_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+    task: str,
+    relative_path: str,
+) -> None:
+    """Do not reuse a complete-looking dense cache containing symlinked files."""
+
+    monkeypatch.setattr(readiness, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    if dataset == "nyu-depth":
+        _write_file(tmp_path / "images" / "sample.jpg")
+        _write_file(tmp_path / "depth" / "sample.npy")
+    else:
+        _write_file(tmp_path / "images" / "ADE_val_00000001.jpg")
+        _write_file(tmp_path / "annotations" / "ADE_val_00000001.png")
+        for file_name in readiness.ADE20K_METADATA_FILES:
+            _write_file(tmp_path / file_name)
+    external_file = tmp_path.parent / f"{tmp_path.name}-outside"
+    external_file.write_bytes(b"outside dataset")
+    source_path = tmp_path / relative_path
+    if source_path.exists():
+        source_path.unlink()
+    source_path.symlink_to(external_file)
+
+    assert not readiness.dataset_ready(tmp_path, task, dataset)

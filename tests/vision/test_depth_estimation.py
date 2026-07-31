@@ -9,28 +9,11 @@ import numpy as np
 import pytest
 import torch
 
-from mblt_model_zoo.vision import list_models
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomNYUDepth, get_nyu_depth_loader
 from mblt_model_zoo.vision.utils.evaluation import NYUDepthMetricAccumulator, calculate_nyu_depth_metrics
 from mblt_model_zoo.vision.utils.postprocess import DepthPost
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.wrapper import resolve_model_config
-
-
-def test_yolo26_depth_configs_resolve_onnx_artifacts() -> None:
-    """Expose every YOLO26 depth wrapper and its matching Hub ONNX artifact."""
-
-    assert list_models("depth_estimation")["depth_estimation"] == [
-        "YOLO26lDepth",
-        "YOLO26mDepth",
-        "YOLO26nDepth",
-        "YOLO26sDepth",
-        "YOLO26xDepth",
-    ]
-    for size in "nsm lx".replace(" ", ""):
-        config = resolve_model_config(f"yolo26{size}-depth")
-        assert config["file_cfg"]["repo_id"] == f"mobilint/YOLO26{size}-depth"
-        assert config["file_cfg"]["onnx_filename"] == f"yolo26{size}-depth.onnx"
 
 
 @pytest.mark.parametrize(

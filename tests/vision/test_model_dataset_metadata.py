@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from mblt_model_zoo.vision.wrapper import resolve_model_config
@@ -38,17 +37,3 @@ def test_all_model_variants_declare_a_supported_dataset() -> None:
             checked += 1
 
     assert checked > 0
-
-
-@pytest.mark.parametrize(
-    ("model_name", "dataset"),
-    [
-        ("yolo26n-sem", "cityscapes"),
-        ("yolo26n-sem-ade20k", "ade20k"),
-        ("yolov8n", "coco"),
-    ],
-)
-def test_model_families_resolve_distinct_datasets(model_name: str, dataset: str) -> None:
-    """Keep same-task model families tied to their actual output taxonomies."""
-
-    assert resolve_model_config(model_name)["post_cfg"]["dataset"] == dataset

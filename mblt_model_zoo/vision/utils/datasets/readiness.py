@@ -34,9 +34,12 @@ CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{
 def _files_by_stem(directory: Path, suffixes: set[str]) -> dict[str, Path] | None:
     """Collect direct child files with supported suffixes by stem."""
 
-    if not directory.is_dir():
+    if directory.is_symlink() or not directory.is_dir():
         return {}
-    paths = [path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in suffixes]
+    entries = list(directory.iterdir())
+    if any(path.is_symlink() for path in entries):
+        return None
+    paths = [path for path in entries if path.is_file() and path.suffix.lower() in suffixes]
     files = {path.stem: path for path in paths}
     return files if len(files) == len(paths) else None
 
@@ -213,6 +216,8 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     """
 
     root = Path(data_path).expanduser()
+    if root.is_symlink() or not root.is_dir():
+        return False
     normalized = dataset.lower()
     if normalized == "nyu-depth":
         images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"})
@@ -235,7 +240,10 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             len(images) == ADE20K_VALIDATION_SAMPLE_COUNT
             and all(stem.startswith("ADE_val_") for stem in images)
             and all(path.suffix.lower() in {".jpg", ".jpeg"} for path in images.values())
-            and all((root / file_name).is_file() for file_name in ADE20K_METADATA_FILES)
+            and all(
+                not (root / file_name).is_symlink() and (root / file_name).is_file()
+                for file_name in ADE20K_METADATA_FILES
+            )
         )
     if normalized == "cityscapes":
         return (

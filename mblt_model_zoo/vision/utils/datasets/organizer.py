@@ -13,6 +13,7 @@ import tarfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
+from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
 from time import sleep
 from typing import Protocol, TypeGuard
@@ -561,13 +562,50 @@ def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
     raise ValueError(f"NYU Depth dataset must contain matching images/ and depth/ directories: {dataset_dir}")
 
 
-def _collect_nyu_depth_validation_files(image_dir: str, depth_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+def _validate_dense_source_file(source_path: str, dataset_root: Path) -> str:
+    """Resolve a non-symlink regular file contained by a dense dataset root.
+
+    Args:
+        source_path: Candidate data or metadata file.
+        dataset_root: Resolved root of the extracted dataset.
+
+    Returns:
+        Resolved source path safe to copy.
+
+    Raises:
+        ValueError: If the source is a symlink, is not a regular file, cannot be
+            resolved, or escapes the dataset root.
+    """
+
+    source = Path(source_path)
+    if source.is_symlink():
+        raise ValueError(f"Dense dataset source file must not be a symlink: {source}.")
+    try:
+        resolved_source = source.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve dense dataset source file {source}: {exc}.") from exc
+    if not resolved_source.is_file():
+        raise ValueError(f"Dense dataset source must be a regular file: {source}.")
+    if not resolved_source.is_relative_to(dataset_root):
+        raise ValueError(f"Dense dataset source must remain within dataset root: {source}.")
+    return str(resolved_source)
+
+
+def _collect_nyu_depth_validation_files(
+    image_dir: str,
+    depth_dir: str,
+    dataset_root: Path,
+) -> tuple[dict[str, str], dict[str, str]]:
     """Validates and returns matching NYU Depth validation image/depth pairs."""
 
     images = {
-        os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
+        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(path, dataset_root)
+        for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
     }
-    depths = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(depth_dir, [".npy"])}
+    depths = {
+        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(path, dataset_root)
+        for path in _iter_files(depth_dir, [".npy"])
+    }
     missing_depths = sorted(set(images) - set(depths))
     missing_images = sorted(set(depths) - set(images))
     if missing_depths or missing_images:
@@ -594,7 +632,11 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     """
 
     image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
-    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir)
+    try:
+        dataset_root = Path(dataset_dir).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve NYU Depth dataset root {dataset_dir}: {exc}.") from exc
+    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir, dataset_root)
     print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
 
     output_dir = os.path.abspath(output_dir)
@@ -665,13 +707,23 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
     """
 
     dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
+    try:
+        resolved_dataset_root = Path(dataset_root).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve ADE20K dataset root {dataset_root}: {exc}.") from exc
     images = {
-        os.path.splitext(file_name)[0]: os.path.join(image_dir, file_name)
+        os.path.splitext(file_name)[0]: _validate_dense_source_file(
+            os.path.join(image_dir, file_name),
+            resolved_dataset_root,
+        )
         for file_name in os.listdir(image_dir)
         if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
     }
     annotations = {
-        os.path.splitext(file_name)[0]: os.path.join(annotation_dir, file_name)
+        os.path.splitext(file_name)[0]: _validate_dense_source_file(
+            os.path.join(annotation_dir, file_name),
+            resolved_dataset_root,
+        )
         for file_name in os.listdir(annotation_dir)
         if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
     }
@@ -681,11 +733,12 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         raise ValueError(
             f"ADE20K validation dataset must contain {ADE20K_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
         )
-    missing_metadata = [
-        file_name for file_name in ADE20K_METADATA_FILES if not os.path.isfile(os.path.join(dataset_root, file_name))
-    ]
-    if missing_metadata:
-        raise ValueError(f"ADE20K dataset is missing required metadata files: {', '.join(missing_metadata)}.")
+    metadata: dict[str, str] = {}
+    for file_name in ADE20K_METADATA_FILES:
+        metadata_path = os.path.join(dataset_root, file_name)
+        if not os.path.lexists(metadata_path):
+            raise ValueError(f"ADE20K dataset is missing required metadata files: {file_name}.")
+        metadata[file_name] = _validate_dense_source_file(metadata_path, resolved_dataset_root)
 
     output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
@@ -703,7 +756,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
             )
         for file_name in ADE20K_METADATA_FILES:
             shutil.copy2(
-                os.path.join(dataset_root, file_name),
+                metadata[file_name],
                 os.path.join(staged_output_dir, file_name),
             )
 

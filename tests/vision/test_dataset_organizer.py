@@ -356,6 +356,57 @@ def test_organize_nyu_depth_extracts_only_validation_layout(
     assert not (output_dir / "depth" / "train").exists()
 
 
+@pytest.mark.parametrize("relative_path", ["images/sample.jpg", "depth/sample.npy"])
+def test_construct_nyu_depth_rejects_symlinked_data_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Reject NYU data symlinks without replacing an existing managed cache."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = tmp_path / "source"
+    (dataset_dir / "images").mkdir(parents=True)
+    (dataset_dir / "depth").mkdir()
+    (dataset_dir / "images" / "sample.jpg").write_bytes(b"image")
+    (dataset_dir / "depth" / "sample.npy").write_bytes(b"depth")
+    external_file = tmp_path / "secret"
+    external_file.write_bytes(b"outside dataset")
+    source_path = dataset_dir / relative_path
+    source_path.unlink()
+    source_path.symlink_to(external_file)
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    marker = output_dir / "valid-cache-marker"
+    marker.write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        organizer.construct_nyu_depth(str(dataset_dir), str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
+    assert not (output_dir / Path(relative_path).name).exists()
+
+
+def test_construct_nyu_depth_rejects_source_outside_resolved_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject regular files reached through a directory symlink escaping the dataset root."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = tmp_path / "source"
+    dataset_dir.mkdir()
+    external_images = tmp_path / "external-images"
+    external_images.mkdir()
+    (external_images / "sample.jpg").write_bytes(b"outside dataset")
+    (dataset_dir / "images").symlink_to(external_images, target_is_directory=True)
+    (dataset_dir / "depth").mkdir()
+    (dataset_dir / "depth" / "sample.npy").write_bytes(b"depth")
+
+    with pytest.raises(ValueError, match="must remain within dataset root"):
+        organizer.construct_nyu_depth(str(dataset_dir), str(tmp_path / "organized"))
+
+
 def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -451,6 +502,40 @@ def test_construct_ade20k_requires_metadata_before_replacing_cache(
         organizer.construct_ade20k(str(dataset_dir), str(output_dir))
 
     assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "images/ADE_val_00000001.jpg",
+        "annotations/ADE_val_00000001.png",
+        "objectInfo150.txt",
+        "sceneCategories.txt",
+    ],
+)
+def test_construct_ade20k_rejects_symlinked_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Reject ADE20K data and metadata symlinks before replacing a managed cache."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = _create_ade20k_source(tmp_path)
+    external_file = tmp_path / "secret"
+    external_file.write_bytes(b"outside dataset")
+    source_path = dataset_dir / relative_path
+    source_path.unlink()
+    source_path.symlink_to(external_file)
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    marker = output_dir / "valid-cache-marker"
+    marker.write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        organizer.construct_ade20k(str(dataset_dir), str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
 
 
 def test_construct_ade20k_preserves_cache_when_metadata_staging_fails(

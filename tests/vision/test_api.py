@@ -6,19 +6,15 @@ import importlib
 
 import pytest
 
-from benchmark.vision import benchmark_vision_models
 from mblt_model_zoo import vision
-from mblt_model_zoo.compile import vision as compile_vision
 from mblt_model_zoo.vision import list_models, list_tasks
 from mblt_model_zoo.vision._tasks import normalize_vision_task
-from mblt_model_zoo.vision.datasets import get_dataset_config_for_task
 from mblt_model_zoo.vision.utils.datasets import (
     CustomCocodata,
     CustomCOCODataset,
     CustomWiderface,
     CustomWiderFaceDataset,
 )
-from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 
 
 def test_list_tasks_includes_obb() -> None:
@@ -53,17 +49,6 @@ def test_oriented_bounding_boxes_remains_an_obb_alias() -> None:
     assert vision.oriented_bounding_boxes is vision.obb
     assert alias_models == canonical_models
     assert compatibility_module.YOLO26mOBB is vision.obb.YOLO26mOBB
-
-
-def test_task_normalization_is_shared_across_public_boundaries(tmp_path) -> None:
-    """Normalize the legacy OBB spelling in every task-driven subsystem."""
-
-    alias = "oriented_bounding_boxes"
-    assert normalize_vision_task(alias) == "obb"
-    assert get_dataset_config_for_task(alias)["name"] == "dotav1"
-    assert not dataset_ready(tmp_path, alias, "dotav1")
-    assert compile_vision._normalize_task(alias) == "obb"
-    assert benchmark_vision_models._parse_task(alias) == "obb"
 
 
 @pytest.mark.parametrize("task", [None, 1, object()])

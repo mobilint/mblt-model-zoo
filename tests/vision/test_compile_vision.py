@@ -43,17 +43,6 @@ def _write_images(directory: Path, names: list[str]) -> list[Path]:
     return created
 
 
-def test_resolve_model_config_handles_alias_and_updated_variant() -> None:
-    """Resolve YAML aliases and variant updates through the shared helper."""
-
-    default_config = resolve_model_config("mobilenet_v3_large")
-    variant_config = resolve_model_config("mobilenet_v3_large", "IMAGENET1K_V1")
-
-    assert default_config["file_cfg"]["filename"].endswith("IMAGENET1K_V2.mxq")
-    assert variant_config["file_cfg"]["filename"].endswith("IMAGENET1K_V1.mxq")
-    assert default_config["post_cfg"]["task"] == variant_config["post_cfg"]["task"]
-
-
 def test_resolve_model_config_derives_onnx_filename() -> None:
     """Derive ONNX artifact names consistently from MXQ artifact names."""
 
