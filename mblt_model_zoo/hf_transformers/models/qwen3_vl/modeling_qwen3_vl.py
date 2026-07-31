@@ -517,8 +517,11 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
         super().__init__()
         self.head_dim = config.head_dim
         self.max_seq_len = config.max_position_embeddings
-        self.rope_theta = config.rope_theta
 
+        # Transformers 5.x folds rope_theta into `rope_parameters` (exposed via
+        # the `rope_scaling` property) during config __post_init__, so the flat
+        # attribute is dropped. Transformers 4.x keeps `rope_theta` as its own
+        # attribute. Read both.
         rope_scaling = getattr(config, "rope_scaling", None)
         if rope_scaling is None or "mrope_section" not in rope_scaling:
             raise ValueError(
@@ -526,6 +529,17 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
                 "check that the Qwen3-VL text config was loaded correctly."
             )
         self.mrope_section = rope_scaling["mrope_section"]
+
+        rope_theta = getattr(config, "rope_theta", None)
+        if rope_theta is None:
+            rope_theta = rope_scaling.get("rope_theta")
+        if rope_theta is None:
+            raise ValueError(
+                "MobilintQwen3VLRotaryEmbedding requires config.rope_theta (Transformers <5) or "
+                "config.rope_scaling['rope_theta'] (Transformers >=5); check that the Qwen3-VL "
+                "text config was loaded correctly."
+            )
+        self.rope_theta = rope_theta
 
         dim = self.head_dim
         inv_freq = 1.0 / (
