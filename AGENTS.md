@@ -116,7 +116,8 @@ truth when this snapshot becomes stale.
   flat `images/` and `annotations/` PNG pairs.
 - Reject symlinked dense dataset files and metadata from local extracted sources, and require every
   resolved copy source to remain within the resolved dataset root. Do not reuse dense managed roots
-  containing symlinked data, metadata, or layout directories.
+  containing symlinked data, metadata, or layout directories, or roots reached through a symlinked
+  ancestor. Organizers must reject those output paths before writing.
 - Reuse an organized validation or calibration root only when its taxonomy-specific layout,
   required metadata and targets, and full official validation sample count are all valid. Apply
   this consistently to ImageNet, COCO, DOTAv1, WiderFace, and dense datasets.

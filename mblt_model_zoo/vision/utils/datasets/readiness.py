@@ -31,6 +31,13 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$")
 
 
+def _path_has_symlink_component(path: Path) -> bool:
+    """Return whether a path or any existing ancestor is a symlink."""
+
+    absolute_path = path.expanduser().absolute()
+    return any(component.is_symlink() for component in (absolute_path, *absolute_path.parents))
+
+
 def _files_by_stem(
     directory: Path,
     suffixes: set[str],
@@ -232,7 +239,7 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     """
 
     root = Path(data_path).expanduser()
-    if root.is_symlink() or not root.is_dir():
+    if _path_has_symlink_component(root) or not root.is_dir():
         return False
     normalized = dataset.lower()
     if normalized == "nyu-depth":

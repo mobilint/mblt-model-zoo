@@ -33,6 +33,7 @@ from .readiness import (
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
     DOTAV1_VALIDATION_SAMPLE_COUNT,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    _path_has_symlink_component,
     dataset_ready,
 )
 
@@ -607,10 +608,10 @@ def _validate_dense_output_root(output_dir: str, dataset_name: str) -> str:
     """
 
     output_path = Path(output_dir).expanduser().absolute()
-    if output_path.is_symlink():
+    if _path_has_symlink_component(output_path):
         raise ValueError(
-            f"{dataset_name} output directory must not be a symlink: {output_path}. "
-            "Remove the symlink or choose a regular output directory."
+            f"{dataset_name} output directory and its existing parents must not be symlinks: {output_path}. "
+            "Remove the symlink or choose a path beneath regular directories."
         )
     return str(output_path)
 

@@ -230,3 +230,27 @@ def test_dense_readiness_rejects_symlinked_files(
     source_path.symlink_to(external_file)
 
     assert not readiness.dataset_ready(tmp_path, task, dataset)
+
+
+def test_dense_readiness_rejects_symlinked_root_ancestors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not reuse complete dense roots reached through a symlinked parent."""
+
+    monkeypatch.setattr(readiness, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    target_parent = tmp_path / "target"
+    nyu_root = target_parent / "nyu-depth"
+    _write_file(nyu_root / "images" / "sample.jpg")
+    _write_file(nyu_root / "depth" / "sample.npy")
+    ade20k_root = target_parent / "ade20k"
+    _write_file(ade20k_root / "images" / "ADE_val_00000001.jpg")
+    _write_file(ade20k_root / "annotations" / "ADE_val_00000001.png")
+    for file_name in readiness.ADE20K_METADATA_FILES:
+        _write_file(ade20k_root / file_name)
+    symlinked_parent = tmp_path / "datasets"
+    symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+
+    assert not readiness.dataset_ready(symlinked_parent / "nyu-depth", "depth_estimation", "nyu-depth")
+    assert not readiness.dataset_ready(symlinked_parent / "ade20k", "semantic_segmentation", "ade20k")

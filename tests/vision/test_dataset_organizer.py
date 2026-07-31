@@ -594,14 +594,7 @@ def test_dense_organizers_reject_symlinked_output_roots(
     tmp_path: Path,
     dataset: str,
 ) -> None:
-    """Fail before organizing through a symlinked managed dataset root."""
-
-    target_dir = tmp_path / "target"
-    target_dir.mkdir()
-    marker = target_dir / "keep"
-    marker.write_bytes(b"existing")
-    output_dir = tmp_path / "managed"
-    output_dir.symlink_to(target_dir, target_is_directory=True)
+    """Fail before organizing through a symlinked managed root or ancestor."""
 
     if dataset == "nyu-depth":
         monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
@@ -610,32 +603,50 @@ def test_dense_organizers_reject_symlinked_output_roots(
         (source_dir / "depth").mkdir()
         (source_dir / "images" / "sample.jpg").write_bytes(b"image")
         (source_dir / "depth" / "sample.npy").write_bytes(b"depth")
-        organizer_fn = organizer.organize_nyu_depth
-        organizer_args = (str(source_dir), str(output_dir))
+
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_nyu_depth(str(source_dir), output_dir)
     elif dataset == "ade20k":
         monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
         source_dir = _create_ade20k_source(tmp_path)
-        organizer_fn = organizer.organize_ade20k
-        organizer_args = (str(source_dir), str(output_dir))
+
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_ade20k(str(source_dir), output_dir)
     else:
         monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
         image_archive, annotation_archive = _write_cityscapes_archives(
             tmp_path,
             ["lindau_000000_000019"],
         )
-        organizer_fn = organizer.organize_cityscapes
-        organizer_args = (
-            str(image_archive),
-            str(annotation_archive),
-            str(output_dir),
-        )
 
-    with pytest.raises(ValueError, match="output directory must not be a symlink"):
-        organizer_fn(*organizer_args)
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_cityscapes(
+                str(image_archive),
+                str(annotation_archive),
+                output_dir,
+            )
 
-    assert output_dir.is_symlink()
-    assert marker.read_bytes() == b"existing"
-    assert list(target_dir.iterdir()) == [marker]
+    for topology in ("root", "ancestor"):
+        if topology == "root":
+            protected_dir = tmp_path / "root-target"
+            protected_dir.mkdir()
+            output_dir = tmp_path / "managed"
+            output_dir.symlink_to(protected_dir, target_is_directory=True)
+        else:
+            target_parent = tmp_path / "ancestor-target"
+            protected_dir = target_parent / "managed"
+            protected_dir.mkdir(parents=True)
+            symlinked_parent = tmp_path / "datasets-link"
+            symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+            output_dir = symlinked_parent / "managed"
+        marker = protected_dir / "keep"
+        marker.write_bytes(b"existing")
+
+        with pytest.raises(ValueError, match="existing parents must not be symlinks"):
+            organizer_fn(str(output_dir))
+
+        assert marker.read_bytes() == b"existing"
+        assert list(protected_dir.iterdir()) == [marker]
 
 
 def test_organize_cityscapes_materializes_lossless_validation_pairs(

@@ -31,7 +31,8 @@ before median alignment.
 Reuse organized validation and calibration datasets only after validating taxonomy-specific layout,
 required metadata and targets, and the complete official split.
 Reject symlinked dense local source data and metadata, require resolved copy sources to remain
-within the resolved dataset root, and reject symlinked dense managed roots during readiness.
+within the resolved dataset root, and reject dense managed roots reached through any symlinked
+path component before readiness reuse or organization.
 Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
 preserves the existing cache; require exact WiderFace event/image identity agreement with
 `wider_face_val.mat`.

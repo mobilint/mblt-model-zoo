@@ -80,7 +80,8 @@ description: >-
 - Reuse ImageNet, COCO, DOTAv1, WiderFace, and dense validation or calibration roots only when
   taxonomy-specific layout, required metadata and targets, and the complete official split are valid.
 - For local dense sources, reject symlinked data and metadata and require resolved copy sources to
-  remain within the resolved dataset root. Reject symlinked dense managed roots during readiness.
+  remain within the resolved dataset root. Reject dense managed roots reached through any
+  symlinked path component before readiness reuse or organization.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement so failure
   preserves the existing cache; require exact WiderFace event/image identity agreement with
   `wider_face_val.mat`.

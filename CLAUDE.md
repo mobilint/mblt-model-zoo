@@ -52,7 +52,8 @@
 - ADE20K organization atomically installs its 2,000 validation pairs with required
   `objectInfo150.txt` and `sceneCategories.txt` metadata after validating the complete staged root.
 - Dense local organizers reject symlinked data and metadata and require resolved copy sources to
-  remain within the resolved dataset root; readiness rejects symlinked dense managed roots.
+  remain within the resolved dataset root; readiness and organization reject dense managed roots
+  reached through any symlinked path component.
 - ADE20K semantic validation uses matched letterbox geometry, ignores source label `0`, and reports mIoU followed by
   pixel accuracy.
 - Cityscapes organization selects only 500 validation PNG pairs from the two official train/validation/test ZIP
