@@ -262,6 +262,24 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._sync_dynamic_vision_to_video_processor()
             text = self._strip_video_outer_wrap(text)
 
+        # transformers 5.x's ``Qwen3VLModel.compute_3d_position_ids`` (and the
+        # generate-side ``_prepare_position_ids_for_generation``) build MRoPE
+        # 3-D t/h/w positions only when ``mm_token_type_ids`` is present.
+        # Without it, both fall back to linear (non-MRoPE) positions and the
+        # decoder cannot distinguish visual tokens by time/space, producing
+        # degenerate output on video inputs. tf 4.x has neither hook and its
+        # ``generate`` strictly rejects unknown model_kwargs, so populating
+        # ``mm_token_type_ids`` unconditionally raises there — gate on the
+        # ``create_mm_token_type_ids`` method that tf 5.x introduced.
+        if (images is not None or videos is not None) and hasattr(
+            self, "create_mm_token_type_ids"
+        ):
+            text_kwargs = kwargs.get("text_kwargs")
+            if text_kwargs is None:
+                text_kwargs = {}
+                kwargs["text_kwargs"] = text_kwargs
+            text_kwargs.setdefault("return_mm_token_type_ids", True)
+
         return super().__call__(images, text, videos, **kwargs)
 
 
