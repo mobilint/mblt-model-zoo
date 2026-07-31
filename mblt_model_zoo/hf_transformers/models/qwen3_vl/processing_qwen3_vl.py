@@ -134,15 +134,12 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
 
         The vision submodule detects its own signature from
         ``get_input_buffer_info()`` and stores the result on
-        ``visual._uses_dynamic_vision``. This mirrors that value onto the
-        processor so its resize / max-pixel clamp stays in lock-step with
-        what the compiled model can actually consume.
-
-        If the processor was previously assigned an explicit
-        ``dynamic_vision`` that disagrees with the model's detection this
-        raises rather than silently overriding — a silent mismatch would let
-        the processor emit tensors the compiled model can't consume, which
-        is the exact footgun this helper exists to prevent.
+        ``visual._uses_dynamic_vision``. Calling this helper unconditionally
+        overwrites ``dynamic_vision`` (and the video processor's mirror) with
+        that detected value, so the processor's resize / max-pixel clamp
+        stays in lock-step with what the compiled model can actually consume.
+        Any prior value — the class default, a config-derived assignment from
+        :meth:`from_pretrained`, or an explicit user override — is replaced.
         """
         vision = getattr(getattr(model, "model", model), "visual", None)
         if vision is None or not hasattr(vision, "_uses_dynamic_vision"):
@@ -150,18 +147,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 "sync_dynamic_vision_from_model expects a Qwen3-VL model whose "
                 "vision submodule exposes `_uses_dynamic_vision`."
             )
-        detected = bool(vision._uses_dynamic_vision)
-        # Only an explicit instance-level assignment counts as a "user
-        # override" worth guarding: the class-level default of False must
-        # transparently upgrade to True when the model is dynamic, otherwise
-        # nobody would benefit from calling this helper.
-        if "dynamic_vision" in self.__dict__ and bool(self.dynamic_vision) != detected:
-            raise ValueError(
-                f"Processor.dynamic_vision={self.dynamic_vision} conflicts with "
-                f"model MXQ detection ({detected}). Reset processor.dynamic_vision "
-                "or reload with a matching MXQ."
-            )
-        self.dynamic_vision = detected
+        self.dynamic_vision = bool(vision._uses_dynamic_vision)
         self._sync_dynamic_vision_to_video_processor()
 
     @staticmethod
