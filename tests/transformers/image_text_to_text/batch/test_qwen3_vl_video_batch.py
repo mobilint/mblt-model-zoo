@@ -4,9 +4,9 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transf
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
-MODEL_PATHS = ("./Qwen3-VL-8B-Instruct-Batch16",)
+MODEL_PATHS = ("mobilint/Qwen3-VL-8B-Instruct-Batch16",)
 
-VIDEO_URL = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4"
+VIDEO_URL = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4"
 
 USER_QUESTIONS = [
     "Describe this video.",
