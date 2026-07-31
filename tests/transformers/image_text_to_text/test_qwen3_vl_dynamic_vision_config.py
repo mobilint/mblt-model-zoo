@@ -13,9 +13,11 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import (
 skip_if_transformers_lacks_qwen3_vl_support()
 
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import (  # noqa: E402
+    MobilintQwen3VLConfig,
     MobilintQwen3VLVisionConfig,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
+    MobilintQwen3VLModel,
     MobilintQwen3VLVisionModel,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
@@ -55,52 +57,84 @@ def _make_processor(prior_dynamic_vision: object = "unset") -> MobilintQwen3VLPr
     return proc
 
 
-def test_vision_config_dynamic_vision_default_false() -> None:
+def test_top_level_config_dynamic_vision_default_false() -> None:
     """Preserve backward compatibility: dynamic_vision defaults to False."""
-    config = MobilintQwen3VLVisionConfig()
+    config = MobilintQwen3VLConfig()
     assert config.dynamic_vision is False
 
 
-def test_vision_config_dynamic_vision_round_trip() -> None:
+def test_top_level_config_dynamic_vision_round_trip() -> None:
     """Preserve ``dynamic_vision`` through ``to_dict`` / ``from_dict`` round-trip."""
-    config = MobilintQwen3VLVisionConfig(dynamic_vision=True)
+    config = MobilintQwen3VLConfig(dynamic_vision=True)
     assert config.dynamic_vision is True
 
     payload = config.to_dict()
     assert payload["dynamic_vision"] is True
 
-    restored = MobilintQwen3VLVisionConfig.from_dict(payload)
+    restored = MobilintQwen3VLConfig.from_dict(payload)
     assert restored.dynamic_vision is True
 
 
-def test_resolve_dynamic_vision_flag_static_matches_config() -> None:
-    """No warning when a 1-input MXQ pairs with ``dynamic_vision=False``."""
-    config = MobilintQwen3VLVisionConfig(dynamic_vision=False)
-    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(1, config) is False
+def test_vision_config_has_no_dynamic_vision_attribute() -> None:
+    """The vision sub-config no longer carries ``dynamic_vision``.
+
+    ``dynamic_vision`` is a release-level attribute that ties the vision
+    MXQ, text MXQ, image processor, and video processor together, so it
+    lives on the composite config. Regressing the field back onto the
+    vision sub-config would nest it as if it were vision-only.
+    """
+    vision_config = MobilintQwen3VLVisionConfig()
+    assert not hasattr(vision_config, "dynamic_vision")
 
 
-def test_resolve_dynamic_vision_flag_dynamic_matches_config() -> None:
-    """No warning when a 3-input MXQ pairs with ``dynamic_vision=True``."""
-    config = MobilintQwen3VLVisionConfig(dynamic_vision=True)
-    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(3, config) is True
+def test_resolve_dynamic_vision_flag_static() -> None:
+    """1-input MXQ is the static path."""
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(1) is False
 
 
-def test_resolve_dynamic_vision_flag_warns_on_config_mismatch(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Warn (and trust MXQ) when the config disagrees with the compiled input count."""
-    config = MobilintQwen3VLVisionConfig(dynamic_vision=False)
-    with caplog.at_level(logging.WARNING, logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl"):
-        detected = MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(3, config)
-    assert detected is True
-    assert any("disagrees with vision MXQ detection" in rec.message for rec in caplog.records)
+def test_resolve_dynamic_vision_flag_dynamic() -> None:
+    """3-input MXQ ([rope, pos, folded]) is the dynamic path."""
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(3) is True
 
 
 def test_resolve_dynamic_vision_flag_rejects_unknown_input_count() -> None:
     """Reject unrecognized MXQ signatures rather than guessing."""
-    config = MobilintQwen3VLVisionConfig()
     with pytest.raises(ValueError, match="1 \\(static\\) or 3 \\(dynamic"):
-        MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(2, config)
+        MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(2)
+
+
+def test_reconcile_dynamic_vision_warns_on_config_mismatch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Warn (and trust the MXQ) when top-level config disagrees with detection."""
+    config = MobilintQwen3VLConfig(dynamic_vision=False)
+    with caplog.at_level(logging.WARNING, logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl"):
+        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, detected=True)
+    assert detected is True
+    assert config.dynamic_vision is True
+    assert any("disagrees with vision MXQ detection" in rec.message for rec in caplog.records)
+
+
+def test_reconcile_dynamic_vision_silent_when_matched(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No warning when config and detection agree; config is left aligned."""
+    config = MobilintQwen3VLConfig(dynamic_vision=True)
+    with caplog.at_level(logging.WARNING, logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl"):
+        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, detected=True)
+    assert detected is True
+    assert config.dynamic_vision is True
+    assert not any("disagrees with vision MXQ detection" in rec.message for rec in caplog.records)
+
+
+def test_reconcile_dynamic_vision_reads_visual_when_detected_omitted() -> None:
+    """The helper can pull the detected value straight off a vision submodule."""
+    config = MobilintQwen3VLConfig(dynamic_vision=False)
+    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(
+        config, visual=_VisionStub(uses_dynamic_vision=True)
+    )
+    assert detected is True
+    assert config.dynamic_vision is True
 
 
 def test_sync_dynamic_vision_from_model_upgrades_default_to_true() -> None:

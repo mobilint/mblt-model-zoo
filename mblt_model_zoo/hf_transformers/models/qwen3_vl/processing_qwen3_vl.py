@@ -120,7 +120,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         }
         try:
             config = AutoConfig.from_pretrained(pretrained_model_name_or_path, **config_kwargs)
-            vision_dyn = bool(getattr(getattr(config, "vision_config", None), "dynamic_vision", False))
+            vision_dyn = bool(getattr(config, "dynamic_vision", False))
         except Exception as exc:
             logger.debug(
                 "Falling back to processor default dynamic_vision (config load failed: %s)",
@@ -135,8 +135,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         """Adopt ``dynamic_vision`` from a loaded Qwen3-VL model's vision MXQ.
 
         In the typical flow, ``dynamic_vision`` is populated automatically by
-        :meth:`from_pretrained` reading ``vision_config.dynamic_vision`` from
-        the shipped ``config.json``, so calling this helper is unnecessary.
+        :meth:`from_pretrained` reading the top-level ``config.dynamic_vision``
+        from the shipped ``config.json``, so calling this helper is
+        unnecessary.
 
         Use it only when the processor and model have diverged at runtime —
         e.g. the model was loaded with an explicit ``vision_mxq_path=`` kwarg

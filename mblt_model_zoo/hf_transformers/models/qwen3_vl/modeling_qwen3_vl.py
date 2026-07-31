@@ -116,7 +116,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     def __init__(self, config: MobilintQwen3VLVisionConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
-        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs, config)
+        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs)
         # Only the dynamic path consumes `pos_embed` and `rotary_pos_emb`
         # (via `_prepare_dynamic_npu_inputs`), and static Qwen3-VL Hub
         # checkpoints don't ship `visual.pos_embed.weight`. Skipping the
@@ -135,33 +135,26 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         return super()._from_config(config, **kwargs)
 
     @staticmethod
-    def _resolve_dynamic_vision_flag(num_mxq_inputs: int, config: MobilintQwen3VLVisionConfig) -> bool:
-        """Trust the compiled vision MXQ over any config attr and warn on mismatch.
+    def _resolve_dynamic_vision_flag(num_mxq_inputs: int) -> bool:
+        """Detect the vision dispatch path from the compiled MXQ input count.
 
         1-input builds take a single folded pixel tensor (static path);
-        3-input builds take ``[rope, pos, folded]`` (dynamic path). Silent
-        config/MXQ divergence would ship the wrong shape to the NPU, so we
-        raise on unrecognized shapes and log when the config disagrees.
+        3-input builds take ``[rope, pos, folded]`` (dynamic path). Any other
+        signature is a compile-side mismatch we cannot recover from — raise
+        rather than guess so a wrong-shape input never reaches the NPU. The
+        top-level ``config.dynamic_vision`` hint is reconciled against this
+        detected value at the composite-model level (see
+        ``MobilintQwen3VLModel._reconcile_dynamic_vision``); this helper stays
+        purely a function of the compiled MXQ.
         """
         if num_mxq_inputs == 1:
-            detected = False
-        elif num_mxq_inputs == 3:
-            detected = True
-        else:
-            raise ValueError(
-                f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
-                f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
-            )
-        config_hint = bool(getattr(config, "dynamic_vision", False))
-        if config_hint != detected:
-            logger.warning_once(
-                "Qwen3-VL config.dynamic_vision=%s disagrees with vision MXQ "
-                "detection (%s); trusting the MXQ. Update the config or the "
-                "shipped MXQ to match.",
-                config_hint,
-                detected,
-            )
-        return detected
+            return False
+        if num_mxq_inputs == 3:
+            return True
+        raise ValueError(
+            f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
+            f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
+        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -1223,6 +1216,47 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.language_model = MobilintQwen3VLTextModel._from_config(config.text_config, _internal_call=True)
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
         self.rope_deltas = None
+        self._reconcile_dynamic_vision(config, visual=self.visual)
+
+    @staticmethod
+    def _reconcile_dynamic_vision(config: MobilintQwen3VLConfig, detected: bool | None = None, *, visual=None) -> bool:
+        """Reconcile ``config.dynamic_vision`` against the vision MXQ's detected path.
+
+        ``dynamic_vision`` is a release-level attribute (vision MXQ + text MXQ +
+        image processor + video processor pair as one bundle), so it lives at
+        the top of the composite config. The vision submodule independently
+        derives the actual dispatch path from its compiled MXQ signature and
+        stores the result on ``visual._uses_dynamic_vision``. This helper
+        promotes that detected value onto ``config.dynamic_vision`` and warns
+        once when the shipped config hint disagrees, so downstream consumers
+        (processor, video processor) can trust the top-level attr.
+
+        Args:
+            config: Composite Qwen3-VL config carrying the top-level hint.
+            detected: Detected path from ``_uses_dynamic_vision``. When
+                ``None``, read from ``visual``.
+            visual: Vision submodule exposing ``_uses_dynamic_vision``,
+                consulted only when ``detected`` is not supplied.
+
+        Returns:
+            The detected dynamic-vision flag now stored on ``config``.
+        """
+        if detected is None:
+            if visual is None:
+                raise ValueError("_reconcile_dynamic_vision needs `detected` or `visual`.")
+            detected = bool(getattr(visual, "_uses_dynamic_vision", False))
+        detected = bool(detected)
+        config_hint = bool(getattr(config, "dynamic_vision", False))
+        if config_hint != detected:
+            logger.warning_once(
+                "Qwen3-VL config.dynamic_vision=%s disagrees with vision MXQ "
+                "detection (%s); trusting the MXQ. Update the config or the "
+                "shipped MXQ to match.",
+                config_hint,
+                detected,
+            )
+        config.dynamic_vision = detected
+        return detected
 
 
 class MobilintQwen3VLForConditionalGeneration(
