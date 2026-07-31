@@ -31,13 +31,29 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$")
 
 
-def _files_by_stem(directory: Path, suffixes: set[str]) -> dict[str, Path] | None:
-    """Collect direct child files with supported suffixes by stem."""
+def _files_by_stem(
+    directory: Path,
+    suffixes: set[str],
+    *,
+    reject_symlinks: bool = False,
+) -> dict[str, Path] | None:
+    """Collect direct child files with supported suffixes by stem.
 
-    if directory.is_symlink() or not directory.is_dir():
+    Args:
+        directory: Directory containing candidate files.
+        suffixes: Accepted lowercase file suffixes.
+        reject_symlinks: Whether any symlinked directory or entry invalidates
+            the file collection.
+
+    Returns:
+        Files keyed by stem, an empty mapping for a missing directory, or
+        ``None`` for duplicate stems or rejected symlinks.
+    """
+
+    if (reject_symlinks and directory.is_symlink()) or not directory.is_dir():
         return {}
     entries = list(directory.iterdir())
-    if any(path.is_symlink() for path in entries):
+    if reject_symlinks and any(path.is_symlink() for path in entries):
         return None
     paths = [path for path in entries if path.is_file() and path.suffix.lower() in suffixes]
     files = {path.stem: path for path in paths}
@@ -220,8 +236,8 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
         return False
     normalized = dataset.lower()
     if normalized == "nyu-depth":
-        images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"})
-        depths = _files_by_stem(root / "depth", {".npy"})
+        images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"}, reject_symlinks=True)
+        depths = _files_by_stem(root / "depth", {".npy"}, reject_symlinks=True)
         if images is None or depths is None:
             return False
         return (
@@ -230,8 +246,8 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             and images.keys() == depths.keys()
         )
 
-    images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"})
-    annotations = _files_by_stem(root / "annotations", {".png"})
+    images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"}, reject_symlinks=True)
+    annotations = _files_by_stem(root / "annotations", {".png"}, reject_symlinks=True)
     if images is None or annotations is None or images.keys() != annotations.keys():
         return False
 

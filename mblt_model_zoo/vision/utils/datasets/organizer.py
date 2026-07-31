@@ -536,14 +536,15 @@ def organize_widerface(
         construct_widerface(local_image_dir, local_annotation_dir, output_dir)
 
 
-def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
+def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str, str]:
     """Resolves NYU Depth validation image and depth directories.
 
     Args:
         dataset_dir: Directory containing the NYU Depth root or its parent.
 
     Returns:
-        Paths to the validation image and depth directories.
+        Paths to the selected dataset root, validation image directory, and
+        validation depth directory.
 
     Raises:
         ValueError: If the expected NYU Depth layout is not present.
@@ -558,7 +559,7 @@ def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
         )
         for image_dir, depth_dir in candidates:
             if os.path.isdir(image_dir) and os.path.isdir(depth_dir):
-                return image_dir, depth_dir
+                return root, image_dir, depth_dir
     raise ValueError(f"NYU Depth dataset must contain matching images/ and depth/ directories: {dataset_dir}")
 
 
@@ -631,11 +632,11 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized dataset will be stored.
     """
 
-    image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
+    selected_root, image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
     try:
-        dataset_root = Path(dataset_dir).resolve(strict=True)
+        dataset_root = Path(selected_root).resolve(strict=True)
     except OSError as exc:
-        raise ValueError(f"Unable to resolve NYU Depth dataset root {dataset_dir}: {exc}.") from exc
+        raise ValueError(f"Unable to resolve NYU Depth dataset root {selected_root}: {exc}.") from exc
     images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir, dataset_root)
     print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
 

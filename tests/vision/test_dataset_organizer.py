@@ -395,13 +395,14 @@ def test_construct_nyu_depth_rejects_source_outside_resolved_root(
 
     monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
     dataset_dir = tmp_path / "source"
-    dataset_dir.mkdir()
-    external_images = tmp_path / "external-images"
+    selected_root = dataset_dir / "nyu-depth"
+    selected_root.mkdir(parents=True)
+    external_images = dataset_dir / "external-images"
     external_images.mkdir()
     (external_images / "sample.jpg").write_bytes(b"outside dataset")
-    (dataset_dir / "images").symlink_to(external_images, target_is_directory=True)
-    (dataset_dir / "depth").mkdir()
-    (dataset_dir / "depth" / "sample.npy").write_bytes(b"depth")
+    (selected_root / "images").symlink_to(external_images, target_is_directory=True)
+    (selected_root / "depth").mkdir()
+    (selected_root / "depth" / "sample.npy").write_bytes(b"depth")
 
     with pytest.raises(ValueError, match="must remain within dataset root"):
         organizer.construct_nyu_depth(str(dataset_dir), str(tmp_path / "organized"))

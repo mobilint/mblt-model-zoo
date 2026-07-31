@@ -109,6 +109,19 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
 
     assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
+    external_image = tmp_path / "external.png"
+    external_label = tmp_path / "external.txt"
+    _write_file(external_image)
+    _write_file(external_label)
+    image_path = tmp_path / relative_image_dir / "P0001.png"
+    label_path = tmp_path / "labels" / "val" / "P0002.txt"
+    image_path.unlink()
+    label_path.unlink()
+    image_path.symlink_to(external_image)
+    label_path.symlink_to(external_label)
+
+    assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
+
 
 def test_widerface_readiness_requires_complete_event_tree_and_metadata(
     monkeypatch: pytest.MonkeyPatch,
