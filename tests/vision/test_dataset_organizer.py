@@ -588,6 +588,56 @@ def _write_cityscapes_archives(tmp_path: Path, sample_ids: list[str]) -> tuple[P
     return image_archive, annotation_archive
 
 
+@pytest.mark.parametrize("dataset", ["nyu-depth", "ade20k", "cityscapes"])
+def test_dense_organizers_reject_symlinked_output_roots(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+) -> None:
+    """Fail before organizing through a symlinked managed dataset root."""
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    marker = target_dir / "keep"
+    marker.write_bytes(b"existing")
+    output_dir = tmp_path / "managed"
+    output_dir.symlink_to(target_dir, target_is_directory=True)
+
+    if dataset == "nyu-depth":
+        monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+        source_dir = tmp_path / "nyu-source"
+        (source_dir / "images").mkdir(parents=True)
+        (source_dir / "depth").mkdir()
+        (source_dir / "images" / "sample.jpg").write_bytes(b"image")
+        (source_dir / "depth" / "sample.npy").write_bytes(b"depth")
+        organizer_fn = organizer.organize_nyu_depth
+        organizer_args = (str(source_dir), str(output_dir))
+    elif dataset == "ade20k":
+        monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+        source_dir = _create_ade20k_source(tmp_path)
+        organizer_fn = organizer.organize_ade20k
+        organizer_args = (str(source_dir), str(output_dir))
+    else:
+        monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+        image_archive, annotation_archive = _write_cityscapes_archives(
+            tmp_path,
+            ["lindau_000000_000019"],
+        )
+        organizer_fn = organizer.organize_cityscapes
+        organizer_args = (
+            str(image_archive),
+            str(annotation_archive),
+            str(output_dir),
+        )
+
+    with pytest.raises(ValueError, match="output directory must not be a symlink"):
+        organizer_fn(*organizer_args)
+
+    assert output_dir.is_symlink()
+    assert marker.read_bytes() == b"existing"
+    assert list(target_dir.iterdir()) == [marker]
+
+
 def test_organize_cityscapes_materializes_lossless_validation_pairs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

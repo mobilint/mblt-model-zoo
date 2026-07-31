@@ -592,6 +592,29 @@ def _validate_dense_source_file(source_path: str, dataset_root: Path) -> str:
     return str(resolved_source)
 
 
+def _validate_dense_output_root(output_dir: str, dataset_name: str) -> str:
+    """Reject a symlinked dense managed root before organization.
+
+    Args:
+        output_dir: Requested managed dataset root.
+        dataset_name: Human-readable dataset name for error reporting.
+
+    Returns:
+        Expanded absolute output path.
+
+    Raises:
+        ValueError: If the managed root is a symlink.
+    """
+
+    output_path = Path(output_dir).expanduser().absolute()
+    if output_path.is_symlink():
+        raise ValueError(
+            f"{dataset_name} output directory must not be a symlink: {output_path}. "
+            "Remove the symlink or choose a regular output directory."
+        )
+    return str(output_path)
+
+
 def _collect_nyu_depth_validation_files(
     image_dir: str,
     depth_dir: str,
@@ -632,6 +655,7 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized dataset will be stored.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth")
     selected_root, image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
     try:
         dataset_root = Path(selected_root).resolve(strict=True)
@@ -640,7 +664,6 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir, dataset_root)
     print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
 
-    output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-staging-") as staging_dir:
@@ -671,6 +694,7 @@ def organize_nyu_depth(
         output_dir: Directory to store the organized dataset.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth")
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -707,6 +731,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         ValueError: If the source does not contain 2,000 matched validation image/mask pairs.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K")
     dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
     try:
         resolved_dataset_root = Path(dataset_root).resolve(strict=True)
@@ -741,7 +766,6 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
             raise ValueError(f"ADE20K dataset is missing required metadata files: {file_name}.")
         metadata[file_name] = _validate_dense_source_file(metadata_path, resolved_dataset_root)
 
-    output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".ade20k-staging-") as staging_dir:
@@ -776,6 +800,7 @@ def organize_ade20k(
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
 
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K")
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -882,9 +907,9 @@ def organize_cityscapes(
         OSError: If extraction, copying, or atomic installation fails.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "Cityscapes")
     image_archive = _validate_cityscapes_zip(image_dir, "image")
     annotation_archive = _validate_cityscapes_zip(annotation_dir, "annotation")
-    output_dir = os.path.abspath(os.path.expanduser(output_dir))
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".cityscapes-staging-") as staging_dir:
