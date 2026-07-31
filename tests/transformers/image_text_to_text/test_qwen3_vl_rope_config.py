@@ -12,6 +12,7 @@ must accept both layouts.
 from __future__ import annotations
 
 import pytest
+import torch
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
     skip_if_transformers_lacks_qwen3_vl_support,
@@ -106,3 +107,51 @@ def test_rotary_embedding_raises_when_rope_theta_missing_everywhere() -> None:
 
     with pytest.raises(ValueError, match="requires config.rope_theta"):
         MobilintQwen3VLRotaryEmbedding(config)
+
+
+def test_rotary_embedding_meta_init_defers_position_table() -> None:
+    """Meta-device init must not build the position table.
+
+    Regression: Transformers 5.x ``from_pretrained`` materializes submodules
+    under ``torch.set_default_device("meta")``. ``_build_position_table`` calls
+    ``.cpu().numpy()`` on a tensor derived from ``inv_freq``, which raises
+    ``NotImplementedError: Cannot copy out of meta tensor; no data!``. That
+    exception then triggers HF's dtype fallback path in ``load_model``, which
+    re-launches MXQ before the first instance is disposed and produces a
+    ``qbruntime.QbRuntimeError: BadAlloc``. Mirror the EAGLE3
+    ``CachedRotaryEmbedding`` pattern: defer the table until forward.
+    """
+    config = _minimal_text_config()
+
+    with torch.device("meta"):
+        emb = MobilintQwen3VLRotaryEmbedding(config)
+
+    assert emb.inv_freq.device.type == "meta"
+    assert emb.position_table is None
+
+
+def test_rotary_embedding_forward_builds_lazy_on_first_call() -> None:
+    """Forward on a meta-initialized module builds the table on demand.
+
+    After ``from_pretrained`` finishes materialization, ``inv_freq`` lives on a
+    real device. The first forward call must notice ``position_table is None``
+    and build it, without waiting for ``max_pos > max_seq_len`` to hit.
+    """
+    config = _minimal_text_config(max_position_embeddings=32)
+
+    with torch.device("meta"):
+        emb = MobilintQwen3VLRotaryEmbedding(config)
+    assert emb.position_table is None
+
+    # Simulate HF materialization: move inv_freq off meta before forward.
+    emb.inv_freq = torch.empty_like(emb.inv_freq, device="cpu")
+    dim = config.head_dim
+    emb.inv_freq.copy_(
+        1.0 / (config.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
+    )
+
+    position_ids = torch.arange(8, dtype=torch.long)[None, None, :].expand(3, 1, -1)
+    result = emb(None, position_ids)
+
+    assert emb.position_table is not None
+    assert result.shape == (1, 8, emb.peSize)

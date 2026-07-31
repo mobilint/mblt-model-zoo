@@ -552,7 +552,14 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
         self.peSize = 2 * tgt_half
 
         self._build_dim_masks()
-        self._build_position_table(device=device)
+        # HF Transformers 5.x materializes weights lazily under
+        # `torch.set_default_device("meta")`, so `inv_freq` starts on meta and
+        # `_build_position_table` would fail at `.cpu().numpy()`. Defer the
+        # table build until forward, mirroring
+        # `mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils.CachedRotaryEmbedding`.
+        self.position_table = None
+        if self.inv_freq.device.type != "meta":
+            self._build_position_table(device=device)
 
     def _build_dim_masks(self):
         """Build boolean masks mapping each peSize entry to T / H / W."""
@@ -634,8 +641,8 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
         seq_len = pos_np.shape[2]
 
         max_pos = int(pos_np.max()) + 1
-        if max_pos > self.max_seq_len:
-            self.max_seq_len = max_pos
+        if self.position_table is None or max_pos > self.max_seq_len:
+            self.max_seq_len = max(max_pos, self.max_seq_len)
             self._build_position_table(device=self.inv_freq.device)
 
         result = np.empty((batch_size, seq_len, self.peSize), dtype=np.float32)
