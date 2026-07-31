@@ -613,9 +613,20 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
             device = self.inv_freq.device
 
         with torch.no_grad():
+            dim = self.head_dim
+            # Recompute inv_freq locally. On tf 5.x, `from_pretrained` loads the
+            # module under `torch.set_default_device("meta")` so the `arange(...)
+            # / dim` in `__init__` runs on meta and the ``inv_freq`` register_buffer
+            # is later materialized off meta with uninitialized bytes (garbage
+            # floats, not the correct 1 / theta^(2i/d)). Since inv_freq is a pure
+            # function of (rope_theta, head_dim), recomputing here avoids the meta
+            # trap and matches the tf 4.x path bit-for-bit.
+            inv_freq = 1.0 / (
+                self.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
+            )
             T = self.max_seq_len
-            t = torch.arange(T, device=device, dtype=self.inv_freq.dtype)
-            freqs = torch.einsum("i,j->ij", t, self.inv_freq)  # [T, dim/2]
+            t = torch.arange(T, device=device, dtype=inv_freq.dtype)
+            freqs = torch.einsum("i,j->ij", t, inv_freq)  # [T, dim/2]
             emb = torch.cat((freqs, freqs), dim=-1)             # [T, dim]
 
             cos_val = emb.cos()
