@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace as _dataclass_replace
 from typing import Optional, Union, cast
 
 import numpy as np
@@ -53,6 +54,19 @@ def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]
     gh_merged = int((_NPU_H // pw) ** 0.5)
     side = gh_merged * merge_size * patch_size
     return (side, side)
+
+
+def _update_size(size_obj, **updates):
+    """Return an updated size, transparently across transformers versions.
+
+    tf < 5 stores ``image_processor.size`` as a plain ``dict``; tf >= 5 wraps
+    it in a frozen ``SizeDict`` dataclass (readable via ``[key]`` but not a
+    ``Mapping``, so ``**size_obj`` unpacking raises ``TypeError``). Use
+    ``dataclasses.replace`` for the dataclass case to build a new instance.
+    """
+    if isinstance(size_obj, dict):
+        return {**size_obj, **updates}
+    return _dataclass_replace(size_obj, **updates)
 
 
 class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
@@ -202,20 +216,21 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         """
         ip = self.image_processor
         limit = self.max_vision_tokens * ip.patch_size ** 2
-        if ip.size["longest_edge"] <= limit:
+        current_longest = ip.size["longest_edge"]
+        if current_longest <= limit:
             return
 
         logger.info(
             "[dynamic-vision] capped max_pixels %d -> %d (<= %d vision tokens)",
-            ip.size["longest_edge"],
+            current_longest,
             limit,
             self.max_vision_tokens,
         )
-        ip.size = {
-            **ip.size,
-            "longest_edge": limit,
-            "shortest_edge": min(ip.size["shortest_edge"], limit),
-        }
+        ip.size = _update_size(
+            ip.size,
+            longest_edge=limit,
+            shortest_edge=min(ip.size["shortest_edge"], limit),
+        )
 
     @staticmethod
     def _strip_video_outer_wrap(text):
