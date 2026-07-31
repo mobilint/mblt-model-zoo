@@ -68,6 +68,28 @@ def _upstream_qwen3_vl_uses_structured_vision_outputs() -> bool:
         return True
 
 
+@lru_cache(maxsize=1)
+def _upstream_vision_rotary_takes_position_ids() -> bool:
+    """Return True when upstream ``Qwen3VLVisionRotaryEmbedding.forward`` takes ``position_ids``.
+
+    Older Transformers releases ship ``forward(self, seqlen: int)`` — we can
+    pass the max HW extent directly and index the returned freq table with
+    2-D coordinates. Newer releases (transformers 5.x onward) switched to
+    ``forward(self, position_ids: torch.Tensor)`` and return the
+    already-flattened freqs, so we must build the arange tensor ourselves.
+    Detecting by the first non-``self`` parameter name keeps us compatible
+    across the whole supported range (>=4.57.0, <=5.12.1) without pinning
+    to a specific transformers version.
+    """
+    try:
+        sig = inspect.signature(Qwen3VLVisionRotaryEmbedding.forward)
+    except (TypeError, ValueError):
+        return True
+    params = list(sig.parameters.values())
+    first = params[1].name if len(params) >= 2 else ""
+    return first == "position_ids"
+
+
 class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
     config: MobilintQwen3VLConfig
     base_model_prefix = "model"
@@ -194,7 +216,12 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     def _rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
         merge_size = int(self.config.spatial_merge_size)
         max_hw = int(grid_thw[:, 1:].max().item())
-        freq_table = self.rotary_pos_emb(max_hw)
+        if _upstream_vision_rotary_takes_position_ids():
+            inv_freq = self.rotary_pos_emb.inv_freq
+            position_ids = torch.arange(max_hw, device=inv_freq.device, dtype=inv_freq.dtype)
+            freq_table = self.rotary_pos_emb(position_ids)
+        else:
+            freq_table = self.rotary_pos_emb(max_hw)
         device = freq_table.device
         total_tokens = int(torch.prod(grid_thw, dim=1).sum().item())
         pos_ids = torch.empty((total_tokens, 2), dtype=torch.long, device=device)

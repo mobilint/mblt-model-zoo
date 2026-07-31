@@ -1,5 +1,6 @@
 """Regression tests for the Qwen3-VL vision output contract."""
 
+import inspect
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,6 +10,10 @@ import torch
 from tests.transformers.image_text_to_text.qwen3_vl_compat import skip_if_transformers_lacks_qwen3_vl_support
 
 skip_if_transformers_lacks_qwen3_vl_support()
+
+from transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
+    Qwen3VLVisionRotaryEmbedding,
+)
 
 from mblt_model_zoo.hf_transformers.models.qwen3_vl import modeling_qwen3_vl  # noqa: E402
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
@@ -273,3 +278,96 @@ def test_qwen3_vl_visual_forward_uses_batched_input_for_multi_core_mode(
     assert [feature.shape for feature in outputs.deepstack_features] == [torch.Size([128, 8])] * 3
     assert len(dummy.mxq_model.inputs) == 1
     assert dummy.mxq_model.inputs[0].shape == (2, 1024, 64, 6)
+
+
+# ---------------------------------------------------------------------------
+# Vision rotary embedding upstream API dispatch.
+#
+# Upstream ``Qwen3VLVisionRotaryEmbedding.forward`` changed its signature from
+# ``(seqlen: int)`` (transformers 4.x early Qwen3-VL) to
+# ``(position_ids: torch.Tensor)`` (transformers 5.x). ``_rot_pos_emb`` must
+# dispatch on the installed signature so both dynamic-image and video paths
+# work across the whole supported range.
+# ---------------------------------------------------------------------------
+
+
+class _RecordingRotaryPosEmb:
+    """Record the argument passed to ``rotary_pos_emb`` for dispatch assertions."""
+
+    def __init__(self, head_half_dim: int = 4) -> None:
+        self.calls: list = []
+        self.inv_freq = torch.zeros(head_half_dim, dtype=torch.float32)
+
+    def __call__(self, arg):
+        self.calls.append(arg)
+        if isinstance(arg, torch.Tensor):
+            max_hw = int(arg.shape[0])
+        else:
+            max_hw = int(arg)
+        # Return a freq table with the shape both API generations produce for
+        # a 1-D input: ``(max_hw, dim/2)``.
+        return torch.zeros(max_hw, self.inv_freq.shape[0], dtype=torch.float32)
+
+
+class _RotaryDispatchStub:
+    """Minimal stand-in for ``MobilintQwen3VLVisionModel`` used by ``_rot_pos_emb``."""
+
+    def __init__(self) -> None:
+        self.config = SimpleNamespace(spatial_merge_size=2)
+        self.rotary_pos_emb = _RecordingRotaryPosEmb()
+
+
+def test_upstream_vision_rotary_signature_detection_matches_installed() -> None:
+    """The helper must agree with the installed upstream signature."""
+    params = list(inspect.signature(Qwen3VLVisionRotaryEmbedding.forward).parameters.values())
+    first = params[1].name if len(params) >= 2 else ""
+    expected = first == "position_ids"
+
+    # Bust the lru_cache so we assert on a fresh probe of the real class.
+    modeling_qwen3_vl._upstream_vision_rotary_takes_position_ids.cache_clear()
+    try:
+        assert modeling_qwen3_vl._upstream_vision_rotary_takes_position_ids() is expected
+    finally:
+        modeling_qwen3_vl._upstream_vision_rotary_takes_position_ids.cache_clear()
+
+
+def test_rot_pos_emb_dispatches_int_for_legacy_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy ``forward(seqlen: int)`` upstream keeps the pre-fix int-argument call."""
+    monkeypatch.setattr(
+        modeling_qwen3_vl,
+        "_upstream_vision_rotary_takes_position_ids",
+        lambda: False,
+    )
+    dummy = _RotaryDispatchStub()
+    grid_thw = torch.tensor([[1, 4, 4]], dtype=torch.long)
+
+    MobilintQwen3VLVisionModel._rot_pos_emb(dummy, grid_thw)
+
+    assert len(dummy.rotary_pos_emb.calls) == 1
+    call_arg = dummy.rotary_pos_emb.calls[0]
+    assert isinstance(call_arg, int)
+    assert call_arg == 4
+
+
+def test_rot_pos_emb_dispatches_tensor_for_new_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """New ``forward(position_ids: Tensor)`` upstream receives a 1-D arange tensor."""
+    monkeypatch.setattr(
+        modeling_qwen3_vl,
+        "_upstream_vision_rotary_takes_position_ids",
+        lambda: True,
+    )
+    dummy = _RotaryDispatchStub()
+    grid_thw = torch.tensor([[1, 4, 4]], dtype=torch.long)
+
+    MobilintQwen3VLVisionModel._rot_pos_emb(dummy, grid_thw)
+
+    assert len(dummy.rotary_pos_emb.calls) == 1
+    call_arg = dummy.rotary_pos_emb.calls[0]
+    assert isinstance(call_arg, torch.Tensor)
+    assert call_arg.ndim == 1
+    assert int(call_arg.shape[0]) == 4
+    # The passed tensor must sit on the same device/dtype as inv_freq — this
+    # is what the compiled encoder consumes, and the new upstream fails at the
+    # broadcast if dtypes disagree.
+    assert call_arg.device == dummy.rotary_pos_emb.inv_freq.device
+    assert call_arg.dtype == dummy.rotary_pos_emb.inv_freq.dtype
