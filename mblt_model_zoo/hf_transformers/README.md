@@ -176,7 +176,26 @@ dynamic-vision release:
 
 ```python
 processor = AutoProcessor.from_pretrained("mobilint/Qwen3-VL-...", trust_remote_code=True)
-processor(images=[img_a, img_b], text="...", videos=None)  # static release -> NotImplementedError
+
+# Two image parts in a single chat message render to two ``<|image_pad|>``
+# placeholders bound to the same prompt, which the static release rejects.
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "image", "image": img_a},
+            {"type": "image", "image": img_b},
+            {"type": "text", "text": "Compare these two images."},
+        ],
+    }
+]
+processor.apply_chat_template(
+    messages,
+    add_generation_prompt=True,
+    tokenize=True,
+    return_dict=True,
+    return_tensors="pt",
+)  # static release -> NotImplementedError from processor.__call__
 ```
 
 Video decoding uses the `torchcodec` dependency shipped with `pip install mblt-model-zoo[transformers]`;
