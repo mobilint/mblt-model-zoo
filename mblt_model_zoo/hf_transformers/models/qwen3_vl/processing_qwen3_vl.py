@@ -227,6 +227,19 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if isinstance(img, Image.Image):
             return img.resize(size)
         if isinstance(img, np.ndarray):
+            # A 4-D ``(N, H, W, C)`` batch is a valid ``ImageInput`` shape that the
+            # upstream Qwen3-VL processor unrolls into per-frame images before its
+            # own resize. ``cv2.resize`` only handles a single 2-D or 3-D array, so
+            # split along the batch axis, resize each frame, and re-stack — this
+            # mirrors the tensor branch below, where ``F.interpolate`` preserves
+            # the leading ``N`` dimension natively for 4-D input.
+            if img.ndim == 4:
+                return np.stack(
+                    [
+                        cast(np.ndarray, cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC))
+                        for frame in img
+                    ]
+                )
             return cast(np.ndarray, cv2_resize(img, size[::-1], interpolation=INTER_CUBIC))
         if torch.is_tensor(img):
             if img.ndim == 2:
