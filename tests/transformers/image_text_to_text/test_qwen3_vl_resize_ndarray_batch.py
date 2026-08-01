@@ -99,6 +99,62 @@ def test_resize_one_preserves_3d_ndarray_behavior() -> None:
     assert resized.shape == (224, 224, 3)
 
 
+def test_resize_one_handles_3d_ndarray_hwc_preserves_channels() -> None:
+    """3-D ``(H, W, C)`` ndarray must resize with channel content intact."""
+    img = np.zeros((32, 40, 3), dtype=np.uint8)
+    img[..., 0] = 10
+    img[..., 1] = 20
+    img[..., 2] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(img, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (16, 24, 3)
+    assert int(resized[..., 0].mean()) == 10
+    assert int(resized[..., 1].mean()) == 20
+    assert int(resized[..., 2].mean()) == 30
+
+
+def test_resize_one_handles_3d_ndarray_chw_preserves_channels() -> None:
+    """3-D ``(C, H, W)`` ndarray must resize with channels-first layout intact.
+
+    Previously fed straight to ``cv2.resize`` (which reads axis -1 as the
+    channel dim), which corrupts a channels-first frame — a ``(3, 32, 40)``
+    array was interpreted as HWC with 40 channels and the spatial dims were
+    silently mangled. Pin down that the CHW layout survives the resize.
+    """
+    img = np.zeros((3, 32, 40), dtype=np.uint8)
+    img[0] = 10
+    img[1] = 20
+    img[2] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(img, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (3, 16, 24)
+    assert int(resized[0].mean()) == 10
+    assert int(resized[1].mean()) == 20
+    assert int(resized[2].mean()) == 30
+
+
+def test_resize_one_ambiguous_3d_ndarray_ties_to_hwc() -> None:
+    """Ambiguous ``(3, 3, 3)`` ndarray: tie-break to HWC.
+
+    Both axis 0 and axis -1 have size 3, so both look like plausible channel
+    counts. The tie-break policy matches the torch branch and
+    ``_count_images``: treat as HWC, keeping the channel axis at -1.
+    """
+    img = np.zeros((3, 3, 3), dtype=np.uint8)
+    img[..., 0] = 1
+    img[..., 1] = 2
+    img[..., 2] = 3
+
+    resized = MobilintQwen3VLProcessor._resize_one(img, size=(6, 6))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (6, 6, 3)
+    assert int(resized[..., 0].mean()) == 1
+    assert int(resized[..., 1].mean()) == 2
+    assert int(resized[..., 2].mean()) == 3
+
+
 def test_resize_images_handles_4d_ndarray_batch() -> None:
     batch = np.zeros((2, 100, 100, 3), dtype=np.uint8)
     resized = MobilintQwen3VLProcessor._resize_images(batch)

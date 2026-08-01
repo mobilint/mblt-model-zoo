@@ -1,6 +1,6 @@
 import re
 from dataclasses import replace as _dataclass_replace
-from typing import Optional, Union, cast
+from typing import Callable, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -106,6 +106,70 @@ _HF_LOADING_KWARGS = (
 
 
 _IMAGE_PAD_TOKEN = "<|image_pad|>"
+
+
+# Sizes that qualify as a channel dimension when detecting layout in
+# ``_to_bhwc``. Grayscale (1), RGB (3), and RGBA (4) cover the layouts
+# ``ImageInput`` actually carries; any other size on an endpoint axis is
+# treated as spatial. When both candidate axes qualify (e.g. a small
+# ``(3, 3, 3)`` array or a ``(N, 3, 3, 3)`` batch), tie-break to HWC / BHWC to
+# match ``_count_images`` and the majority upstream convention.
+_CHANNEL_CANDIDATES = (1, 3, 4)
+
+
+def _to_bhwc(img):
+    """Normalize a rank-3 or rank-4 image to batch-first channels-last layout.
+
+    Returns ``(bhwc, restore_layout_fn)``. ``bhwc`` is a rank-4
+    ``(N, H, W, C)`` array or tensor of the same underlying type as ``img``;
+    ``restore_layout_fn`` reverses the transform on a resized ``(N, H', W', C)``
+    result so callers get their original layout back. Together they cover the
+    eight ``(rank-3 vs rank-4) x (HWC vs CHW) x (ndarray vs torch tensor)``
+    combinations without per-shape branching at each call site — cv2 always
+    sees an HWC frame, and ``F.interpolate`` always starts from BHWC and
+    permutes to BCHW just before the call.
+
+    The channel axis is detected from the endpoint sizes: axis 0 (rank-3) or
+    axis 1 (rank-4) vs axis -1. An axis qualifies as ``channels`` when its
+    size is in :data:`_CHANNEL_CANDIDATES`. Ambiguous shapes where both
+    endpoints qualify tie-break to HWC / BHWC.
+    """
+    is_torch = torch.is_tensor(img)
+    if not is_torch and not isinstance(img, np.ndarray):
+        raise TypeError(f"_to_bhwc expects ndarray or torch tensor, got {type(img)}")
+    rank = img.ndim
+    if rank not in (3, 4):
+        raise ValueError(f"_to_bhwc expects a rank-3 or rank-4 image, got rank {rank}")
+    first_axis = 0 if rank == 3 else 1
+    channels_first = img.shape[first_axis] in _CHANNEL_CANDIDATES
+    channels_last = img.shape[-1] in _CHANNEL_CANDIDATES
+    # Tie-break to HWC / BHWC when both endpoints look like plausible channel
+    # counts, matching ``_count_images`` and the majority upstream convention.
+    is_channels_first = channels_first and not channels_last
+
+    if is_torch:
+        if rank == 3:
+            bhwc = img.permute(1, 2, 0).unsqueeze(0) if is_channels_first else img.unsqueeze(0)
+        else:
+            bhwc = img.permute(0, 2, 3, 1) if is_channels_first else img
+    else:
+        if rank == 3:
+            bhwc = np.transpose(img, (1, 2, 0))[None, ...] if is_channels_first else img[None, ...]
+        else:
+            bhwc = np.transpose(img, (0, 2, 3, 1)) if is_channels_first else img
+
+    def restore(bhwc_out):
+        if is_torch:
+            if rank == 3:
+                out = bhwc_out.squeeze(0)
+                return out.permute(2, 0, 1) if is_channels_first else out
+            return bhwc_out.permute(0, 3, 1, 2) if is_channels_first else bhwc_out
+        if rank == 3:
+            out = bhwc_out[0]
+            return np.transpose(out, (2, 0, 1)) if is_channels_first else out
+        return np.transpose(bhwc_out, (0, 3, 1, 2)) if is_channels_first else bhwc_out
+
+    return bhwc, cast(Callable, restore)
 
 
 def _count_images(images) -> int:
@@ -368,84 +432,30 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             img = load_image(img)
         if isinstance(img, Image.Image):
             return img.resize(size)
+        # ``ImageInput`` accepts arrays / tensors in any of the eight layouts
+        # from (rank-3 vs rank-4) x (HWC vs CHW) x (ndarray vs torch tensor).
+        # cv2.resize only takes an HWC frame and F.interpolate only takes
+        # NCHW, so route both types through ``_to_bhwc`` first and let the
+        # returned restore closure put the original layout back on the way out.
         if isinstance(img, np.ndarray):
-            # A 4-D batch is a valid ``ImageInput`` shape that the upstream
-            # Qwen3-VL processor unrolls into per-frame images before its own
-            # resize; ``_count_images`` accepts both ``(N, H, W, C)`` and
-            # ``(N, C, H, W)`` layouts, so both must survive here. ``cv2.resize``
-            # only handles a single 2-D or 3-D HWC array, so split along the batch
-            # axis, detect each frame's channel layout, transpose channels-first
-            # frames to HWC for the resize, and restore the original layout on the
-            # way out. When both endpoints look like plausible channel counts
-            # (e.g. a small square image where ``shape[0] == shape[-1] == 3``),
-            # tie-break to HWC to match ``_count_images`` and the majority
-            # upstream convention.
-            if img.ndim == 4:
-                resized_frames = []
-                for frame in img:
-                    first, last = frame.shape[0], frame.shape[-1]
-                    channels_last = last in (1, 3, 4)
-                    channels_first = first in (1, 3, 4)
-                    if channels_first and not channels_last:
-                        hwc = np.transpose(frame, (1, 2, 0))
-                        resized_hwc = cast(
-                            np.ndarray,
-                            cv2_resize(hwc, size[::-1], interpolation=INTER_CUBIC),
-                        )
-                        resized_frames.append(np.transpose(resized_hwc, (2, 0, 1)))
-                    else:
-                        resized_frames.append(
-                            cast(
-                                np.ndarray,
-                                cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC),
-                            )
-                        )
-                return np.stack(resized_frames)
-            return cast(np.ndarray, cv2_resize(img, size[::-1], interpolation=INTER_CUBIC))
-        if torch.is_tensor(img):
-            # ``ImageInput`` accepts torch tensors in either channel layout:
-            # 3-D ``(H, W, C)`` or ``(C, H, W)``, 4-D ``(N, H, W, C)`` or
-            # ``(N, C, H, W)``. ``F.interpolate`` unconditionally treats its
-            # input as NCHW, so feeding an HWC / BHWC tensor silently corrupts
-            # the spatial dims (the current "channel" axis is bicubic-resized
-            # as if it were height). Detect the channel axis from the endpoints
-            # and permute HWC-style tensors to channels-first for the resize,
-            # then restore the original layout. When both candidate axes look
-            # like plausible channel counts (e.g. a small square 3-channel
-            # image where ``shape[0] == shape[-1] == 3``), tie-break to HWC /
-            # BHWC to match the ndarray branch and the majority upstream
-            # convention.
-            if img.ndim == 2:
-                img = img.unsqueeze(0).unsqueeze(0)
-                return F.interpolate(img.float(), size=size, mode="bicubic", align_corners=False)
-            if img.ndim == 3:
-                first, last = img.shape[0], img.shape[-1]
-                channels_last = last in (1, 3, 4)
-                channels_first = first in (1, 3, 4)
-                if channels_first and not channels_last:
-                    chw = img.unsqueeze(0).float()
-                    return F.interpolate(
-                        chw, size=size, mode="bicubic", align_corners=False
-                    ).squeeze(0)
-                hwc_as_chw = img.permute(2, 0, 1).unsqueeze(0).float()
-                return (
-                    F.interpolate(hwc_as_chw, size=size, mode="bicubic", align_corners=False)
-                    .squeeze(0)
-                    .permute(1, 2, 0)
-                )
-            if img.ndim == 4:
-                first, last = img.shape[1], img.shape[-1]
-                channels_last = last in (1, 3, 4)
-                channels_first = first in (1, 3, 4)
-                if channels_first and not channels_last:
-                    return F.interpolate(
-                        img.float(), size=size, mode="bicubic", align_corners=False
+            bhwc, restore = _to_bhwc(img)
+            resized = np.stack(
+                [
+                    cast(
+                        np.ndarray,
+                        cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC),
                     )
-                bchw = img.permute(0, 3, 1, 2).float()
-                return F.interpolate(
-                    bchw, size=size, mode="bicubic", align_corners=False
-                ).permute(0, 2, 3, 1)
-            return F.interpolate(img.float(), size=size, mode="bicubic", align_corners=False)
+                    for frame in bhwc
+                ]
+            )
+            return restore(resized)
+        if torch.is_tensor(img):
+            bhwc, restore = _to_bhwc(img)
+            bchw = bhwc.permute(0, 3, 1, 2).float()
+            resized_bhwc = F.interpolate(
+                bchw, size=size, mode="bicubic", align_corners=False
+            ).permute(0, 2, 3, 1)
+            return restore(resized_bhwc)
         raise TypeError(f"Unsupported image type: {type(img)}")
 
     @classmethod
