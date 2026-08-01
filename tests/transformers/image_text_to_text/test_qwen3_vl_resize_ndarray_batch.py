@@ -1,12 +1,11 @@
-"""Regression tests: ``_resize_one`` handles a 4-D ``(N, H, W, C)`` NumPy batch.
+"""Regression tests: ``_resize_one`` handles a 4-D NumPy batch in either layout.
 
-``ImageInput`` allows a 4-D NumPy batch, and the upstream Qwen3-VL processor
-unrolls such an array into per-frame images before its own resize. Our
-override's ndarray branch previously called ``cv2.resize`` directly, which
-only handles 2-D or 3-D inputs and fails on 4-D batches. This test pins down
-the fix: iterate along the batch axis, resize each frame, and re-stack —
-mirroring the tensor branch, where ``F.interpolate`` preserves the batch dim
-for 4-D input natively.
+``ImageInput`` allows a 4-D NumPy batch, and ``_count_images`` recognizes both
+``(N, H, W, C)`` (NHWC) and ``(N, C, H, W)`` (NCHW). The override's ndarray
+branch splits along the batch axis and hands each 3-D frame to ``cv2.resize``,
+which only handles HWC frames — so a channels-first frame must be transposed
+to HWC before the resize and restored after. These tests pin down that both
+layouts survive the resize with correct shape *and* correct channel content.
 """
 
 from __future__ import annotations
@@ -41,6 +40,55 @@ def test_resize_one_handles_4d_ndarray_batch() -> None:
     resized = MobilintQwen3VLProcessor._resize_one(batch, size=(128, 128))
     assert isinstance(resized, np.ndarray)
     assert resized.shape == (3, 128, 128, 3)
+
+
+def test_resize_one_handles_4d_ndarray_batch_nhwc_preserves_channels() -> None:
+    """NHWC regression: a distinguishable per-channel pattern must survive.
+
+    A constant per-channel value survives bicubic resize exactly, so we can
+    read the output channels back and verify the layout wasn't scrambled.
+    """
+    batch = np.zeros((2, 32, 32, 3), dtype=np.uint8)
+    batch[..., 0] = 10
+    batch[..., 1] = 20
+    batch[..., 2] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(batch, size=(16, 16))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (2, 16, 16, 3)
+    assert int(resized[0, ..., 0].mean()) == 10
+    assert int(resized[0, ..., 1].mean()) == 20
+    assert int(resized[0, ..., 2].mean()) == 30
+
+
+def test_resize_one_handles_4d_ndarray_batch_nchw() -> None:
+    """NCHW ``(N, C, H, W)`` batch must resize to ``(N, C, target_h, target_w)``.
+
+    Fills each channel with a distinct constant so we can verify the channel
+    axis was preserved (not folded into the spatial dim by cv2 misreading a
+    ``(C, H, W)`` frame as HWC).
+    """
+    batch = np.zeros((2, 3, 32, 40), dtype=np.uint8)
+    batch[:, 0] = 10
+    batch[:, 1] = 20
+    batch[:, 2] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(batch, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (2, 3, 16, 24)
+    assert int(resized[0, 0].mean()) == 10
+    assert int(resized[0, 1].mean()) == 20
+    assert int(resized[0, 2].mean()) == 30
+    assert int(resized[1, 0].mean()) == 10
+    assert int(resized[1, 1].mean()) == 20
+    assert int(resized[1, 2].mean()) == 30
+
+
+def test_resize_images_handles_4d_ndarray_batch_nchw() -> None:
+    batch = np.zeros((2, 3, 100, 100), dtype=np.uint8)
+    resized = MobilintQwen3VLProcessor._resize_images(batch)
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (2, 3, 224, 224)
 
 
 def test_resize_one_preserves_3d_ndarray_behavior() -> None:

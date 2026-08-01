@@ -292,19 +292,38 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if isinstance(img, Image.Image):
             return img.resize(size)
         if isinstance(img, np.ndarray):
-            # A 4-D ``(N, H, W, C)`` batch is a valid ``ImageInput`` shape that the
-            # upstream Qwen3-VL processor unrolls into per-frame images before its
-            # own resize. ``cv2.resize`` only handles a single 2-D or 3-D array, so
-            # split along the batch axis, resize each frame, and re-stack — this
-            # mirrors the tensor branch below, where ``F.interpolate`` preserves
-            # the leading ``N`` dimension natively for 4-D input.
+            # A 4-D batch is a valid ``ImageInput`` shape that the upstream
+            # Qwen3-VL processor unrolls into per-frame images before its own
+            # resize; ``_count_images`` accepts both ``(N, H, W, C)`` and
+            # ``(N, C, H, W)`` layouts, so both must survive here. ``cv2.resize``
+            # only handles a single 2-D or 3-D HWC array, so split along the batch
+            # axis, detect each frame's channel layout, transpose channels-first
+            # frames to HWC for the resize, and restore the original layout on the
+            # way out. When both endpoints look like plausible channel counts
+            # (e.g. a small square image where ``shape[0] == shape[-1] == 3``),
+            # tie-break to HWC to match ``_count_images`` and the majority
+            # upstream convention.
             if img.ndim == 4:
-                return np.stack(
-                    [
-                        cast(np.ndarray, cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC))
-                        for frame in img
-                    ]
-                )
+                resized_frames = []
+                for frame in img:
+                    first, last = frame.shape[0], frame.shape[-1]
+                    channels_last = last in (1, 3, 4)
+                    channels_first = first in (1, 3, 4)
+                    if channels_first and not channels_last:
+                        hwc = np.transpose(frame, (1, 2, 0))
+                        resized_hwc = cast(
+                            np.ndarray,
+                            cv2_resize(hwc, size[::-1], interpolation=INTER_CUBIC),
+                        )
+                        resized_frames.append(np.transpose(resized_hwc, (2, 0, 1)))
+                    else:
+                        resized_frames.append(
+                            cast(
+                                np.ndarray,
+                                cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC),
+                            )
+                        )
+                return np.stack(resized_frames)
             return cast(np.ndarray, cv2_resize(img, size[::-1], interpolation=INTER_CUBIC))
         if torch.is_tensor(img):
             if img.ndim == 2:
