@@ -64,5 +64,12 @@
 - Keep TPS table and JSON output synchronized through `mblt_model_zoo/cli/tps_table.py`.
 - Keep VLM non-batch tests under `image_text_to_text/non_batch`; matrix-runner Phase B owns the
   batch text-generation and image-text-to-text suites.
+- Qwen3-VL video and per-prompt multi-image inputs require a dynamic-vision release
+  (`MobilintQwen3VLConfig.dynamic_vision=True`); static-vision releases hard-fail those inputs
+  from `MobilintQwen3VLProcessor.__call__` with `NotImplementedError` pointing at a
+  dynamic-vision release. Batched single-image prompts are always allowed.
+- The Qwen3-VL processor reads `config.dynamic_vision` in `from_pretrained` and mirrors it onto
+  its video processor. Call `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)`
+  only when a runtime `vision_mxq_path=` override diverges from the shipped config.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

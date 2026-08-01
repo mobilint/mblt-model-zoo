@@ -153,6 +153,52 @@ pipe(
 
 Further usage examples can be found in the [tests](../../tests/transformers) directory.
 
+### Qwen3-VL release contract
+
+Qwen3-VL ships on Mobilint as one release per Hugging Face branch: the vision `*.mxq`, the text
+`*.mxq`, `MobilintQwen3VLProcessor`, and `MobilintQwen3VLConfig` are compiled and calibrated
+together. The release-level flag is `dynamic_vision`, exposed as a top-level attribute on
+`MobilintQwen3VLConfig`:
+
+- `dynamic_vision=True` (dynamic-vision release): variable-resolution vision + per-image 2D RoPE
+  in the text decoder. Supports single-image, per-prompt multi-image, and video inputs.
+- `dynamic_vision=False` (static-vision release): fixed vision-token count baked into the text
+  decoder. Supports one image per prompt only. Batched single-image prompts (`[[img_1], [img_2], ...]`)
+  are always allowed; video and per-prompt multi-image inputs are rejected.
+
+`AutoProcessor.from_pretrained` reads `config.dynamic_vision` from the shipped `config.json` and
+mirrors it onto `MobilintQwen3VLProcessor` and its video processor, so a caller does not normally
+have to touch the flag directly.
+
+Passing a video input or more than one image per prompt to a static-vision release raises
+`NotImplementedError` from `MobilintQwen3VLProcessor.__call__` with a message pointing at a
+dynamic-vision release:
+
+```python
+processor = AutoProcessor.from_pretrained("mobilint/Qwen3-VL-...", trust_remote_code=True)
+processor(images=[img_a, img_b], text="...", videos=None)  # static release -> NotImplementedError
+```
+
+Video decoding uses the `torchcodec` dependency shipped with `pip install mblt-model-zoo[transformers]`;
+validate video inputs only against a dynamic-vision release.
+
+If you override the vision MXQ at load time (for example with `vision_mxq_path=`) and the override
+points at an MXQ whose signature (static vs. dynamic) does not match the shipped
+`config.dynamic_vision`, resynchronize the processor with the loaded model:
+
+```python
+processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+model = AutoModel.from_pretrained(
+    model_name,
+    trust_remote_code=True,
+    vision_mxq_path="/path/to/other/vision.mxq",
+)
+processor.sync_dynamic_vision_from_model(model)
+```
+
+This is only needed for the runtime-override case; the standard `from_pretrained` flow already
+keeps the processor and model in lock-step.
+
 ## Listing Available Models
 
 **mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
