@@ -23,6 +23,7 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl impor
     MobilintQwen3VLVisionConfig,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
+    MobilintQwen3VLForConditionalGeneration,
     MobilintQwen3VLModel,
     MobilintQwen3VLVisionModel,
 )
@@ -38,16 +39,44 @@ class _VisionStub:
         self._uses_dynamic_vision = uses_dynamic_vision
 
 
+class _LanguageModelStub:
+    def __init__(self, uses_rope_input: bool) -> None:
+        self._uses_rope_input = uses_rope_input
+
+
+class _ConfigStub:
+    """Expose the two MXQ paths the reconciler names in its mismatch error."""
+
+    def __init__(self, vision_mxq_path: str = "vision.mxq", text_mxq_path: str = "text.mxq") -> None:
+        self.vision_mxq_path = vision_mxq_path
+        self.text_mxq_path = text_mxq_path
+
+
 class _ModelStub:
     """Mimic the Qwen3-VL model attribute layout expected by the sync helper."""
 
-    def __init__(self, uses_dynamic_vision: bool, *, nested: bool = True) -> None:
+    def __init__(
+        self,
+        uses_dynamic_vision: bool,
+        uses_rope_input: Optional[bool] = None,
+        *,
+        nested: bool = True,
+        config: Optional[_ConfigStub] = None,
+    ) -> None:
+        # Default the text signature to match the vision signature so the
+        # bundled-release invariant holds on stubs that only care about one
+        # side; disagreement cases pass an explicit ``uses_rope_input``.
+        if uses_rope_input is None:
+            uses_rope_input = uses_dynamic_vision
         vision = _VisionStub(uses_dynamic_vision)
+        language_model = _LanguageModelStub(uses_rope_input)
         if nested:
-            inner = type("_Inner", (), {"visual": vision})()
+            inner = type("_Inner", (), {"visual": vision, "language_model": language_model})()
             self.model = inner
         else:
             self.visual = vision
+            self.language_model = language_model
+        self.config = config if config is not None else _ConfigStub()
 
 
 def _make_processor(prior_dynamic_vision: object = "unset") -> MobilintQwen3VLProcessor:
@@ -116,7 +145,7 @@ def test_reconcile_dynamic_vision_warns_on_config_mismatch(
     """Warn (and trust the MXQ) when top-level config disagrees with detection."""
     config = MobilintQwen3VLConfig(dynamic_vision=False)
     with caplog.at_level(logging.WARNING, logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl"):
-        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, detected=True)
+        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, vision_dynamic=True, text_dynamic=True)
     assert detected is True
     assert config.dynamic_vision is True
     assert any("disagrees with vision MXQ detection" in rec.message for rec in caplog.records)
@@ -128,18 +157,66 @@ def test_reconcile_dynamic_vision_silent_when_matched(
     """No warning when config and detection agree; config is left aligned."""
     config = MobilintQwen3VLConfig(dynamic_vision=True)
     with caplog.at_level(logging.WARNING, logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl"):
-        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, detected=True)
+        detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, vision_dynamic=True, text_dynamic=True)
     assert detected is True
     assert config.dynamic_vision is True
     assert not any("disagrees with vision MXQ detection" in rec.message for rec in caplog.records)
 
 
-def test_reconcile_dynamic_vision_reads_visual_when_detected_omitted() -> None:
-    """The helper can pull the detected value straight off a vision submodule."""
+def test_reconcile_dynamic_vision_reads_submodules_when_detected_omitted() -> None:
+    """The helper can pull the detected values straight off the submodules."""
     config = MobilintQwen3VLConfig(dynamic_vision=False)
-    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, visual=_VisionStub(uses_dynamic_vision=True))
+    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(
+        config,
+        visual=_VisionStub(uses_dynamic_vision=True),
+        language_model=_LanguageModelStub(uses_rope_input=True),
+    )
     assert detected is True
     assert config.dynamic_vision is True
+
+
+def test_reconcile_dynamic_vision_raises_when_vision_dynamic_text_static() -> None:
+    """Dynamic vision + static text is an inconsistent bundle — must raise.
+
+    Failure mode: a user swaps ``vision_mxq_path=`` to a 3-input dynamic-vision
+    MXQ but leaves the shipped 2-input static text MXQ. Without this guard
+    the reconciler would silently flip ``dynamic_vision=True`` on the vision
+    signal alone; the processor would then forward multi-image / video to a
+    text decoder whose MRoPE is baked/static, producing plausible-but-
+    semantically-wrong output.
+    """
+    config = MobilintQwen3VLConfig(dynamic_vision=False)
+    with pytest.raises(ValueError) as excinfo:
+        MobilintQwen3VLModel._reconcile_dynamic_vision(
+            config,
+            vision_dynamic=True,
+            text_dynamic=False,
+        )
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
+
+
+def test_reconcile_dynamic_vision_raises_when_vision_static_text_dynamic() -> None:
+    """Static vision + dynamic text is the symmetric inconsistent bundle."""
+    config = MobilintQwen3VLConfig(dynamic_vision=True)
+    with pytest.raises(ValueError) as excinfo:
+        MobilintQwen3VLModel._reconcile_dynamic_vision(
+            config,
+            vision_dynamic=False,
+            text_dynamic=True,
+        )
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
+
+
+def test_reconcile_dynamic_vision_both_false_stays_false() -> None:
+    """Legacy static bundle: both flags False -> ``dynamic_vision=False``."""
+    config = MobilintQwen3VLConfig(dynamic_vision=False)
+    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, vision_dynamic=False, text_dynamic=False)
+    assert detected is False
+    assert config.dynamic_vision is False
 
 
 def test_sync_dynamic_vision_from_model_upgrades_default_to_true() -> None:
@@ -184,10 +261,162 @@ def test_sync_dynamic_vision_from_model_rejects_non_qwen3_vl_model() -> None:
     proc = _make_processor()
 
     class _AlienModel:
-        model = type("_Inner", (), {"visual": object()})()
+        model = type("_Inner", (), {"visual": object(), "language_model": object()})()
 
     with pytest.raises(ValueError, match="_uses_dynamic_vision"):
         proc.sync_dynamic_vision_from_model(_AlienModel())
+
+
+def test_sync_dynamic_vision_from_model_rejects_model_without_language_module() -> None:
+    """A model whose language_model lacks ``_uses_rope_input`` is rejected.
+
+    The two flags together define the bundled-release contract; missing
+    either side is treated as a non-Qwen3-VL model rather than silently
+    trusting a single flag.
+    """
+    proc = _make_processor()
+
+    class _HalfAlienModel:
+        model = type(
+            "_Inner",
+            (),
+            {"visual": _VisionStub(uses_dynamic_vision=True), "language_model": object()},
+        )()
+
+    with pytest.raises(ValueError, match="_uses_rope_input"):
+        proc.sync_dynamic_vision_from_model(_HalfAlienModel())
+
+
+def test_sync_dynamic_vision_from_model_raises_when_vision_dynamic_text_static() -> None:
+    """Processor mirrors the bundled-release invariant: dynamic vision + static text raises.
+
+    The reconciler on the model side already rejects this configuration at
+    init time, but the ``vision_mxq_path=`` override flow can produce it
+    post-load and the processor is the boundary that would forward video /
+    multi-image inputs to the (silently mismatched) text decoder. Refusing
+    to enable dynamic mode here is the second line of defence.
+    """
+    proc = _make_processor()
+    model = _ModelStub(uses_dynamic_vision=True, uses_rope_input=False)
+
+    with pytest.raises(ValueError) as excinfo:
+        proc.sync_dynamic_vision_from_model(model)
+
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
+    # The processor must not silently flip to dynamic mode on the mismatch.
+    assert getattr(proc, "dynamic_vision", False) is False
+
+
+def test_sync_dynamic_vision_from_model_raises_when_vision_static_text_dynamic() -> None:
+    """Symmetric mismatch: static vision + dynamic text raises with both flags named."""
+    proc = _make_processor(prior_dynamic_vision=True)
+    model = _ModelStub(uses_dynamic_vision=False, uses_rope_input=True)
+
+    with pytest.raises(ValueError) as excinfo:
+        proc.sync_dynamic_vision_from_model(model)
+
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
+
+
+def test_sync_dynamic_vision_from_model_agrees_true_true() -> None:
+    """Both flags True -> dynamic mode enabled, no raise."""
+    proc = _make_processor()
+    model = _ModelStub(uses_dynamic_vision=True, uses_rope_input=True)
+    proc.sync_dynamic_vision_from_model(model)
+    assert proc.dynamic_vision is True
+    assert proc.video_processor.dynamic_vision is True
+
+
+def test_sync_dynamic_vision_from_model_agrees_false_false() -> None:
+    """Both flags False -> static mode, no raise."""
+    proc = _make_processor(prior_dynamic_vision=True)
+    model = _ModelStub(uses_dynamic_vision=False, uses_rope_input=False)
+    proc.sync_dynamic_vision_from_model(model)
+    assert proc.dynamic_vision is False
+    assert proc.video_processor.dynamic_vision is False
+
+
+# ---------------------------------------------------------------------------
+# ``MobilintQwen3VLForConditionalGeneration.sync_dynamic_vision_from_model`` —
+# four-combo bundled-release invariant on the outer model.
+# ---------------------------------------------------------------------------
+
+
+def _make_conditional_generation(
+    *,
+    vision_dynamic: bool,
+    text_dynamic: bool,
+    config_dynamic_vision: bool = False,
+) -> MobilintQwen3VLForConditionalGeneration:
+    """Build a ``MobilintQwen3VLForConditionalGeneration`` bypassing the heavy init.
+
+    ``sync_dynamic_vision_from_model`` only reads ``self.config`` and
+    ``self.model.{visual, language_model}``, so a bare instance with those
+    attributes stubbed is enough to exercise the invariant without touching
+    hardware or MXQs.
+    """
+    gen = object.__new__(MobilintQwen3VLForConditionalGeneration)
+    gen.config = MobilintQwen3VLConfig(dynamic_vision=config_dynamic_vision)
+    inner = type(
+        "_Inner",
+        (),
+        {
+            "visual": _VisionStub(uses_dynamic_vision=vision_dynamic),
+            "language_model": _LanguageModelStub(uses_rope_input=text_dynamic),
+        },
+    )()
+    gen.model = inner
+    return gen
+
+
+def test_generation_sync_dynamic_vision_true_true_sets_dynamic_vision() -> None:
+    """Vision True + text True -> ``config.dynamic_vision`` ends up True, no raise."""
+    gen = _make_conditional_generation(vision_dynamic=True, text_dynamic=True)
+    detected = gen.sync_dynamic_vision_from_model()
+    assert detected is True
+    assert gen.config.dynamic_vision is True
+
+
+def test_generation_sync_dynamic_vision_false_false_stays_false() -> None:
+    """Vision False + text False -> ``config.dynamic_vision`` ends up False, no raise."""
+    gen = _make_conditional_generation(vision_dynamic=False, text_dynamic=False, config_dynamic_vision=False)
+    detected = gen.sync_dynamic_vision_from_model()
+    assert detected is False
+    assert gen.config.dynamic_vision is False
+
+
+def test_generation_sync_dynamic_vision_dynamic_vision_static_text_raises() -> None:
+    """Dynamic vision + static text raises ValueError naming both flags.
+
+    This is the concrete failure the Codex review targets: the documented
+    ``vision_mxq_path=`` override swaps to a 3-input vision MXQ but leaves
+    the shipped 2-input static text MXQ. Without the two-flag guard the
+    reconciler flips ``dynamic_vision=True`` on the vision signal alone,
+    and the processor happily forwards video / multi-image to a text
+    decoder whose MRoPE is baked/static.
+    """
+    gen = _make_conditional_generation(vision_dynamic=True, text_dynamic=False)
+    with pytest.raises(ValueError) as excinfo:
+        gen.sync_dynamic_vision_from_model()
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
+    # config.dynamic_vision must not silently flip on the mismatch.
+    assert gen.config.dynamic_vision is False
+
+
+def test_generation_sync_dynamic_vision_static_vision_dynamic_text_raises() -> None:
+    """Symmetric mismatch (static vision + dynamic text) raises with both flags named."""
+    gen = _make_conditional_generation(vision_dynamic=False, text_dynamic=True, config_dynamic_vision=True)
+    with pytest.raises(ValueError) as excinfo:
+        gen.sync_dynamic_vision_from_model()
+    message = str(excinfo.value)
+    assert "_uses_dynamic_vision" in message
+    assert "_uses_rope_input" in message
 
 
 def test_strip_video_outer_wrap_removes_chat_template_wrap() -> None:

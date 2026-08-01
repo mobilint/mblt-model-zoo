@@ -1272,36 +1272,89 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.language_model = MobilintQwen3VLTextModel._from_config(config.text_config, _internal_call=True)
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
         self.rope_deltas = None
-        self._reconcile_dynamic_vision(config, visual=self.visual)
+        self._reconcile_dynamic_vision(config, visual=self.visual, language_model=self.language_model)
 
     @staticmethod
-    def _reconcile_dynamic_vision(config: MobilintQwen3VLConfig, detected: bool | None = None, *, visual=None) -> bool:
-        """Reconcile ``config.dynamic_vision`` against the vision MXQ's detected path.
+    def _reconcile_dynamic_vision(
+        config: MobilintQwen3VLConfig,
+        vision_dynamic: bool | None = None,
+        text_dynamic: bool | None = None,
+        *,
+        visual=None,
+        language_model=None,
+    ) -> bool:
+        """Reconcile ``config.dynamic_vision`` against paired vision/text MXQ signatures.
 
-        ``dynamic_vision`` is a release-level attribute (vision MXQ + text MXQ +
-        image processor + video processor pair as one bundle), so it lives at
-        the top of the composite config. The vision submodule independently
-        derives the actual dispatch path from its compiled MXQ signature and
-        stores the result on ``visual._uses_dynamic_vision``. This helper
-        promotes that detected value onto ``config.dynamic_vision`` and warns
-        once when the shipped config hint disagrees, so downstream consumers
-        (processor, video processor) can trust the top-level attr.
+        ``dynamic_vision`` is a release-level attribute: the vision MXQ, text
+        MXQ, image processor, and video processor are a *bundled release* and
+        cannot be swapped independently. A dynamic-vision MXQ produces per-image
+        / per-frame RoPE tensors that the text MXQ must consume via its rope
+        input; a static-vision MXQ bakes MRoPE into the text decoder. Pairing
+        a dynamic vision MXQ with a legacy static text MXQ (or vice versa) is
+        silently semantically wrong — the language model loses image-boundary
+        information and emits plausible-but-corrupted output.
+
+        Each submodule detects its own signature from its compiled MXQ:
+
+        * ``visual._uses_dynamic_vision`` is True for a 3-input vision MXQ.
+        * ``language_model._uses_rope_input`` is True for a 3-input text MXQ
+          that receives a per-image rope tensor.
+
+        The two flags must agree. When they disagree we raise ``ValueError``
+        with both flags and both MXQ paths so the caller can either load a
+        consistent release or override both sides. When they agree we promote
+        the value onto ``config.dynamic_vision`` and warn once when the shipped
+        config hint disagrees, so downstream consumers (processor, video
+        processor) can trust the top-level attr.
 
         Args:
             config: Composite Qwen3-VL config carrying the top-level hint.
-            detected: Detected path from ``_uses_dynamic_vision``. When
-                ``None``, read from ``visual``.
+            vision_dynamic: Detected vision path. When ``None``, read from
+                ``visual``.
+            text_dynamic: Detected text path. When ``None``, read from
+                ``language_model``.
             visual: Vision submodule exposing ``_uses_dynamic_vision``,
-                consulted only when ``detected`` is not supplied.
+                consulted only when ``vision_dynamic`` is not supplied.
+            language_model: Text submodule exposing ``_uses_rope_input``,
+                consulted only when ``text_dynamic`` is not supplied.
 
         Returns:
-            The detected dynamic-vision flag now stored on ``config``.
+            The reconciled dynamic-vision flag now stored on ``config``.
+
+        Raises:
+            ValueError: When ``vision_dynamic`` and ``text_dynamic`` disagree,
+                or when a required detection source is missing.
         """
-        if detected is None:
+        if vision_dynamic is None:
             if visual is None:
-                raise ValueError("_reconcile_dynamic_vision needs `detected` or `visual`.")
-            detected = bool(getattr(visual, "_uses_dynamic_vision", False))
-        detected = bool(detected)
+                raise ValueError(
+                    "_reconcile_dynamic_vision needs `vision_dynamic` or `visual`."
+                )
+            vision_dynamic = bool(getattr(visual, "_uses_dynamic_vision", False))
+        if text_dynamic is None:
+            if language_model is None:
+                raise ValueError(
+                    "_reconcile_dynamic_vision needs `text_dynamic` or `language_model`."
+                )
+            text_dynamic = bool(getattr(language_model, "_uses_rope_input", False))
+        vision_dynamic = bool(vision_dynamic)
+        text_dynamic = bool(text_dynamic)
+        if vision_dynamic != text_dynamic:
+            vision_path = getattr(config, "vision_mxq_path", "<unknown>")
+            text_path = getattr(config, "text_mxq_path", "<unknown>")
+            raise ValueError(
+                "Qwen3-VL vision and text MXQs are a bundled release and cannot "
+                "be swapped independently: visual._uses_dynamic_vision="
+                f"{vision_dynamic} disagrees with language_model._uses_rope_input="
+                f"{text_dynamic}. A dynamic-vision MXQ produces per-image RoPE "
+                "tensors that the text MXQ must consume via its rope input; "
+                "pairing a 3-input vision MXQ with a legacy 2-input text MXQ "
+                "(or vice versa) silently corrupts image-boundary information. "
+                f"vision_mxq_path={vision_path!r}, text_mxq_path={text_path!r}. "
+                "Load a consistent Qwen3-VL release, or override both "
+                "vision_mxq_path= and text_mxq_path= to a matching pair."
+            )
+        detected = vision_dynamic
         config_hint = bool(getattr(config, "dynamic_vision", False))
         if config_hint != detected:
             logger.warning_once(
@@ -1328,6 +1381,38 @@ class MobilintQwen3VLForConditionalGeneration(
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
+
+    def sync_dynamic_vision_from_model(self) -> bool:
+        """Re-reconcile ``config.dynamic_vision`` from the loaded vision + text MXQs.
+
+        Vision and text MXQs are a *bundled release* — one cannot be swapped
+        independently, because a dynamic-vision MXQ produces per-image RoPE
+        tensors that the text MXQ must consume via its rope input. This helper
+        reads both compiled signatures and either promotes the agreed value
+        onto ``self.config.dynamic_vision`` or raises when they disagree.
+
+        The composite ``__init__`` already runs this reconciliation once, so
+        calling this helper is only necessary when the model was loaded with a
+        runtime override (e.g. ``vision_mxq_path=``) that could have swapped
+        one side without the other. It re-checks the flags via
+        :meth:`MobilintQwen3VLModel._reconcile_dynamic_vision`, so the same
+        bundled-release invariant is enforced at both init time and post-load
+        override time.
+
+        Returns:
+            The reconciled dynamic-vision flag now stored on ``self.config``.
+
+        Raises:
+            ValueError: When ``self.model.visual._uses_dynamic_vision`` and
+                ``self.model.language_model._uses_rope_input`` disagree. The
+                message names both flags, both MXQ paths, and tells the caller
+                to load a consistent release or override both sides.
+        """
+        return MobilintQwen3VLModel._reconcile_dynamic_vision(
+            self.config,
+            visual=self.model.visual,
+            language_model=self.model.language_model,
+        )
 
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()

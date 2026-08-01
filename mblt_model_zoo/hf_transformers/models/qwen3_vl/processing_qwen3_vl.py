@@ -282,7 +282,13 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         return processor
 
     def sync_dynamic_vision_from_model(self, model) -> None:
-        """Adopt ``dynamic_vision`` from a loaded Qwen3-VL model's vision MXQ.
+        """Adopt ``dynamic_vision`` from a loaded Qwen3-VL model's paired MXQs.
+
+        Vision and text MXQs are a *bundled release* — one cannot be swapped
+        independently, because a dynamic-vision MXQ produces per-image RoPE
+        tensors that the text MXQ must consume via its rope input. This
+        helper consults both compiled signatures and refuses to enable
+        dynamic mode unless they agree.
 
         In the typical flow, ``dynamic_vision`` is populated automatically by
         :meth:`from_pretrained` reading the top-level ``config.dynamic_vision``
@@ -294,22 +300,53 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         pointing at an MXQ whose signature (static/dynamic) doesn't match the
         config the processor was built from.
 
-        The vision submodule detects its own signature from
-        ``get_input_buffer_info()`` and stores the result on
-        ``visual._uses_dynamic_vision``. Calling this helper unconditionally
-        overwrites ``dynamic_vision`` (and the video processor's mirror) with
-        that detected value, so the processor's resize / max-pixel clamp
-        stays in lock-step with what the compiled model can actually consume.
-        Any prior value — the class default, a config-derived assignment from
+        Each submodule detects its own signature from its compiled MXQ:
+
+        * ``visual._uses_dynamic_vision`` is True for a 3-input vision MXQ.
+        * ``language_model._uses_rope_input`` is True for a 3-input text MXQ
+          that receives a per-image rope tensor.
+
+        When the flags agree, this helper overwrites ``dynamic_vision`` (and
+        the video processor's mirror) with the agreed value. Any prior value
+        — the class default, a config-derived assignment from
         :meth:`from_pretrained`, or an explicit user override — is replaced.
+        When they disagree, it raises ``ValueError`` naming both flags and
+        both MXQ paths so the caller can either load a consistent release or
+        override both ``vision_mxq_path=`` and ``text_mxq_path=`` to a
+        matching pair.
         """
-        vision = getattr(getattr(model, "model", model), "visual", None)
+        submodule_root = getattr(model, "model", model)
+        vision = getattr(submodule_root, "visual", None)
         if vision is None or not hasattr(vision, "_uses_dynamic_vision"):
             raise ValueError(
                 "sync_dynamic_vision_from_model expects a Qwen3-VL model whose "
                 "vision submodule exposes `_uses_dynamic_vision`."
             )
-        self.dynamic_vision = bool(vision._uses_dynamic_vision)
+        language_model = getattr(submodule_root, "language_model", None)
+        if language_model is None or not hasattr(language_model, "_uses_rope_input"):
+            raise ValueError(
+                "sync_dynamic_vision_from_model expects a Qwen3-VL model whose "
+                "language_model submodule exposes `_uses_rope_input`."
+            )
+        vision_dynamic = bool(vision._uses_dynamic_vision)
+        text_dynamic = bool(language_model._uses_rope_input)
+        if vision_dynamic != text_dynamic:
+            config = getattr(model, "config", None)
+            vision_path = getattr(config, "vision_mxq_path", "<unknown>")
+            text_path = getattr(config, "text_mxq_path", "<unknown>")
+            raise ValueError(
+                "Qwen3-VL vision and text MXQs are a bundled release and cannot "
+                "be swapped independently: visual._uses_dynamic_vision="
+                f"{vision_dynamic} disagrees with language_model._uses_rope_input="
+                f"{text_dynamic}. A dynamic-vision MXQ produces per-image RoPE "
+                "tensors that the text MXQ must consume via its rope input; "
+                "pairing a 3-input vision MXQ with a legacy 2-input text MXQ "
+                "(or vice versa) silently corrupts image-boundary information. "
+                f"vision_mxq_path={vision_path!r}, text_mxq_path={text_path!r}. "
+                "Load a consistent Qwen3-VL release, or override both "
+                "vision_mxq_path= and text_mxq_path= to a matching pair."
+            )
+        self.dynamic_vision = vision_dynamic
         self._sync_dynamic_vision_to_video_processor()
 
     @staticmethod
