@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Optional
+from unittest import mock
 
 import pytest
 
@@ -14,6 +15,9 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import (
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
+from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  # noqa: E402
+
+from mblt_model_zoo.hf_transformers.models.qwen3_vl import processing_qwen3_vl  # noqa: E402
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLConfig,
     MobilintQwen3VLVisionConfig,
@@ -23,9 +27,9 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
     MobilintQwen3VLVisionModel,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
+    _NPU_MAX_VISION_TOKENS,
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
-    _NPU_MAX_VISION_TOKENS,
 )
 
 
@@ -133,9 +137,7 @@ def test_reconcile_dynamic_vision_silent_when_matched(
 def test_reconcile_dynamic_vision_reads_visual_when_detected_omitted() -> None:
     """The helper can pull the detected value straight off a vision submodule."""
     config = MobilintQwen3VLConfig(dynamic_vision=False)
-    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(
-        config, visual=_VisionStub(uses_dynamic_vision=True)
-    )
+    detected = MobilintQwen3VLModel._reconcile_dynamic_vision(config, visual=_VisionStub(uses_dynamic_vision=True))
     assert detected is True
     assert config.dynamic_vision is True
 
@@ -215,10 +217,7 @@ def test_strip_video_outer_wrap_leaves_image_wrap_untouched() -> None:
 
 def test_strip_video_outer_wrap_handles_multiple_videos() -> None:
     """Multiple video wraps in a single message all collapse."""
-    text = (
-        "<|vision_start|><|video_pad|><|vision_end|> and "
-        "<|vision_start|><|video_pad|><|vision_end|>"
-    )
+    text = "<|vision_start|><|video_pad|><|vision_end|> and <|vision_start|><|video_pad|><|vision_end|>"
     stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(text)
     assert stripped == "<|video_pad|> and <|video_pad|>"
 
@@ -279,10 +278,8 @@ def _make_processor_with_image_processor(size) -> MobilintQwen3VLProcessor:
 
 def test_clamp_dynamic_image_size_plain_dict_caps_longest_edge() -> None:
     """tf 4.x path: ``size`` is a plain dict and gets replaced in-place."""
-    limit = _NPU_MAX_VISION_TOKENS * 14 ** 2
-    proc = _make_processor_with_image_processor(
-        {"longest_edge": limit * 4, "shortest_edge": limit * 2}
-    )
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
+    proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": limit * 2})
     proc._clamp_dynamic_image_size()
     assert isinstance(proc.image_processor.size, dict)
     assert proc.image_processor.size["longest_edge"] == limit
@@ -291,10 +288,8 @@ def test_clamp_dynamic_image_size_plain_dict_caps_longest_edge() -> None:
 
 def test_clamp_dynamic_image_size_plain_dict_preserves_small_shortest_edge() -> None:
     """``shortest_edge`` below the limit must not be inflated."""
-    limit = _NPU_MAX_VISION_TOKENS * 14 ** 2
-    proc = _make_processor_with_image_processor(
-        {"longest_edge": limit * 4, "shortest_edge": 3136}
-    )
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
+    proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": 3136})
     proc._clamp_dynamic_image_size()
     assert proc.image_processor.size["shortest_edge"] == 3136
 
@@ -302,7 +297,7 @@ def test_clamp_dynamic_image_size_plain_dict_preserves_small_shortest_edge() -> 
 def test_clamp_dynamic_image_size_size_dict_caps_longest_edge() -> None:
     """tf 5.x path: ``size`` is a frozen ``SizeDict``; clamp must not raise
     ``TypeError`` from ``**size`` unpacking and must yield a new instance."""
-    limit = _NPU_MAX_VISION_TOKENS * 14 ** 2
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     original = _SizeDictLike(longest_edge=limit * 4, shortest_edge=limit * 2)
     proc = _make_processor_with_image_processor(original)
     proc._clamp_dynamic_image_size()
@@ -315,7 +310,7 @@ def test_clamp_dynamic_image_size_size_dict_caps_longest_edge() -> None:
 
 def test_clamp_dynamic_image_size_noop_when_already_within_limit() -> None:
     """Neither the dict nor the SizeDict path mutates when already under budget."""
-    limit = _NPU_MAX_VISION_TOKENS * 14 ** 2
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     small_dict = {"longest_edge": limit // 2, "shortest_edge": limit // 4}
     proc_dict = _make_processor_with_image_processor(small_dict)
     proc_dict._clamp_dynamic_image_size()
@@ -325,3 +320,189 @@ def test_clamp_dynamic_image_size_noop_when_already_within_limit() -> None:
     proc_sd = _make_processor_with_image_processor(small_sd)
     proc_sd._clamp_dynamic_image_size()
     assert proc_sd.image_processor.size is small_sd
+
+
+# ---------------------------------------------------------------------------
+# ``from_pretrained`` kwarg propagation to the follow-up config load.
+# ---------------------------------------------------------------------------
+
+
+class _FakeConfig:
+    """Stand-in for a top-level Qwen3-VL config with an explicit dynamic_vision."""
+
+    def __init__(self, dynamic_vision: bool) -> None:
+        self.dynamic_vision = dynamic_vision
+
+
+class _LegacyConfigNoDynamicVision:
+    """Older static release: config loads, but the ``dynamic_vision`` field is absent."""
+
+
+def _build_bare_processor() -> MobilintQwen3VLProcessor:
+    """Return a ``MobilintQwen3VLProcessor`` instance without running its heavy init.
+
+    ``from_pretrained`` needs the super() return value to satisfy
+    ``isinstance(processor, cls)`` and to carry a ``video_processor``
+    attribute for ``_sync_dynamic_vision_to_video_processor``.
+    """
+    proc = object.__new__(MobilintQwen3VLProcessor)
+    proc.video_processor = MobilintQwen3VLVideoProcessor()
+    return proc
+
+
+def test_from_pretrained_forwards_subfolder_to_config_load() -> None:
+    """A caller-supplied ``subfolder`` must reach the follow-up AutoConfig call.
+
+    This is the concrete Codex-review regression: ``from_pretrained(path,
+    subfolder='release')`` used to load the processor from ``path/release``
+    but drop ``subfolder`` before reading the config, so the config lookup
+    fell back to ``path/config.json`` and ``dynamic_vision`` silently
+    defaulted to False — turning a dynamic-vision MXQ release into a hard
+    failure on any multi-image/video input.
+    """
+    fake_config = _FakeConfig(dynamic_vision=True)
+    with (
+        mock.patch.object(
+            Qwen3VLProcessor,
+            "from_pretrained",
+            return_value=_build_bare_processor(),
+        ),
+        mock.patch.object(
+            processing_qwen3_vl.AutoConfig,
+            "from_pretrained",
+            return_value=fake_config,
+        ) as mock_autoconfig,
+    ):
+        proc = MobilintQwen3VLProcessor.from_pretrained("some/repo", subfolder="release")
+
+    _, config_kwargs = mock_autoconfig.call_args
+    assert config_kwargs.get("subfolder") == "release"
+    assert proc.dynamic_vision is True
+    assert proc.video_processor.dynamic_vision is True
+
+
+def test_from_pretrained_forwards_full_hf_loading_kwargs() -> None:
+    """Every standard HF loading kwarg the caller passes must reach AutoConfig."""
+    fake_config = _FakeConfig(dynamic_vision=False)
+    caller_kwargs = {
+        "cache_dir": "/tmp/hf-cache",
+        "force_download": True,
+        "resume_download": False,
+        "proxies": {"http": "http://proxy.example:3128"},
+        "token": "hf_TOKEN",
+        "local_files_only": True,
+        "revision": "abc123",
+        "subfolder": "release",
+        "trust_remote_code": False,
+        "code_revision": "def456",
+    }
+    with (
+        mock.patch.object(
+            Qwen3VLProcessor,
+            "from_pretrained",
+            return_value=_build_bare_processor(),
+        ),
+        mock.patch.object(
+            processing_qwen3_vl.AutoConfig,
+            "from_pretrained",
+            return_value=fake_config,
+        ) as mock_autoconfig,
+    ):
+        MobilintQwen3VLProcessor.from_pretrained("some/repo", **caller_kwargs)
+
+    _, config_kwargs = mock_autoconfig.call_args
+    for key, value in caller_kwargs.items():
+        assert config_kwargs.get(key) == value, f"{key} not forwarded"
+
+
+def test_from_pretrained_respects_local_files_only() -> None:
+    """``local_files_only=True`` must reach AutoConfig (proving no network).
+
+    We assert on the propagated kwarg rather than intercepting the network
+    layer: propagation is exactly what the fix owns, and any downstream
+    behavior around ``local_files_only`` is upstream HF territory.
+    """
+    fake_config = _FakeConfig(dynamic_vision=True)
+    with (
+        mock.patch.object(
+            Qwen3VLProcessor,
+            "from_pretrained",
+            return_value=_build_bare_processor(),
+        ),
+        mock.patch.object(
+            processing_qwen3_vl.AutoConfig,
+            "from_pretrained",
+            return_value=fake_config,
+        ) as mock_autoconfig,
+    ):
+        MobilintQwen3VLProcessor.from_pretrained("some/repo", local_files_only=True)
+
+    _, config_kwargs = mock_autoconfig.call_args
+    assert config_kwargs.get("local_files_only") is True
+
+
+def test_from_pretrained_legacy_config_without_dynamic_vision_silent_false(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A legacy config that omits the field resolves to False *silently*.
+
+    The exception-path fallback logs a warning to surface silent
+    misconfiguration, but the load-succeeded-without-field path is the
+    legitimate legacy release shape and must not emit a warning.
+    """
+    with (
+        mock.patch.object(
+            Qwen3VLProcessor,
+            "from_pretrained",
+            return_value=_build_bare_processor(),
+        ),
+        mock.patch.object(
+            processing_qwen3_vl.AutoConfig,
+            "from_pretrained",
+            return_value=_LegacyConfigNoDynamicVision(),
+        ),
+    ):
+        with caplog.at_level(
+            logging.WARNING,
+            logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl",
+        ):
+            proc = MobilintQwen3VLProcessor.from_pretrained("some/repo")
+
+    assert proc.dynamic_vision is False
+    assert proc.video_processor.dynamic_vision is False
+    assert not any("dynamic_vision" in rec.message for rec in caplog.records), (
+        "Legacy config path must not emit a warning."
+    )
+
+
+def test_from_pretrained_warns_when_config_load_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Config-load failure falls back to False *with* a visible warning.
+
+    A transient error (network, permissions) or a missing ``config.json``
+    both land here. The prior implementation swallowed the exception at
+    ``debug`` level, hiding the misconfiguration; the fix logs at
+    ``warning`` so operators can spot it before the processor silently
+    hard-fails dynamic-only inputs.
+    """
+    with (
+        mock.patch.object(
+            Qwen3VLProcessor,
+            "from_pretrained",
+            return_value=_build_bare_processor(),
+        ),
+        mock.patch.object(
+            processing_qwen3_vl.AutoConfig,
+            "from_pretrained",
+            side_effect=OSError("simulated network failure"),
+        ),
+    ):
+        with caplog.at_level(
+            logging.WARNING,
+            logger="mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl",
+        ):
+            proc = MobilintQwen3VLProcessor.from_pretrained("some/repo")
+
+    assert proc.dynamic_vision is False
+    assert any("simulated network failure" in rec.message for rec in caplog.records)

@@ -47,6 +47,27 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
 # supports longer sequences.
 _NPU_MAX_VISION_TOKENS = 2048
 
+# Standard Hugging Face loading kwargs that select which artifact
+# ``from_pretrained`` reads. The processor and the model config must resolve
+# to the *same* release, so any caller-supplied value here must be propagated
+# from the processor's ``from_pretrained`` to the follow-up
+# ``AutoConfig.from_pretrained``. Missing any one of these (``subfolder`` in
+# particular) makes the two calls disagree — the processor lands in a
+# subfolder while the config lookup falls back to the repo root and silently
+# picks up the wrong ``dynamic_vision`` (or none at all).
+_HF_LOADING_KWARGS = (
+    "cache_dir",
+    "force_download",
+    "resume_download",
+    "proxies",
+    "token",
+    "local_files_only",
+    "revision",
+    "subfolder",
+    "trust_remote_code",
+    "code_revision",
+)
+
 
 def _count_images(images) -> int:
     """Count images in an ``ImageInput`` without loading/decoding.
@@ -171,20 +192,36 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if not isinstance(processor, cls):
             # AutoProcessor resolved a different class; leave it untouched.
             return processor
-        config_kwargs = {
-            k: kwargs[k]
-            for k in ("revision", "cache_dir", "token", "trust_remote_code")
-            if k in kwargs
-        }
+        # Forward every standard HF loading kwarg the caller supplied so the
+        # processor and the config are read from the *same* artifact. In
+        # particular, ``subfolder`` must reach ``AutoConfig`` — otherwise a
+        # release that lives in ``<repo>/release/`` loads the processor from
+        # the subfolder but the config lookup falls back to ``<repo>/``, and
+        # ``dynamic_vision`` is silently defaulted to ``False``.
+        config_kwargs = {k: kwargs[k] for k in _HF_LOADING_KWARGS if k in kwargs}
         try:
             config = AutoConfig.from_pretrained(pretrained_model_name_or_path, **config_kwargs)
-            vision_dyn = bool(getattr(config, "dynamic_vision", False))
         except Exception as exc:
-            logger.debug(
-                "Falling back to processor default dynamic_vision (config load failed: %s)",
+            # A legacy static release that ships a config *without* the
+            # ``dynamic_vision`` field is handled by the ``getattr`` default
+            # in the success path below; it does not reach this branch. So
+            # any exception here means the config load itself failed
+            # (missing ``config.json``, transient network/permission error,
+            # etc.), which would silently drop the processor into static
+            # mode. Warn loudly so the misconfiguration is easy to spot.
+            logger.warning(
+                "Could not load model config from %r to determine "
+                "dynamic_vision; defaulting to False. This is expected only "
+                "for a processor artifact with no accompanying config.json; "
+                "for a transient network/permission failure the processor "
+                "will hard-fail dynamic-only inputs even against a "
+                "dynamic-vision MXQ. Underlying error: %s",
+                pretrained_model_name_or_path,
                 exc,
             )
             vision_dyn = False
+        else:
+            vision_dyn = bool(getattr(config, "dynamic_vision", False))
         processor.dynamic_vision = vision_dyn
         processor._sync_dynamic_vision_to_video_processor()
         return processor
