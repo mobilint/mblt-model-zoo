@@ -837,6 +837,118 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         )
         scope["size"] = _update_size(size, **updates)
 
+    def _apply_safety_envelope(
+        self,
+        images: Optional[ImageInput],
+        videos: Optional[VideoInput],
+        kwargs: dict,
+    ) -> None:
+        """Centralized safety gate for the processor's caller-kwargs surface.
+
+        Every kwargs-surface invariant that the loaded release requires lives
+        in this one method so a new class of "caller kwargs bypass safety"
+        leak surfaces as a change here rather than as a scattered per-site
+        patch. ``__call__`` invokes it exactly once, right after the incoming
+        kwargs have been assembled and right before dispatch to
+        ``super().__call__``. The invariants enforced (in order):
+
+        1. **Structural knob equality.** ``patch_size`` /
+           ``temporal_patch_size`` / ``merge_size`` are baked into the vision
+           MXQ at compile time — the folded feature width the language model
+           expects at the vision-language boundary is ``patch_size *
+           merge_size`` and the temporal stride is ``temporal_patch_size``.
+           Any override in the top-level or nested per-modality kwargs must
+           match the shipped processor/config value; otherwise the boundary
+           shape mismatches (or worse, silently reads plausible-but-wrong
+           tokens). Run first because a smaller caller-supplied ``patch_size``
+           would otherwise fool the vision-token budget clamp (whose ceiling
+           is derived from the stored ``patch_size``).
+
+        2. **Static branch resize rejection.** A static-vision release ships
+           a vision MXQ compiled for a rigid ``(_NPU_H, _NPU_W, 6)`` grid;
+           ``__call__`` pre-resizes every image to the matching pixel
+           resolution via ``_resize_images``. Any caller-supplied ``size`` /
+           ``min_pixels`` / ``max_pixels`` / ``do_resize=False`` would still
+           reach upstream's ``_preprocess`` after that step and re-resize the
+           just-normalized image away from the fixed grid. The video branch
+           doesn't need a symmetric reject — it hard-fails at ``__call__``
+           before the envelope runs on a static release — but the envelope
+           still owns the story: it only clamps video kwargs on the dynamic
+           branch and hands the reject to ``__call__`` for the static branch.
+
+        3. **Dynamic vision-token budget.** A dynamic-vision release accepts
+           variable resolutions, but the vision MXQ hangs the NPU (watchdog
+           timeout → ``Model_NotAlive``) above the pre-merge patch ceiling of
+           ``self.max_vision_tokens * patch_size ** 2``. Cap the storage
+           defaults (``ip.size`` / ``ip.max_pixels``, ``vp.size`` /
+           ``vp.max_pixels``) so an omitted-kwarg call is safe by default,
+           then re-clamp any per-call ``size`` / ``max_pixels`` /
+           ``min_pixels`` overrides in both the top-level and the nested
+           per-modality scopes. ``do_resize=False`` is a hard reject because
+           it strips the ceiling entirely.
+
+        4. **MRoPE metadata invariant.** tf 5.x's ``Qwen3VLModel.compute_3d_position_ids``
+           and the generate-side ``_prepare_position_ids_for_generation``
+           build MRoPE 3-D t/h/w positions only when ``mm_token_type_ids``
+           is present in the tokenizer output. Without it, both fall back to
+           linear (non-MRoPE) positions and the decoder cannot distinguish
+           visual tokens by time/space — degenerate output on video, stale
+           position math on multi-image. For a multimodal run on tf 5.x,
+           force ``text_kwargs['return_mm_token_type_ids'] = True`` by
+           explicit assignment (not ``setdefault``) so a caller-supplied
+           ``False`` cannot silently disable MRoPE. Gate on
+           ``create_mm_token_type_ids`` — the tf 5.x method absent on tf 4.x,
+           where ``generate`` strictly rejects unknown ``model_kwargs`` and
+           the field is a no-op the tokenizer would refuse.
+
+        Release-level contract hard-fails (video-on-static, per-prompt
+        multi-image-on-static) are *not* caller-kwargs invariants — they
+        reject inputs the loaded release cannot serve at all — so they
+        happen in ``__call__`` before this envelope runs. Storage-level
+        defaults (``_clamp_dynamic_image_size`` / ``_clamp_dynamic_video_size``)
+        are invoked here as the belt-and-suspenders companion to the
+        per-call clamp: the envelope catches caller overrides, the storage
+        clamp catches the omitted-kwarg default path (tf 4.x's
+        ``Qwen2VLImageProcessor.preprocess`` reads ``self.max_pixels`` from
+        the scalar attribute when the caller omits it).
+        """
+        if images is not None:
+            self._reject_structural_vision_overrides(
+                kwargs, "images_kwargs", "image_processor", "image"
+            )
+        if videos is not None:
+            self._reject_structural_vision_overrides(
+                kwargs, "videos_kwargs", "video_processor", "video"
+            )
+
+        if images is not None:
+            if self.dynamic_vision:
+                self._clamp_dynamic_image_size()
+                self._clamp_dynamic_image_call_kwargs(kwargs)
+            else:
+                self._reject_static_image_resize_overrides(kwargs)
+
+        if videos is not None and self.dynamic_vision:
+            self._clamp_dynamic_video_size()
+            self._clamp_dynamic_video_call_kwargs(kwargs)
+
+        if (images is not None or videos is not None) and hasattr(
+            self, "create_mm_token_type_ids"
+        ):
+            text_kwargs = kwargs.get("text_kwargs")
+            if text_kwargs is None:
+                text_kwargs = {}
+                kwargs["text_kwargs"] = text_kwargs
+            prior = text_kwargs.get("return_mm_token_type_ids")
+            if prior is False:
+                logger.debug(
+                    "[safety-envelope] overwriting caller-supplied "
+                    "text_kwargs.return_mm_token_type_ids=False -> True: tf 5.x "
+                    "MRoPE builds 3-D t/h/w positions only when "
+                    "mm_token_type_ids is present in the tokenizer output"
+                )
+            text_kwargs["return_mm_token_type_ids"] = True
+
     @staticmethod
     def _strip_video_outer_wrap(text):
         """Reduce chat-template ``<|vision_start|><|video_pad|><|vision_end|>`` to ``<|video_pad|>``.
@@ -871,114 +983,70 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     ) -> BatchFeature:
         assert text is not None, "text is None!"
 
-        if images is not None:
-            # Structural vision kwargs (``patch_size`` / ``temporal_patch_size``
-            # / ``merge_size``) are baked into the vision MXQ at compile time
-            # and apply to both static and dynamic releases, so reject caller
-            # overrides here before either branch runs.
-            self._reject_structural_vision_overrides(
-                kwargs, "images_kwargs", "image_processor", "image"
+        # Release-level contract hard-fails. These reject inputs the loaded
+        # release cannot serve at all — a static-vision MXQ has neither
+        # per-image RoPE (needed for per-prompt multi-image) nor per-frame
+        # RoPE / variable visual-token count (needed for video). They are
+        # *not* caller-kwargs invariants, so they live here rather than in
+        # the safety envelope: no point clamping/rejecting kwargs for a
+        # call we would reject anyway, and the safety envelope's static-
+        # branch resize reject would obscure the "load a dynamic-vision
+        # release" story with a shape-mismatch complaint.
+        if videos is not None and not self.dynamic_vision:
+            raise NotImplementedError(
+                "Video input requires a dynamic-vision Qwen3-VL release (3-input vision "
+                "MXQ with variable visual-token count in the text decoder). The currently "
+                "loaded processor is in static mode (dynamic_vision=False). Load a "
+                "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
+                "inputs."
             )
-            if self.dynamic_vision:
-                # Keep the aspect ratio, but stay inside the NPU sequence limit.
-                # Two-stage clamp: cap the stored defaults, then re-clamp any
-                # caller overrides so ``size`` / ``max_pixels`` / ``min_pixels``
-                # / ``do_resize`` cannot bypass the ceiling. See
-                # ``_clamp_dynamic_image_call_kwargs`` for the override contract.
-                self._clamp_dynamic_image_size()
-                self._clamp_dynamic_image_call_kwargs(kwargs)
-                logger.debug("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
-            else:
-                # Static Qwen3-VL MXQ releases bake a single image's 2D RoPE grid into
-                # the text decoder. A second image *for the same prompt* would need
-                # its own independent 2D coordinates, which the baked rope cannot
-                # express — the decoder loses the image-boundary distinction and
-                # emits grammatically-plausible but semantically wrong output. Fail
-                # here, before ``_resize_images`` and the image_processor's patch
-                # extraction, with the same shape of message the video hard-fail
-                # uses. The guard is per-prompt (a batch of N single-image prompts
-                # must pass through) and derives entirely from placeholder counts
-                # in ``text`` — see ``_per_prompt_image_counts`` — so that container
-                # nesting on ``images`` never influences the ownership decision.
-                image_token = getattr(self, "image_token", _IMAGE_PAD_TOKEN)
-                per_prompt_counts = _per_prompt_image_counts(text, image_token)
-                offender = next(
-                    ((i, c) for i, c in enumerate(per_prompt_counts) if c > 1),
-                    None,
+        if images is not None and not self.dynamic_vision:
+            # Match upstream's per-prompt association order: count
+            # ``<|image_pad|>`` placeholders per prompt (a batch of N
+            # single-image prompts must pass through — only per-prompt
+            # multi-image is the constraint). Container nesting on
+            # ``images`` is irrelevant — see ``_per_prompt_image_counts``.
+            image_token = getattr(self, "image_token", _IMAGE_PAD_TOKEN)
+            per_prompt_counts = _per_prompt_image_counts(text, image_token)
+            offender = next(
+                ((i, c) for i, c in enumerate(per_prompt_counts) if c > 1),
+                None,
+            )
+            if offender is not None:
+                offending_index, offending_count = offender
+                raise NotImplementedError(
+                    f"Multi-image input at prompt index {offending_index} "
+                    f"({offending_count} images bound to that prompt) requires "
+                    "a dynamic-vision Qwen3-VL release (3-input vision MXQ with "
+                    "per-image 2D RoPE in the text decoder). The currently "
+                    "loaded processor is in static mode (dynamic_vision=False), "
+                    "which supports exactly one image per prompt. Load a "
+                    "Qwen3-VL release that ships a dynamic vision MXQ, or pass "
+                    "a single image per prompt."
                 )
-                if offender is not None:
-                    offending_index, offending_count = offender
-                    raise NotImplementedError(
-                        f"Multi-image input at prompt index {offending_index} "
-                        f"({offending_count} images bound to that prompt) requires "
-                        "a dynamic-vision Qwen3-VL release (3-input vision MXQ with "
-                        "per-image 2D RoPE in the text decoder). The currently "
-                        "loaded processor is in static mode (dynamic_vision=False), "
-                        "which supports exactly one image per prompt. Load a "
-                        "Qwen3-VL release that ships a dynamic vision MXQ, or pass "
-                        "a single image per prompt."
-                    )
-                # ``_resize_images`` forces the fixed static-MXQ grid, but any
-                # caller-supplied ``size`` / ``min_pixels`` / ``max_pixels`` /
-                # ``do_resize=False`` would still reach upstream's ``_preprocess``
-                # after that step and re-resize the just-normalized image away
-                # from the grid the compiled MXQ expects. See
-                # ``_reject_static_image_resize_overrides`` for the override
-                # contract.
-                self._reject_static_image_resize_overrides(kwargs)
+
+        # Single centralized gate for every caller-kwargs invariant. See
+        # ``_apply_safety_envelope`` for the full contract.
+        self._apply_safety_envelope(images, videos, kwargs)
+
+        if images is not None:
+            if self.dynamic_vision:
+                logger.debug(
+                    "[dynamic-vision] skipping forced resize, keeping original aspect ratio"
+                )
+            else:
+                # Force the fixed static-MXQ grid. The envelope's static
+                # resize reject already fired for size / min_pixels /
+                # max_pixels / do_resize=False overrides that would otherwise
+                # re-resize away from this grid inside upstream ``_preprocess``.
                 images = self._resize_images(images)
 
         if videos is not None:
-            # Static Qwen3-VL MXQ releases (single-input vision, fixed visual-token count in the
-            # text decoder) cannot express video: per-frame RoPE and variable-length visual
-            # regions are exactly what the dynamic vision MXQ was compiled to carry. Without
-            # that, video decoding + preprocessing would still run and the language model
-            # would emit grammatically-plausible but semantically empty output. Fail here —
-            # before the heavy torchcodec/FFmpeg video decode — with a message pointing to
-            # the release that actually supports video.
-            if not self.dynamic_vision:
-                raise NotImplementedError(
-                    "Video input requires a dynamic-vision Qwen3-VL release (3-input vision "
-                    "MXQ with variable visual-token count in the text decoder). The currently "
-                    "loaded processor is in static mode (dynamic_vision=False). Load a "
-                    "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
-                    "inputs."
-                )
+            # Runtime consistency: mirror ``dynamic_vision`` onto the video
+            # processor before it sees the frames. Only reached on a dynamic
+            # release (the video hard-fail above catches static).
             self._sync_dynamic_vision_to_video_processor()
-            # Structural video kwargs are baked into the vision MXQ the same
-            # way as the image path; reject overrides before the token-budget
-            # clamp runs (the clamp derives its ceiling from the stored
-            # ``patch_size`` / ``temporal_patch_size`` and would otherwise be
-            # bypassed by a smaller caller value).
-            self._reject_structural_vision_overrides(
-                kwargs, "videos_kwargs", "video_processor", "video"
-            )
-            # Keep the aspect ratio, but stay inside the NPU per-frame sequence
-            # limit. Two-stage clamp: cap the stored defaults, then re-clamp
-            # any caller overrides (``size``, ``do_resize``) so they cannot
-            # bypass the ceiling. See ``_clamp_dynamic_video_call_kwargs`` for
-            # the override contract.
-            self._clamp_dynamic_video_size()
-            self._clamp_dynamic_video_call_kwargs(kwargs)
             text = self._strip_video_outer_wrap(text)
-
-        # transformers 5.x's ``Qwen3VLModel.compute_3d_position_ids`` (and the
-        # generate-side ``_prepare_position_ids_for_generation``) build MRoPE
-        # 3-D t/h/w positions only when ``mm_token_type_ids`` is present.
-        # Without it, both fall back to linear (non-MRoPE) positions and the
-        # decoder cannot distinguish visual tokens by time/space, producing
-        # degenerate output on video inputs. tf 4.x has neither hook and its
-        # ``generate`` strictly rejects unknown model_kwargs, so populating
-        # ``mm_token_type_ids`` unconditionally raises there — gate on the
-        # ``create_mm_token_type_ids`` method that tf 5.x introduced.
-        if (images is not None or videos is not None) and hasattr(
-            self, "create_mm_token_type_ids"
-        ):
-            text_kwargs = kwargs.get("text_kwargs")
-            if text_kwargs is None:
-                text_kwargs = {}
-                kwargs["text_kwargs"] = text_kwargs
-            text_kwargs.setdefault("return_mm_token_type_ids", True)
 
         return super().__call__(images, text, videos, **kwargs)
 
