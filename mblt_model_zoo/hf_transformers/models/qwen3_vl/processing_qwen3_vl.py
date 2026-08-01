@@ -69,6 +69,9 @@ _HF_LOADING_KWARGS = (
 )
 
 
+_IMAGE_PAD_TOKEN = "<|image_pad|>"
+
+
 def _count_images(images) -> int:
     """Count images in an ``ImageInput`` without loading/decoding.
 
@@ -90,55 +93,43 @@ def _count_images(images) -> int:
     return 1
 
 
-def _num_prompts(text) -> int:
-    """Return the number of prompts described by ``text``.
+def _per_prompt_image_pad_counts(text, image_token: str = _IMAGE_PAD_TOKEN) -> list[int]:
+    """Return the ``<|image_pad|>`` count for each prompt described by ``text``.
 
-    A bare string (or ``None``) is a single prompt; a list is a batch whose
-    length is the prompt count. This is the signal used to disambiguate a
-    rank-4 ndarray/tensor image input: ``shape[0] == num_prompts`` means a
-    batch of single-image prompts, not one prompt with N images.
+    Mirrors the association order in upstream ``Qwen3VLProcessor.__call__``:
+    ``text`` is normalized to a list of prompts (a bare string becomes a
+    single-element list), each prompt is then walked left-to-right, and every
+    ``<|image_pad|>`` placeholder consumes one image from the *flat* image
+    input. Container nesting on the ``images`` side is irrelevant — only the
+    placeholder counts in each prompt determine the per-prompt image count.
+    Guarding on those counts avoids both the false-positive (flat images with
+    one placeholder per prompt) and the false-negative (nested images with
+    both placeholders in the same prompt) that a container-shape heuristic
+    produces.
+
+    ``PreTokenizedInput`` (a list of pre-tokenized token strings for a single
+    prompt) is treated as one prompt and counts full-token equality against
+    ``image_token``. A batch of pre-tokenized inputs is a list of such lists
+    and yields one count per inner list. This case is nominal — upstream's
+    ``__call__`` does not actually run ``.replace`` on pre-tokenized token
+    lists — but supporting it here keeps the guard type-consistent with the
+    ``__call__`` signature.
     """
-    if text is None or isinstance(text, str):
-        return 1
-    if isinstance(text, (list, tuple)):
-        return len(text) if text else 1
-    return 1
-
-
-def _max_images_per_prompt(images, text=None) -> int:
-    """Return the largest image count across prompts.
-
-    The chat-template pipeline wraps images as ``[[imgs_prompt_1], [imgs_prompt_2], ...]``
-    (outer list = prompts, inner list = images per prompt), so a batch of N
-    single-image prompts arrives as ``[[img_1], [img_2], ..., [img_N]]`` — a
-    total count of N that must not trip the static multi-image hard-fail. The
-    static MXQ constraint is "at most one image per prompt", so we return the
-    max per-prompt count; ``_count_images`` totals across all prompts and is
-    the wrong quantity for the guard. A flat list (single prompt with
-    multiple images) or a bare image is treated as one prompt.
-
-    Rank-4 ndarray/tensor input (``(N, H, W, C)`` / ``(N, C, H, W)``) is
-    ambiguous on its own: it can be either one prompt with N images or a batch
-    of N single-image prompts. Disambiguate using the paired ``text``: if it
-    describes N prompts, the leading axis is the batch and each prompt sees
-    exactly one image. Otherwise it is single-prompt multi-image and must trip
-    the guard.
-    """
-    if images is None:
-        return 0
-    if (
-        isinstance(images, (list, tuple))
-        and images
-        and all(isinstance(item, (list, tuple)) for item in images)
-    ):
-        return max((_count_images(item) for item in images), default=0)
-    if (
-        (isinstance(images, np.ndarray) or torch.is_tensor(images))
-        and images.ndim == 4
-        and _num_prompts(text) == int(images.shape[0])
-    ):
-        return 1
-    return _count_images(images)
+    if text is None:
+        return []
+    if isinstance(text, str):
+        return [text.count(image_token)]
+    if not isinstance(text, (list, tuple)):
+        return [0]
+    counts: list[int] = []
+    for entry in text:
+        if isinstance(entry, str):
+            counts.append(entry.count(image_token))
+        elif isinstance(entry, (list, tuple)):
+            counts.append(sum(1 for tok in entry if tok == image_token))
+        else:
+            counts.append(0)
+    return counts
 
 
 def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]:
@@ -450,13 +441,19 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 logger.debug("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
             else:
                 # Static Qwen3-VL MXQ releases bake a single image's 2D RoPE grid into
-                # the text decoder. A second image would need its own independent 2D
-                # coordinates, which the baked rope cannot express — the decoder loses
-                # the image-boundary distinction and emits grammatically-plausible but
-                # semantically wrong output. Fail here, before ``_resize_images`` and
-                # the image_processor's patch extraction, with the same shape of
-                # message the video hard-fail uses.
-                if _max_images_per_prompt(images, text) > 1:
+                # the text decoder. A second image *for the same prompt* would need
+                # its own independent 2D coordinates, which the baked rope cannot
+                # express — the decoder loses the image-boundary distinction and
+                # emits grammatically-plausible but semantically wrong output. Fail
+                # here, before ``_resize_images`` and the image_processor's patch
+                # extraction, with the same shape of message the video hard-fail
+                # uses. The guard is per-prompt (a batch of N single-image prompts
+                # must pass through), so match upstream's association order and
+                # count ``<|image_pad|>`` placeholders per prompt rather than
+                # inferring per-prompt counts from the ``images`` container shape.
+                image_token = getattr(self, "image_token", _IMAGE_PAD_TOKEN)
+                per_prompt_counts = _per_prompt_image_pad_counts(text, image_token)
+                if per_prompt_counts and max(per_prompt_counts) > 1:
                     raise NotImplementedError(
                         "Multi-image input requires a dynamic-vision Qwen3-VL release "
                         "(3-input vision MXQ with per-image 2D RoPE in the text "

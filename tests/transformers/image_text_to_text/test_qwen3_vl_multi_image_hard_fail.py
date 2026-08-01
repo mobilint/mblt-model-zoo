@@ -7,15 +7,20 @@ the baked rope cannot express, so the decoder silently loses the image-boundary
 distinction and the language model emits grammatically-plausible but semantically
 wrong output. These tests pin down the processor-level guard (which also skips
 the image processor's patch extraction) and verify that both the single-image
-path and the batched-single-image path are unaffected. The guard is per-prompt,
-not total-count: a batch of N single-image prompts must pass through.
+path and the batched-single-image path are unaffected.
+
+The guard mirrors upstream ``Qwen3VLProcessor.__call__`` association order:
+upstream flattens the ``images`` container and walks each prompt in ``text``,
+consuming one image from the flat list per ``<|image_pad|>`` placeholder in
+order. Container nesting on the ``images`` side is irrelevant — only the
+placeholder counts in each prompt determine the per-prompt image count. The
+guard therefore counts ``<|image_pad|>`` per prompt and fires only when some
+prompt binds more than one image.
 """
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
-import torch
 from PIL import Image
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
@@ -44,11 +49,14 @@ def _make_image() -> Image.Image:
     return Image.new("RGB", (32, 32), color=(128, 128, 128))
 
 
-def test_processor_rejects_multi_image_when_static_vision() -> None:
-    """Static-mode processor must raise ``NotImplementedError`` on multi-image input."""
+def test_processor_rejects_single_prompt_multi_image_when_static_vision() -> None:
+    """Static-mode processor must raise on a single prompt that binds >1 image."""
     proc = _make_processor(dynamic_vision=False)
     with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
-        proc(images=[_make_image(), _make_image()], text="describe")
+        proc(
+            images=[_make_image(), _make_image()],
+            text="describe <|image_pad|> and <|image_pad|>",
+        )
 
 
 def test_processor_multi_image_guard_fires_before_super_call(
@@ -59,21 +67,22 @@ def test_processor_multi_image_guard_fires_before_super_call(
     Silent-fail regression was that the processor happily ran ``_resize_images``
     plus the upstream patch extraction, so we guarantee the raise happens before
     ``super().__call__`` is entered — an exploding stub for the upstream call
-    verifies we never reach it in the static multi-image path.
+    verifies we never reach it in the static single-prompt multi-image path.
     """
     called = {"super": False}
 
     def _boom_super_call(self, *args, **kwargs):
         called["super"] = True
-        raise AssertionError(
-            "super().__call__ must not be reached in the static multi-image path"
-        )
+        raise AssertionError("super().__call__ must not be reached in the static multi-image path")
 
     monkeypatch.setattr(Qwen3VLProcessor, "__call__", _boom_super_call)
 
     proc = _make_processor(dynamic_vision=False)
     with pytest.raises(NotImplementedError):
-        proc(images=[_make_image(), _make_image()], text="describe")
+        proc(
+            images=[_make_image(), _make_image()],
+            text="describe <|image_pad|> and <|image_pad|>",
+        )
     assert called["super"] is False
 
 
@@ -96,13 +105,11 @@ def test_processor_lets_multi_image_through_when_dynamic_vision(
     def _noop_clamp(self):
         return None
 
-    monkeypatch.setattr(
-        MobilintQwen3VLProcessor, "_clamp_dynamic_image_size", _noop_clamp
-    )
+    monkeypatch.setattr(MobilintQwen3VLProcessor, "_clamp_dynamic_image_size", _noop_clamp)
 
     proc = _make_processor(dynamic_vision=True)
     imgs = [_make_image(), _make_image()]
-    result = proc(images=imgs, text="compare")
+    result = proc(images=imgs, text="compare <|image_pad|> and <|image_pad|>")
 
     assert result == "sentinel-batch-feature"
     assert captured["images"] is imgs
@@ -125,7 +132,7 @@ def test_processor_accepts_single_image_when_static_vision(
     # `_resize_images` doesn't need `image_processor`; a raw PIL image is fine.
     proc = _make_processor(dynamic_vision=False)
     single = _make_image()
-    result = proc(images=[single], text="describe")
+    result = proc(images=[single], text="describe <|image_pad|>")
 
     assert result == "sentinel-batch-feature"
     # `_resize_images` returns a list of resized copies — only the count matters here.
@@ -133,14 +140,14 @@ def test_processor_accepts_single_image_when_static_vision(
     assert len(captured["images"]) == 1
 
 
-def test_processor_accepts_batched_single_image_when_static_vision(
+def test_processor_accepts_batched_single_image_nested_when_static_vision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Batch of N single-image prompts (``[[img], [img], ...]``) must pass on static.
+    """Nested batched single-image (``[[img], [img], ...]``) must pass on static.
 
-    The chat-template pipeline nests images as ``[[imgs_prompt_1], ...]``, so a
-    batch of N single-image samples arrives with total image count == N but
-    per-prompt count == 1. Static-vision MXQ handles this via the batched
+    The chat-template pipeline typically nests images as ``[[imgs_prompt_1], ...]``,
+    so a batch of N single-image samples arrives with total image count N but
+    per-prompt count 1. Static-vision MXQ handles this via the batched
     multi-core stack path; only per-prompt multi-image is the constraint.
     """
     captured: dict[str, object] = {}
@@ -155,13 +162,50 @@ def test_processor_accepts_batched_single_image_when_static_vision(
 
     proc = _make_processor(dynamic_vision=False)
     batched = [[_make_image()], [_make_image()], [_make_image()]]
-    result = proc(images=batched, text=["a", "b", "c"])
+    result = proc(
+        images=batched,
+        text=[
+            "a <|image_pad|>",
+            "b <|image_pad|>",
+            "c <|image_pad|>",
+        ],
+    )
 
     assert result == "sentinel-batch-feature"
     # Each inner list keeps a single (resized) image after `_resize_images`.
     assert isinstance(captured["images"], list)
     assert len(captured["images"]) == 3
     assert all(len(inner) == 1 for inner in captured["images"])
+
+
+def test_processor_accepts_flat_batched_single_image_when_static_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flat batched single-image (``[img, img]``) with one placeholder per prompt passes.
+
+    This is the Codex-review false-positive case. Upstream flattens ``images``
+    and consumes one image per ``<|image_pad|>`` in each prompt, so
+    ``images=[img_1, img_2]`` with ``text=["a <|image_pad|>", "b <|image_pad|>"]``
+    binds one image per prompt — per-prompt count is 1 and the static guard
+    must not fire. A container-shape heuristic that treats the flat list as
+    a single prompt with N images would erroneously reject this.
+    """
+    captured: dict[str, object] = {}
+
+    def _capture_super_call(self, images, text, videos, **kwargs):
+        captured["images"] = images
+        captured["text"] = text
+        captured["videos"] = videos
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+
+    proc = _make_processor(dynamic_vision=False)
+    imgs = [_make_image(), _make_image()]
+    result = proc(images=imgs, text=["a <|image_pad|>", "b <|image_pad|>"])
+
+    assert result == "sentinel-batch-feature"
+    assert captured["text"] == ["a <|image_pad|>", "b <|image_pad|>"]
 
 
 def test_processor_rejects_per_prompt_multi_image_in_batch(
@@ -178,76 +222,54 @@ def test_processor_rejects_per_prompt_multi_image_in_batch(
     proc = _make_processor(dynamic_vision=False)
     batched = [[_make_image()], [_make_image(), _make_image()]]
     with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
-        proc(images=batched, text=["a", "b"])
+        proc(
+            images=batched,
+            text=["a <|image_pad|>", "b <|image_pad|> <|image_pad|>"],
+        )
 
 
-def test_processor_accepts_rank4_ndarray_batch_when_static_vision(
+def test_processor_rejects_nested_container_with_all_placeholders_on_one_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rank-4 ``(N, H, W, C)`` ndarray with a batched text of length N is batched-single-image.
+    """Nested container with all placeholders on the first prompt must hard-fail.
 
-    The upstream / original tensor path accepted rank-4 batches as one image per
-    row. The static-vision multi-image guard must interpret the leading axis as
-    the batch (not as "N images for one prompt") whenever ``text`` describes N
-    prompts — otherwise legitimate batched single-image input is rejected.
-    """
-    captured: dict[str, object] = {}
-
-    def _capture_super_call(self, images, text, videos, **kwargs):
-        captured["images"] = images
-        captured["text"] = text
-        captured["videos"] = videos
-        return "sentinel-batch-feature"
-
-    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
-
-    proc = _make_processor(dynamic_vision=False)
-    batch = np.zeros((3, 32, 32, 3), dtype=np.uint8)
-    result = proc(images=batch, text=["a", "b", "c"])
-
-    assert result == "sentinel-batch-feature"
-    assert captured["text"] == ["a", "b", "c"]
-
-
-def test_processor_accepts_rank4_tensor_batch_when_static_vision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Rank-4 ``(N, C, H, W)`` tensor with a batched text of length N is batched-single-image."""
-    captured: dict[str, object] = {}
-
-    def _capture_super_call(self, images, text, videos, **kwargs):
-        captured["images"] = images
-        captured["text"] = text
-        captured["videos"] = videos
-        return "sentinel-batch-feature"
-
-    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
-
-    proc = _make_processor(dynamic_vision=False)
-    batch = torch.zeros((3, 3, 32, 32), dtype=torch.float32)
-    result = proc(images=batch, text=["a", "b", "c"])
-
-    assert result == "sentinel-batch-feature"
-    assert captured["text"] == ["a", "b", "c"]
-
-
-def test_processor_rejects_rank4_ndarray_multi_image_for_single_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Rank-4 with N>1 and a single-prompt text is single-prompt multi-image and must fail.
-
-    Without the ``text``-aware disambiguation the leading axis would silently be
-    interpreted as batch, sneaking multi-image content past the static-vision
-    guard — the exact silent-fail this regression test pins down.
+    This is the Codex-review false-negative case. ``images=[[img_1], [img_2]]``
+    looks like a batched single-image container by nesting, but upstream binds
+    per-prompt by placeholder count: ``text=["a <|image_pad|> <|image_pad|>", "b"]``
+    consumes both images for prompt 1 and none for prompt 2, so per-prompt
+    counts are ``[2, 0]``. The guard must fire.
     """
     monkeypatch.setattr(
         Qwen3VLProcessor,
         "__call__",
         lambda *_a, **_k: (_ for _ in ()).throw(
-            AssertionError("super().__call__ must not run for single-prompt multi-image")
+            AssertionError("super().__call__ must not run for nested single-prompt multi-image")
         ),
     )
     proc = _make_processor(dynamic_vision=False)
-    batch = np.zeros((3, 32, 32, 3), dtype=np.uint8)
+    batched = [[_make_image()], [_make_image()]]
     with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
-        proc(images=batch, text="describe")
+        proc(
+            images=batched,
+            text=["a <|image_pad|> <|image_pad|>", "b"],
+        )
+
+
+def test_processor_pretokenized_batch_hard_fails_on_per_prompt_multi_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PreTokenizedInput batch (list of token lists) is counted per inner list."""
+    monkeypatch.setattr(
+        Qwen3VLProcessor,
+        "__call__",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("super().__call__ must not run for per-prompt multi-image")
+        ),
+    )
+    proc = _make_processor(dynamic_vision=False)
+    tokenized = [
+        ["a", "<|image_pad|>", "<|image_pad|>"],
+        ["b"],
+    ]
+    with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
+        proc(images=[_make_image(), _make_image()], text=tokenized)
