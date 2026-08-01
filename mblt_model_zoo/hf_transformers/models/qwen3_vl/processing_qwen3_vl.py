@@ -58,6 +58,18 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
 # would depend on raw pixel resolution with no upper bound.
 _NPU_MAX_VISION_TOKENS = 2048
 
+# Structural vision kwargs baked into the vision MXQ at compile time. The
+# folded feature width handed to the language model at the vision-language
+# boundary is ``patch_size * merge_size``, and the temporal stride is
+# ``temporal_patch_size``; the MXQ was compiled for a single choice of each.
+# ``Qwen3VLImagesKwargs`` and ``Qwen3VLVideosKwargs`` still let a caller pass
+# these fields at call time, but any deviation from the shipped processor
+# value breaks the boundary shape (silent shape mismatch downstream) *and*
+# bypasses the token-budget guard, which derives its ceiling from the stored
+# ``patch_size``. Reject caller overrides at the processor surface before
+# either failure can materialize.
+_STRUCTURAL_VISION_KWARGS = ("patch_size", "temporal_patch_size", "merge_size")
+
 # Standard Hugging Face loading kwargs that select which artifact
 # ``from_pretrained`` reads. The processor and the model config must resolve
 # to the *same* release, so any caller-supplied value here must be propagated
@@ -484,6 +496,65 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             scopes.append(nested)
         return scopes
 
+    def _reject_structural_vision_overrides(
+        self,
+        kwargs: dict,
+        nested_key: str,
+        source_attr: str,
+        kind: str,
+    ) -> None:
+        """Reject caller overrides of vision MXQ compile-time structural knobs.
+
+        ``patch_size`` / ``temporal_patch_size`` / ``merge_size`` are baked
+        into the compiled vision MXQ. The folded feature width handed to the
+        language model at the vision-language boundary is
+        ``patch_size * merge_size``, and the temporal stride is
+        ``temporal_patch_size``; changing any of them at call time either
+        produces a shape mismatch against the MXQ or silently emits a wrong
+        grid that the language model reads as plausible-but-wrong tokens. The
+        token-budget clamp is *also* fooled — its ceiling is
+        ``max_vision_tokens * patch_size ** 2``, computed from the stored
+        ``patch_size``, so a smaller caller-supplied ``patch_size`` inflates
+        the real patch count past the NPU watchdog boundary.
+
+        Compare each override in the top-level ``kwargs`` and the nested
+        per-modality dict against ``self.<source_attr>`` (the shipped image or
+        video processor, whose attribute value came from the config). Raise
+        ``ValueError`` on any mismatch; pop matching values so the upstream
+        call sees a clean dict. The baseline source is looked up lazily so a
+        call that supplied no structural kwargs is a no-op even when the
+        processor was constructed without that submodule.
+        """
+        scopes = self._call_kwargs_scopes(kwargs, nested_key)
+        if not any(
+            field in scope for scope in scopes for field in _STRUCTURAL_VISION_KWARGS
+        ):
+            return
+        baseline_source = getattr(self, source_attr, None)
+        for scope in scopes:
+            for field in _STRUCTURAL_VISION_KWARGS:
+                if field not in scope:
+                    continue
+                override = scope[field]
+                if override is None:
+                    scope.pop(field)
+                    continue
+                baseline = getattr(baseline_source, field, None)
+                if baseline is None or override != baseline:
+                    raise ValueError(
+                        f"{kind} {field}={override!r} cannot override the vision "
+                        f"MXQ's compile-time value ({baseline!r}). {field} is a "
+                        "release-level structural parameter baked into the compiled "
+                        "Qwen3-VL vision MXQ: the folded feature width the language "
+                        "model expects at the vision-language boundary is "
+                        "patch_size * merge_size, and the temporal stride is "
+                        "temporal_patch_size. Overriding it at call time also "
+                        "bypasses the NPU vision-token guard (the ceiling is "
+                        "derived from the stored patch_size). Remove the override, "
+                        "or load a Qwen3-VL release compiled with the desired value."
+                    )
+                scope.pop(field)
+
     def _reject_do_resize_false(self, scope: dict, kind: str) -> None:
         if scope.get("do_resize") is False:
             raise ValueError(
@@ -573,6 +644,13 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         assert text is not None, "text is None!"
 
         if images is not None:
+            # Structural vision kwargs (``patch_size`` / ``temporal_patch_size``
+            # / ``merge_size``) are baked into the vision MXQ at compile time
+            # and apply to both static and dynamic releases, so reject caller
+            # overrides here before either branch runs.
+            self._reject_structural_vision_overrides(
+                kwargs, "images_kwargs", "image_processor", "image"
+            )
             if self.dynamic_vision:
                 # Keep the aspect ratio, but stay inside the NPU sequence limit.
                 # Two-stage clamp: cap the stored defaults, then re-clamp any
@@ -624,6 +702,14 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                     "inputs."
                 )
             self._sync_dynamic_vision_to_video_processor()
+            # Structural video kwargs are baked into the vision MXQ the same
+            # way as the image path; reject overrides before the token-budget
+            # clamp runs (the clamp derives its ceiling from the stored
+            # ``patch_size`` / ``temporal_patch_size`` and would otherwise be
+            # bypassed by a smaller caller value).
+            self._reject_structural_vision_overrides(
+                kwargs, "videos_kwargs", "video_processor", "video"
+            )
             # Keep the aspect ratio, but stay inside the NPU per-frame sequence
             # limit. Two-stage clamp: cap the stored defaults, then re-clamp
             # any caller overrides (``size``, ``do_resize``) so they cannot
