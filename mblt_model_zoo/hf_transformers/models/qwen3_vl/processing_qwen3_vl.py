@@ -465,6 +465,15 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # cv2.resize only takes an HWC frame and F.interpolate only takes
         # NCHW, so route both types through ``_to_bhwc`` first and let the
         # returned restore closure put the original layout back on the way out.
+        # Rank-2 grayscale ``(H, W)`` is promoted to ``(H, W, 1)`` for the
+        # ``_to_bhwc`` contract and squeezed back on the way out so the caller
+        # gets the same rank they passed in.
+        if isinstance(img, np.ndarray) and img.ndim == 2:
+            resized = MobilintQwen3VLProcessor._resize_one(img[..., None], size)
+            return resized[..., 0]
+        if torch.is_tensor(img) and img.ndim == 2:
+            resized = MobilintQwen3VLProcessor._resize_one(img.unsqueeze(-1), size)
+            return resized.squeeze(-1)
         if isinstance(img, np.ndarray):
             bhwc, restore = _to_bhwc(img)
             # cv2.resize collapses the trailing axis for a single-channel HWC
