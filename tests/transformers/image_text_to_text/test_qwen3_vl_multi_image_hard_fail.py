@@ -2,19 +2,18 @@
 
 Static Qwen3-VL MXQ releases (single-input vision, fixed visual-token count in the
 text decoder) bake a single image's 2D RoPE grid into the text decoder. A second
-image would need its own independent 2D coordinates, which the baked rope cannot
-express, so the decoder silently loses the image-boundary distinction and the
-language model emits grammatically-plausible but semantically wrong output. These
-tests pin down both the processor-level guard (which also skips the image
-processor's patch extraction) and the model-level defense-in-depth guard, and
-verify that the single-image path is unaffected.
+image *for the same prompt* would need its own independent 2D coordinates, which
+the baked rope cannot express, so the decoder silently loses the image-boundary
+distinction and the language model emits grammatically-plausible but semantically
+wrong output. These tests pin down the processor-level guard (which also skips
+the image processor's patch extraction) and verify that both the single-image
+path and the batched-single-image path are unaffected. The guard is per-prompt,
+not total-count: a batch of N single-image prompts must pass through.
 """
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
-import torch
 from PIL import Image
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
@@ -25,9 +24,6 @@ skip_if_transformers_lacks_qwen3_vl_support()
 
 from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  # noqa: E402
 
-from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
-    MobilintQwen3VLVisionModel,
-)
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
@@ -135,83 +131,49 @@ def test_processor_accepts_single_image_when_static_vision(
     assert len(captured["images"]) == 1
 
 
-class _StaticVisionStub:
-    """Minimal stand-in for ``MobilintQwen3VLVisionModel`` used by ``_encode_images``."""
+def test_processor_accepts_batched_single_image_when_static_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Batch of N single-image prompts (``[[img], [img], ...]``) must pass on static.
 
-    _uses_dynamic_vision = False
-
-    def _split_hidden_states_by_grid(
-        self,
-        hidden_states: torch.Tensor,
-        grid_thw: torch.Tensor,
-    ) -> list[torch.Tensor]:
-        return MobilintQwen3VLVisionModel._split_hidden_states_by_grid(
-            self, hidden_states, grid_thw
-        )
-
-
-def test_encode_images_rejects_multi_image_grid_on_static_vision() -> None:
-    """Bypassing the processor and driving ``_encode_images`` directly still fails.
-
-    Defense in depth for callers that construct pixel tensors + grids by hand
-    (e.g. custom pipelines, test harnesses) and skip the processor's guard.
+    The chat-template pipeline nests images as ``[[imgs_prompt_1], ...]``, so a
+    batch of N single-image samples arrives with total image count == N but
+    per-prompt count == 1. Static-vision MXQ handles this via the batched
+    multi-core stack path; only per-prompt multi-image is the constraint.
     """
-    dummy = _StaticVisionStub()
-    # Two image grids (gt=1 each, distinct 2D shapes) — with gh=gw=1 the shape
-    # math is trivial and we only need the number of grid rows to be > 1 to
-    # trip the multi-image guard.
-    grid_thw = torch.tensor([[1, 1, 1], [1, 1, 1]], dtype=torch.long)
-    hidden_states = torch.zeros((2, 8), dtype=torch.float32)
+    captured: dict[str, object] = {}
 
-    with pytest.raises(NotImplementedError, match="Multi-image input requires"):
-        MobilintQwen3VLVisionModel._encode_images(dummy, hidden_states, grid_thw)
+    def _capture_super_call(self, images, text, videos, **kwargs):
+        captured["images"] = images
+        captured["text"] = text
+        captured["videos"] = videos
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+
+    proc = _make_processor(dynamic_vision=False)
+    batched = [[_make_image()], [_make_image()], [_make_image()]]
+    result = proc(images=batched, text=["a", "b", "c"])
+
+    assert result == "sentinel-batch-feature"
+    # Each inner list keeps a single (resized) image after `_resize_images`.
+    assert isinstance(captured["images"], list)
+    assert len(captured["images"]) == 3
+    assert all(len(inner) == 1 for inner in captured["images"])
 
 
-def test_encode_images_allows_single_image_grid_on_static_vision() -> None:
-    """Sanity check: len(grid_thw)==1 image grid does not trip the multi-image guard."""
-
-    class _StubWithBackend(_StaticVisionStub):
-        """Extend the stub with the minimum surface ``_encode_images`` touches for an image."""
-
-        npu_backend = None
-
-        def __init__(self) -> None:
-            self.config = type("_Cfg", (), {"core_mode": "single"})()
-            self.mxq_inputs: list = []
-
-        def _prepare_npu_inputs(self, chunk: torch.Tensor, grid: torch.Tensor) -> np.ndarray:
-            del chunk, grid
-            return np.zeros((1024, 64, 6), dtype=np.float32)
-
-        def get_mxq_model(self):
-            outer = self
-
-            class _MxqStub:
-                def infer(self_inner, npu_input):
-                    outer.mxq_inputs.append(npu_input)
-                    # Match `_reorder_encoder_outputs` (4 tensors) with a 1-token grid.
-                    return [np.zeros((1, 8), dtype=np.float32) for _ in range(4)]
-
-            return _MxqStub()
-
-        def _reorder_encoder_outputs(
-            self,
-            encoder_outputs,
-            device: torch.device,
-            batch_size: int = 1,
-        ):
-            del encoder_outputs, batch_size
-            image_embed = torch.zeros((1, 8), dtype=torch.float32, device=device)
-            deepstack_embeds = [torch.zeros((1, 8), dtype=torch.float32, device=device) for _ in range(3)]
-            return image_embed, deepstack_embeds
-
-    dummy = _StubWithBackend()
-    grid_thw = torch.tensor([[1, 1, 1]], dtype=torch.long)
-    hidden_states = torch.zeros((1, 8), dtype=torch.float32)
-
-    image_embeds, deepstack = MobilintQwen3VLVisionModel._encode_images(
-        dummy, hidden_states, grid_thw
+def test_processor_rejects_per_prompt_multi_image_in_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One prompt in a batch with >1 image still trips the static-vision guard."""
+    monkeypatch.setattr(
+        Qwen3VLProcessor,
+        "__call__",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("super().__call__ must not run for per-prompt multi-image")
+        ),
     )
-    assert image_embeds.shape == (1, 8)
-    assert len(deepstack) == 3
-    assert len(dummy.mxq_inputs) == 1
+    proc = _make_processor(dynamic_vision=False)
+    batched = [[_make_image()], [_make_image(), _make_image()]]
+    with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
+        proc(images=batched, text=["a", "b"])

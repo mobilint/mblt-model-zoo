@@ -69,6 +69,29 @@ def _count_images(images) -> int:
     return 1
 
 
+def _max_images_per_prompt(images) -> int:
+    """Return the largest image count across prompts.
+
+    The chat-template pipeline wraps images as ``[[imgs_prompt_1], [imgs_prompt_2], ...]``
+    (outer list = prompts, inner list = images per prompt), so a batch of N
+    single-image prompts arrives as ``[[img_1], [img_2], ..., [img_N]]`` — a
+    total count of N that must not trip the static multi-image hard-fail. The
+    static MXQ constraint is "at most one image per prompt", so we return the
+    max per-prompt count; ``_count_images`` totals across all prompts and is
+    the wrong quantity for the guard. A flat list (single prompt with
+    multiple images) or a bare image is treated as one prompt.
+    """
+    if images is None:
+        return 0
+    if (
+        isinstance(images, (list, tuple))
+        and images
+        and all(isinstance(item, (list, tuple)) for item in images)
+    ):
+        return max((_count_images(item) for item in images), default=0)
+    return _count_images(images)
+
+
 def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]:
     """Derive the pixel resolution that produces the NPU-compatible grid."""
     pw = _NPU_W // (merge_size ** 2)
@@ -300,7 +323,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 # semantically wrong output. Fail here, before ``_resize_images`` and
                 # the image_processor's patch extraction, with the same shape of
                 # message the video hard-fail uses.
-                if _count_images(images) > 1:
+                if _max_images_per_prompt(images) > 1:
                     raise NotImplementedError(
                         "Multi-image input requires a dynamic-vision Qwen3-VL release "
                         "(3-input vision MXQ with per-image 2D RoPE in the text "
