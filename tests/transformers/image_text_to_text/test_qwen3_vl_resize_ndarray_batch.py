@@ -1,10 +1,10 @@
 """Regression tests: ``_resize_one`` handles a 4-D NumPy batch in either layout.
 
-``ImageInput`` allows a 4-D NumPy batch, and ``_count_images`` recognizes both
-``(N, H, W, C)`` (NHWC) and ``(N, C, H, W)`` (NCHW). The override's ndarray
-branch splits along the batch axis and hands each 3-D frame to ``cv2.resize``,
-which only handles HWC frames — so a channels-first frame must be transposed
-to HWC before the resize and restored after. These tests pin down that both
+``ImageInput`` allows a 4-D NumPy batch in both ``(N, H, W, C)`` (NHWC) and
+``(N, C, H, W)`` (NCHW) layouts. The override's ndarray branch splits along
+the batch axis and hands each 3-D frame to ``cv2.resize``, which only
+handles HWC frames — so a channels-first frame must be transposed to HWC
+before the resize and restored after. These tests pin down that both
 layouts survive the resize with correct shape *and* correct channel content.
 """
 

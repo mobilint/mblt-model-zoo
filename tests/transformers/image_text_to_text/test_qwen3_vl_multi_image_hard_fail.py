@@ -283,3 +283,89 @@ def test_processor_pretokenized_batch_hard_fails_on_per_prompt_multi_image(
     ]
     with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
         proc(images=[_make_image(), _make_image()], text=tokenized)
+
+
+def test_processor_chat_message_batch_hard_fails_on_per_prompt_multi_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chat-message batch: prompt with two image parts trips the guard, index 0.
+
+    Chat-message content is a list of ``{"type": ..., ...}`` parts that
+    ``apply_chat_template`` will render 1:1 to ``<|image_pad|>`` placeholders,
+    so the guard counts image parts structurally rather than requiring the
+    caller to pre-render. The error message must name the violating prompt
+    index (here ``prompt index 0``) so the caller can find the offending
+    conversation in a large batch.
+    """
+    monkeypatch.setattr(
+        Qwen3VLProcessor,
+        "__call__",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("super().__call__ must not run for chat multi-image")
+        ),
+    )
+    proc = _make_processor(dynamic_vision=False)
+    chat_batch = [
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "text", "text": "compare"},
+                ],
+            }
+        ],
+        [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+    ]
+    with pytest.raises(NotImplementedError, match=r"prompt index 0"):
+        proc(images=[_make_image(), _make_image()], text=chat_batch)
+
+
+def test_processor_single_chat_message_conversation_passes_when_static_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single chat conversation with one image part must pass on static vision."""
+    captured: dict[str, object] = {}
+
+    def _capture_super_call(self, images, text, videos, **kwargs):
+        captured["images"] = images
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+
+    proc = _make_processor(dynamic_vision=False)
+    single_chat = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": "describe"},
+            ],
+        }
+    ]
+    result = proc(images=[_make_image()], text=single_chat)
+    assert result == "sentinel-batch-feature"
+
+
+def test_processor_error_message_names_offending_prompt_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Batched multi-image failure names the first offending prompt index."""
+    monkeypatch.setattr(
+        Qwen3VLProcessor,
+        "__call__",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("super().__call__ must not run for per-prompt multi-image")
+        ),
+    )
+    proc = _make_processor(dynamic_vision=False)
+    with pytest.raises(NotImplementedError, match=r"prompt index 1"):
+        proc(
+            images=[_make_image(), _make_image(), _make_image()],
+            text=[
+                "a <|image_pad|>",
+                "b <|image_pad|> <|image_pad|>",
+                "c",
+            ],
+        )

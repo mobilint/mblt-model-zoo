@@ -113,7 +113,7 @@ _IMAGE_PAD_TOKEN = "<|image_pad|>"
 # ``ImageInput`` actually carries; any other size on an endpoint axis is
 # treated as spatial. When both candidate axes qualify (e.g. a small
 # ``(3, 3, 3)`` array or a ``(N, 3, 3, 3)`` batch), tie-break to HWC / BHWC to
-# match ``_count_images`` and the majority upstream convention.
+# match the majority upstream convention.
 _CHANNEL_CANDIDATES = (1, 3, 4)
 
 
@@ -144,7 +144,7 @@ def _to_bhwc(img):
     channels_first = img.shape[first_axis] in _CHANNEL_CANDIDATES
     channels_last = img.shape[-1] in _CHANNEL_CANDIDATES
     # Tie-break to HWC / BHWC when both endpoints look like plausible channel
-    # counts, matching ``_count_images`` and the majority upstream convention.
+    # counts, matching the majority upstream convention.
     is_channels_first = channels_first and not channels_last
 
     if is_torch:
@@ -172,47 +172,67 @@ def _to_bhwc(img):
     return bhwc, cast(Callable, restore)
 
 
-def _count_images(images) -> int:
-    """Count images in an ``ImageInput`` without loading/decoding.
+def _count_chat_message_images(messages) -> int:
+    """Count image content items in a single chat-message conversation.
 
-    ``make_flat_list_of_images`` requires each leaf to be a PIL image or
-    ndarray, so it rejects URL/path strings that the processor accepts as
-    valid image inputs (they are resolved later, downstream of this guard).
-    We only need the count for the multi-image hard-fail, so recurse through
-    list/tuple containers and treat every non-container leaf as one image —
-    with the standard ndarray/tensor batch axis expansion.
+    A conversation is a list of ``{"role": ..., "content": ...}`` dicts.
+    ``content`` is either a plain string (no images) or a list of content
+    parts; an image part is a dict with ``type == "image"`` (or the
+    ``image``/``image_url``/``image_path`` legacy aliases some Qwen3-VL
+    examples still emit). Each such part maps 1:1 to an ``<|image_pad|>``
+    placeholder in the rendered chat template output, so counting them
+    structurally mirrors placeholder counting on the rendered string
+    without having to call ``apply_chat_template`` (which would have side
+    effects and requires a bound tokenizer).
     """
-    if images is None:
-        return 0
-    if isinstance(images, (list, tuple)):
-        return sum(_count_images(item) for item in images)
-    if isinstance(images, np.ndarray) and images.ndim == 4:
-        return images.shape[0]
-    if torch.is_tensor(images) and images.ndim == 4:
-        return images.shape[0]
-    return 1
+    image_types = {"image", "image_url", "image_path"}
+    total = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, (list, tuple)):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in image_types:
+                    total += 1
+    return total
 
 
-def _per_prompt_image_pad_counts(text, image_token: str = _IMAGE_PAD_TOKEN) -> list[int]:
-    """Return the ``<|image_pad|>`` count for each prompt described by ``text``.
+def _per_prompt_image_counts(text, image_token: str = _IMAGE_PAD_TOKEN) -> list[int]:
+    """Return the per-prompt image count for each prompt described by ``text``.
 
-    Mirrors the association order in upstream ``Qwen3VLProcessor.__call__``:
-    ``text`` is normalized to a list of prompts (a bare string becomes a
-    single-element list), each prompt is then walked left-to-right, and every
-    ``<|image_pad|>`` placeholder consumes one image from the *flat* image
-    input. Container nesting on the ``images`` side is irrelevant — only the
-    placeholder counts in each prompt determine the per-prompt image count.
-    Guarding on those counts avoids both the false-positive (flat images with
-    one placeholder per prompt) and the false-negative (nested images with
-    both placeholders in the same prompt) that a container-shape heuristic
-    produces.
+    This is the single source of truth for how the processor associates
+    images with prompts. It mirrors the association order in upstream
+    ``Qwen3VLProcessor.__call__``: ``text`` is normalized to a list of
+    prompts (a bare string becomes a single-element list), each prompt is
+    then walked left-to-right, and every ``<|image_pad|>`` placeholder
+    consumes one image from the *flat* image input. Container nesting on
+    the ``images`` side is irrelevant — only the placeholder counts in
+    each prompt determine the per-prompt image count. Guarding on those
+    counts avoids both the false-positive (flat images with one
+    placeholder per prompt) and the false-negative (nested images with
+    both placeholders in the same prompt) that a container-shape
+    heuristic produces.
 
-    ``PreTokenizedInput`` (a list of pre-tokenized token strings for a single
-    prompt) is treated as one prompt and counts full-token equality against
-    ``image_token``. A batch of pre-tokenized inputs is a list of such lists
-    and yields one count per inner list. This case is nominal — upstream's
-    ``__call__`` does not actually run ``.replace`` on pre-tokenized token
-    lists — but supporting it here keeps the guard type-consistent with the
+    Supported ``text`` shapes:
+
+    * ``str`` — one rendered prompt.
+    * ``list[str]`` — batch of rendered prompts.
+    * ``PreTokenizedInput`` (a single list of pre-tokenized token strings)
+      — treated as one prompt; counts full-token equality against
+      ``image_token``.
+    * ``list[PreTokenizedInput]`` — batch of pre-tokenized prompts; one
+      count per inner list.
+    * A single chat-message conversation (``list[dict]``) — treated as
+      one prompt; counts image-typed content parts, which is exactly what
+      ``apply_chat_template`` would emit as ``<|image_pad|>`` on the
+      rendered string.
+    * A batch of chat-message conversations (``list[list[dict]]``) — one
+      count per conversation.
+
+    Pre-tokenized shapes are nominal — upstream's ``__call__`` does not
+    actually run ``.replace`` on pre-tokenized token lists — but
+    supporting them here keeps the guard type-consistent with the
     ``__call__`` signature.
     """
     if text is None:
@@ -221,12 +241,20 @@ def _per_prompt_image_pad_counts(text, image_token: str = _IMAGE_PAD_TOKEN) -> l
         return [text.count(image_token)]
     if not isinstance(text, (list, tuple)):
         return [0]
+    # Single chat-message conversation: a list of role/content dicts.
+    if text and isinstance(text[0], dict):
+        return [_count_chat_message_images(text)]
     counts: list[int] = []
     for entry in text:
         if isinstance(entry, str):
             counts.append(entry.count(image_token))
         elif isinstance(entry, (list, tuple)):
-            counts.append(sum(1 for tok in entry if tok == image_token))
+            # Nested list: either a batched chat-message conversation
+            # (list of role/content dicts) or a pre-tokenized token list.
+            if entry and isinstance(entry[0], dict):
+                counts.append(_count_chat_message_images(entry))
+            else:
+                counts.append(sum(1 for tok in entry if tok == image_token))
         else:
             counts.append(0)
     return counts
@@ -869,19 +897,26 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 # here, before ``_resize_images`` and the image_processor's patch
                 # extraction, with the same shape of message the video hard-fail
                 # uses. The guard is per-prompt (a batch of N single-image prompts
-                # must pass through), so match upstream's association order and
-                # count ``<|image_pad|>`` placeholders per prompt rather than
-                # inferring per-prompt counts from the ``images`` container shape.
+                # must pass through) and derives entirely from placeholder counts
+                # in ``text`` — see ``_per_prompt_image_counts`` — so that container
+                # nesting on ``images`` never influences the ownership decision.
                 image_token = getattr(self, "image_token", _IMAGE_PAD_TOKEN)
-                per_prompt_counts = _per_prompt_image_pad_counts(text, image_token)
-                if per_prompt_counts and max(per_prompt_counts) > 1:
+                per_prompt_counts = _per_prompt_image_counts(text, image_token)
+                offender = next(
+                    ((i, c) for i, c in enumerate(per_prompt_counts) if c > 1),
+                    None,
+                )
+                if offender is not None:
+                    offending_index, offending_count = offender
                     raise NotImplementedError(
-                        "Multi-image input requires a dynamic-vision Qwen3-VL release "
-                        "(3-input vision MXQ with per-image 2D RoPE in the text "
-                        "decoder). The currently loaded processor is in static mode "
-                        "(dynamic_vision=False), which supports exactly one image per "
-                        "prompt. Load a Qwen3-VL release that ships a dynamic vision "
-                        "MXQ, or pass a single image."
+                        f"Multi-image input at prompt index {offending_index} "
+                        f"({offending_count} images bound to that prompt) requires "
+                        "a dynamic-vision Qwen3-VL release (3-input vision MXQ with "
+                        "per-image 2D RoPE in the text decoder). The currently "
+                        "loaded processor is in static mode (dynamic_vision=False), "
+                        "which supports exactly one image per prompt. Load a "
+                        "Qwen3-VL release that ships a dynamic vision MXQ, or pass "
+                        "a single image per prompt."
                     )
                 # ``_resize_images`` forces the fixed static-MXQ grid, but any
                 # caller-supplied ``size`` / ``min_pixels`` / ``max_pixels`` /
