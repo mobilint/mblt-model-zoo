@@ -36,3 +36,21 @@ def skip_if_transformers_lacks_qwen3_vl_support() -> None:
         return
 
     pytest.skip(_QWEN3_VL_SKIP_REASON, allow_module_level=True)
+
+
+def skip_if_static_vision(pipe, feature: str) -> None:
+    """Skip the current test when the pipeline's processor is static-vision.
+
+    Multi-image and video inputs require a dynamic-vision Qwen3-VL release
+    (3-input vision MXQ with per-image / per-frame 2D RoPE in the text
+    decoder). Static releases hard-fail such inputs in the processor, so
+    tests exercising those code paths must skip on those model variants.
+    """
+    processor = getattr(pipe, "processor", None)
+    if processor is None or getattr(processor, "dynamic_vision", True):
+        return
+
+    pytest.skip(
+        f"{feature} requires a dynamic-vision Qwen3-VL release; loaded "
+        f"processor is in static mode (dynamic_vision=False)."
+    )
