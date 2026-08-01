@@ -13,7 +13,9 @@ not total-count: a batch of N single-image prompts must pass through.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
+import torch
 from PIL import Image
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
@@ -177,3 +179,75 @@ def test_processor_rejects_per_prompt_multi_image_in_batch(
     batched = [[_make_image()], [_make_image(), _make_image()]]
     with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
         proc(images=batched, text=["a", "b"])
+
+
+def test_processor_accepts_rank4_ndarray_batch_when_static_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rank-4 ``(N, H, W, C)`` ndarray with a batched text of length N is batched-single-image.
+
+    The upstream / original tensor path accepted rank-4 batches as one image per
+    row. The static-vision multi-image guard must interpret the leading axis as
+    the batch (not as "N images for one prompt") whenever ``text`` describes N
+    prompts — otherwise legitimate batched single-image input is rejected.
+    """
+    captured: dict[str, object] = {}
+
+    def _capture_super_call(self, images, text, videos, **kwargs):
+        captured["images"] = images
+        captured["text"] = text
+        captured["videos"] = videos
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+
+    proc = _make_processor(dynamic_vision=False)
+    batch = np.zeros((3, 32, 32, 3), dtype=np.uint8)
+    result = proc(images=batch, text=["a", "b", "c"])
+
+    assert result == "sentinel-batch-feature"
+    assert captured["text"] == ["a", "b", "c"]
+
+
+def test_processor_accepts_rank4_tensor_batch_when_static_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rank-4 ``(N, C, H, W)`` tensor with a batched text of length N is batched-single-image."""
+    captured: dict[str, object] = {}
+
+    def _capture_super_call(self, images, text, videos, **kwargs):
+        captured["images"] = images
+        captured["text"] = text
+        captured["videos"] = videos
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+
+    proc = _make_processor(dynamic_vision=False)
+    batch = torch.zeros((3, 3, 32, 32), dtype=torch.float32)
+    result = proc(images=batch, text=["a", "b", "c"])
+
+    assert result == "sentinel-batch-feature"
+    assert captured["text"] == ["a", "b", "c"]
+
+
+def test_processor_rejects_rank4_ndarray_multi_image_for_single_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rank-4 with N>1 and a single-prompt text is single-prompt multi-image and must fail.
+
+    Without the ``text``-aware disambiguation the leading axis would silently be
+    interpreted as batch, sneaking multi-image content past the static-vision
+    guard — the exact silent-fail this regression test pins down.
+    """
+    monkeypatch.setattr(
+        Qwen3VLProcessor,
+        "__call__",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("super().__call__ must not run for single-prompt multi-image")
+        ),
+    )
+    proc = _make_processor(dynamic_vision=False)
+    batch = np.zeros((3, 32, 32, 3), dtype=np.uint8)
+    with pytest.raises(NotImplementedError, match="dynamic-vision Qwen3-VL release"):
+        proc(images=batch, text="describe")

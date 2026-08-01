@@ -90,7 +90,22 @@ def _count_images(images) -> int:
     return 1
 
 
-def _max_images_per_prompt(images) -> int:
+def _num_prompts(text) -> int:
+    """Return the number of prompts described by ``text``.
+
+    A bare string (or ``None``) is a single prompt; a list is a batch whose
+    length is the prompt count. This is the signal used to disambiguate a
+    rank-4 ndarray/tensor image input: ``shape[0] == num_prompts`` means a
+    batch of single-image prompts, not one prompt with N images.
+    """
+    if text is None or isinstance(text, str):
+        return 1
+    if isinstance(text, (list, tuple)):
+        return len(text) if text else 1
+    return 1
+
+
+def _max_images_per_prompt(images, text=None) -> int:
     """Return the largest image count across prompts.
 
     The chat-template pipeline wraps images as ``[[imgs_prompt_1], [imgs_prompt_2], ...]``
@@ -101,6 +116,13 @@ def _max_images_per_prompt(images) -> int:
     max per-prompt count; ``_count_images`` totals across all prompts and is
     the wrong quantity for the guard. A flat list (single prompt with
     multiple images) or a bare image is treated as one prompt.
+
+    Rank-4 ndarray/tensor input (``(N, H, W, C)`` / ``(N, C, H, W)``) is
+    ambiguous on its own: it can be either one prompt with N images or a batch
+    of N single-image prompts. Disambiguate using the paired ``text``: if it
+    describes N prompts, the leading axis is the batch and each prompt sees
+    exactly one image. Otherwise it is single-prompt multi-image and must trip
+    the guard.
     """
     if images is None:
         return 0
@@ -110,6 +132,12 @@ def _max_images_per_prompt(images) -> int:
         and all(isinstance(item, (list, tuple)) for item in images)
     ):
         return max((_count_images(item) for item in images), default=0)
+    if (
+        (isinstance(images, np.ndarray) or torch.is_tensor(images))
+        and images.ndim == 4
+        and _num_prompts(text) == int(images.shape[0])
+    ):
+        return 1
     return _count_images(images)
 
 
@@ -409,7 +437,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 # semantically wrong output. Fail here, before ``_resize_images`` and
                 # the image_processor's patch extraction, with the same shape of
                 # message the video hard-fail uses.
-                if _max_images_per_prompt(images) > 1:
+                if _max_images_per_prompt(images, text) > 1:
                     raise NotImplementedError(
                         "Multi-image input requires a dynamic-vision Qwen3-VL release "
                         "(3-input vision MXQ with per-image 2D RoPE in the text "
