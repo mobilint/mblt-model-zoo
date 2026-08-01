@@ -182,9 +182,16 @@ processor(images=[img_a, img_b], text="...", videos=None)  # static release -> N
 Video decoding uses the `torchcodec` dependency shipped with `pip install mblt-model-zoo[transformers]`;
 validate video inputs only against a dynamic-vision release.
 
-If you override the vision MXQ at load time (for example with `vision_mxq_path=`) and the override
-points at an MXQ whose signature (static vs. dynamic) does not match the shipped
-`config.dynamic_vision`, resynchronize the processor with the loaded model:
+The vision MXQ and text MXQ are a bundled release: a dynamic-vision vision MXQ produces per-image
+RoPE tensors that only a paired dynamic text MXQ consumes, so pairing a dynamic vision MXQ with a
+legacy static text MXQ (or vice versa) silently corrupts image-boundary information. If you
+override one MXQ at load time, override both to a matching pair. `from_pretrained` reconciles the
+two compiled signatures and raises `ValueError` from `MobilintQwen3VLModel._reconcile_dynamic_vision`
+when they disagree; the message names both flags (`visual._uses_dynamic_vision`,
+`language_model._uses_rope_input`) and both MXQ paths (`vision_mxq_path=`, `text_mxq_path=`).
+
+When the paired override's signature differs from the shipped `config.dynamic_vision`,
+resynchronize the processor with the loaded model so it adopts the reconciled flag:
 
 ```python
 processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
@@ -192,11 +199,12 @@ model = AutoModel.from_pretrained(
     model_name,
     trust_remote_code=True,
     vision_mxq_path="/path/to/other/vision.mxq",
+    text_mxq_path="/path/to/other/text.mxq",
 )
 processor.sync_dynamic_vision_from_model(model)
 ```
 
-This is only needed for the runtime-override case; the standard `from_pretrained` flow already
+This is only needed for the paired-override case; the standard `from_pretrained` flow already
 keeps the processor and model in lock-step.
 
 ## Listing Available Models
