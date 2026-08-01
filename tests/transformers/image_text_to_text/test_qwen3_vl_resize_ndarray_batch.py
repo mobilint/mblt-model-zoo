@@ -122,8 +122,16 @@ def test_processor_forwards_4d_ndarray_batch_when_dynamic_vision(
         return "sentinel-batch-feature"
 
     monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
+    # Stub both dynamic-vision image clamps: the dynamic path calls
+    # ``_clamp_dynamic_image_size`` on stored defaults and
+    # ``_clamp_dynamic_image_call_kwargs`` on caller overrides, and neither
+    # can inspect ``image_processor`` here because we skipped the heavy
+    # ``__init__``.
+    monkeypatch.setattr(MobilintQwen3VLProcessor, "_clamp_dynamic_image_size", lambda self: None)
     monkeypatch.setattr(
-        MobilintQwen3VLProcessor, "_clamp_dynamic_image_size", lambda self: None
+        MobilintQwen3VLProcessor,
+        "_clamp_dynamic_image_call_kwargs",
+        lambda self, kwargs: None,
     )
 
     proc = _make_processor(dynamic_vision=True)

@@ -100,12 +100,22 @@ def test_processor_lets_multi_image_through_when_dynamic_vision(
 
     monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super_call)
 
-    # Stub `_clamp_dynamic_image_size` since we skipped the heavy __init__ and
-    # `image_processor` isn't set — the dynamic path calls it before dispatch.
+    # Stub both dynamic-vision image clamps since we skipped the heavy __init__
+    # and `image_processor` isn't set — the dynamic path calls both before
+    # dispatch (`_clamp_dynamic_image_size` on stored defaults,
+    # `_clamp_dynamic_image_call_kwargs` on caller overrides).
     def _noop_clamp(self):
         return None
 
+    def _noop_clamp_kwargs(self, kwargs):
+        return None
+
     monkeypatch.setattr(MobilintQwen3VLProcessor, "_clamp_dynamic_image_size", _noop_clamp)
+    monkeypatch.setattr(
+        MobilintQwen3VLProcessor,
+        "_clamp_dynamic_image_call_kwargs",
+        _noop_clamp_kwargs,
+    )
 
     proc = _make_processor(dynamic_vision=True)
     imgs = [_make_image(), _make_image()]

@@ -45,6 +45,17 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
 # (watchdog timeout -> `Model_NotAlive`) rather than erroring out, so the default is
 # the largest length measured to run. Override `max_vision_tokens` for an MXQ that
 # supports longer sequences.
+#
+# Enforcement strategy — cap-preprocessing (Option 1 from the design). The
+# stored processor defaults are capped once at load time by
+# ``_clamp_dynamic_image_size`` / ``_clamp_dynamic_video_size`` so the default
+# path is safe; caller overrides (``size``, ``max_pixels``, ``min_pixels``,
+# ``do_resize``, in either the top-level kwargs or the nested
+# ``images_kwargs`` / ``videos_kwargs``) are re-clamped at call time by
+# ``_clamp_dynamic_image_call_kwargs`` / ``_clamp_dynamic_video_call_kwargs``
+# right before dispatch to ``super().__call__``. ``do_resize=False`` is hard-
+# rejected because it strips the ceiling entirely — the resulting patch count
+# would depend on raw pixel resolution with no upper bound.
 _NPU_MAX_VISION_TOKENS = 2048
 
 # Standard Hugging Face loading kwargs that select which artifact
@@ -151,6 +162,19 @@ def _update_size(size_obj, **updates):
     if isinstance(size_obj, dict):
         return {**size_obj, **updates}
     return _dataclass_replace(size_obj, **updates)
+
+
+def _size_get(size_obj, key: str):
+    """Read ``key`` from a size that may be a dict or a frozen ``SizeDict``.
+
+    Mirrors :func:`_update_size` on the read side: both size shapes support
+    ``[key]``, but the frozen dataclass raises ``KeyError`` (via ``__getitem__``)
+    on missing fields while dicts raise the same, so route through the safe
+    ``.get`` / ``getattr`` paths and return ``None`` when the field is absent.
+    """
+    if isinstance(size_obj, dict):
+        return size_obj.get(key)
+    return getattr(size_obj, key, None)
 
 
 class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
@@ -364,6 +388,33 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             shortest_edge=min(ip.size["shortest_edge"], limit),
         )
 
+    def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
+        """Cap image-side caller overrides so nothing exceeds the NPU vision-token budget.
+
+        ``_clamp_dynamic_image_size`` caps the stored processor defaults, but the
+        caller can still smuggle a bypass through top-level ``kwargs`` (``size``,
+        ``max_pixels``, ``min_pixels``, ``do_resize``) or nested
+        ``images_kwargs``. Upstream ``_merge_kwargs`` reads both routes: a flat
+        top-level kwarg is copied into every modality's kwarg dict (``.get``,
+        not ``.pop``), and the nested per-modality dict wins on collision. Any
+        one of these can silently produce a grid with
+        ``grid_h * grid_w > max_vision_tokens``, which hangs the NPU rather
+        than erroring cleanly. Re-clamp both scopes here so the effective values
+        stay inside the budget after caller overrides land.
+
+        ``do_resize=False`` is a hard reject: the caller has asked the image
+        processor to skip resize entirely, so patch extraction runs at raw
+        resolution and the budget has no upper bound. Fail loudly with a
+        message pointing at the ceiling rather than silently overriding the
+        caller's intent.
+        """
+        ip = self.image_processor
+        limit = self.max_vision_tokens * ip.patch_size ** 2
+        for scope in self._call_kwargs_scopes(kwargs, "images_kwargs"):
+            self._reject_do_resize_false(scope, "image")
+            self._cap_pixel_kwargs(scope, limit, "image")
+            self._cap_size_edges(scope, limit, "image")
+
     def _clamp_dynamic_video_size(self) -> None:
         """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
 
@@ -399,6 +450,93 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             longest_edge=limit,
             shortest_edge=min(vp.size["shortest_edge"], limit),
         )
+
+    def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
+        """Cap video-side caller overrides so nothing exceeds the NPU vision-token budget.
+
+        Companion to :meth:`_clamp_dynamic_image_call_kwargs` for the video path.
+        The video processor doesn't accept ``max_pixels`` / ``min_pixels`` as
+        call kwargs (they aren't declared on ``VideosKwargs``), so the attack
+        surface here is limited to ``size`` and ``do_resize``. Both are still
+        reachable via top-level ``kwargs`` (a flat ``size=`` is copied into
+        every modality by ``_merge_kwargs``) or via ``videos_kwargs``.
+        """
+        vp = self.video_processor
+        if vp is None:
+            return
+        limit = self.max_vision_tokens * vp.patch_size ** 2 * vp.temporal_patch_size
+        for scope in self._call_kwargs_scopes(kwargs, "videos_kwargs"):
+            self._reject_do_resize_false(scope, "video")
+            self._cap_size_edges(scope, limit, "video")
+
+    @staticmethod
+    def _call_kwargs_scopes(kwargs: dict, nested_key: str) -> list:
+        """Return the top-level kwargs plus the nested per-modality dict when present.
+
+        ``_merge_kwargs`` reads both scopes to build the effective per-modality
+        kwarg dict, so both must be re-clamped in place. Non-dict nested
+        values (``None``, missing) are dropped rather than raising: they simply
+        contribute no overrides.
+        """
+        scopes = [kwargs]
+        nested = kwargs.get(nested_key)
+        if isinstance(nested, dict):
+            scopes.append(nested)
+        return scopes
+
+    def _reject_do_resize_false(self, scope: dict, kind: str) -> None:
+        if scope.get("do_resize") is False:
+            raise ValueError(
+                f"do_resize=False bypasses the {self.max_vision_tokens}-token NPU "
+                f"vision-token ceiling for {kind} inputs. Larger inputs hang the "
+                "NPU (watchdog timeout -> Model_NotAlive) rather than erroring "
+                "cleanly. Remove the do_resize override or pre-resize the input "
+                "so its resulting patch grid fits the ceiling."
+            )
+
+    def _cap_pixel_kwargs(self, scope: dict, limit: int, kind: str) -> None:
+        """Cap ``max_pixels`` / ``min_pixels`` scalar overrides against ``limit``.
+
+        Bounding ``max_pixels`` bounds ``smart_resize``'s ``h * w`` product,
+        which bounds the patch count. Bounding ``min_pixels`` prevents the
+        symmetric scale-*up* path where an oversized floor forces the
+        rescaler to inflate a small input past the budget.
+        """
+        for field in ("max_pixels", "min_pixels"):
+            value = scope.get(field)
+            if value is None or value <= limit:
+                continue
+            logger.info(
+                "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
+                kind, field, value, limit, self.max_vision_tokens,
+            )
+            scope[field] = limit
+
+    def _cap_size_edges(self, scope: dict, limit: int, kind: str) -> None:
+        """Cap ``size.longest_edge`` / ``size.shortest_edge`` against ``limit``.
+
+        A ``size`` override without those edge keys (e.g. ``{"height", "width"}``)
+        is left untouched: the upstream image and video processors both reject
+        such a size shape at call time, so no bypass is possible.
+        """
+        size = scope.get("size")
+        if size is None:
+            return
+        longest = _size_get(size, "longest_edge")
+        shortest = _size_get(size, "shortest_edge")
+        updates: dict = {}
+        if longest is not None and longest > limit:
+            updates["longest_edge"] = limit
+        if shortest is not None and shortest > limit:
+            updates["shortest_edge"] = limit
+        if not updates:
+            return
+        logger.info(
+            "[dynamic-vision] capped call-time %s size longest=%s shortest=%s "
+            "-> %s (<= %d vision tokens)",
+            kind, longest, shortest, updates, self.max_vision_tokens,
+        )
+        scope["size"] = _update_size(size, **updates)
 
     @staticmethod
     def _strip_video_outer_wrap(text):
@@ -437,7 +575,12 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if images is not None:
             if self.dynamic_vision:
                 # Keep the aspect ratio, but stay inside the NPU sequence limit.
+                # Two-stage clamp: cap the stored defaults, then re-clamp any
+                # caller overrides so ``size`` / ``max_pixels`` / ``min_pixels``
+                # / ``do_resize`` cannot bypass the ceiling. See
+                # ``_clamp_dynamic_image_call_kwargs`` for the override contract.
                 self._clamp_dynamic_image_size()
+                self._clamp_dynamic_image_call_kwargs(kwargs)
                 logger.debug("[dynamic-vision] skipping forced resize, keeping original aspect ratio")
             else:
                 # Static Qwen3-VL MXQ releases bake a single image's 2D RoPE grid into
@@ -481,8 +624,13 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                     "inputs."
                 )
             self._sync_dynamic_vision_to_video_processor()
-            # Keep the aspect ratio, but stay inside the NPU per-frame sequence limit.
+            # Keep the aspect ratio, but stay inside the NPU per-frame sequence
+            # limit. Two-stage clamp: cap the stored defaults, then re-clamp
+            # any caller overrides (``size``, ``do_resize``) so they cannot
+            # bypass the ceiling. See ``_clamp_dynamic_video_call_kwargs`` for
+            # the override contract.
             self._clamp_dynamic_video_size()
+            self._clamp_dynamic_video_call_kwargs(kwargs)
             text = self._strip_video_outer_wrap(text)
 
         # transformers 5.x's ``Qwen3VLModel.compute_3d_position_ids`` (and the
