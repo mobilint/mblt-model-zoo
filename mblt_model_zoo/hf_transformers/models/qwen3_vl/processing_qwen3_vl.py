@@ -326,6 +326,42 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             shortest_edge=min(ip.size["shortest_edge"], limit),
         )
 
+    def _clamp_dynamic_video_size(self) -> None:
+        """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
+
+        Mirrors ``_clamp_dynamic_image_size`` for the video processor. The
+        dynamic vision MXQ takes the pre-merge patch sequence as ``inputs[0]``
+        and hangs the NPU (watchdog timeout -> ``Model_NotAlive``) above
+        ``max_vision_tokens`` per frame, so a high-resolution video frame must
+        not produce a grid with ``grid_h * grid_w > max_vision_tokens``.
+
+        The video ``smart_resize`` bounds the *volume* ``t_bar * h_bar * w_bar``
+        by ``max_pixels`` with ``t_bar >= temporal_patch_size``. That means
+        ``h_bar * w_bar <= max_pixels / temporal_patch_size``, so setting
+        ``max_pixels = max_vision_tokens * patch_size ** 2 * temporal_patch_size``
+        guarantees per-frame ``grid_h * grid_w <= max_vision_tokens`` while
+        preserving the aspect ratio and grid alignment.
+        """
+        vp = self.video_processor
+        if vp is None:
+            return
+        limit = self.max_vision_tokens * vp.patch_size ** 2 * vp.temporal_patch_size
+        current_longest = vp.size["longest_edge"]
+        if current_longest <= limit:
+            return
+
+        logger.info(
+            "[dynamic-vision] capped video max_pixels %d -> %d (<= %d vision tokens/frame)",
+            current_longest,
+            limit,
+            self.max_vision_tokens,
+        )
+        vp.size = _update_size(
+            vp.size,
+            longest_edge=limit,
+            shortest_edge=min(vp.size["shortest_edge"], limit),
+        )
+
     @staticmethod
     def _strip_video_outer_wrap(text):
         """Reduce chat-template ``<|vision_start|><|video_pad|><|vision_end|>`` to ``<|video_pad|>``.
@@ -401,6 +437,8 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                     "inputs."
                 )
             self._sync_dynamic_vision_to_video_processor()
+            # Keep the aspect ratio, but stay inside the NPU per-frame sequence limit.
+            self._clamp_dynamic_video_size()
             text = self._strip_video_outer_wrap(text)
 
         # transformers 5.x's ``Qwen3VLModel.compute_3d_position_ids`` (and the
