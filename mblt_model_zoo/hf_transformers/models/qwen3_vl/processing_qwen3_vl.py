@@ -403,10 +403,48 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 return np.stack(resized_frames)
             return cast(np.ndarray, cv2_resize(img, size[::-1], interpolation=INTER_CUBIC))
         if torch.is_tensor(img):
+            # ``ImageInput`` accepts torch tensors in either channel layout:
+            # 3-D ``(H, W, C)`` or ``(C, H, W)``, 4-D ``(N, H, W, C)`` or
+            # ``(N, C, H, W)``. ``F.interpolate`` unconditionally treats its
+            # input as NCHW, so feeding an HWC / BHWC tensor silently corrupts
+            # the spatial dims (the current "channel" axis is bicubic-resized
+            # as if it were height). Detect the channel axis from the endpoints
+            # and permute HWC-style tensors to channels-first for the resize,
+            # then restore the original layout. When both candidate axes look
+            # like plausible channel counts (e.g. a small square 3-channel
+            # image where ``shape[0] == shape[-1] == 3``), tie-break to HWC /
+            # BHWC to match the ndarray branch and the majority upstream
+            # convention.
             if img.ndim == 2:
                 img = img.unsqueeze(0).unsqueeze(0)
-            elif img.ndim == 3:
-                img = img.unsqueeze(0)
+                return F.interpolate(img.float(), size=size, mode="bicubic", align_corners=False)
+            if img.ndim == 3:
+                first, last = img.shape[0], img.shape[-1]
+                channels_last = last in (1, 3, 4)
+                channels_first = first in (1, 3, 4)
+                if channels_first and not channels_last:
+                    chw = img.unsqueeze(0).float()
+                    return F.interpolate(
+                        chw, size=size, mode="bicubic", align_corners=False
+                    ).squeeze(0)
+                hwc_as_chw = img.permute(2, 0, 1).unsqueeze(0).float()
+                return (
+                    F.interpolate(hwc_as_chw, size=size, mode="bicubic", align_corners=False)
+                    .squeeze(0)
+                    .permute(1, 2, 0)
+                )
+            if img.ndim == 4:
+                first, last = img.shape[1], img.shape[-1]
+                channels_last = last in (1, 3, 4)
+                channels_first = first in (1, 3, 4)
+                if channels_first and not channels_last:
+                    return F.interpolate(
+                        img.float(), size=size, mode="bicubic", align_corners=False
+                    )
+                bchw = img.permute(0, 3, 1, 2).float()
+                return F.interpolate(
+                    bchw, size=size, mode="bicubic", align_corners=False
+                ).permute(0, 2, 3, 1)
             return F.interpolate(img.float(), size=size, mode="bicubic", align_corners=False)
         raise TypeError(f"Unsupported image type: {type(img)}")
 
