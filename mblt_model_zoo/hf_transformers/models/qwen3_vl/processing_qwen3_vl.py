@@ -418,24 +418,54 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         deliberate: `smart_resize` runs *after* that hook and re-rounds every
         side to a `patch_size * merge_size` multiple, so a pre-resized side can
         be rounded back up and silently overshoot the budget.
+
+        Two surfaces feed ``smart_resize`` and both must be capped. tf 4.x's
+        ``Qwen2VLImageProcessor`` (the base of Qwen3-VL's image processor)
+        stores ``max_pixels`` / ``min_pixels`` as separate scalar attributes,
+        and its ``preprocess()`` falls back to those attributes when the
+        caller omits ``max_pixels`` — the effective ``size`` is then derived
+        via a "backward-compatibility" branch as
+        ``{shortest_edge: self.min_pixels, longest_edge: self.max_pixels}``,
+        and ``self.size`` is never even consulted. Updating only ``self.size``
+        therefore does nothing on the default no-override path. tf 5.x's
+        image processor dropped those scalar attributes, so we guard with a
+        ``getattr`` sentinel and skip the scalar branch when they are absent.
         """
         ip = self.image_processor
         limit = self.max_vision_tokens * ip.patch_size ** 2
         current_longest = ip.size["longest_edge"]
-        if current_longest <= limit:
+        _MISSING = object()
+        current_max_pixels = getattr(ip, "max_pixels", _MISSING)
+        size_over_budget = current_longest > limit
+        scalar_over_budget = (
+            current_max_pixels is not _MISSING
+            and current_max_pixels is not None
+            and current_max_pixels > limit
+        )
+        if not (size_over_budget or scalar_over_budget):
             return
 
         logger.info(
             "[dynamic-vision] capped max_pixels %d -> %d (<= %d vision tokens)",
-            current_longest,
+            current_max_pixels if scalar_over_budget else current_longest,
             limit,
             self.max_vision_tokens,
         )
-        ip.size = _update_size(
-            ip.size,
-            longest_edge=limit,
-            shortest_edge=min(ip.size["shortest_edge"], limit),
-        )
+        if size_over_budget:
+            ip.size = _update_size(
+                ip.size,
+                longest_edge=limit,
+                shortest_edge=min(ip.size["shortest_edge"], limit),
+            )
+        if scalar_over_budget:
+            ip.max_pixels = limit
+            current_min_pixels = getattr(ip, "min_pixels", _MISSING)
+            if (
+                current_min_pixels is not _MISSING
+                and current_min_pixels is not None
+                and current_min_pixels > limit
+            ):
+                ip.min_pixels = limit
 
     def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
         """Cap image-side caller overrides so nothing exceeds the NPU vision-token budget.
@@ -479,26 +509,52 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         ``max_pixels = max_vision_tokens * patch_size ** 2 * temporal_patch_size``
         guarantees per-frame ``grid_h * grid_w <= max_vision_tokens`` while
         preserving the aspect ratio and grid alignment.
+
+        Scalar ``max_pixels`` / ``min_pixels`` attributes are handled the same
+        way as on the image path: on tf versions that keep them as separate
+        fallbacks (``preprocess`` reads them when the caller omits
+        ``max_pixels``), we cap them alongside ``size``. On versions where
+        the attribute is absent (default for the tf 4.x
+        ``Qwen3VLVideoProcessor`` at the time of writing), the ``getattr``
+        sentinel skips the scalar branch so the clamp is version-tolerant.
         """
         vp = self.video_processor
         if vp is None:
             return
         limit = self.max_vision_tokens * vp.patch_size ** 2 * vp.temporal_patch_size
         current_longest = vp.size["longest_edge"]
-        if current_longest <= limit:
+        _MISSING = object()
+        current_max_pixels = getattr(vp, "max_pixels", _MISSING)
+        size_over_budget = current_longest > limit
+        scalar_over_budget = (
+            current_max_pixels is not _MISSING
+            and current_max_pixels is not None
+            and current_max_pixels > limit
+        )
+        if not (size_over_budget or scalar_over_budget):
             return
 
         logger.info(
             "[dynamic-vision] capped video max_pixels %d -> %d (<= %d vision tokens/frame)",
-            current_longest,
+            current_max_pixels if scalar_over_budget else current_longest,
             limit,
             self.max_vision_tokens,
         )
-        vp.size = _update_size(
-            vp.size,
-            longest_edge=limit,
-            shortest_edge=min(vp.size["shortest_edge"], limit),
-        )
+        if size_over_budget:
+            vp.size = _update_size(
+                vp.size,
+                longest_edge=limit,
+                shortest_edge=min(vp.size["shortest_edge"], limit),
+            )
+        if scalar_over_budget:
+            vp.max_pixels = limit
+            current_min_pixels = getattr(vp, "min_pixels", _MISSING)
+            if (
+                current_min_pixels is not _MISSING
+                and current_min_pixels is not None
+                and current_min_pixels > limit
+            ):
+                vp.min_pixels = limit
 
     def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
         """Cap video-side caller overrides so nothing exceeds the NPU vision-token budget.
