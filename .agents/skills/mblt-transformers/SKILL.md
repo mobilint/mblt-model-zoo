@@ -24,6 +24,18 @@ description: >-
 - Keep VLM non-batch tests under `tests/transformers/image_text_to_text/non_batch`. Keep batch
   text-generation and image-text-to-text suites in their `batch` directories and route both
   through serial Phase B in `scripts/test_transformers_matrix.py`.
+- Qwen3-VL release contract: `MobilintQwen3VLConfig.dynamic_vision` (top-level bool) pairs the
+  vision MXQ, text MXQ, and processor as one release. A dynamic-vision release accepts video and
+  per-prompt multi-image inputs. A static-vision release supports one image per prompt only and
+  raises `NotImplementedError` from `MobilintQwen3VLProcessor.__call__` for video or per-prompt
+  multi-image, with a message pointing the caller at a dynamic-vision release. Batched
+  single-image prompts are always allowed. `MobilintQwen3VLProcessor.from_pretrained` derives
+  the flag from `config.dynamic_vision` and syncs the video processor's mirror. Call
+  `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)` only when a runtime
+  `vision_mxq_path=` override diverges from the shipped config so the processor adopts the
+  detected `visual._uses_dynamic_vision` value.
+- Qwen3-VL video decoding requires the `torchcodec` dependency shipped with the `transformers`
+  extra; validate video paths only against a dynamic-vision release.
 - Preserve local style in `mblt_model_zoo/hf_transformers`; it is excluded from repository-wide
   Ruff checks.
 

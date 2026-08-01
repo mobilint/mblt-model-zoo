@@ -168,6 +168,24 @@ truth when this snapshot becomes stale.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Route batch
   text-generation and image-text-to-text suites through the serial Phase B in
   `scripts/test_transformers_matrix.py`, where they can use the required NPU core allocation.
+- Qwen3-VL treats the vision MXQ, text MXQ, and processor as one release. `MobilintQwen3VLConfig`
+  declares the top-level `dynamic_vision` bool; the shipped `config.json` selects which release a
+  caller loaded. A dynamic-vision release (`dynamic_vision=True`) accepts video and per-prompt
+  multi-image inputs. A static-vision release (`dynamic_vision=False`) supports at most one image
+  per prompt and rejects video and per-prompt multi-image inputs. Batched single-image prompts
+  are always allowed. `MobilintQwen3VLProcessor.from_pretrained` reads `config.dynamic_vision`
+  and stays in lock-step with its video processor.
+- Qwen3-VL static-vision releases hard-fail from `MobilintQwen3VLProcessor.__call__` with
+  `NotImplementedError` when the caller passes a video input or more than one image per prompt.
+  The message points the caller at a dynamic-vision release; keep the guard and message in
+  `processing_qwen3_vl.py` as the contract statement.
+- Call `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)` only when a runtime
+  loader override (for example `vision_mxq_path=`) points at an MXQ whose signature
+  (static/dynamic) does not match the shipped `config.dynamic_vision`. The helper adopts the
+  vision submodule's detected signature (`visual._uses_dynamic_vision`) and re-syncs the video
+  processor.
+- Video decoding in the Qwen3-VL release requires the `transformers` extra's `torchcodec`
+  dependency; validate video paths only against a dynamic-vision release.
 - Start with the narrowest test file or documented `-k` selection. Use
   `pytest tests/transformers --full-matrix` only for a release or pre-merge matrix; use `-x` while
   iterating.

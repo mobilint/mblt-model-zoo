@@ -512,7 +512,7 @@ class MobilintQwen3ASRThinkerForConditionalGeneration(
     config: MobilintQwen3ASRThinkerConfig
 
     def __init__(self, config: MobilintQwen3ASRThinkerConfig, *args, **kwargs):
-        PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
+        self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.audio_tower = MobilintQwen3ASRAudioEncoder._from_config(
             config.audio_config, _internal_call=True
@@ -642,7 +642,7 @@ class MobilintQwen3ASRForConditionalGeneration(
     main_input_name = "input_features"
 
     def __init__(self, config: MobilintQwen3ASRConfig, *args, **kwargs):
-        PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
+        self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.config = config
         self.thinker = MobilintQwen3ASRThinkerForConditionalGeneration._from_config(
