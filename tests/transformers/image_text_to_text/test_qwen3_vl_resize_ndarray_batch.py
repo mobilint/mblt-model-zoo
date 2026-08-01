@@ -135,6 +135,70 @@ def test_resize_one_handles_3d_ndarray_chw_preserves_channels() -> None:
     assert int(resized[2].mean()) == 30
 
 
+def test_resize_one_handles_3d_ndarray_hwc_grayscale() -> None:
+    """3-D ``(H, W, 1)`` grayscale ndarray must retain the singleton channel.
+
+    ``cv2.resize`` collapses the trailing axis on a single-channel HWC frame
+    and returns rank-2 output. Without a rank restore step, ``np.stack`` +
+    ``restore`` would either raise during the layout transpose or silently
+    return the wrong shape. Pin down that the round-trip layout is
+    ``(H', W', 1)``.
+    """
+    img = np.zeros((32, 40, 1), dtype=np.uint8)
+    img[..., 0] = 42
+
+    resized = MobilintQwen3VLProcessor._resize_one(img, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (16, 24, 1)
+    assert int(resized[..., 0].mean()) == 42
+
+
+def test_resize_one_handles_3d_ndarray_chw_grayscale() -> None:
+    """3-D ``(1, H, W)`` grayscale ndarray must retain the leading singleton.
+
+    A CHW single-channel frame is transposed to ``(H, W, 1)`` before cv2,
+    which then collapses the trailing axis; the restore step must
+    re-materialize both the channel axis and the CHW orientation.
+    """
+    img = np.zeros((1, 32, 40), dtype=np.uint8)
+    img[0] = 42
+
+    resized = MobilintQwen3VLProcessor._resize_one(img, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (1, 16, 24)
+    assert int(resized[0].mean()) == 42
+
+
+def test_resize_one_handles_4d_ndarray_bhwc_grayscale() -> None:
+    """4-D ``(N, H, W, 1)`` grayscale batch must preserve the singleton channel."""
+    batch = np.zeros((3, 32, 40, 1), dtype=np.uint8)
+    batch[0, ..., 0] = 10
+    batch[1, ..., 0] = 20
+    batch[2, ..., 0] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(batch, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (3, 16, 24, 1)
+    assert int(resized[0, ..., 0].mean()) == 10
+    assert int(resized[1, ..., 0].mean()) == 20
+    assert int(resized[2, ..., 0].mean()) == 30
+
+
+def test_resize_one_handles_4d_ndarray_bchw_grayscale() -> None:
+    """4-D ``(N, 1, H, W)`` grayscale batch must preserve the leading singleton."""
+    batch = np.zeros((3, 1, 32, 40), dtype=np.uint8)
+    batch[0, 0] = 10
+    batch[1, 0] = 20
+    batch[2, 0] = 30
+
+    resized = MobilintQwen3VLProcessor._resize_one(batch, size=(16, 24))
+    assert isinstance(resized, np.ndarray)
+    assert resized.shape == (3, 1, 16, 24)
+    assert int(resized[0, 0].mean()) == 10
+    assert int(resized[1, 0].mean()) == 20
+    assert int(resized[2, 0].mean()) == 30
+
+
 def test_resize_one_ambiguous_3d_ndarray_ties_to_hwc() -> None:
     """Ambiguous ``(3, 3, 3)`` ndarray: tie-break to HWC.
 

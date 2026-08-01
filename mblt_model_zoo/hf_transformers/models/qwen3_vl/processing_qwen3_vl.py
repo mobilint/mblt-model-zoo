@@ -467,11 +467,18 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # returned restore closure put the original layout back on the way out.
         if isinstance(img, np.ndarray):
             bhwc, restore = _to_bhwc(img)
+            # cv2.resize collapses the trailing axis for a single-channel HWC
+            # frame — a ``(H, W, 1)`` input comes back as ``(H', W')`` — which
+            # would drop the batch to rank-3 after ``np.stack`` and break
+            # ``restore``. ``np.atleast_3d`` promotes any collapsed rank-2 output
+            # back to ``(H', W', 1)`` and leaves multi-channel outputs untouched.
             resized = np.stack(
                 [
-                    cast(
-                        np.ndarray,
-                        cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC),
+                    np.atleast_3d(
+                        cast(
+                            np.ndarray,
+                            cv2_resize(frame, size[::-1], interpolation=INTER_CUBIC),
+                        )
                     )
                     for frame in bhwc
                 ]
