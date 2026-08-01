@@ -428,19 +428,33 @@ def test_huge_videos_kwargs_size_still_produces_within_budget_video_grid() -> No
 # ---------------------------------------------------------------------------
 
 
-def test_static_vision_image_path_ignores_caller_overrides(
+def test_static_vision_image_path_does_not_invoke_dynamic_clamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Static-vision keeps forcing the fixed grid via ``_resize_images``; caller
-    ``max_pixels`` / ``do_resize`` overrides must not trigger the dynamic clamp.
+    """Static-vision keeps forcing the fixed grid via ``_resize_images`` and does
+    not route through the dynamic clamp.
 
     The static path relies on ``_resize_images`` producing a fixed image
-    resolution and on the MXQ's baked grid rejecting shape mismatches; the
-    dynamic clamp isn't in the code path at all here, so caller overrides pass
-    through untouched. This test pins down that we haven't accidentally
-    plumbed the guard into the static branch.
+    resolution and on the MXQ's baked grid rejecting shape mismatches, so the
+    dynamic ``_clamp_dynamic_image_call_kwargs`` must not run in that branch.
+    Static releases have their *own* resize-override guard
+    (``_reject_static_image_resize_overrides``) — that reject is exercised in
+    ``test_qwen3_vl_static_resize_override_hard_fail.py``; here we only pin
+    down that the dynamic clamp is not accidentally plumbed into the static
+    branch.
     """
     proc = _make_processor(dynamic_vision=False)
+
+    calls = {"dynamic_clamp": 0}
+
+    def _spy_dynamic_clamp(self, kwargs):
+        calls["dynamic_clamp"] += 1
+
+    monkeypatch.setattr(
+        MobilintQwen3VLProcessor,
+        "_clamp_dynamic_image_call_kwargs",
+        _spy_dynamic_clamp,
+    )
 
     captured: dict[str, object] = {}
 
@@ -454,11 +468,7 @@ def test_static_vision_image_path_ignores_caller_overrides(
     from PIL import Image
 
     image = Image.new("RGB", (224, 224))
-    result = proc(
-        images=[image],
-        text="describe <|image_pad|>",
-        do_resize=False,  # Would raise on the dynamic path; must pass on static.
-    )
+    result = proc(images=[image], text="describe <|image_pad|>")
 
     assert result == "sentinel"
-    assert captured["kwargs"]["do_resize"] is False
+    assert calls["dynamic_clamp"] == 0

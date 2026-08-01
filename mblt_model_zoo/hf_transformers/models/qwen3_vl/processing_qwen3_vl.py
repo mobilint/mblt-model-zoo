@@ -70,6 +70,19 @@ _NPU_MAX_VISION_TOKENS = 2048
 # either failure can materialize.
 _STRUCTURAL_VISION_KWARGS = ("patch_size", "temporal_patch_size", "merge_size")
 
+# Resize-shaping caller kwargs that must not touch the static-vision path.
+# The static release ships a vision MXQ compiled for a rigid
+# ``(H, W, C) = (_NPU_H, _NPU_W, 6)`` grid; ``__call__`` pre-resizes every
+# input to the matching pixel resolution via ``_resize_images``, but the
+# upstream image processor still runs after that and honors caller-supplied
+# ``size`` / ``min_pixels`` / ``max_pixels`` overrides, which would re-resize
+# the just-normalized image and break the fixed grid the MXQ expects — either
+# shape-mismatching at dispatch or silently producing semantically wrong
+# output. ``do_resize`` is checked separately because only ``do_resize=False``
+# is a semantic change worth rejecting (``True`` matches the default and the
+# static branch's assumption).
+_STATIC_RESIZE_OVERRIDE_KWARGS = ("size", "min_pixels", "max_pixels")
+
 # Standard Hugging Face loading kwargs that select which artifact
 # ``from_pretrained`` reads. The processor and the model config must resolve
 # to the *same* release, so any caller-supplied value here must be propagated
@@ -658,6 +671,52 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 "so its resulting patch grid fits the ceiling."
             )
 
+    def _reject_static_image_resize_overrides(self, kwargs: dict) -> None:
+        """Reject caller-supplied resize overrides on the static-vision image path.
+
+        A static-vision Qwen3-VL release ships a vision MXQ compiled for a rigid
+        ``(_NPU_H, _NPU_W, 6)`` grid derived from the shipped ``patch_size`` /
+        ``merge_size``. ``__call__`` pre-resizes every input to the matching
+        pixel resolution via ``_resize_images``, but the upstream image
+        processor's ``_preprocess`` still runs after that step and honors
+        caller-supplied ``size`` / ``min_pixels`` / ``max_pixels`` overrides —
+        which re-resize the just-normalized image and break the fixed grid the
+        MXQ expects, either shape-mismatching at dispatch or silently producing
+        semantically wrong output. The dynamic path treats these overrides as
+        first-class inputs and clamps them; the static path is stricter because
+        no variance in spatial size is compatible with the compiled MXQ's fixed
+        grid.
+
+        Both the top-level ``kwargs`` and the nested ``images_kwargs`` dict
+        are inspected. ``do_resize=True`` matches the branch's assumption
+        (upstream's default) and is passed through; ``do_resize=False`` is
+        a semantic change and rejected — do not silently coerce it, since an
+        override that changes semantics is worth surfacing to the caller.
+        """
+        for scope in self._call_kwargs_scopes(kwargs, "images_kwargs"):
+            for field in _STATIC_RESIZE_OVERRIDE_KWARGS:
+                if field not in scope:
+                    continue
+                value = scope[field]
+                if value is None:
+                    continue
+                self._raise_static_resize_override(field, value)
+            if scope.get("do_resize") is False:
+                self._raise_static_resize_override("do_resize", False)
+
+    @staticmethod
+    def _raise_static_resize_override(field: str, value) -> None:
+        raise ValueError(
+            f"image {field}={value!r} cannot override the static-vision "
+            "Qwen3-VL processor's fixed resize. The static release ships a "
+            f"vision MXQ compiled for a rigid ({_NPU_H}, {_NPU_W}, 6) grid, "
+            "and the processor pre-resizes every input to the matching pixel "
+            "resolution before dispatch. Any additional resize would shape-"
+            "mismatch the MXQ or silently emit a grid the decoder reads as "
+            "plausible-but-wrong tokens. Remove the override, or load a "
+            "dynamic-vision Qwen3-VL release for resize control."
+        )
+
     def _cap_pixel_kwargs(self, scope: dict, limit: int, kind: str) -> None:
         """Cap ``max_pixels`` / ``min_pixels`` scalar overrides against ``limit``.
 
@@ -776,6 +835,14 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                         "prompt. Load a Qwen3-VL release that ships a dynamic vision "
                         "MXQ, or pass a single image."
                     )
+                # ``_resize_images`` forces the fixed static-MXQ grid, but any
+                # caller-supplied ``size`` / ``min_pixels`` / ``max_pixels`` /
+                # ``do_resize=False`` would still reach upstream's ``_preprocess``
+                # after that step and re-resize the just-normalized image away
+                # from the grid the compiled MXQ expects. See
+                # ``_reject_static_image_resize_overrides`` for the override
+                # contract.
+                self._reject_static_image_resize_overrides(kwargs)
                 images = self._resize_images(images)
 
         if videos is not None:
