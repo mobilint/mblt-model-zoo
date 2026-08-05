@@ -593,18 +593,24 @@ def _validate_dense_source_file(source_path: str, dataset_root: Path) -> str:
     return str(resolved_source)
 
 
-def _validate_dense_output_root(output_dir: str, dataset_name: str) -> str:
-    """Reject a symlinked dense managed root before organization.
+def _validate_dense_output_root(
+    output_dir: str,
+    dataset_name: str,
+    layout_names: Iterable[str],
+) -> str:
+    """Reject symlinks in a dense managed root before organization.
 
     Args:
         output_dir: Requested managed dataset root.
         dataset_name: Human-readable dataset name for error reporting.
+        layout_names: Dataset-specific directories managed below the root.
 
     Returns:
         Expanded absolute output path.
 
     Raises:
-        ValueError: If the managed root is a symlink.
+        ValueError: If the managed root, an ancestor, or a managed layout
+            directory is a symlink.
     """
 
     requested_path = Path(output_dir).expanduser()
@@ -614,6 +620,13 @@ def _validate_dense_output_root(output_dir: str, dataset_name: str) -> str:
             f"{dataset_name} output directory and its existing parents must not be symlinks: {output_path}. "
             "Remove the symlink or choose a path beneath regular directories."
         )
+    for layout_name in layout_names:
+        layout_path = output_path / layout_name
+        if layout_path.is_symlink():
+            raise ValueError(
+                f"{dataset_name} output layout directories must not be symlinks: {layout_path}. "
+                "Remove the symlink or choose a different output directory."
+            )
     return str(output_path)
 
 
@@ -657,7 +670,7 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized dataset will be stored.
     """
 
-    output_dir = _validate_dense_output_root(output_dir, "NYU Depth")
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth", ("images", "depth"))
     selected_root, image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
     try:
         dataset_root = Path(selected_root).resolve(strict=True)
@@ -696,7 +709,7 @@ def organize_nyu_depth(
         output_dir: Directory to store the organized dataset.
     """
 
-    output_dir = _validate_dense_output_root(output_dir, "NYU Depth")
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth", ("images", "depth"))
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -733,7 +746,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         ValueError: If the source does not contain 2,000 matched validation image/mask pairs.
     """
 
-    output_dir = _validate_dense_output_root(output_dir, "ADE20K")
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K", ("images", "annotations"))
     dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
     try:
         resolved_dataset_root = Path(dataset_root).resolve(strict=True)
@@ -802,7 +815,7 @@ def organize_ade20k(
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
 
-    output_dir = _validate_dense_output_root(output_dir, "ADE20K")
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K", ("images", "annotations"))
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -909,7 +922,7 @@ def organize_cityscapes(
         OSError: If extraction, copying, or atomic installation fails.
     """
 
-    output_dir = _validate_dense_output_root(output_dir, "Cityscapes")
+    output_dir = _validate_dense_output_root(output_dir, "Cityscapes", ("images", "annotations"))
     image_archive = _validate_cityscapes_zip(image_dir, "image")
     annotation_archive = _validate_cityscapes_zip(annotation_dir, "annotation")
     output_parent_dir = os.path.dirname(output_dir)

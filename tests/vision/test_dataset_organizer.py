@@ -665,6 +665,45 @@ def test_dense_organizers_reject_symlinked_output_roots(
         assert list(protected_dir.iterdir()) == [marker]
 
 
+@pytest.mark.parametrize(
+    ("dataset", "layout_name"),
+    [
+        ("nyu-depth", "images"),
+        ("nyu-depth", "depth"),
+        ("ade20k", "images"),
+        ("ade20k", "annotations"),
+        ("cityscapes", "images"),
+        ("cityscapes", "annotations"),
+    ],
+)
+def test_dense_organizers_reject_symlinked_output_layout_directories(
+    tmp_path: Path,
+    dataset: str,
+    layout_name: str,
+) -> None:
+    """Reject symlinked managed layout children without modifying their targets."""
+
+    output_dir = tmp_path / "managed"
+    output_dir.mkdir()
+    protected_dir = tmp_path / "protected-layout"
+    protected_dir.mkdir()
+    marker = protected_dir / "keep"
+    marker.write_bytes(b"existing")
+    (output_dir / layout_name).symlink_to(protected_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="layout directories must not be symlinks"):
+        if dataset == "nyu-depth":
+            organizer.organize_nyu_depth("unused", str(output_dir))
+        elif dataset == "ade20k":
+            organizer.organize_ade20k("unused", str(output_dir))
+        else:
+            organizer.organize_cityscapes("unused-images", "unused-annotations", str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
+    assert list(protected_dir.iterdir()) == [marker]
+    assert (output_dir / layout_name).is_symlink()
+
+
 def test_organize_cityscapes_materializes_lossless_validation_pairs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
