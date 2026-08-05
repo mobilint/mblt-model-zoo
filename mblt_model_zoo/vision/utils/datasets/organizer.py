@@ -607,7 +607,7 @@ def _validate_dense_output_root(output_dir: str, dataset_name: str) -> str:
         ValueError: If the managed root is a symlink.
     """
 
-    output_path = Path(output_dir).expanduser().absolute()
+    output_path = Path(os.path.abspath(Path(output_dir).expanduser()))
     if _path_has_symlink_component(output_path):
         raise ValueError(
             f"{dataset_name} output directory and its existing parents must not be symlinks: {output_path}. "

@@ -626,19 +626,26 @@ def test_dense_organizers_reject_symlinked_output_roots(
                 output_dir,
             )
 
-    for topology in ("root", "ancestor"):
+    for topology in ("root", "ancestor", "normalized-ancestor"):
         if topology == "root":
             protected_dir = tmp_path / "root-target"
             protected_dir.mkdir()
             output_dir = tmp_path / "managed"
             output_dir.symlink_to(protected_dir, target_is_directory=True)
-        else:
+        elif topology == "ancestor":
             target_parent = tmp_path / "ancestor-target"
             protected_dir = target_parent / "managed"
             protected_dir.mkdir(parents=True)
             symlinked_parent = tmp_path / "datasets-link"
             symlinked_parent.symlink_to(target_parent, target_is_directory=True)
             output_dir = symlinked_parent / "managed"
+        else:
+            target_parent = tmp_path / "normalized-ancestor-target"
+            protected_dir = target_parent / "managed"
+            protected_dir.mkdir(parents=True)
+            symlinked_parent = tmp_path / "normalized-datasets-link"
+            symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+            output_dir = tmp_path / "missing" / ".." / symlinked_parent.name / "managed"
         marker = protected_dir / "keep"
         marker.write_bytes(b"existing")
 
