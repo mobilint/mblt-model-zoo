@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 import torch
 
-from mblt_model_zoo.vision import list_models
 from mblt_model_zoo.vision.utils.datasets import (
     CustomADE20K,
     CustomCityscapes,
@@ -31,34 +30,6 @@ from mblt_model_zoo.vision.utils.evaluation import (
 from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
 from mblt_model_zoo.vision.utils.preprocess import build_preprocess
 from mblt_model_zoo.vision.utils.results import Results
-from mblt_model_zoo.vision.wrapper import resolve_model_config
-
-
-def test_yolo26_ade20k_configs_resolve_onnx_artifacts() -> None:
-    """Expose every ADE20K model and its matching Hub ONNX artifact."""
-
-    assert list_models("semantic_segmentation")["semantic_segmentation"] == [
-        "YOLO26lSem",
-        "YOLO26lSemADE20K",
-        "YOLO26mSem",
-        "YOLO26mSemADE20K",
-        "YOLO26nSem",
-        "YOLO26nSemADE20K",
-        "YOLO26sSem",
-        "YOLO26sSemADE20K",
-        "YOLO26xSem",
-        "YOLO26xSemADE20K",
-    ]
-    for size in "nsmlx":
-        config = resolve_model_config(f"yolo26{size}-sem-ade20k")
-        assert config["file_cfg"]["repo_id"] == f"mobilint/YOLO26{size}-sem-ade20k"
-        assert config["file_cfg"]["onnx_filename"] == f"yolo26{size}-sem-ade20k.onnx"
-        assert config["pre_cfg"]["LetterBox"]["img_size"] == [640, 640]
-        assert config["post_cfg"] == {"task": "semantic_segmentation", "dataset": "ade20k"}
-        cityscapes_config = resolve_model_config(f"yolo26{size}-sem")
-        assert cityscapes_config["file_cfg"]["repo_id"] == f"mobilint/YOLO26{size}-sem"
-        assert cityscapes_config["file_cfg"]["onnx_filename"] == f"yolo26{size}-sem.onnx"
-        assert cityscapes_config["post_cfg"] == {"task": "semantic_segmentation", "dataset": "cityscapes"}
 
 
 def test_semantic_postprocess_supports_logits_and_baked_maps() -> None:

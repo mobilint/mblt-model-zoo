@@ -23,6 +23,7 @@ from ..utils.core_mode import CoreMode, normalize_core_mode
 from ..utils.npu_backend import MobilintNPUBackend
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
+from ._model_paths import uses_shifted_engine_model_path_layout as _uses_shifted_engine_model_path_layout
 from .utils.postprocess import build_postprocess
 from .utils.preprocess import build_preprocess
 from .utils.results import Results
@@ -249,7 +250,6 @@ class MBLT_Engine:
         self,
         model_cls: str | dict[str, Any],
         model_type: str = "DEFAULT",
-        model_path: str = "",
         mxq_path: str = "",
         onnx_path: str = "",
         dev_no: int | None = None,
@@ -259,15 +259,16 @@ class MBLT_Engine:
         postprocess_kwargs: dict[str, Any] | None = None,
         framework: str | None = None,
         onnx_providers: Sequence[str] | None = None,
+        model_path: str = "",
     ) -> None:
         """Initializes the MBLT_Engine.
 
         Args:
             model_cls(if dict):
                 file_cfg: Model configuration.
-                    model_path: generic path to local model file
                     mxq_path: path to mxq file
                     onnx_path: path to onnx file
+                    model_path: generic path to local model file
                     dev_no: Accelerator No.
                     core_mode: single, multi, global4, global8
                     target_cores: single mode
@@ -281,6 +282,39 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
+        if _uses_shifted_engine_model_path_layout(
+            model_path,
+            mxq_path,
+            dev_no,
+            core_mode,
+            target_cores,
+            postprocess_kwargs,
+            framework,
+            onnx_providers,
+        ):
+            (
+                model_path,
+                mxq_path,
+                onnx_path,
+                dev_no,
+                core_mode,
+                target_cores,
+                target_clusters,
+                postprocess_kwargs,
+                framework,
+                onnx_providers,
+            ) = (
+                mxq_path,
+                onnx_path,
+                cast(str, dev_no or ""),
+                cast(int | None, core_mode),
+                cast(CoreMode | None, target_cores),
+                cast(Sequence[str | CoreId] | None, target_clusters),
+                cast(Sequence[int | Cluster] | None, postprocess_kwargs),
+                cast(dict[str, Any] | None, framework),
+                cast(str | None, onnx_providers),
+                cast(Sequence[str] | None, model_path or None),
+            )
         model_config_part = resolve_model_config(model_cls, model_type)
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))

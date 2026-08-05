@@ -109,6 +109,19 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
 
     assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
+    external_image = tmp_path / "external.png"
+    external_label = tmp_path / "external.txt"
+    _write_file(external_image)
+    _write_file(external_label)
+    image_path = tmp_path / relative_image_dir / "P0001.png"
+    label_path = tmp_path / "labels" / "val" / "P0002.txt"
+    image_path.unlink()
+    label_path.unlink()
+    image_path.symlink_to(external_image)
+    label_path.symlink_to(external_label)
+
+    assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
+
 
 def test_widerface_readiness_requires_complete_event_tree_and_metadata(
     monkeypatch: pytest.MonkeyPatch,
@@ -177,3 +190,81 @@ def test_ade20k_readiness_requires_source_metadata(
 
     _write_file(tmp_path / "sceneCategories.txt")
     assert readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
+
+
+@pytest.mark.parametrize(
+    ("dataset", "task", "relative_path"),
+    [
+        ("nyu-depth", "depth_estimation", "images/sample.jpg"),
+        ("nyu-depth", "depth_estimation", "depth/sample.npy"),
+        ("nyu-depth", "depth_estimation", "images/extra.jpg"),
+        ("ade20k", "semantic_segmentation", "images/ADE_val_00000001.jpg"),
+        ("ade20k", "semantic_segmentation", "annotations/ADE_val_00000001.png"),
+        ("ade20k", "semantic_segmentation", "objectInfo150.txt"),
+    ],
+)
+def test_dense_readiness_rejects_symlinked_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+    task: str,
+    relative_path: str,
+) -> None:
+    """Do not reuse a complete-looking dense cache containing symlinked files."""
+
+    monkeypatch.setattr(readiness, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    if dataset == "nyu-depth":
+        _write_file(tmp_path / "images" / "sample.jpg")
+        _write_file(tmp_path / "depth" / "sample.npy")
+    else:
+        _write_file(tmp_path / "images" / "ADE_val_00000001.jpg")
+        _write_file(tmp_path / "annotations" / "ADE_val_00000001.png")
+        for file_name in readiness.ADE20K_METADATA_FILES:
+            _write_file(tmp_path / file_name)
+    external_file = tmp_path.parent / f"{tmp_path.name}-outside"
+    external_file.write_bytes(b"outside dataset")
+    source_path = tmp_path / relative_path
+    if source_path.exists():
+        source_path.unlink()
+    source_path.symlink_to(external_file)
+
+    assert not readiness.dataset_ready(tmp_path, task, dataset)
+
+
+def test_dense_readiness_rejects_symlinked_root_ancestors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not reuse complete dense roots reached through a symlinked parent."""
+
+    monkeypatch.setattr(readiness, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    target_parent = tmp_path / "target"
+    nyu_root = target_parent / "nyu-depth"
+    _write_file(nyu_root / "images" / "sample.jpg")
+    _write_file(nyu_root / "depth" / "sample.npy")
+    ade20k_root = target_parent / "ade20k"
+    _write_file(ade20k_root / "images" / "ADE_val_00000001.jpg")
+    _write_file(ade20k_root / "annotations" / "ADE_val_00000001.png")
+    for file_name in readiness.ADE20K_METADATA_FILES:
+        _write_file(ade20k_root / file_name)
+    symlinked_parent = tmp_path / "datasets"
+    symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+
+    assert not readiness.dataset_ready(symlinked_parent / "nyu-depth", "depth_estimation", "nyu-depth")
+    assert not readiness.dataset_ready(symlinked_parent / "ade20k", "semantic_segmentation", "ade20k")
+
+    existing_dir = tmp_path / "existing"
+    existing_dir.mkdir()
+    traversed_parent = existing_dir / ".." / symlinked_parent.name
+    assert not readiness.dataset_ready(traversed_parent / "nyu-depth", "depth_estimation", "nyu-depth")
+    assert not readiness.dataset_ready(traversed_parent / "ade20k", "semantic_segmentation", "ade20k")
+
+    target_child = target_parent / "child"
+    target_child.mkdir()
+    traversal_link = tmp_path / "traversal-link"
+    traversal_link.symlink_to(target_child, target_is_directory=True)
+    symlink_traversed_parent = traversal_link / ".."
+    assert not readiness.dataset_ready(symlink_traversed_parent / "nyu-depth", "depth_estimation", "nyu-depth")
+    assert not readiness.dataset_ready(symlink_traversed_parent / "ade20k", "semantic_segmentation", "ade20k")

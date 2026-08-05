@@ -356,6 +356,58 @@ def test_organize_nyu_depth_extracts_only_validation_layout(
     assert not (output_dir / "depth" / "train").exists()
 
 
+@pytest.mark.parametrize("relative_path", ["images/sample.jpg", "depth/sample.npy"])
+def test_construct_nyu_depth_rejects_symlinked_data_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Reject NYU data symlinks without replacing an existing managed cache."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = tmp_path / "source"
+    (dataset_dir / "images").mkdir(parents=True)
+    (dataset_dir / "depth").mkdir()
+    (dataset_dir / "images" / "sample.jpg").write_bytes(b"image")
+    (dataset_dir / "depth" / "sample.npy").write_bytes(b"depth")
+    external_file = tmp_path / "secret"
+    external_file.write_bytes(b"outside dataset")
+    source_path = dataset_dir / relative_path
+    source_path.unlink()
+    source_path.symlink_to(external_file)
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    marker = output_dir / "valid-cache-marker"
+    marker.write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        organizer.construct_nyu_depth(str(dataset_dir), str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
+    assert not (output_dir / Path(relative_path).name).exists()
+
+
+def test_construct_nyu_depth_rejects_source_outside_resolved_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject regular files reached through a directory symlink escaping the dataset root."""
+
+    monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = tmp_path / "source"
+    selected_root = dataset_dir / "nyu-depth"
+    selected_root.mkdir(parents=True)
+    external_images = dataset_dir / "external-images"
+    external_images.mkdir()
+    (external_images / "sample.jpg").write_bytes(b"outside dataset")
+    (selected_root / "images").symlink_to(external_images, target_is_directory=True)
+    (selected_root / "depth").mkdir()
+    (selected_root / "depth" / "sample.npy").write_bytes(b"depth")
+
+    with pytest.raises(ValueError, match="must remain within dataset root"):
+        organizer.construct_nyu_depth(str(dataset_dir), str(tmp_path / "organized"))
+
+
 def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -453,6 +505,40 @@ def test_construct_ade20k_requires_metadata_before_replacing_cache(
     assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "images/ADE_val_00000001.jpg",
+        "annotations/ADE_val_00000001.png",
+        "objectInfo150.txt",
+        "sceneCategories.txt",
+    ],
+)
+def test_construct_ade20k_rejects_symlinked_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Reject ADE20K data and metadata symlinks before replacing a managed cache."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = _create_ade20k_source(tmp_path)
+    external_file = tmp_path / "secret"
+    external_file.write_bytes(b"outside dataset")
+    source_path = dataset_dir / relative_path
+    source_path.unlink()
+    source_path.symlink_to(external_file)
+    output_dir = tmp_path / "organized"
+    output_dir.mkdir()
+    marker = output_dir / "valid-cache-marker"
+    marker.write_bytes(b"existing")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        organizer.construct_ade20k(str(dataset_dir), str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
+
+
 def test_construct_ade20k_preserves_cache_when_metadata_staging_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -500,6 +586,122 @@ def _write_cityscapes_archives(tmp_path: Path, sample_ids: list[str]) -> tuple[P
             archive.writestr(f"gtFine/val/{city}/{sample_id}_gtFine_polygons.json", b"{}")
             archive.writestr(f"gtFine/val/{city}/{sample_id}_gtFine_trainIds.png", b"train IDs")
     return image_archive, annotation_archive
+
+
+@pytest.mark.parametrize("dataset", ["nyu-depth", "ade20k", "cityscapes"])
+def test_dense_organizers_reject_symlinked_output_roots(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    dataset: str,
+) -> None:
+    """Fail before organizing through a symlinked managed root or ancestor."""
+
+    if dataset == "nyu-depth":
+        monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+        source_dir = tmp_path / "nyu-source"
+        (source_dir / "images").mkdir(parents=True)
+        (source_dir / "depth").mkdir()
+        (source_dir / "images" / "sample.jpg").write_bytes(b"image")
+        (source_dir / "depth" / "sample.npy").write_bytes(b"depth")
+
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_nyu_depth(str(source_dir), output_dir)
+    elif dataset == "ade20k":
+        monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+        source_dir = _create_ade20k_source(tmp_path)
+
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_ade20k(str(source_dir), output_dir)
+    else:
+        monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+        image_archive, annotation_archive = _write_cityscapes_archives(
+            tmp_path,
+            ["lindau_000000_000019"],
+        )
+
+        def organizer_fn(output_dir: str) -> None:
+            organizer.organize_cityscapes(
+                str(image_archive),
+                str(annotation_archive),
+                output_dir,
+            )
+
+    for topology in ("root", "ancestor", "normalized-ancestor", "symlink-parent-traversal"):
+        if topology == "root":
+            protected_dir = tmp_path / "root-target"
+            protected_dir.mkdir()
+            output_dir = tmp_path / "managed"
+            output_dir.symlink_to(protected_dir, target_is_directory=True)
+        elif topology == "ancestor":
+            target_parent = tmp_path / "ancestor-target"
+            protected_dir = target_parent / "managed"
+            protected_dir.mkdir(parents=True)
+            symlinked_parent = tmp_path / "datasets-link"
+            symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+            output_dir = symlinked_parent / "managed"
+        elif topology == "normalized-ancestor":
+            target_parent = tmp_path / "normalized-ancestor-target"
+            protected_dir = target_parent / "managed"
+            protected_dir.mkdir(parents=True)
+            symlinked_parent = tmp_path / "normalized-datasets-link"
+            symlinked_parent.symlink_to(target_parent, target_is_directory=True)
+            output_dir = tmp_path / "missing" / ".." / symlinked_parent.name / "managed"
+        else:
+            target_parent = tmp_path / "traversal-target"
+            target_child = target_parent / "child"
+            target_child.mkdir(parents=True)
+            protected_dir = target_parent / "traversed-managed"
+            protected_dir.mkdir()
+            symlinked_parent = tmp_path / "traversal-link"
+            symlinked_parent.symlink_to(target_child, target_is_directory=True)
+            output_dir = symlinked_parent / ".." / protected_dir.name
+        marker = protected_dir / "keep"
+        marker.write_bytes(b"existing")
+
+        with pytest.raises(ValueError, match="existing parents must not be symlinks"):
+            organizer_fn(str(output_dir))
+
+        assert marker.read_bytes() == b"existing"
+        assert list(protected_dir.iterdir()) == [marker]
+
+
+@pytest.mark.parametrize(
+    ("dataset", "layout_name"),
+    [
+        ("nyu-depth", "images"),
+        ("nyu-depth", "depth"),
+        ("ade20k", "images"),
+        ("ade20k", "annotations"),
+        ("cityscapes", "images"),
+        ("cityscapes", "annotations"),
+    ],
+)
+def test_dense_organizers_reject_symlinked_output_layout_directories(
+    tmp_path: Path,
+    dataset: str,
+    layout_name: str,
+) -> None:
+    """Reject symlinked managed layout children without modifying their targets."""
+
+    output_dir = tmp_path / "managed"
+    output_dir.mkdir()
+    protected_dir = tmp_path / "protected-layout"
+    protected_dir.mkdir()
+    marker = protected_dir / "keep"
+    marker.write_bytes(b"existing")
+    (output_dir / layout_name).symlink_to(protected_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="layout directories must not be symlinks"):
+        if dataset == "nyu-depth":
+            organizer.organize_nyu_depth("unused", str(output_dir))
+        elif dataset == "ade20k":
+            organizer.organize_ade20k("unused", str(output_dir))
+        else:
+            organizer.organize_cityscapes("unused-images", "unused-annotations", str(output_dir))
+
+    assert marker.read_bytes() == b"existing"
+    assert list(protected_dir.iterdir()) == [marker]
+    assert (output_dir / layout_name).is_symlink()
 
 
 def test_organize_cityscapes_materializes_lossless_validation_pairs(
