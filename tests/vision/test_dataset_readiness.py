@@ -254,3 +254,9 @@ def test_dense_readiness_rejects_symlinked_root_ancestors(
 
     assert not readiness.dataset_ready(symlinked_parent / "nyu-depth", "depth_estimation", "nyu-depth")
     assert not readiness.dataset_ready(symlinked_parent / "ade20k", "semantic_segmentation", "ade20k")
+
+    existing_dir = tmp_path / "existing"
+    existing_dir.mkdir()
+    traversed_parent = existing_dir / ".." / symlinked_parent.name
+    assert not readiness.dataset_ready(traversed_parent / "nyu-depth", "depth_estimation", "nyu-depth")
+    assert not readiness.dataset_ready(traversed_parent / "ade20k", "semantic_segmentation", "ade20k")
