@@ -21,7 +21,7 @@ from qbruntime import Cluster, CoreId
 
 from ..utils.core_mode import CoreMode, normalize_core_mode
 from ..utils.npu_backend import MobilintNPUBackend
-from ._model_paths import is_v2_3_positional_onnx_layout as _is_v2_3_positional_onnx_layout
+from ._model_paths import is_v2_3_engine_positional_layout as _is_v2_3_engine_positional_layout
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from .utils.postprocess import build_postprocess
@@ -282,7 +282,16 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
-        if _is_v2_3_positional_onnx_layout(model_path, mxq_path):
+        if _is_v2_3_engine_positional_layout(
+            model_path,
+            mxq_path,
+            dev_no,
+            core_mode,
+            target_cores,
+            postprocess_kwargs,
+            framework,
+            onnx_providers,
+        ):
             (
                 model_path,
                 mxq_path,
