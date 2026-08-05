@@ -18,7 +18,7 @@ def framework_from_model_path(model_path: str) -> str | None:
     return None
 
 
-def is_v2_3_engine_positional_layout(
+def uses_shifted_engine_model_path_layout(
     model_path: object,
     mxq_path: object,
     dev_no: object,
@@ -28,14 +28,14 @@ def is_v2_3_engine_positional_layout(
     framework: object,
     onnx_providers: object,
 ) -> bool:
-    """Return whether engine arguments match the v2.3 positional layout.
+    """Return whether engine arguments use the model-path-first layout.
 
-    The pre-v2.3 public signature used the third positional argument for
-    ``mxq_path``, while v2.3 used it for ``model_path``. An ONNX suffix always
-    identifies the newer layout because it changes runtime routing. For MXQ,
-    remapping is needed only when later values have the types produced by the
+    Public constructor layouts have used the third positional argument for
+    either ``mxq_path`` or ``model_path``. An ONNX suffix identifies the
+    model-path-first layout because it changes runtime routing. For MXQ,
+    remapping is needed only when later values have the types produced by a
     one-slot positional shift; a path by itself behaves identically as the
-    legacy ``mxq_path`` alias.
+    ``mxq_path`` alias.
     """
 
     if not isinstance(mxq_path, str):
@@ -59,13 +59,13 @@ def is_v2_3_engine_positional_layout(
     )
 
 
-def is_v2_3_compat_positional_layout(
+def uses_shifted_compat_model_path_layout(
     model_path: object,
     mxq_path: object,
     onnx_path: object,
     framework: object,
 ) -> bool:
-    """Return whether generated-wrapper arguments match the v2.3 tail."""
+    """Return whether generated-wrapper arguments use a shifted model-path tail."""
 
     if not isinstance(mxq_path, str):
         return False

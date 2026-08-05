@@ -309,11 +309,11 @@ def test_engine_init_preserves_legacy_positional_arguments(
         engine.dispose()
 
 
-def test_engine_init_preserves_v2_3_positional_mxq_runtime_arguments(
+def test_engine_init_preserves_shifted_positional_mxq_runtime_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Keep runtime arguments after the v2.3 positional MXQ ``model_path``."""
+    """Keep runtime arguments after a positional MXQ ``model_path``."""
 
     mxq_path = tmp_path / "model.mxq"
     mxq_path.write_bytes(b"mxq")
@@ -379,10 +379,10 @@ def test_legacy_wrapper_preserves_positional_path_and_framework_arguments(
     assert captured_kwargs["framework"] == "onnx"
 
 
-def test_legacy_wrapper_preserves_v2_3_positional_model_path(
+def test_legacy_wrapper_preserves_shifted_positional_model_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep the generated v2.3 positional ``model_path`` slot working for ONNX."""
+    """Keep the generated positional ``model_path`` slot working for ONNX."""
 
     captured_kwargs: dict[str, Any] = {}
 
@@ -401,10 +401,10 @@ def test_legacy_wrapper_preserves_v2_3_positional_model_path(
     assert captured_kwargs["framework"] == "onnx"
 
 
-def test_legacy_wrapper_preserves_v2_3_positional_mxq_tail(
+def test_legacy_wrapper_preserves_shifted_positional_mxq_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep the generated v2.3 positional tail working for MXQ."""
+    """Keep the generated shifted positional tail working for MXQ."""
 
     captured_kwargs: dict[str, Any] = {}
 
@@ -517,7 +517,7 @@ def test_engine_init_auto_detects_mxq_framework_from_model_path(
         engine.dispose()
 
 
-@pytest.mark.parametrize("model_path_style", ["keyword", "v2.3-positional", "v2.3-positional-runtime"])
+@pytest.mark.parametrize("model_path_style", ["keyword", "positional", "positional-runtime"])
 def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -568,9 +568,9 @@ def test_engine_init_accepts_local_onnx_model_path(
         "pre_cfg": {},
         "post_cfg": {},
     }
-    if model_path_style == "v2.3-positional":
+    if model_path_style == "positional":
         engine = MBLT_Engine(model_config, "DEFAULT", str(onnx_path))
-    elif model_path_style == "v2.3-positional-runtime":
+    elif model_path_style == "positional-runtime":
         engine = MBLT_Engine(
             model_config,
             "DEFAULT",
@@ -592,7 +592,7 @@ def test_engine_init_accepts_local_onnx_model_path(
     assert fake_ort.session is not None
     assert fake_ort.session.path == str(onnx_path)
     assert engine.framework == "onnx"
-    if model_path_style == "v2.3-positional-runtime":
+    if model_path_style == "positional-runtime":
         assert engine.file_cfg["dev_no"] == 3
         assert engine.file_cfg["core_mode"] == "global8"
         assert engine.file_cfg["target_cores"] == ["0:0"]

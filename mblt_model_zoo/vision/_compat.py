@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence, TypeAlias, cast
 
-from ._model_paths import is_v2_3_compat_positional_layout
+from ._model_paths import uses_shifted_compat_model_path_layout
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
@@ -127,7 +127,7 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         """
 
         del product
-        if is_v2_3_compat_positional_layout(model_path, mxq_path, onnx_path, framework):
+        if uses_shifted_compat_model_path_layout(model_path, mxq_path, onnx_path, framework):
             model_path, mxq_path, onnx_path, framework = (
                 mxq_path,
                 onnx_path,
