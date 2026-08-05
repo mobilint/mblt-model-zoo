@@ -249,7 +249,6 @@ class MBLT_Engine:
         self,
         model_cls: str | dict[str, Any],
         model_type: str = "DEFAULT",
-        model_path: str = "",
         mxq_path: str = "",
         onnx_path: str = "",
         dev_no: int | None = None,
@@ -259,15 +258,16 @@ class MBLT_Engine:
         postprocess_kwargs: dict[str, Any] | None = None,
         framework: str | None = None,
         onnx_providers: Sequence[str] | None = None,
+        model_path: str = "",
     ) -> None:
         """Initializes the MBLT_Engine.
 
         Args:
             model_cls(if dict):
                 file_cfg: Model configuration.
-                    model_path: generic path to local model file
                     mxq_path: path to mxq file
                     onnx_path: path to onnx file
+                    model_path: generic path to local model file
                     dev_no: Accelerator No.
                     core_mode: single, multi, global4, global8
                     target_cores: single mode

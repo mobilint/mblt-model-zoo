@@ -259,6 +259,78 @@ def test_engine_init_accepts_local_mxq_model_path(
         engine.dispose()
 
 
+def test_engine_init_preserves_legacy_positional_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep pre-``model_path`` positional arguments bound to their original fields."""
+
+    mxq_path = tmp_path / "legacy.mxq"
+    onnx_path = tmp_path / "legacy.onnx"
+    mxq_path.write_bytes(b"mxq")
+    onnx_path.write_bytes(b"onnx")
+    backend_kwargs: dict[str, Any] = {}
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            backend_kwargs.update(kwargs)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
+
+    engine = MBLT_Engine(
+        {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+        "DEFAULT",
+        str(mxq_path),
+        str(onnx_path),
+        3,
+        "global8",
+    )
+
+    try:
+        assert engine.file_cfg["mxq_path"] == str(mxq_path)
+        assert engine.file_cfg["onnx_path"] == str(onnx_path)
+        assert backend_kwargs["dev_no"] == 3
+        assert backend_kwargs["core_mode"] == "global8"
+    finally:
+        engine.dispose()
+
+
+def test_legacy_wrapper_preserves_positional_path_and_framework_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the generated compatibility constructor's original positional order."""
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _capture_engine_init(self: MBLT_Engine, **kwargs: Any) -> None:
+        del self
+        captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(MBLT_Engine, "__init__", _capture_engine_init)
+    compat_cls = create_model_class("ResNet50", "mblt_model_zoo.vision.image_classification")
+
+    compat_cls(None, "DEFAULT", "global8", "aries", 3, ["0:0"], [0], "legacy.mxq", "legacy.onnx", "onnx")
+
+    assert captured_kwargs["model_path"] == ""
+    assert captured_kwargs["mxq_path"] == "legacy.mxq"
+    assert captured_kwargs["onnx_path"] == "legacy.onnx"
+    assert captured_kwargs["framework"] == "onnx"
+
+
 def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
