@@ -297,7 +297,7 @@ class MobilintQwen2VLForConditionalGeneration(
     Qwen2VLForConditionalGeneration,
 ):
     def __init__(self, config: MobilintQwen2VLConfig, *args, **kwargs):
-        PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
+        self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.model = MobilintQwen2VLModel(config, _internal_call=True)
         # lm_head is done in self.model

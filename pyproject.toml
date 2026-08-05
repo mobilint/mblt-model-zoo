@@ -67,6 +67,7 @@ transformers = [
     "datasets>=3.2.0,<=3.6.0",
     "sentencepiece",
     "torchvision",
+    "torchcodec",
 ]
 MeloTTS = [
     "transformers>=4.54.0, <=5.12.1",

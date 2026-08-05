@@ -13,6 +13,7 @@ from transformers.models.qwen3_vl.modeling_qwen3_vl import (
     Qwen3VLForConditionalGeneration,
     Qwen3VLModel,
     Qwen3VLPreTrainedModel,
+    Qwen3VLVisionRotaryEmbedding,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
@@ -67,6 +68,28 @@ def _upstream_qwen3_vl_uses_structured_vision_outputs() -> bool:
         return True
 
 
+@lru_cache(maxsize=1)
+def _upstream_vision_rotary_takes_position_ids() -> bool:
+    """Return True when upstream ``Qwen3VLVisionRotaryEmbedding.forward`` takes ``position_ids``.
+
+    Older Transformers releases ship ``forward(self, seqlen: int)`` — we can
+    pass the max HW extent directly and index the returned freq table with
+    2-D coordinates. Newer releases (transformers 5.x onward) switched to
+    ``forward(self, position_ids: torch.Tensor)`` and return the
+    already-flattened freqs, so we must build the arange tensor ourselves.
+    Detecting by the first non-``self`` parameter name keeps us compatible
+    across the whole supported range (>=4.57.0, <=5.12.1) without pinning
+    to a specific transformers version.
+    """
+    try:
+        sig = inspect.signature(Qwen3VLVisionRotaryEmbedding.forward)
+    except (TypeError, ValueError):
+        return True
+    params = list(sig.parameters.values())
+    first = params[1].name if len(params) >= 2 else ""
+    return first == "position_ids"
+
+
 class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
     config: MobilintQwen3VLConfig
     base_model_prefix = "model"
@@ -80,15 +103,58 @@ class MobilintQwen3VLPreTrainedModel(Qwen3VLPreTrainedModel):
     _can_record_outputs = {}
 
 
+def fold_pixel_values(pixel_values: torch.Tensor) -> torch.Tensor:
+    """Fused repreprocess + fold: HF pixel_values (N, fold_in) -> (1, fold_in, 1, N)."""
+    n, fold_in = pixel_values.shape
+    return pixel_values.transpose(0, 1).reshape(1, fold_in, 1, n).contiguous()
+
+
 class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedModel):
     config: MobilintQwen3VLVisionConfig
     input_modalities = ("image", "video")
+
+    def __init__(self, config: MobilintQwen3VLVisionConfig, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+        num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
+        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs)
+        # Only the dynamic path consumes `pos_embed` and `rotary_pos_emb`
+        # (via `_prepare_dynamic_npu_inputs`), and static Qwen3-VL Hub
+        # checkpoints don't ship `visual.pos_embed.weight`. Skipping the
+        # allocation on static builds avoids a spurious "MISSING: newly
+        # initialized" load warning for a weight that would never be used.
+        if self._uses_dynamic_vision:
+            self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
+            self.num_grid_per_side = int(config.num_position_embeddings**0.5)
+            head_dim = config.hidden_size // config.num_heads
+            self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
         kwargs["_internal_call"] = True
         return super()._from_config(config, **kwargs)
+
+    @staticmethod
+    def _resolve_dynamic_vision_flag(num_mxq_inputs: int) -> bool:
+        """Detect the vision dispatch path from the compiled MXQ input count.
+
+        1-input builds take a single folded pixel tensor (static path);
+        3-input builds take ``[rope, pos, folded]`` (dynamic path). Any other
+        signature is a compile-side mismatch we cannot recover from — raise
+        rather than guess so a wrong-shape input never reaches the NPU. The
+        top-level ``config.dynamic_vision`` hint is reconciled against this
+        detected value at the composite-model level (see
+        ``MobilintQwen3VLModel._reconcile_dynamic_vision``); this helper stays
+        purely a function of the compiled MXQ.
+        """
+        if num_mxq_inputs == 1:
+            return False
+        if num_mxq_inputs == 3:
+            return True
+        raise ValueError(
+            f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
+            f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
+        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -139,6 +205,94 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 return structured_outputs.to_tuple()
             return structured_outputs
         return image_embeds, deepstack_embeds
+
+    def _rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        merge_size = int(self.config.spatial_merge_size)
+        max_hw = int(grid_thw[:, 1:].max().item())
+        if _upstream_vision_rotary_takes_position_ids():
+            inv_freq = self.rotary_pos_emb.inv_freq
+            position_ids = torch.arange(max_hw, device=inv_freq.device, dtype=inv_freq.dtype)
+            freq_table = self.rotary_pos_emb(position_ids)
+        else:
+            freq_table = self.rotary_pos_emb(max_hw)
+        device = freq_table.device
+        total_tokens = int(torch.prod(grid_thw, dim=1).sum().item())
+        pos_ids = torch.empty((total_tokens, 2), dtype=torch.long, device=device)
+        offset = 0
+        for num_frames, height, width in grid_thw:
+            merged_h, merged_w = height // merge_size, width // merge_size
+            block_rows = torch.arange(merged_h, device=device)
+            block_cols = torch.arange(merged_w, device=device)
+            intra_row = torch.arange(merge_size, device=device)
+            intra_col = torch.arange(merge_size, device=device)
+            row_idx = block_rows[:, None, None, None] * merge_size + intra_row[None, None, :, None]
+            col_idx = block_cols[None, :, None, None] * merge_size + intra_col[None, None, None, :]
+            row_idx = row_idx.expand(merged_h, merged_w, merge_size, merge_size).reshape(-1)
+            col_idx = col_idx.expand(merged_h, merged_w, merge_size, merge_size).reshape(-1)
+            coords = torch.stack((row_idx, col_idx), dim=-1)
+            if num_frames > 1:
+                coords = coords.repeat(num_frames, 1)
+            num_tokens = coords.shape[0]
+            pos_ids[offset : offset + num_tokens] = coords
+            offset += num_tokens
+        embeddings = freq_table[pos_ids]
+        return embeddings.flatten(1)
+
+    def _fast_pos_embed_interpolate(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        grid_ts, grid_hs, grid_ws = grid_thw[:, 0], grid_thw[:, 1], grid_thw[:, 2]
+        idx_list: list[list] = [[] for _ in range(4)]
+        weight_list: list[list] = [[] for _ in range(4)]
+        for t, h, w in zip(grid_ts, grid_hs, grid_ws):
+            h_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(h))
+            w_idxs = torch.linspace(0, self.num_grid_per_side - 1, int(w))
+            h_idxs_floor = h_idxs.int()
+            w_idxs_floor = w_idxs.int()
+            h_idxs_ceil = (h_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
+            w_idxs_ceil = (w_idxs.int() + 1).clip(max=self.num_grid_per_side - 1)
+            dh = h_idxs - h_idxs_floor
+            dw = w_idxs - w_idxs_floor
+            base_h = h_idxs_floor * self.num_grid_per_side
+            base_h_ceil = h_idxs_ceil * self.num_grid_per_side
+            indices = [
+                (base_h[None].T + w_idxs_floor[None]).flatten(),
+                (base_h[None].T + w_idxs_ceil[None]).flatten(),
+                (base_h_ceil[None].T + w_idxs_floor[None]).flatten(),
+                (base_h_ceil[None].T + w_idxs_ceil[None]).flatten(),
+            ]
+            weights = [
+                ((1 - dh)[None].T * (1 - dw)[None]).flatten(),
+                ((1 - dh)[None].T * dw[None]).flatten(),
+                (dh[None].T * (1 - dw)[None]).flatten(),
+                (dh[None].T * dw[None]).flatten(),
+            ]
+            for i in range(4):
+                idx_list[i].extend(indices[i].tolist())
+                weight_list[i].extend(weights[i].tolist())
+        device = self.pos_embed.weight.device
+        idx_tensor = torch.tensor(idx_list, dtype=torch.long, device=device)
+        weight_tensor = torch.tensor(weight_list, dtype=self.pos_embed.weight.dtype, device=device)
+        pos_embeds = self.pos_embed(idx_tensor) * weight_tensor[:, :, None]
+        patch_pos_embeds = pos_embeds[0] + pos_embeds[1] + pos_embeds[2] + pos_embeds[3]
+        patch_pos_embeds = patch_pos_embeds.split([int(h * w) for h, w in zip(grid_hs, grid_ws)])
+        merge_size = int(self.config.spatial_merge_size)
+        result = []
+        for pos_embed, t, h, w in zip(patch_pos_embeds, grid_ts, grid_hs, grid_ws):
+            pos_embed = pos_embed.repeat(int(t), 1)
+            pos_embed = (
+                pos_embed.view(int(t), int(h) // merge_size, merge_size, int(w) // merge_size, merge_size, -1)
+                .permute(0, 1, 3, 2, 4, 5)
+                .flatten(0, 4)
+            )
+            result.append(pos_embed)
+        return torch.cat(result)
+
+    @torch.no_grad()
+    def compute_side_inputs(self, grid_thw: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        pos_embeds = self._fast_pos_embed_interpolate(grid_thw)
+        rotary = self._rot_pos_emb(grid_thw)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        cos_sin = torch.cat([emb.cos(), emb.sin()], dim=-1)
+        return pos_embeds, cos_sin
 
     def _repreprocess_pixel_values(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """Match the runtime `repreprocess_pixel_values` layout for one Qwen3-VL image input."""
@@ -199,6 +353,41 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         processed = processed.squeeze(0).permute(1, 2, 0).contiguous()
         return processed.to(torch.float32).cpu().numpy()
 
+    def _prepare_dynamic_npu_inputs(
+        self, hidden_states: torch.Tensor, grid: torch.Tensor
+    ) -> list[np.ndarray]:
+        grid_thw = grid.unsqueeze(0) if grid.dim() == 1 else grid
+        folded = fold_pixel_values(hidden_states)
+        pos_embeds, _ = self.compute_side_inputs(grid_thw)
+        n = folded.shape[-1]
+
+        folded_np = folded.squeeze(2).permute(0, 2, 1).contiguous().to(torch.float32).cpu().numpy()
+        pos_np = pos_embeds.reshape(1, n, -1).to(torch.float32).cpu().numpy()
+        rope_np = self._build_vision_rotate_tensor(grid_thw)
+
+        return [rope_np, pos_np, folded_np]
+
+    def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
+        """Build rotateTensor-format rotary for the vision encoder (matches MXQ peSize layout)."""
+        rotary = self._rot_pos_emb(grid_thw)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        cos_val = emb.cos()
+        sin_val = emb.sin()
+
+        n = emb.shape[0]
+        dim = emb.shape[-1]
+        half_dim = dim // 2
+        tgt_half = ((dim + 63) // 64) * 64
+        pe_size = 2 * tgt_half
+
+        rt = torch.zeros(n, pe_size, dtype=torch.float32)
+        rt[:, 0:dim:2] = cos_val[:, :half_dim]
+        rt[:, 1:dim:2] = -sin_val[:, :half_dim]
+        rt[:, dim : 2 * dim : 2] = sin_val[:, half_dim:]
+        rt[:, dim + 1 : 2 * dim : 2] = cos_val[:, half_dim:]
+
+        return rt.reshape(1, n, pe_size).numpy()
+
     def _split_hidden_states_by_grid(
         self,
         hidden_states: torch.Tensor,
@@ -252,6 +441,18 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected Qwen3-VL vision output shape: {tuple(np.asarray(output).shape)}")
         return torch.tensor(output_array, dtype=torch.float32, device=device)
 
+    def _split_video_into_dynamic_frames(
+        self, chunk: torch.Tensor, grid: torch.Tensor
+    ) -> list[list[np.ndarray]]:
+        gt, gh, gw = (int(x) for x in grid.tolist())
+        tokens_per_frame = gh * gw
+        frame_grid = torch.tensor([1, gh, gw], dtype=grid.dtype, device=grid.device)
+        frames = []
+        for f in range(gt):
+            frame_chunk = chunk[f * tokens_per_frame : (f + 1) * tokens_per_frame]
+            frames.append(self._prepare_dynamic_npu_inputs(frame_chunk, frame_grid))
+        return frames
+
     def _encode_images(
         self,
         hidden_states: torch.Tensor,
@@ -259,11 +460,47 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run Qwen3-VL vision encoding with core-mode-specific batch handling."""
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
-        npu_inputs = [self._prepare_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        is_dynamic = self._uses_dynamic_vision
+
+        # Defense-in-depth video guard behind the processor-level check in
+        # `MobilintQwen3VLProcessor.__call__`: static Qwen3-VL MXQ releases bake a
+        # single image's 2D RoPE + fixed visual-token count into the text decoder,
+        # so video (per-frame RoPE + variable visual-token count) silently degrades
+        # into embeddings the language model still decodes into plausible-looking
+        # but semantically wrong text. `grid_thw[i, 0] > 1` is a per-row property
+        # (frame count in one video), so it is safe to enforce here — unlike
+        # multi-image, which the model cannot distinguish from batched single-image
+        # samples given only `grid_thw` (that guard lives in the processor).
+        if not is_dynamic and any(int(g[0].item()) > 1 for g in grid_thw):
+            raise NotImplementedError(
+                "Video input requires a dynamic-vision Qwen3-VL MXQ (3-input vision + "
+                "variable visual-token count in the text decoder). The currently loaded "
+                "vision MXQ is static (single-tensor input with fixed frame size). Use a "
+                "Qwen3-VL release that ships a dynamic vision MXQ, or pass only image "
+                "inputs."
+            )
+
+        npu_inputs: list = []
+        for chunk, grid in zip(chunks, grid_thw):
+            gt = grid[0].item()
+            if gt > 1:
+                npu_inputs.extend(self._split_video_into_dynamic_frames(chunk, grid))
+            else:
+                if is_dynamic:
+                    npu_inputs.append(self._prepare_dynamic_npu_inputs(chunk, grid))
+                else:
+                    npu_inputs.append(self._prepare_npu_inputs(chunk, grid))
+
         npu_backend = getattr(self, "npu_backend", None)
         core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
         mxq_model = self.get_mxq_model()
-        if core_mode == "multi" and len(npu_inputs) > 1:
+        for i, inp in enumerate(npu_inputs):
+            if isinstance(inp, list):
+                shapes = [np.asarray(x).shape for x in inp]
+                logger.debug("[Vision] Input[%d] (dynamic, %d tensors): %s", i, len(inp), shapes)
+            else:
+                logger.debug("[Vision] Input[%d] shape: %s", i, np.asarray(inp).shape)
+        if not is_dynamic and core_mode == "multi" and len(npu_inputs) > 1:
             encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
             if encoder_outputs is None:
                 raise RuntimeError("Vision MXQ inference returned None.")
@@ -283,6 +520,173 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 deepstack_by_layer[layer_idx].append(deepstack_embed)
 
         return torch.cat(image_embeds, dim=0), [torch.cat(layer_embeds, dim=0) for layer_embeds in deepstack_by_layer]
+
+
+class MobilintQwen3VLRotaryEmbedding(nn.Module):
+    """Pre-computed MRoPE for Qwen3-VL on MXQ.
+
+    Builds a 1-D ``position_table[max_pos, peSize]`` at init (rotateTensor
+    format, same layout as ``CachedRotaryEmbedding`` in
+    ``mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils``) and three
+    dimension masks derived from ``mrope_section``.  At forward time the
+    table is indexed by the per-dimension position ids and merged via the
+    masks — no matmul, cos/sin, or interleave at runtime.
+    """
+
+    def __init__(self, config, device=None):
+        super().__init__()
+        self.head_dim = config.head_dim
+        self.max_seq_len = config.max_position_embeddings
+
+        # Transformers 5.x folds rope_theta into `rope_parameters` (exposed via
+        # the `rope_scaling` property) during config __post_init__, so the flat
+        # attribute is dropped. Transformers 4.x keeps `rope_theta` as its own
+        # attribute. Read both.
+        rope_scaling = getattr(config, "rope_scaling", None)
+        if rope_scaling is None or "mrope_section" not in rope_scaling:
+            raise ValueError(
+                "MobilintQwen3VLRotaryEmbedding requires config.rope_scaling.mrope_section; "
+                "check that the Qwen3-VL text config was loaded correctly."
+            )
+        self.mrope_section = rope_scaling["mrope_section"]
+
+        rope_theta = getattr(config, "rope_theta", None)
+        if rope_theta is None:
+            rope_theta = rope_scaling.get("rope_theta")
+        if rope_theta is None:
+            raise ValueError(
+                "MobilintQwen3VLRotaryEmbedding requires config.rope_theta (Transformers <5) or "
+                "config.rope_scaling['rope_theta'] (Transformers >=5); check that the Qwen3-VL "
+                "text config was loaded correctly."
+            )
+        self.rope_theta = rope_theta
+
+        dim = self.head_dim
+        inv_freq = 1.0 / (
+            self.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
+        )
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+        chSize = dim
+        tgt_half = ((chSize + 63) // 64) * 64
+        self.peSize = 2 * tgt_half
+
+        self._build_dim_masks()
+        # HF Transformers 5.x materializes weights lazily under
+        # `torch.set_default_device("meta")`, so `inv_freq` starts on meta and
+        # `_build_position_table` would fail at `.cpu().numpy()`. Defer the
+        # table build until forward, mirroring
+        # `mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils.CachedRotaryEmbedding`.
+        self.position_table = None
+        if self.inv_freq.device.type != "meta":
+            self._build_position_table(device=device)
+
+    def _build_dim_masks(self):
+        """Build boolean masks mapping each peSize entry to T / H / W."""
+        dim = self.head_dim
+        halfDim = dim // 2
+
+        freq_dim = np.full(dim // 2, 0, dtype=np.int32)  # default: T
+        for dim_idx, offset in enumerate((1, 2), start=1):
+            length = self.mrope_section[dim_idx] * 3
+            indices = np.arange(offset, length, 3)
+            freq_dim[indices] = dim_idx
+
+        pe_dim = np.full(self.peSize, -1, dtype=np.int32)
+        for fi in range(halfDim):
+            d = freq_dim[fi]
+            pe_dim[2 * fi] = d       # cos slot (first half)
+            pe_dim[2 * fi + 1] = d   # -sin slot (first half)
+        for fi in range(halfDim):
+            d = freq_dim[fi]
+            base = dim + 2 * fi
+            if base < self.peSize:
+                pe_dim[base] = d      # sin slot (second half)
+            if base + 1 < self.peSize:
+                pe_dim[base + 1] = d  # cos slot (second half)
+
+        self.mask_t = pe_dim == 0
+        self.mask_h = pe_dim == 1
+        self.mask_w = pe_dim == 2
+
+    def _build_position_table(self, device=None):
+        """Pre-compute rotateTensor rows for positions 0..max_seq_len-1."""
+        if device is None:
+            device = self.inv_freq.device
+
+        with torch.no_grad():
+            dim = self.head_dim
+            # Recompute inv_freq locally. On tf 5.x, `from_pretrained` loads the
+            # module under `torch.set_default_device("meta")` so the `arange(...)
+            # / dim` in `__init__` runs on meta and the ``inv_freq`` register_buffer
+            # is later materialized off meta with uninitialized bytes (garbage
+            # floats, not the correct 1 / theta^(2i/d)). Since inv_freq is a pure
+            # function of (rope_theta, head_dim), recomputing here avoids the meta
+            # trap and matches the tf 4.x path bit-for-bit.
+            inv_freq = 1.0 / (
+                self.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
+            )
+            T = self.max_seq_len
+            t = torch.arange(T, device=device, dtype=inv_freq.dtype)
+            freqs = torch.einsum("i,j->ij", t, inv_freq)  # [T, dim/2]
+            emb = torch.cat((freqs, freqs), dim=-1)             # [T, dim]
+
+            cos_val = emb.cos()
+            sin_val = emb.sin()
+
+            dim = self.head_dim
+            halfDim = dim // 2
+
+            cos_ = cos_val.unsqueeze(0).unsqueeze(0)  # [1, 1, T, dim]
+            sin_ = sin_val.unsqueeze(0).unsqueeze(0)
+
+            rotateTensor = torch.zeros(1, 1, T, 2 * dim, device=device, dtype=torch.float32)
+            rotateTensor[..., 0:dim:2] = cos_[..., :halfDim]
+            rotateTensor[..., 1:dim:2] = -sin_[..., :halfDim]
+            rotateTensor[..., dim:2 * dim:2] = sin_[..., halfDim:dim]
+            rotateTensor[..., dim + 1:2 * dim:2] = cos_[..., halfDim:dim]
+
+            if rotateTensor.shape[-1] != self.peSize:
+                pad = self.peSize - rotateTensor.shape[-1]
+                if pad > 0:
+                    rotateTensor = torch.nn.functional.pad(rotateTensor, (0, pad))
+
+            self.position_table = rotateTensor.cpu().numpy()[0, 0]  # [T, peSize]
+
+    @torch.no_grad()
+    def forward(self, x, position_ids):
+        """Index pre-computed table by 3-D position ids.
+
+        Args:
+            x: unused (API compat with upstream rotary_emb).
+            position_ids: ``(3, batch, seq_len)`` or ``(batch, seq_len)``.
+
+        Returns:
+            numpy array of shape ``(batch, seq_len, peSize)``.
+        """
+        if position_ids.ndim == 2:
+            position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+
+        pos_np = position_ids.cpu().numpy()  # (3, B, S)
+        batch_size = pos_np.shape[1]
+        seq_len = pos_np.shape[2]
+
+        max_pos = int(pos_np.max()) + 1
+        if self.position_table is None or max_pos > self.max_seq_len:
+            self.max_seq_len = max(max_pos, self.max_seq_len)
+            self._build_position_table(device=self.inv_freq.device)
+
+        result = np.empty((batch_size, seq_len, self.peSize), dtype=np.float32)
+        for b in range(batch_size):
+            rows_t = self.position_table[pos_np[0, b]]  # (S, peSize)
+            rows_h = self.position_table[pos_np[1, b]]
+            rows_w = self.position_table[pos_np[2, b]]
+            buf = result[b]
+            buf[:, self.mask_t] = rows_t[:, self.mask_t]
+            buf[:, self.mask_h] = rows_h[:, self.mask_h]
+            buf[:, self.mask_w] = rows_w[:, self.mask_w]
+
+        return result
 
 
 class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen3VLPreTrainedModel):
@@ -305,7 +709,53 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         super().__init__(config, *args, **kwargs)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        # Supported compiled layouts (detected from the MXQ variant handle,
+        # not ``max_batch_size``):
+        #   * Non-batch (``max_batch_size == 1``): 2 or 3 inputs.
+        #     - 2-input ``[inputs_embeds (1,-1,H), deepstack (num_layers,-1,H)]``
+        #       — legacy/static: MRoPE is baked into the compiled model, no
+        #       external rope tensor is fed. Used by the 2B/4B W8 builds.
+        #     - 3-input ``[inputs_embeds (1,-1,H), deepstack (num_layers,-1,H),
+        #       rope (1,-1,peSize)]`` — dynamic: rope table produced by
+        #       :class:`MobilintQwen3VLRotaryEmbedding` and threaded through
+        #       ``_do_infer``. Used by the 8B W8 build shipped on HF Hub.
+        #   * Batch (``max_batch_size > 1``, e.g. the Batch16 W8 build):
+        #     3-input ``[inputs_embeds (1,-1,H), rope (1,-1,peSize),
+        #     deepstack (num_layers,-1,H)]`` only — the legacy 2-input batch
+        #     MXQ is no longer supported (see ``_llm_forward_batch_deepstack``).
+        # The 3-input orders differ between non-batch and batch builds; the
+        # compiled signatures are independent and each dispatch honors its own
+        # layout. We trust the compiled MXQ over any config attr for the input
+        # count since batch builds fuse every tensor into a single
+        # ``get_input_buffer_info()`` entry (would misreport as 1). The variant
+        # handle's ``get_model_input_shape()`` returns one shape per tensor
+        # input regardless of buffer fusion.
+        num_mxq_inputs = self._get_num_mxq_inputs()
+        if num_mxq_inputs == 3:
+            self._uses_rope_input = True
+            self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
+        elif num_mxq_inputs == 2:
+            self._uses_rope_input = False
+            self.rotary_emb = None
+        else:
+            raise ValueError(
+                f"Qwen3-VL text MXQ must expose 2 (non-batch: [inputs, deepstack]) or "
+                f"3 (non-batch: [inputs, deepstack, rope] / batch: [inputs, rope, "
+                f"deepstack]) inputs; got {num_mxq_inputs}."
+            )
         self.num_deepstack_layers = 0
+
+    def _get_num_mxq_inputs(self) -> int:
+        """Return the compiled MXQ's true input tensor count.
+
+        Reads the variant handle's ``get_model_input_shape()`` rather than
+        ``get_input_buffer_info()`` because batch builds fuse every input
+        tensor into a single buffer-info entry (misreporting as 1). The
+        variant handle exposes one shape per tensor input for both batch
+        and non-batch layouts.
+        """
+        handle = self.get_mxq_model().get_model_variant_handle(0)
+        return len(handle.get_model_input_shape())
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -377,6 +827,21 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 torch.arange(past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device),
             )
 
+        if self._uses_rope_input:
+            # the hard coded `3` is for temporal, height and width.
+            if position_ids is None:
+                position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
+            elif position_ids.ndim == 2:
+                position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+
+            if position_ids.ndim == 3 and position_ids.shape[0] == 4:
+                position_ids = position_ids[1:]
+
+            assert self.rotary_emb is not None
+            position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+        else:
+            position_embeddings = None
+
         logits = self.llm_forward(
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
@@ -387,6 +852,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             visual_pos_masks=visual_pos_masks,
             attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,
+            position_embeddings=position_embeddings,
         )
 
         return BaseModelOutputWithPast(
@@ -405,6 +871,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         count_npu_time: bool = False,
         attention_mask: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        position_embeddings: Optional[np.ndarray] = None,
     ) -> torch.Tensor:
         """Run the dual-input MXQ decoder with HF-style ``logits_to_keep``.
 
@@ -426,6 +893,9 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 MXQ can process every batch row in a single infer call.
             logits_to_keep: HF-style position selector; see the shared
                 :meth:`MobilintModelMixin.llm_forward` for details.
+            position_embeddings: Pre-computed RoPE numpy array of shape
+                ``(batch, seq_len, peSize)`` from
+                :class:`MobilintQwen3VLRotaryEmbedding`.
 
         Returns:
             Decoder logits for the requested token positions.
@@ -454,6 +924,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 npu_prefill_chunk_size=npu_prefill_chunk_size,
                 count_npu_time=count_npu_time,
                 logits_to_keep=logits_to_keep,
+                position_embeddings=position_embeddings,
             )
 
         if inputs_embeds.shape[0] != 1:
@@ -498,15 +969,31 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                     dtype=torch.float32,
                 ).cpu().numpy()
 
+            # Non-batch (``max_batch_size == 1``) builds ship two MXQ layouts:
+            #   * 2-input ``[inputs, deepstack]`` — legacy/static: MRoPE baked
+            #     into the compiled model, no rope tensor is fed.
+            #   * 3-input ``[inputs, deepstack, rope]`` — dynamic: rope threaded
+            #     externally as ``(1, seq, peSize)`` after deepstack. Note this
+            #     order differs from the batched build's ``[inputs, rope,
+            #     deepstack]`` (see ``_llm_forward_batch_deepstack``); the
+            #     compiled signatures are independent so we honor each path's
+            #     actual input layout rather than unifying them.
+            infer_inputs = [inputs_chunk, deepstack_chunk]
+            if self._uses_rope_input:
+                assert position_embeddings is not None, (
+                    "position_embeddings must be provided for the 3-input Qwen3-VL text MXQ."
+                )
+                infer_inputs.append(position_embeddings[:, start_index:end_index, :])
+
             if count_npu_time:
                 import time
 
                 t1 = time.perf_counter()
-                result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
                 assert self.npu_time is not None
                 self.npu_time += time.perf_counter() - t1
             else:
-                result = mxq_model.infer([inputs_chunk, deepstack_chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
 
             if result is None:
                 raise RuntimeError("Text MXQ inference returned None.")
@@ -651,6 +1138,32 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             per_item.append(padded)
         return per_item
 
+    def _build_batched_rope_arrays(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_embeddings: np.ndarray,
+    ) -> list[np.ndarray]:
+        """Slice a batched ``(batch, seq_len, peSize)`` rope array per active item.
+
+        Mirrors :meth:`_build_batched_deepstack_tensors`'s per-item slicing so
+        the closure in :meth:`_llm_forward_batch_deepstack` can select the
+        same ``[chunk_start, chunk_start + chunk_len_k)`` window on rope that
+        ``_assemble_batch_chunk`` selects on ``inputs_embeds_masked[j]``.
+
+        Returns:
+            List of length ``batch_size``. Item ``j`` has shape
+            ``(seq_len_j, peSize)`` where ``seq_len_j`` matches the compacted
+            per-item embed length (or 1 in the decode-shaped fallback).
+        """
+        batch_size = int(inputs_embeds.shape[0])
+        if attention_mask.shape == inputs_embeds.shape[:-1]:
+            attention_mask_bool_np = attention_mask.type(torch.bool).cpu().numpy()
+            return [position_embeddings[j, attention_mask_bool_np[j], :] for j in range(batch_size)]
+        # Decode-shaped fallback: no per-token attention mask, single-token rows.
+        assert inputs_embeds.shape[1] == 1
+        return [position_embeddings[j, :, :] for j in range(batch_size)]
+
     def _llm_forward_batch_deepstack(
         self,
         inputs_embeds: torch.Tensor,
@@ -662,6 +1175,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         npu_prefill_chunk_size: Optional[int] = None,
         count_npu_time: bool = False,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        position_embeddings: Optional[np.ndarray] = None,
     ) -> torch.Tensor:
         """Batched sibling of :meth:`llm_forward` that also packs deepstack chunks.
 
@@ -674,8 +1188,26 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         ``update_seen_tokens`` — the shared helper does that here too, so
         we skip ``cache.set_deepstack_tensor`` / ``update_cache_position``
         (they are only needed by the single-batch decode replay path).
+
+        The batched path only supports the 3-input ``[inputs, rope,
+        deepstack]`` MXQ signature (i.e. the current Batch16 W8 build). The
+        caller supplies a shared ``position_embeddings`` array of shape
+        ``(batch, seq_len, peSize)`` pre-computed once in :meth:`forward`;
+        per-item rope rows are sliced the same way as deepstack and
+        concatenated so the packed extras arrive at the compiled model as
+        ``[rope, deepstack]`` — the positions the 3-input MXQ expects.
         """
         del cache_position  # Batched path uses `update_seen_tokens` bookkeeping.
+
+        if not self._uses_rope_input:
+            raise ValueError(
+                "Batched Qwen3-VL text inference requires a 3-input "
+                "[inputs, rope, deepstack] MXQ (the current Batch16 build). "
+                "The legacy 2-input batch MXQ is no longer supported."
+            )
+        assert position_embeddings is not None, (
+            "position_embeddings must be provided for the 3-input Qwen3-VL text MXQ."
+        )
 
         resolved_npu_prefill_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
 
@@ -685,6 +1217,11 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             visual_pos_masks=visual_pos_masks,
             deepstack_visual_embeds=deepstack_visual_embeds,
         )
+        rope_by_item = self._build_batched_rope_arrays(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_embeddings=position_embeddings,
+        )
 
         def _pack_deepstack_extras(
             *,
@@ -692,18 +1229,28 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             sequence_lengths_chunks: list[int],
             cache_ids: list[int],
         ) -> list[np.ndarray]:
-            # Slice each active item's deepstack tensor with the same
-            # `[start, start + chunk_len_k)` window `_assemble_batch_chunk`
-            # used for its inputs_embeds row, then concat along the token
-            # axis so the packed shape matches the compiled model's
-            # `(num_layers, packed_tokens, hidden)` layout.
+            # Batched builds ship the 3-input signature
+            # ``[inputs, rope, deepstack]``. Slice each active item's
+            # per-item tensors with the same
+            # ``[chunk_start, chunk_start + chunk_len_k)`` window the base
+            # helper uses for ``inputs_embeds_masked`` and concat along the
+            # token axis so the packed shapes match the compiled model:
+            # rope becomes ``(1, packed_tokens, peSize)`` (leading batch
+            # axis lifted from the per-item ``(seq_len_j, peSize)`` slices)
+            # and deepstack becomes ``(num_layers, packed_tokens, hidden)``.
+            rope_chunks: list[np.ndarray] = []
             deepstack_chunks: list[torch.Tensor] = []
             for k, cache_id in enumerate(cache_ids):
                 length = sequence_lengths_chunks[k]
                 end = chunk_start + length
+                rope_chunks.append(rope_by_item[cache_id][chunk_start:end, :])
                 deepstack_chunks.append(deepstack_by_item[cache_id][:, chunk_start:end, :])
+            rope_concat = np.concatenate(rope_chunks, axis=0)[np.newaxis, :, :]
             deepstack_concat = torch.cat(deepstack_chunks, dim=1)
-            return [deepstack_concat.to(dtype=torch.float32).cpu().numpy()]
+            return [
+                rope_concat.astype(np.float32, copy=False),
+                deepstack_concat.to(dtype=torch.float32).cpu().numpy(),
+            ]
 
         return self._llm_forward_batch(
             inputs_embeds,
@@ -725,6 +1272,100 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.language_model = MobilintQwen3VLTextModel._from_config(config.text_config, _internal_call=True)
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
         self.rope_deltas = None
+        self._reconcile_dynamic_vision(config, visual=self.visual, language_model=self.language_model)
+
+    @staticmethod
+    def _reconcile_dynamic_vision(
+        config: MobilintQwen3VLConfig,
+        vision_dynamic: bool | None = None,
+        text_dynamic: bool | None = None,
+        *,
+        visual=None,
+        language_model=None,
+    ) -> bool:
+        """Reconcile ``config.dynamic_vision`` against paired vision/text MXQ signatures.
+
+        ``dynamic_vision`` is a release-level attribute: the vision MXQ, text
+        MXQ, image processor, and video processor are a *bundled release* and
+        cannot be swapped independently. A dynamic-vision MXQ produces per-image
+        / per-frame RoPE tensors that the text MXQ must consume via its rope
+        input; a static-vision MXQ bakes MRoPE into the text decoder. Pairing
+        a dynamic vision MXQ with a legacy static text MXQ (or vice versa) is
+        silently semantically wrong — the language model loses image-boundary
+        information and emits plausible-but-corrupted output.
+
+        Each submodule detects its own signature from its compiled MXQ:
+
+        * ``visual._uses_dynamic_vision`` is True for a 3-input vision MXQ.
+        * ``language_model._uses_rope_input`` is True for a 3-input text MXQ
+          that receives a per-image rope tensor.
+
+        The two flags must agree. When they disagree we raise ``ValueError``
+        with both flags and both MXQ paths so the caller can either load a
+        consistent release or override both sides. When they agree we promote
+        the value onto ``config.dynamic_vision`` and warn once when the shipped
+        config hint disagrees, so downstream consumers (processor, video
+        processor) can trust the top-level attr.
+
+        Args:
+            config: Composite Qwen3-VL config carrying the top-level hint.
+            vision_dynamic: Detected vision path. When ``None``, read from
+                ``visual``.
+            text_dynamic: Detected text path. When ``None``, read from
+                ``language_model``.
+            visual: Vision submodule exposing ``_uses_dynamic_vision``,
+                consulted only when ``vision_dynamic`` is not supplied.
+            language_model: Text submodule exposing ``_uses_rope_input``,
+                consulted only when ``text_dynamic`` is not supplied.
+
+        Returns:
+            The reconciled dynamic-vision flag now stored on ``config``.
+
+        Raises:
+            ValueError: When ``vision_dynamic`` and ``text_dynamic`` disagree,
+                or when a required detection source is missing.
+        """
+        if vision_dynamic is None:
+            if visual is None:
+                raise ValueError(
+                    "_reconcile_dynamic_vision needs `vision_dynamic` or `visual`."
+                )
+            vision_dynamic = bool(getattr(visual, "_uses_dynamic_vision", False))
+        if text_dynamic is None:
+            if language_model is None:
+                raise ValueError(
+                    "_reconcile_dynamic_vision needs `text_dynamic` or `language_model`."
+                )
+            text_dynamic = bool(getattr(language_model, "_uses_rope_input", False))
+        vision_dynamic = bool(vision_dynamic)
+        text_dynamic = bool(text_dynamic)
+        if vision_dynamic != text_dynamic:
+            vision_path = getattr(config, "vision_mxq_path", "<unknown>")
+            text_path = getattr(config, "text_mxq_path", "<unknown>")
+            raise ValueError(
+                "Qwen3-VL vision and text MXQs are a bundled release and cannot "
+                "be swapped independently: visual._uses_dynamic_vision="
+                f"{vision_dynamic} disagrees with language_model._uses_rope_input="
+                f"{text_dynamic}. A dynamic-vision MXQ produces per-image RoPE "
+                "tensors that the text MXQ must consume via its rope input; "
+                "pairing a 3-input vision MXQ with a legacy 2-input text MXQ "
+                "(or vice versa) silently corrupts image-boundary information. "
+                f"vision_mxq_path={vision_path!r}, text_mxq_path={text_path!r}. "
+                "Load a consistent Qwen3-VL release, or override both "
+                "vision_mxq_path= and text_mxq_path= to a matching pair."
+            )
+        detected = vision_dynamic
+        config_hint = bool(getattr(config, "dynamic_vision", False))
+        if config_hint != detected:
+            logger.warning_once(
+                "Qwen3-VL config.dynamic_vision=%s disagrees with vision MXQ "
+                "detection (%s); trusting the MXQ. Update the config or the "
+                "shipped MXQ to match.",
+                config_hint,
+                detected,
+            )
+        config.dynamic_vision = detected
+        return detected
 
 
 class MobilintQwen3VLForConditionalGeneration(
@@ -734,12 +1375,44 @@ class MobilintQwen3VLForConditionalGeneration(
     Qwen3VLForConditionalGeneration,
 ):
     def __init__(self, config: MobilintQwen3VLConfig, *args, **kwargs):
-        PretrainedOnlyMixin.__init__(self, config, *args, **kwargs)
+        self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.model = MobilintQwen3VLModel(config, _internal_call=True)
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
+
+    def sync_dynamic_vision_from_model(self) -> bool:
+        """Re-reconcile ``config.dynamic_vision`` from the loaded vision + text MXQs.
+
+        Vision and text MXQs are a *bundled release* — one cannot be swapped
+        independently, because a dynamic-vision MXQ produces per-image RoPE
+        tensors that the text MXQ must consume via its rope input. This helper
+        reads both compiled signatures and either promotes the agreed value
+        onto ``self.config.dynamic_vision`` or raises when they disagree.
+
+        The composite ``__init__`` already runs this reconciliation once, so
+        calling this helper is only necessary when the model was loaded with a
+        runtime override (e.g. ``vision_mxq_path=``) that could have swapped
+        one side without the other. It re-checks the flags via
+        :meth:`MobilintQwen3VLModel._reconcile_dynamic_vision`, so the same
+        bundled-release invariant is enforced at both init time and post-load
+        override time.
+
+        Returns:
+            The reconciled dynamic-vision flag now stored on ``self.config``.
+
+        Raises:
+            ValueError: When ``self.model.visual._uses_dynamic_vision`` and
+                ``self.model.language_model._uses_rope_input`` disagree. The
+                message names both flags, both MXQ paths, and tells the caller
+                to load a consistent release or override both sides.
+        """
+        return MobilintQwen3VLModel._reconcile_dynamic_vision(
+            self.config,
+            visual=self.model.visual,
+            language_model=self.model.language_model,
+        )
 
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()

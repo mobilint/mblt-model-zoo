@@ -22,16 +22,33 @@ core_map = {
 class PretrainedOnlyMixin(PreTrainedModel):
     def __init__(self, *args, **kwargs):
         _internal_call = kwargs.pop("_internal_call", False)
-        
-        if not _internal_call:
-            cls_name = self.__class__.__name__
-            raise RuntimeError(
-                f"Direct instantiation of {cls_name} is not allowed.\n"
-                f"Please use `{cls_name}.from_pretrained(...)` to load the NPU model correctly."
-            )
-            
+        self._assert_internal_call(_internal_call)
         super().__init__(*args, **kwargs)
         self._ensure_transformers_5_runtime_attrs()
+
+    def _pretrained_only_base_init(self, config, *args, **kwargs) -> None:
+        """Set up the ``PreTrainedModel`` base without cascading through MRO.
+
+        Composite wrappers that inherit an upstream ``*ForConditionalGeneration``
+        would otherwise let ``PretrainedOnlyMixin.__init__``'s ``super().__init__``
+        walk into the upstream constructor, which instantiates its own vision/
+        text submodules — an MXQ load we immediately throw away when the
+        wrapper overwrites ``self.model``. Calling ``PreTrainedModel.__init__``
+        directly skips that upstream body.
+        """
+        _internal_call = kwargs.pop("_internal_call", False)
+        self._assert_internal_call(_internal_call)
+        PreTrainedModel.__init__(self, config, *args, **kwargs)
+        self._ensure_transformers_5_runtime_attrs()
+
+    def _assert_internal_call(self, _internal_call: bool) -> None:
+        if _internal_call:
+            return
+        cls_name = self.__class__.__name__
+        raise RuntimeError(
+            f"Direct instantiation of {cls_name} is not allowed.\n"
+            f"Please use `{cls_name}.from_pretrained(...)` to load the NPU model correctly."
+        )
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):

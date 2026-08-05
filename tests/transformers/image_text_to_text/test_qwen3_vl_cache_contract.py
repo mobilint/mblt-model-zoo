@@ -35,6 +35,11 @@ class _DummyQwen3VLTextModel(MobilintQwen3VLTextModel):
         )
         self.num_deepstack_layers = 0
         self.cache_created = False
+        # Match the 2-input `[inputs, deepstack]` MXQ signature so `forward`
+        # skips the RoPE computation and doesn't pass a rope kwarg into the
+        # stubbed `llm_forward` below.
+        self._uses_rope_input = False
+        self.rotary_emb = None
 
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args: object) -> object:
         """Record cache creation without allocating a real Mobilint cache."""
@@ -53,10 +58,11 @@ class _DummyQwen3VLTextModel(MobilintQwen3VLTextModel):
         count_npu_time: bool = False,
         attention_mask: torch.Tensor | None = None,
         logits_to_keep: int | torch.Tensor = 1,
+        position_embeddings: object | None = None,
     ) -> torch.Tensor:
         """Return deterministic logits while exposing forward-time cache state."""
         del deepstack_visual_embeds, visual_pos_masks, cache_position, npu_prefill_chunk_size, count_npu_time
-        del attention_mask, logits_to_keep
+        del attention_mask, logits_to_keep, position_embeddings
         self.forward_past_key_values = past_key_values
         return torch.zeros(
             inputs_embeds.shape[0],
