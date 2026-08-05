@@ -21,6 +21,7 @@ from qbruntime import Cluster, CoreId
 
 from ..utils.core_mode import CoreMode, normalize_core_mode
 from ..utils.npu_backend import MobilintNPUBackend
+from ._model_paths import normalize_positional_model_path as _normalize_positional_model_path
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from .utils.postprocess import build_postprocess
@@ -281,6 +282,7 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
+        model_path, mxq_path = _normalize_positional_model_path(model_path, mxq_path, onnx_path, framework)
         model_config_part = resolve_model_config(model_cls, model_type)
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))

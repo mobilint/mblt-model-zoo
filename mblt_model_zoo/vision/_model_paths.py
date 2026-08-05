@@ -18,6 +18,27 @@ def framework_from_model_path(model_path: str) -> str | None:
     return None
 
 
+def normalize_positional_model_path(
+    model_path: str,
+    mxq_path: str,
+    onnx_path: str,
+    framework: str | None,
+) -> tuple[str, str]:
+    """Restore the v2.3 positional ``model_path`` slot for ONNX artifacts.
+
+    The pre-v2.3 public signature used the third positional argument for
+    ``mxq_path``, while v2.3 used it for ``model_path``. MXQ artifacts have the
+    same behavior in either slot, so only an unambiguous ONNX suffix requires
+    promotion after restoring the older positional order.
+    """
+
+    if model_path or onnx_path or framework_from_model_path(mxq_path) != "onnx":
+        return model_path, mxq_path
+    if framework is not None and framework.lower() != "onnx":
+        return model_path, mxq_path
+    return mxq_path, ""
+
+
 def resolve_framework(framework: str | None, model_path: str = "") -> str:
     """Resolve the execution framework from explicit input and model path."""
 

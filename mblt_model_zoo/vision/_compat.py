@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence, TypeAlias
 
+from ._model_paths import normalize_positional_model_path
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
@@ -126,11 +127,17 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         """
 
         del product
+        model_path, mxq_path = normalize_positional_model_path(
+            model_path or "",
+            mxq_path or "",
+            onnx_path or "",
+            framework,
+        )
         MBLT_Engine.__init__(
             self,
             model_cls=yaml_name,
             model_type=model_type,
-            model_path=model_path or "",
+            model_path=model_path,
             mxq_path=mxq_path or local_path or "",
             onnx_path=onnx_path or "",
             dev_no=dev_no,

@@ -331,6 +331,26 @@ def test_legacy_wrapper_preserves_positional_path_and_framework_arguments(
     assert captured_kwargs["framework"] == "onnx"
 
 
+def test_legacy_wrapper_preserves_v2_3_positional_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the generated v2.3 positional ``model_path`` slot working for ONNX."""
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def _capture_engine_init(self: MBLT_Engine, **kwargs: Any) -> None:
+        del self
+        captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(MBLT_Engine, "__init__", _capture_engine_init)
+    compat_cls = create_model_class("ResNet50", "mblt_model_zoo.vision.image_classification")
+
+    compat_cls(None, "DEFAULT", "global8", "aries", 3, ["0:0"], [0], "legacy.onnx")
+
+    assert captured_kwargs["model_path"] == "legacy.onnx"
+    assert captured_kwargs["mxq_path"] == ""
+
+
 def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -425,9 +445,11 @@ def test_engine_init_auto_detects_mxq_framework_from_model_path(
         engine.dispose()
 
 
+@pytest.mark.parametrize("positional_model_path", [False, True], ids=["keyword", "v2.3-positional"])
 def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    positional_model_path: bool,
 ) -> None:
     """Route API ``model_path`` to the ONNX runtime session for local ONNX inference."""
 
@@ -469,15 +491,15 @@ def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
     monkeypatch.setattr(wrapper, "build_postprocess", lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs))
 
-    engine = MBLT_Engine(
-        model_cls={
-            "file_cfg": {},
-            "pre_cfg": {},
-            "post_cfg": {},
-        },
-        framework="onnx",
-        model_path=str(onnx_path),
-    )
+    model_config = {
+        "file_cfg": {},
+        "pre_cfg": {},
+        "post_cfg": {},
+    }
+    if positional_model_path:
+        engine = MBLT_Engine(model_config, "DEFAULT", str(onnx_path))
+    else:
+        engine = MBLT_Engine(model_cls=model_config, model_path=str(onnx_path))
 
     assert engine.file_cfg["onnx_path"] == str(onnx_path)
     assert fake_ort.session is not None
