@@ -33,10 +33,13 @@ CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{
 
 
 def _path_has_symlink_component(path: Path) -> bool:
-    """Return whether a path or any existing ancestor is a symlink."""
+    """Return whether a path traversal or its normalized ancestors contain a symlink."""
 
-    absolute_path = Path(os.path.abspath(path.expanduser()))
-    return any(component.is_symlink() for component in (absolute_path, *absolute_path.parents))
+    expanded_path = path.expanduser()
+    traversal_path = expanded_path if expanded_path.is_absolute() else Path.cwd() / expanded_path
+    normalized_path = Path(os.path.abspath(expanded_path))
+    candidates = (traversal_path, *traversal_path.parents, normalized_path, *normalized_path.parents)
+    return any(component.is_symlink() for component in candidates)
 
 
 def _files_by_stem(
