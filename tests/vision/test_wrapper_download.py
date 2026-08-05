@@ -345,10 +345,12 @@ def test_legacy_wrapper_preserves_v2_3_positional_model_path(
     monkeypatch.setattr(MBLT_Engine, "__init__", _capture_engine_init)
     compat_cls = create_model_class("ResNet50", "mblt_model_zoo.vision.image_classification")
 
-    compat_cls(None, "DEFAULT", "global8", "aries", 3, ["0:0"], [0], "legacy.onnx")
+    compat_cls(None, "DEFAULT", "global8", "aries", 3, ["0:0"], [0], "legacy.onnx", None, None, "onnx")
 
     assert captured_kwargs["model_path"] == "legacy.onnx"
     assert captured_kwargs["mxq_path"] == ""
+    assert captured_kwargs["onnx_path"] == ""
+    assert captured_kwargs["framework"] == "onnx"
 
 
 def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
@@ -445,11 +447,11 @@ def test_engine_init_auto_detects_mxq_framework_from_model_path(
         engine.dispose()
 
 
-@pytest.mark.parametrize("positional_model_path", [False, True], ids=["keyword", "v2.3-positional"])
+@pytest.mark.parametrize("model_path_style", ["keyword", "v2.3-positional", "v2.3-positional-runtime"])
 def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    positional_model_path: bool,
+    model_path_style: str,
 ) -> None:
     """Route API ``model_path`` to the ONNX runtime session for local ONNX inference."""
 
@@ -496,8 +498,23 @@ def test_engine_init_accepts_local_onnx_model_path(
         "pre_cfg": {},
         "post_cfg": {},
     }
-    if positional_model_path:
+    if model_path_style == "v2.3-positional":
         engine = MBLT_Engine(model_config, "DEFAULT", str(onnx_path))
+    elif model_path_style == "v2.3-positional-runtime":
+        engine = MBLT_Engine(
+            model_config,
+            "DEFAULT",
+            str(onnx_path),
+            "",
+            "",
+            3,
+            "global8",
+            ["0:0"],
+            [1],
+            {"confidence": 0.25},
+            "onnx",
+            ["CPUExecutionProvider"],
+        )
     else:
         engine = MBLT_Engine(model_cls=model_config, model_path=str(onnx_path))
 
@@ -505,6 +522,13 @@ def test_engine_init_accepts_local_onnx_model_path(
     assert fake_ort.session is not None
     assert fake_ort.session.path == str(onnx_path)
     assert engine.framework == "onnx"
+    if model_path_style == "v2.3-positional-runtime":
+        assert engine.file_cfg["dev_no"] == 3
+        assert engine.file_cfg["core_mode"] == "global8"
+        assert engine.file_cfg["target_cores"] == ["0:0"]
+        assert engine.file_cfg["target_clusters"] == [1]
+        assert engine.postprocess_kwargs == {"confidence": 0.25}
+        assert fake_ort.session.providers == ["CPUExecutionProvider"]
 
 
 def test_engine_init_rejects_conflicting_framework_and_model_path(tmp_path: Path) -> None:

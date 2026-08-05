@@ -8,9 +8,9 @@ constructor shape while delegating model loading to ``MBLT_Engine``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence, TypeAlias
+from typing import Any, Callable, Iterable, Sequence, TypeAlias, cast
 
-from ._model_paths import normalize_positional_model_path
+from ._model_paths import is_v2_3_positional_onnx_layout
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
@@ -127,17 +127,18 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         """
 
         del product
-        model_path, mxq_path = normalize_positional_model_path(
-            model_path or "",
-            mxq_path or "",
-            onnx_path or "",
-            framework,
-        )
+        if is_v2_3_positional_onnx_layout(model_path, mxq_path):
+            model_path, mxq_path, onnx_path, framework = (
+                mxq_path,
+                onnx_path,
+                framework,
+                cast(str | None, model_path),
+            )
         MBLT_Engine.__init__(
             self,
             model_cls=yaml_name,
             model_type=model_type,
-            model_path=model_path,
+            model_path=model_path or "",
             mxq_path=mxq_path or local_path or "",
             onnx_path=onnx_path or "",
             dev_no=dev_no,

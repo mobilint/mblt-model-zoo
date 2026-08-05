@@ -21,7 +21,7 @@ from qbruntime import Cluster, CoreId
 
 from ..utils.core_mode import CoreMode, normalize_core_mode
 from ..utils.npu_backend import MobilintNPUBackend
-from ._model_paths import normalize_positional_model_path as _normalize_positional_model_path
+from ._model_paths import is_v2_3_positional_onnx_layout as _is_v2_3_positional_onnx_layout
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from .utils.postprocess import build_postprocess
@@ -282,7 +282,30 @@ class MBLT_Engine:
             onnx_providers: Optional ONNX Runtime execution provider order.
         """
 
-        model_path, mxq_path = _normalize_positional_model_path(model_path, mxq_path, onnx_path, framework)
+        if _is_v2_3_positional_onnx_layout(model_path, mxq_path):
+            (
+                model_path,
+                mxq_path,
+                onnx_path,
+                dev_no,
+                core_mode,
+                target_cores,
+                target_clusters,
+                postprocess_kwargs,
+                framework,
+                onnx_providers,
+            ) = (
+                mxq_path,
+                onnx_path,
+                cast(str, dev_no or ""),
+                cast(int | None, core_mode),
+                cast(CoreMode | None, target_cores),
+                cast(Sequence[str | CoreId] | None, target_clusters),
+                cast(Sequence[int | Cluster] | None, postprocess_kwargs),
+                cast(dict[str, Any] | None, framework),
+                cast(str | None, onnx_providers),
+                cast(Sequence[str] | None, model_path or None),
+            )
         model_config_part = resolve_model_config(model_cls, model_type)
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))

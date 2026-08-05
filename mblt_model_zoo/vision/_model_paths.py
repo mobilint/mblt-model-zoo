@@ -18,25 +18,18 @@ def framework_from_model_path(model_path: str) -> str | None:
     return None
 
 
-def normalize_positional_model_path(
-    model_path: str,
-    mxq_path: str,
-    onnx_path: str,
-    framework: str | None,
-) -> tuple[str, str]:
-    """Restore the v2.3 positional ``model_path`` slot for ONNX artifacts.
+def is_v2_3_positional_onnx_layout(model_path: object, mxq_path: object) -> bool:
+    """Return whether bound arguments match the v2.3 positional ONNX layout.
 
     The pre-v2.3 public signature used the third positional argument for
     ``mxq_path``, while v2.3 used it for ``model_path``. MXQ artifacts have the
-    same behavior in either slot, so only an unambiguous ONNX suffix requires
-    promotion after restoring the older positional order.
+    same behavior in either slot, so an ONNX suffix identifies the layout that
+    requires shifting all subsequent positional values.
     """
 
-    if model_path or onnx_path or framework_from_model_path(mxq_path) != "onnx":
-        return model_path, mxq_path
-    if framework is not None and framework.lower() != "onnx":
-        return model_path, mxq_path
-    return mxq_path, ""
+    if not isinstance(mxq_path, str) or framework_from_model_path(mxq_path) != "onnx":
+        return False
+    return not model_path or not isinstance(model_path, str) or model_path.lower() in SUPPORTED_FRAMEWORKS
 
 
 def resolve_framework(framework: str | None, model_path: str = "") -> str:
