@@ -96,7 +96,8 @@ truth when this snapshot becomes stale.
   prediction passes both values through postprocessing so spatial logits are inverse-letterboxed
   before `argmax`; loaders use the same metadata to apply identical target geometry.
 - Normalize dense MXQ outputs before inverse letterboxing: bilinearly upsample depth
-  `[1, H/4, W/4]` maps by four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to
+  `[B, 1, H/4, W/4]` or `[B, H/4, W/4]` maps by four, accept baked-resize `[H, W, 1]` or
+  `[B, H, W, 1]` depth maps without another resize, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to
   NCHW before bilinear restoration and `argmax`. Preserve full-resolution ONNX depth, NCHW
   semantic logits, and baked class maps. Accept floating baked maps only when every value is
   finite, integral, and within the configured class range; validate before converting to `int64`.

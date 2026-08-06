@@ -39,7 +39,8 @@ description: >-
   packages and its canonical 19-class source-ID mapping; never install train, test, or auxiliary annotation files.
 - Reject semantic evaluator taxonomy overrides that differ from `model.post_cfg.dataset`.
 - Normalize quarter-resolution MXQ depth and channel-last Cityscapes MXQ logits before inverse
-  letterboxing while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
+  letterboxing, and accept baked-resize `[H, W, 1]` or `[B, H, W, 1]` MXQ depth without resizing
+  it again, while preserving full-resolution ONNX depth, NCHW logits, and baked class maps.
   Validate baked semantic IDs as finite, integral, and in-range before converting their dtype.
 - Require explicit YOLO LetterBox configuration. Metadata-enabled semantic preprocessing exposes
   original shape and `ratio_pad`; prediction restores spatial logits before `argmax`.

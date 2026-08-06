@@ -61,7 +61,7 @@ def test_depth_post_restores_letterbox_padding() -> None:
     assert isinstance(restored, torch.Tensor)
     assert restored.shape == (2, 4)
     assert torch.allclose(restored, torch.full((2, 4), 2.0))
-    with pytest.raises(ValueError, match=r"expects \[B, 1, H, W\]"):
+    with pytest.raises(ValueError, match=r"expects \[B, 1, H, W\] or \[B, H, W, 1\]"):
         post(torch.zeros((1, 2, 8, 8)))
 
 
@@ -98,6 +98,21 @@ def test_depth_post_keeps_full_resolution_onnx_output_and_rejects_other_scales()
 
     with pytest.raises(ValueError, match="spatial shape must be"):
         post(torch.zeros((1, 3, 3)))
+
+
+def test_depth_post_normalizes_full_resolution_channel_last_mxq_output() -> None:
+    """Normalize batched and single-image baked MXQ resize outputs without resizing again."""
+
+    post = DepthPost({"LetterBox": {"img_size": [8, 8]}}, {})
+    full_resolution = torch.arange(64, dtype=torch.float32).reshape(1, 8, 8, 1)
+    normalized = post(full_resolution)
+    assert isinstance(normalized, torch.Tensor)
+    assert torch.equal(normalized, full_resolution[..., 0])
+
+    single_image = full_resolution[0]
+    normalized_single_image = post(single_image)
+    assert isinstance(normalized_single_image, torch.Tensor)
+    assert torch.equal(normalized_single_image, full_resolution[..., 0])
 
 
 def test_depth_metrics_median_align_and_ignore_invalid_targets() -> None:
