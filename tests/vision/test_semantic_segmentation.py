@@ -383,7 +383,7 @@ def test_semantic_results_plot_restores_original_shape(tmp_path: Path) -> None:
         np.full((4, 8, 3), 255, dtype=np.uint8),
         0.3,
         np.broadcast_to(np.array([0, 237, 204], dtype=np.uint8), (4, 8, 3)),
-        0.7,
+        0.6,
         0,
     )
     assert np.array_equal(plotted, expected)
@@ -404,7 +404,7 @@ def test_semantic_results_plot_distinguishes_person_and_bus() -> None:
     plotted = result.plot(np.zeros((1, 2, 3), dtype=np.uint8))
     assert plotted is not None
     expected_overlay = np.array([[[255, 255, 0], [255, 42, 4]]], dtype=np.uint8)
-    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
+    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.6, 0)
 
     assert np.array_equal(plotted, expected)
     assert not np.array_equal(plotted[0, 0], plotted[0, 1])
@@ -425,7 +425,7 @@ def test_semantic_results_plot_uses_cityscapes_palette() -> None:
     plotted = result.plot(np.zeros((1, 3, 3), dtype=np.uint8))
     assert plotted is not None
     expected_overlay = np.array([[[128, 64, 128], [60, 20, 220], [142, 0, 0]]], dtype=np.uint8)
-    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.7, 0)
+    expected = cv2.addWeighted(np.zeros_like(expected_overlay), 0.3, expected_overlay, 0.6, 0)
 
     assert np.array_equal(plotted, expected)
 
