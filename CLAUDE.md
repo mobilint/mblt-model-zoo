@@ -43,8 +43,9 @@
 - Require `pre_cfg.LetterBox` for YOLO detection postprocessing, and use metadata-enabled semantic
   preprocessing that exposes original `img0_shape` and `ratio_pad`. Prediction restores spatial
   logits with this geometry before `argmax`, while validation loaders reuse it for targets.
-- Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[1, H/4, W/4]` maps by
-  four, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
+- Normalize dense MXQ outputs before inverse letterboxing: upsample depth `[B, 1, H/4, W/4]` or
+  `[B, H/4, W/4]` maps by four, accept baked-resize `[H, W, 1]` or `[B, H, W, 1]` maps without
+  another resize, and convert Cityscapes `[H, W, 19]` or `[B, H, W, 19]` logits to NCHW before restoration
   and `argmax`. Preserve existing ONNX layouts and baked class maps; validate baked IDs as finite,
   integral, and in-range before converting to `int64`.
 - Resolve dense compilation datasets from `post_cfg.dataset`: NYU Depth, ADE20K, or Cityscapes;
