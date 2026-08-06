@@ -33,7 +33,7 @@ from .types import ListTensorLike, NestedListTensorLike, TensorLike
 LW = 2  # line width
 RADIUS = 5  # circle radius
 ALPHA = 0.3  # alpha for overlay
-DENSE_OVERLAY_ALPHA = 0.7
+DENSE_OVERLAY_ALPHA = 0.6
 
 
 class Results:
