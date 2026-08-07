@@ -766,7 +766,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         resolved_top_k = int(raw_top_k) if raw_top_k is not None else 0
         if not resolved_do_sample:
             resolved_temperature = 0.0
-        num_assistant_tokens = int(getattr(generation_config, "num_assistant_tokens", 64))
+        raw_num_assistant_tokens = getattr(generation_config, "num_assistant_tokens", None)
+        num_assistant_tokens = int(raw_num_assistant_tokens) if raw_num_assistant_tokens is not None else 64
         self.eagle3_draft_model.max_draft_tokens = max(1, num_assistant_tokens - 1)
         return generation_config, resolved_max_new_tokens, resolved_temperature, resolved_top_p, resolved_top_k
 
