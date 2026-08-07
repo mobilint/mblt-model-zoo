@@ -650,8 +650,9 @@ class MobilintEagle3DraftModelMixin:
             seq_end = min((chunk_index + 1) * chunk_size, seq_length)
             current_cache_position = base_cache_position + seq_start
             infer_inputs = [
-                hidden_states_numpy[:, :, seq_start:seq_end, :],
                 inputs_embeds_numpy[:, :, seq_start:seq_end, :],
+                hidden_states_numpy[:, :, seq_start:seq_end, :],
+                
                 attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
                 position_embs_numpy[:, :, seq_start:seq_end, :],
             ]
