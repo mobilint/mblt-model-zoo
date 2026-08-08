@@ -10,8 +10,10 @@ from mblt_model_zoo.cli.tps_table import (
     SECTION_VLM_MEASURE,
     SECTION_VLM_SWEEP_LLM,
     SECTION_VLM_SWEEP_VISION,
+    TEMPERATURE_JSON_KEY,
     TPS_TABLE_SPEC,
     emit_table,
+    format_temperature_display,
     iter_json_rows,
     iter_section_rows,
     json_key_for,
@@ -418,3 +420,19 @@ def test_total_row_from_run_combines_vision_and_llm_for_vlm_measure():
         llm=SimpleNamespace(),
     )
     assert row.from_run(vlm_run_incomplete) is None
+
+
+def test_temperature_json_key_is_stable():
+    """``TEMPERATURE_JSON_KEY`` is the canonical JSON key emitted by ``tps measure``."""
+    assert TEMPERATURE_JSON_KEY == "temperature"
+
+
+def test_format_temperature_display_greedy_labels_zero():
+    """Zero temperature should render as ``0.0 (greedy)`` in the CLI header."""
+    assert format_temperature_display(0.0) == "0.0 (greedy)"
+
+
+def test_format_temperature_display_positive_values():
+    """Positive temperatures should render as their numeric value."""
+    assert format_temperature_display(0.7) == "0.7"
+    assert format_temperature_display(1.5) == "1.5"

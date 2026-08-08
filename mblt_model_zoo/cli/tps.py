@@ -16,6 +16,40 @@ from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 import torch
 from tqdm.auto import tqdm
 
+from mblt_model_zoo.cli.tps_table import (
+    SECTION_LLM_MEASURE,
+    SECTION_LLM_SWEEP,
+    SECTION_VLM_MEASURE,
+    SECTION_VLM_SWEEP_LLM,
+    SECTION_VLM_SWEEP_VISION,
+)
+from mblt_model_zoo.cli.tps_table import (
+    TEMPERATURE_JSON_KEY as _TEMPERATURE_JSON_KEY,
+)
+from mblt_model_zoo.cli.tps_table import (
+    emit_table as _emit_tps_table,
+)
+from mblt_model_zoo.cli.tps_table import (
+    format_temperature_display as _format_temperature_display,
+)
+from mblt_model_zoo.cli.tps_table import (
+    iter_json_rows as _iter_json_rows,
+)
+from mblt_model_zoo.cli.tps_table import (
+    json_key_for as _json_key_for,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_aggregate_json as _render_aggregate_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_run_json as _render_run_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_summary_json as _render_summary_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_units as _render_units,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
 )
@@ -63,21 +97,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
-)
-
-from mblt_model_zoo.cli.tps_table import (
-    SECTION_LLM_MEASURE,
-    SECTION_LLM_SWEEP,
-    SECTION_VLM_MEASURE,
-    SECTION_VLM_SWEEP_LLM,
-    SECTION_VLM_SWEEP_VISION,
-    emit_table as _emit_tps_table,
-    iter_json_rows as _iter_json_rows,
-    json_key_for as _json_key_for,
-    render_aggregate_json as _render_aggregate_json,
-    render_run_json as _render_run_json,
-    render_summary_json as _render_summary_json,
-    render_units as _render_units,
 )
 
 _SWEEP_WARMUP_PREFILL = 128
@@ -247,6 +266,17 @@ def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
     return _parse_positive_int_optional_common(spec)
 
 
+def _parse_non_negative_float(spec: str) -> float:
+    """Parse a non-negative float for argparse ``type=`` validation."""
+    try:
+        value = float(spec)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected float") from exc
+    if value < 0.0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return value
+
+
 def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     """Return whether ``flag`` appears in raw argv (accepts ``--flag`` or ``--flag=value``)."""
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
@@ -309,14 +339,10 @@ def _apply_sweep_batch_auto_scale(args: argparse.Namespace, pipeline: Any) -> No
     if scaled:
         print(
             f"[tps] batch={batch_size} detected; auto-scaled sweep lengths by "
-            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: "
-            + ", ".join(scaled)
+            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: " + ", ".join(scaled)
         )
     if skipped:
-        print(
-            f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): "
-            + ", ".join(skipped)
-        )
+        print(f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): " + ", ".join(skipped))
 
 
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
@@ -1027,9 +1053,7 @@ def _energy_from_device_time_series(device_time_series: dict[str, list[dict[str,
     return _energy_from_device_time_series_common(device_time_series)
 
 
-def _vision_efficiency_metrics(
-    vision_energy_j: Sequence[float], batch_size: int
-) -> tuple[list[float], list[float]]:
+def _vision_efficiency_metrics(vision_energy_j: Sequence[float], batch_size: int) -> tuple[list[float], list[float]]:
     """Return (vision_img_per_j, vision_j_per_img) scaled by ``batch_size``.
 
     A single ``measure_vision`` invocation processes ``batch_size`` images under
@@ -1175,9 +1199,7 @@ def _attach_tps_per_w(
         if prefill_energy is not None and total_prefill_tokens > 0
         else None
     )
-    run.decode_tps_per_w = (
-        _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
-    )
+    run.decode_tps_per_w = _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
     run.decode_j_per_token = (
         _safe_div(decode_energy, float(total_decode_tokens))
         if decode_energy is not None and total_decode_tokens > 0
@@ -1545,9 +1567,7 @@ def _llm_sweep_aggregate_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
-def _units_for_section(
-    section: str, values_by_key: dict[str, Sequence[float]]
-) -> dict[str, str]:
+def _units_for_section(section: str, values_by_key: dict[str, Sequence[float]]) -> dict[str, str]:
     """Return the ``units`` metadata block for ``section`` filtered by data."""
     keys_present: set[str] = set()
     for row in _iter_json_rows(section):
@@ -1608,6 +1628,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
     )
 
+    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=measure_num_prefill,
@@ -1618,6 +1639,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
             batch_size=batch_size,
+            temperature=temperature,
         )
     runs = []
     run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
@@ -1641,6 +1663,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                     on_decode_start=((lambda: tracker_decode.start()) if tracker_decode is not None else None),
                     on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
                     batch_size=batch_size,
+                    temperature=temperature,
                 )
             finally:
                 _stop_tracker_safe(tracker_prefill)
@@ -1743,6 +1766,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
     print(f"prefill tokens: {runs[0].num_prefill} | decode tokens: {runs[0].num_decode}")
+    print(f"temperature: {_format_temperature_display(temperature)}")
     values_by_key: dict[str, Sequence[float]] = {
         "prefill_tps": prefill_tps,
         "decode_tps": decode_tps,
@@ -1813,6 +1837,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         payload = {
             "repeat": args.repeat,
             "batch_size": batch_size,
+            _TEMPERATURE_JSON_KEY: temperature,
             "input": {
                 "mode": str(getattr(args, "input_mode", "random")),
                 "prompt_sha256": selected_prompt_sha256,
@@ -1950,10 +1975,9 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
-    print(
-        f"image resolution: {args.image_resolution} | "
-        f"prefill tokens: {args.prefill} | decode tokens: {args.decode}"
-    )
+    print(f"image resolution: {args.image_resolution} | prefill tokens: {args.prefill} | decode tokens: {args.decode}")
+    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
+    print(f"temperature: {_format_temperature_display(temperature)}")
 
     for _ in tqdm(range(args.warmup), desc="vision warmup runs", leave=False):
         measurer.measure_vision(
@@ -2004,6 +2028,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             show_progress=True,
             progress_prefix=f"llm warmup {warmup_idx + 1}/{args.warmup}",
             batch_size=batch_size,
+            temperature=temperature,
         )
 
     llm_results = []
@@ -2026,6 +2051,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                     on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
                     on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
                     on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
+                    temperature=temperature,
                 )
             finally:
                 _stop_tracker_safe(llm_tracker_prefill)
@@ -2225,12 +2251,8 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             return None
         return float(phase_tps) / float(phase_power)
 
-    prefill_tps_per_w = [
-        v for v in (_phase_tps_per_w(r, "prefill") for r in runs) if v is not None
-    ]
-    decode_tps_per_w = [
-        v for v in (_phase_tps_per_w(r, "decode") for r in runs) if v is not None
-    ]
+    prefill_tps_per_w = [v for v in (_phase_tps_per_w(r, "prefill") for r in runs) if v is not None]
+    decode_tps_per_w = [v for v in (_phase_tps_per_w(r, "decode") for r in runs) if v is not None]
     prefill_j_per_tok = [
         r.llm.prefill_j_per_token for r in runs if getattr(r.llm, "prefill_j_per_token", None) is not None
     ]
@@ -2364,6 +2386,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             "image_resolution": args.image_resolution,
             "repeat": args.repeat,
             "batch_size": batch_size,
+            _TEMPERATURE_JSON_KEY: temperature,
             "units": _units_for_section(SECTION_VLM_MEASURE, values_by_key),
             "runs": [_vlm_measure_run_payload(r) for r in runs],
             "summary": _render_summary_json(SECTION_VLM_MEASURE, values_by_key, _summary),
@@ -2661,12 +2684,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]
     ttft_last_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in runs if r.prefill_sweep.time_values]
     decode_duration_last_ms = [r.decode_sweep.time_values[-1] * 1000.0 for r in runs if r.decode_sweep.time_values]
-    prefill_energy_last = [
-        float(v) for r in runs if (v := getattr(r, "prefill_energy_j", None)) is not None
-    ]
-    decode_energy_last = [
-        float(v) for r in runs if (v := getattr(r, "decode_energy_j", None)) is not None
-    ]
+    prefill_energy_last = [float(v) for r in runs if (v := getattr(r, "prefill_energy_j", None)) is not None]
+    decode_energy_last = [float(v) for r in runs if (v := getattr(r, "decode_energy_j", None)) is not None]
     prefill_npu_latency_pct_last = [
         pct
         for r in runs
@@ -2722,18 +2741,10 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         )
         if total is not None:
             total_npu_latency_pct_last.append(float(total))
-    prefill_tps_per_w = [
-        r.prefill_tps_per_w for r in runs if getattr(r, "prefill_tps_per_w", None) is not None
-    ]
-    decode_tps_per_w = [
-        r.decode_tps_per_w for r in runs if getattr(r, "decode_tps_per_w", None) is not None
-    ]
-    prefill_j_per_token = [
-        r.prefill_j_per_token for r in runs if getattr(r, "prefill_j_per_token", None) is not None
-    ]
-    decode_j_per_token = [
-        r.decode_j_per_token for r in runs if getattr(r, "decode_j_per_token", None) is not None
-    ]
+    prefill_tps_per_w = [r.prefill_tps_per_w for r in runs if getattr(r, "prefill_tps_per_w", None) is not None]
+    decode_tps_per_w = [r.decode_tps_per_w for r in runs if getattr(r, "decode_tps_per_w", None) is not None]
+    prefill_j_per_token = [r.prefill_j_per_token for r in runs if getattr(r, "prefill_j_per_token", None) is not None]
+    decode_j_per_token = [r.decode_j_per_token for r in runs if getattr(r, "decode_j_per_token", None) is not None]
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
@@ -3149,13 +3160,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "repeat": args.repeat,
                     "batch_size": batch_size,
                     "units": _units_for_section(SECTION_VLM_SWEEP_VISION, vision_values_by_key),
-                    "runs": [
-                        _render_run_json(SECTION_VLM_SWEEP_VISION, holder)
-                        for holder in vision_run_holders
-                    ],
-                    "summary": _render_summary_json(
-                        SECTION_VLM_SWEEP_VISION, vision_values_by_key, _summary
-                    ),
+                    "runs": [_render_run_json(SECTION_VLM_SWEEP_VISION, holder) for holder in vision_run_holders],
+                    "summary": _render_summary_json(SECTION_VLM_SWEEP_VISION, vision_values_by_key, _summary),
                     "device_time_series_runs": vision_device_time_series_runs,
                 }
             )
@@ -3199,8 +3205,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             finally:
                 _stop_tracker_safe(llm_tracker_prefill)
                 _stop_tracker_safe(llm_tracker_decode)
-            if llm_tracker_prefill is not None and llm_tracker_decode is not None and (
-                run.prefill_sweep.x_values or run.decode_sweep.x_values
+            if (
+                llm_tracker_prefill is not None
+                and llm_tracker_decode is not None
+                and (run.prefill_sweep.x_values or run.decode_sweep.x_values)
             ):
                 prefill_metric = _extract_device_metric(llm_tracker_prefill)
                 decode_metric = _extract_device_metric(llm_tracker_decode)
@@ -3227,9 +3235,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     # row that the schema declares — ``runs[i]`` and ``summary`` populate them
     # but ``aggregate`` extractors would fall back to ``None``.
     _attach_vlm_llm_aggregate_scalars(llm_result, llm_runs)
-    _attach_aggregate_sweep_device(
-        llm_result, llm_runs, batch_size=batch_size, decode_window=args.decode_window
-    )
+    _attach_aggregate_sweep_device(llm_result, llm_runs, batch_size=batch_size, decode_window=args.decode_window)
     llm_prefill_tps = [r.prefill_sweep.tps_values[-1] for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
@@ -3357,12 +3363,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         r.llm_decode_energy_j for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
-    llm_prefill_tps_per_w = [
-        r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
-    ]
-    llm_decode_tps_per_w = [
-        r.decode_tps_per_w for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None
-    ]
+    llm_prefill_tps_per_w = [r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None]
+    llm_decode_tps_per_w = [r.decode_tps_per_w for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None]
     llm_prefill_j_per_token = [
         r.prefill_j_per_token for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None
     ]
@@ -3517,9 +3519,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "aggregate": _vlm_llm_aggregate_payload(llm_result),
                     "runs": [_vlm_llm_run_payload(r) for r in llm_runs],
                     "device_time_series_runs": llm_device_time_series_runs,
-                    "summary": _render_summary_json(
-                        SECTION_VLM_SWEEP_LLM, llm_values_by_key, _summary
-                    ),
+                    "summary": _render_summary_json(SECTION_VLM_SWEEP_LLM, llm_values_by_key, _summary),
                 },
             },
         )
@@ -3741,6 +3741,12 @@ def add_tps_parser(
         "--prompt",
         default="Describe the image in one sentence.",
         help="VLM only: fixed prompt used for synthetic image-text input",
+    )
+    p_measure.add_argument(
+        "--temperature",
+        type=_parse_non_negative_float,
+        default=0.0,
+        help="sampling temperature; 0 (default) = greedy decoding, >0 = do_sample=True with that temperature",
     )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.set_defaults(_handler=_cmd_measure)
