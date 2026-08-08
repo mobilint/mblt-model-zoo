@@ -39,6 +39,17 @@ _LAST_TREE: dict[str, torch.Tensor] = {}
 _STEP_DATA: dict[str, Any] = {}
 _STEP_INDEX = 0
 _TOKENIZER: Any = None
+_INCLUDE_PARENT_TOPK = False
+
+
+_BASE_INFO_NULL_KEYS = (
+    "own_base_prob",
+    "base_greedy_token_id",
+    "base_greedy_token_text",
+    "matches_greedy",
+    "own_base_topk_rank",
+    "parent_topk",
+)
 
 
 def _escape_token_text(text: str) -> str:
@@ -62,6 +73,18 @@ def _decode_token(token_id: int) -> str:
         return f"<{token_id}>"
 
 
+def _apply_logits_processor_local(
+    logits: torch.Tensor,
+    logits_processor: Any,
+) -> torch.Tensor:
+    """Apply an HF logits processor list; mirrors ``tree_decoding._apply_logits_processor``."""
+    if logits_processor is None:
+        return logits
+    if logits.ndim == 1:
+        return logits_processor(None, logits.unsqueeze(0))[0]
+    return logits_processor(None, logits)
+
+
 def _build_draft_tree_dict(
     draft_tokens: torch.Tensor,
     tree_mask: torch.Tensor,
@@ -76,7 +99,9 @@ def _build_draft_tree_dict(
         tree_position_ids: ``[tree_nodes]`` per-node depth.
 
     Returns:
-        Dict with ``nodes`` list and ``total_tokens`` count.
+        Dict with ``nodes`` list and ``total_tokens`` count. Every node carries
+        base-model verification fields (``own_base_prob`` etc.) initialized to
+        ``None``; ``_finalize_step`` populates them for real steps.
     """
     tokens = draft_tokens[0].detach().cpu().tolist()
     positions = tree_position_ids.detach().cpu().tolist()
@@ -90,15 +115,17 @@ def _build_draft_tree_dict(
                 if int(mask[i, j]) == 1:
                     parent_id = j
         tok = int(tokens[i])
-        nodes.append(
-            {
-                "node_id": i,
-                "parent_id": parent_id,
-                "depth": int(positions[i]),
-                "token_id": tok,
-                "token_text": _decode_token(tok),
-            }
-        )
+        node: dict[str, Any] = {
+            "node_id": i,
+            "parent_id": parent_id,
+            "parent_node_id": parent_id,
+            "depth": int(positions[i]),
+            "token_id": tok,
+            "token_text": _decode_token(tok),
+        }
+        for key in _BASE_INFO_NULL_KEYS:
+            node[key] = None
+        nodes.append(node)
     return {"nodes": nodes, "total_tokens": total}
 
 
@@ -167,6 +194,96 @@ def _sample_p_topk(
     ]
 
 
+def _compute_base_prob_info(logits: torch.Tensor, logits_processor: Any) -> dict[int, dict[str, Any]]:
+    """Compute per-node base-model verification info for the current draft tree.
+
+    Uses the exact ``logits_processor`` that ``evaluate_posterior`` sees so the
+    numbers match acceptance logic. For each unique parent position we cache the
+    warped top-10 slice and a log-normalizer for numerically stable prob lookups
+    of arbitrary child token ids.
+    """
+    draft_tokens = _LAST_TREE["draft_tokens"][0].tolist()
+    tree_mask = _LAST_TREE["tree_mask"][0, 0]
+    total = len(draft_tokens)
+
+    parents: list[Optional[int]] = [None] * total
+    for i in range(1, total):
+        for j in range(i):
+            if int(tree_mask[i, j]) == 1:
+                parents[i] = j
+
+    logits_cpu = logits.detach().float().cpu()
+    if logits_cpu.ndim == 1:
+        logits_cpu = logits_cpu.unsqueeze(0)
+
+    seq_len = logits_cpu.shape[0]
+    unique_parents = {p for p in parents if p is not None and 0 <= p < seq_len}
+
+    parent_topk: dict[int, list[dict[str, Any]]] = {}
+    parent_greedy_id: dict[int, int] = {}
+    parent_greedy_text: dict[int, str] = {}
+    parent_processed: dict[int, torch.Tensor] = {}
+    parent_log_denom: dict[int, torch.Tensor] = {}
+
+    for p in unique_parents:
+        row = logits_cpu[p]
+        processed = _apply_logits_processor_local(row, logits_processor)
+        if processed.ndim > 1:
+            processed = processed.view(-1)
+        k = min(10, int(processed.numel()))
+        top_logits, top_ids = torch.topk(processed, k=k, dim=-1, largest=True, sorted=True)
+        max_val = processed.max()
+        exp_shifted = torch.exp(processed - max_val)
+        denom = exp_shifted.sum()
+        top_probs = torch.exp(top_logits - max_val) / denom
+
+        parent_topk[p] = [
+            {
+                "token_id": int(top_ids[i].item()),
+                "token_text": _decode_token(int(top_ids[i].item())),
+                "prob": float(top_probs[i].item()),
+            }
+            for i in range(k)
+        ]
+        greedy_id = int(top_ids[0].item())
+        parent_greedy_id[p] = greedy_id
+        parent_greedy_text[p] = _decode_token(greedy_id)
+        parent_processed[p] = processed
+        parent_log_denom[p] = torch.log(denom) + max_val
+
+    per_node_info: dict[int, dict[str, Any]] = {}
+    for i in range(1, total):
+        p = parents[i]
+        if p is None or p not in parent_processed:
+            per_node_info[i] = {key: None for key in _BASE_INFO_NULL_KEYS}
+            continue
+        tok = int(draft_tokens[i])
+        processed = parent_processed[p]
+        log_denom = parent_log_denom[p]
+        vocab = int(processed.numel())
+        if not (0 <= tok < vocab):
+            per_node_info[i] = {key: None for key in _BASE_INFO_NULL_KEYS}
+            continue
+        log_prob = processed[tok] - log_denom
+        prob = float(torch.exp(log_prob).item())
+        topk_list = parent_topk[p]
+        rank: Optional[int] = None
+        for k_idx, entry in enumerate(topk_list):
+            if entry["token_id"] == tok:
+                rank = k_idx + 1
+                break
+        greedy_id = parent_greedy_id[p]
+        per_node_info[i] = {
+            "own_base_prob": prob,
+            "base_greedy_token_id": greedy_id,
+            "base_greedy_token_text": parent_greedy_text[p],
+            "matches_greedy": tok == greedy_id,
+            "own_base_topk_rank": rank,
+            "parent_topk": topk_list if _INCLUDE_PARENT_TOPK else None,
+        }
+    return per_node_info
+
+
 def _render_tree_ascii(
     *,
     step_index: int,
@@ -177,16 +294,35 @@ def _render_tree_ascii(
     best_leaf: Optional[int],
     per_node_accepted: list[bool],
     best_path_set: set[int],
+    criterion_str: str,
+    show_parent_topk: bool,
 ) -> str:
     """Render a single step as an ASCII tree block with a header line."""
-    if accepted_count >= 0:
-        header_acc = f"{accepted_count + 1}/{tree_size}"
-    else:
+    is_pre_verify = accepted_count < 0
+    if is_pre_verify:
         header_acc = f"-/{tree_size}"
+    else:
+        header_acc = f"{accepted_count + 1}/{tree_size}"
     header_leaf = "-" if best_leaf is None else str(best_leaf)
     lines: list[str] = [
         f"=== step {step_index} | prompt_len={prompt_len} | accepted={header_acc} | best_leaf={header_leaf} ==="
     ]
+    lines.append(f"criterion: {criterion_str}")
+    if not is_pre_verify:
+        product = 1.0
+        counted = 0
+        for nid in sorted(best_path_set):
+            if nid == 0:
+                continue
+            if 0 <= nid < len(tree_nodes):
+                prob = tree_nodes[nid].get("own_base_prob")
+                if prob is not None:
+                    product *= float(prob)
+                    counted += 1
+        if counted > 0:
+            lines.append(f"best-path base-prob product: {product:.6f}")
+        else:
+            lines.append("best-path base-prob product: -")
 
     parent_to_children: dict[Optional[int], list[int]] = {}
     node_by_id: dict[int, dict[str, Any]] = {}
@@ -196,15 +332,44 @@ def _render_tree_ascii(
     for children in parent_to_children.values():
         children.sort()
 
+    def format_prob(node: dict[str, Any]) -> str:
+        val = node.get("own_base_prob")
+        if val is None:
+            return "p=  -  "
+        return f"p={float(val):.3f}"
+
+    def format_greedy(node: dict[str, Any]) -> str:
+        matches = node.get("matches_greedy")
+        if matches is None:
+            return "g= "
+        return "g==" if matches else "g=x"
+
     def fmt(node: dict[str, Any], prefix: str, connector: str) -> str:
-        accepted = per_node_accepted[node["node_id"]] if node["node_id"] < len(per_node_accepted) else False
-        acc_marker = "[OK]" if accepted else "[X ]"
+        if is_pre_verify:
+            acc_marker = "[  ]"
+        else:
+            accepted = per_node_accepted[node["node_id"]] if node["node_id"] < len(per_node_accepted) else False
+            acc_marker = "[OK]" if accepted else "[X ]"
         best_marker = "*" if node["node_id"] in best_path_set else " "
         text = _escape_token_text(node["token_text"])
+        prob_str = format_prob(node)
+        greedy_str = format_greedy(node)
         return (
             f"{prefix}{connector}{acc_marker}{best_marker} "
-            f"id={node['node_id']:3d} d={node['depth']} tok={node['token_id']:>6d} \"{text}\""
+            f"id={node['node_id']:3d} d={node['depth']} tok={node['token_id']:>6d} "
+            f"{prob_str} {greedy_str} \"{text}\""
         )
+
+    def format_parent_topk_line(node: dict[str, Any], sub_prefix: str) -> Optional[str]:
+        topk = node.get("parent_topk")
+        if not topk:
+            return None
+        entries = []
+        for entry in topk:
+            esc_text = _escape_token_text(entry["token_text"])
+            entries.append(f"(tok={entry['token_id']}, \"{esc_text}\", p={float(entry['prob']):.3f})")
+        joined = ", ".join(entries)
+        return f"{sub_prefix}    parent top-10: [{joined}]"
 
     def walk(node_id: int, prefix: str, is_last: bool) -> None:
         node = node_by_id[node_id]
@@ -215,6 +380,10 @@ def _render_tree_ascii(
             connector = "\\-- " if is_last else "+-- "
             lines.append(fmt(node, prefix, connector))
             child_prefix = prefix + ("    " if is_last else "|   ")
+            if show_parent_topk and not is_pre_verify:
+                extra = format_parent_topk_line(node, child_prefix)
+                if extra is not None:
+                    lines.append(extra)
         children = parent_to_children.get(node_id, [])
         for idx, cid in enumerate(children):
             walk(cid, child_prefix, idx == len(children) - 1)
@@ -310,6 +479,10 @@ def _apply_wrappers() -> Any:
     ) -> Any:
         _STEP_DATA["candidates_tensor"] = candidates.detach().cpu()
         _STEP_DATA["logits_processor_none"] = logits_processor is None
+        try:
+            _STEP_DATA["per_node_base_info"] = _compute_base_prob_info(logits, logits_processor)
+        except (RuntimeError, ValueError, IndexError):
+            _STEP_DATA["per_node_base_info"] = {}
         start = time.perf_counter()
         result = orig_evaluate_posterior(logits, candidates, logits_processor, retrieve_indices)
         _STEP_DATA["t_post_ms"] = (time.perf_counter() - start) * 1000.0
@@ -417,6 +590,12 @@ def _finalize_step() -> None:
     sampled_indices = _STEP_DATA["sampled_indices"]
 
     draft_tree = _build_draft_tree_dict(draft_tokens, tree_mask, tree_position_ids)
+    per_node_info = _STEP_DATA.get("per_node_base_info", {})
+    for node in draft_tree["nodes"]:
+        info = per_node_info.get(node["node_id"])
+        if info is not None:
+            node.update(info)
+
     total_nodes = draft_tree["total_tokens"]
     per_node_accepted = [False] * total_nodes
     if total_nodes > 0:
@@ -497,7 +676,25 @@ def _parse_args() -> argparse.Namespace:
             "other templates silently ignore the resolved value."
         ),
     )
+    parser.add_argument(
+        "--show-parent-topk",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Print a sub-line under each non-root, non-step-`-1` node with its parent's "
+            "top-10 base-model tokens, and record the same list under "
+            "draft_tree.nodes[i].parent_topk in the JSON trace."
+        ),
+    )
     return parser.parse_args()
+
+
+def _criterion_string(do_sample: bool, temperature: Optional[float], top_k: Optional[int], top_p: float) -> str:
+    """Format the sampling criterion header line body."""
+    if not do_sample or temperature is None or float(temperature) <= 1e-5:
+        return "greedy"
+    resolved_top_k = int(top_k) if top_k is not None else 0
+    return f"sampling temp={float(temperature):.3f} top_k={resolved_top_k} top_p={float(top_p):.3f}"
 
 
 def main() -> int:
@@ -528,8 +725,9 @@ def main() -> int:
     )
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=trust_remote_code)
 
-    global _TOKENIZER, _TRACE, _STEP_INDEX
+    global _TOKENIZER, _TRACE, _STEP_INDEX, _INCLUDE_PARENT_TOPK
     _TOKENIZER = tokenizer
+    _INCLUDE_PARENT_TOPK = bool(args.show_parent_topk)
 
     if args.num_assistant_tokens is not None:
         model.generation_config.num_assistant_tokens = int(args.num_assistant_tokens)
@@ -569,6 +767,8 @@ def main() -> int:
     resolved_top_k = args.top_k if args.top_k is not None else getattr(model.generation_config, "top_k", None)
     if resolved_temperature is not None and float(resolved_temperature) <= 1e-5:
         do_sample = False
+
+    criterion_str = _criterion_string(do_sample, resolved_temperature, resolved_top_k, top_p=0.0)
 
     torch.manual_seed(int(args.seed))
 
@@ -612,8 +812,6 @@ def main() -> int:
             accepted_count = -1
             best_leaf = None
             per_node_accepted = [False] * total
-            if total > 0:
-                per_node_accepted[0] = True
             best_path_set = {0} if total > 0 else set()
 
         block = _render_tree_ascii(
@@ -625,6 +823,8 @@ def main() -> int:
             best_leaf=best_leaf,
             per_node_accepted=per_node_accepted,
             best_path_set=best_path_set,
+            criterion_str=criterion_str,
+            show_parent_topk=bool(args.show_parent_topk),
         )
         print(block)
         print()
@@ -666,6 +866,8 @@ def main() -> int:
             "max_new_tokens": int(args.max_new_tokens),
             "seed": int(args.seed),
         },
+        "criterion": criterion_str,
+        "show_parent_topk": bool(args.show_parent_topk),
         "summary": summary,
         "steps": _TRACE,
     }
