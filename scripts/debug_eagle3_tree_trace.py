@@ -44,6 +44,7 @@ _INCLUDE_PARENT_TOPK = False
 
 _BASE_INFO_NULL_KEYS = (
     "own_base_prob",
+    "own_base_prob_raw",
     "base_greedy_token_id",
     "base_greedy_token_text",
     "matches_greedy",
@@ -224,6 +225,8 @@ def _compute_base_prob_info(logits: torch.Tensor, logits_processor: Any) -> dict
     parent_greedy_text: dict[int, str] = {}
     parent_processed: dict[int, torch.Tensor] = {}
     parent_log_denom: dict[int, torch.Tensor] = {}
+    parent_raw_row: dict[int, torch.Tensor] = {}
+    parent_raw_log_denom: dict[int, torch.Tensor] = {}
 
     for p in unique_parents:
         row = logits_cpu[p]
@@ -251,6 +254,13 @@ def _compute_base_prob_info(logits: torch.Tensor, logits_processor: Any) -> dict
         parent_processed[p] = processed
         parent_log_denom[p] = torch.log(denom) + max_val
 
+        row_flat = row.view(-1) if row.ndim > 1 else row
+        raw_max_val = row_flat.max()
+        raw_exp_shifted = torch.exp(row_flat - raw_max_val)
+        raw_denom = raw_exp_shifted.sum()
+        parent_raw_row[p] = row_flat
+        parent_raw_log_denom[p] = torch.log(raw_denom) + raw_max_val
+
     per_node_info: dict[int, dict[str, Any]] = {}
     for i in range(1, total):
         p = parents[i]
@@ -266,6 +276,14 @@ def _compute_base_prob_info(logits: torch.Tensor, logits_processor: Any) -> dict
             continue
         log_prob = processed[tok] - log_denom
         prob = float(torch.exp(log_prob).item())
+        raw_row = parent_raw_row[p]
+        raw_log_denom = parent_raw_log_denom[p]
+        raw_vocab = int(raw_row.numel())
+        if 0 <= tok < raw_vocab:
+            raw_log_prob = raw_row[tok] - raw_log_denom
+            raw_prob: Optional[float] = float(torch.exp(raw_log_prob).item())
+        else:
+            raw_prob = None
         topk_list = parent_topk[p]
         rank: Optional[int] = None
         for k_idx, entry in enumerate(topk_list):
@@ -275,6 +293,7 @@ def _compute_base_prob_info(logits: torch.Tensor, logits_processor: Any) -> dict
         greedy_id = parent_greedy_id[p]
         per_node_info[i] = {
             "own_base_prob": prob,
+            "own_base_prob_raw": raw_prob,
             "base_greedy_token_id": greedy_id,
             "base_greedy_token_text": parent_greedy_text[p],
             "matches_greedy": tok == greedy_id,
@@ -309,20 +328,30 @@ def _render_tree_ascii(
     ]
     lines.append(f"criterion: {criterion_str}")
     if not is_pre_verify:
-        product = 1.0
-        counted = 0
+        warped_product = 1.0
+        raw_product = 1.0
+        warped_counted = 0
+        raw_counted = 0
         for nid in sorted(best_path_set):
             if nid == 0:
                 continue
             if 0 <= nid < len(tree_nodes):
-                prob = tree_nodes[nid].get("own_base_prob")
-                if prob is not None:
-                    product *= float(prob)
-                    counted += 1
-        if counted > 0:
-            lines.append(f"best-path base-prob product: {product:.6f}")
+                wprob = tree_nodes[nid].get("own_base_prob")
+                if wprob is not None:
+                    warped_product *= float(wprob)
+                    warped_counted += 1
+                rprob = tree_nodes[nid].get("own_base_prob_raw")
+                if rprob is not None:
+                    raw_product *= float(rprob)
+                    raw_counted += 1
+        if warped_counted > 0:
+            lines.append(f"best-path warped-prob product: {warped_product:.6f}")
         else:
-            lines.append("best-path base-prob product: -")
+            lines.append("best-path warped-prob product: -")
+        if raw_counted > 0:
+            lines.append(f"best-path raw-prob product:    {raw_product:.6f}")
+        else:
+            lines.append("best-path raw-prob product:    -")
 
     parent_to_children: dict[Optional[int], list[int]] = {}
     node_by_id: dict[int, dict[str, Any]] = {}
@@ -332,11 +361,13 @@ def _render_tree_ascii(
     for children in parent_to_children.values():
         children.sort()
 
-    def format_prob(node: dict[str, Any]) -> str:
-        val = node.get("own_base_prob")
+    def format_prob_value(val: Optional[float]) -> str:
         if val is None:
-            return "p=  -  "
-        return f"p={float(val):.3f}"
+            return "-"
+        v = float(val)
+        if v >= 1e-3 or v == 0.0:
+            return f"{v:.4f}"
+        return f"{v:.1e}"
 
     def format_greedy(node: dict[str, Any]) -> str:
         matches = node.get("matches_greedy")
@@ -352,12 +383,13 @@ def _render_tree_ascii(
             acc_marker = "[OK]" if accepted else "[X ]"
         best_marker = "*" if node["node_id"] in best_path_set else " "
         text = _escape_token_text(node["token_text"])
-        prob_str = format_prob(node)
+        warped_str = format_prob_value(node.get("own_base_prob"))
+        raw_str = format_prob_value(node.get("own_base_prob_raw"))
         greedy_str = format_greedy(node)
         return (
             f"{prefix}{connector}{acc_marker}{best_marker} "
             f"id={node['node_id']:3d} d={node['depth']} tok={node['token_id']:>6d} "
-            f"{prob_str} {greedy_str} \"{text}\""
+            f"pw={warped_str:>7s} pr={raw_str:>7s} {greedy_str} \"{text}\""
         )
 
     def format_parent_topk_line(node: dict[str, Any], sub_prefix: str) -> Optional[str]:
