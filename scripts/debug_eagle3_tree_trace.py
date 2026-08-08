@@ -487,6 +487,16 @@ def _parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument(
+        "--enable-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Maps to tokenizer.apply_chat_template(enable_thinking=...). "
+            "Only affects Qwen3-family templates that recognize the kwarg; "
+            "other templates silently ignore the resolved value."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -524,12 +534,27 @@ def main() -> int:
     if args.num_assistant_tokens is not None:
         model.generation_config.num_assistant_tokens = int(args.num_assistant_tokens)
 
+    enable_thinking = bool(args.enable_thinking)
     if getattr(tokenizer, "chat_template", None):
-        chat_prompt = tokenizer.apply_chat_template(
-            [{"role": "user", "content": args.prompt}],
-            add_generation_prompt=True,
-            tokenize=False,
-        )
+        try:
+            chat_prompt = tokenizer.apply_chat_template(
+                [{"role": "user", "content": args.prompt}],
+                add_generation_prompt=True,
+                tokenize=False,
+                enable_thinking=enable_thinking,
+            )
+        except TypeError:
+            if not enable_thinking:
+                print(
+                    "warning: tokenizer.apply_chat_template does not accept enable_thinking; "
+                    "--no-enable-thinking has no effect for this template",
+                    file=sys.stderr,
+                )
+            chat_prompt = tokenizer.apply_chat_template(
+                [{"role": "user", "content": args.prompt}],
+                add_generation_prompt=True,
+                tokenize=False,
+            )
     else:
         print("warning: tokenizer has no chat_template; using raw prompt", file=sys.stderr)
         chat_prompt = args.prompt
@@ -632,6 +657,7 @@ def main() -> int:
             "eagle3_tree_depth": args.eagle3_tree_depth,
             "eagle3_tree_top_k": args.eagle3_tree_top_k,
             "num_assistant_tokens": args.num_assistant_tokens,
+            "enable_thinking": enable_thinking,
         },
         "generation_config_effective": {
             "do_sample": do_sample,
