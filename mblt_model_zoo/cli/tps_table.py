@@ -32,7 +32,7 @@ label helpers, so the JSON key set stays in lockstep with the printed table.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 SECTION_LLM_MEASURE = "llm_measure"
@@ -84,20 +84,25 @@ def _get_optional(obj: Any, name: str) -> Any:
 
 def _attr(name: str) -> Extractor:
     """Return an extractor that reads ``obj.name`` (with ``.llm`` fallback)."""
+
     def _f(obj: Any) -> Any:
         return _get_optional(obj, name)
+
     return _f
 
 
 def _direct_attr(name: str) -> Extractor:
     """Return an extractor that reads ``obj.name`` without the ``.llm`` fallback."""
+
     def _f(obj: Any) -> Any:
         return getattr(obj, name, None)
+
     return _f
 
 
 def _sweep_curve(sweep_attr: str, values_attr: str) -> Extractor:
     """Return an extractor that reads a full sweep curve as a list."""
+
     def _f(obj: Any) -> Any:
         sweep = getattr(obj, sweep_attr, None)
         if sweep is None:
@@ -110,6 +115,7 @@ def _sweep_curve(sweep_attr: str, values_attr: str) -> Extractor:
         if values is None:
             return None
         return list(values)
+
     return _f
 
 
@@ -125,6 +131,7 @@ def _sweep_last(sweep_attr: str, values_attr: str) -> Extractor:
         if last is None:
             return None
         return last
+
     return _f
 
 
@@ -137,11 +144,13 @@ def _sweep_last_ms(sweep_attr: str, values_attr: str) -> Extractor:
         if v is None:
             return None
         return float(v) * 1000.0
+
     return _f
 
 
 def _list_attr(name: str, *, scale: float = 1.0) -> RunsExtractor:
     """Return a from_runs_for_summary that pulls ``obj.name`` from every run."""
+
     def _f(runs: Sequence[Any]) -> list[float]:
         out: list[float] = []
         for run in runs:
@@ -150,6 +159,7 @@ def _list_attr(name: str, *, scale: float = 1.0) -> RunsExtractor:
                 continue
             out.append(float(v) * scale)
         return out
+
     return _f
 
 
@@ -165,6 +175,7 @@ def _list_sweep_last(sweep_attr: str, values_attr: str, *, scale: float = 1.0) -
                 continue
             out.append(float(v) * scale)
         return out
+
     return _f
 
 
@@ -310,6 +321,7 @@ def _sweep_last_npu_pct(sweep_attr: str) -> Extractor:
         if not totals or not npus:
             return None
         return _npu_latency_pct(totals[-1], npus[-1])
+
     return _f
 
 
@@ -365,16 +377,8 @@ def _total_npu_latency_row() -> TpsRow:
             return None
         prefill_sweep = getattr(run, "prefill_sweep", None)
         decode_sweep = getattr(run, "decode_sweep", None)
-        p_t = (
-            float(prefill_sweep.time_values[-1])
-            if prefill_sweep and prefill_sweep.time_values
-            else 0.0
-        )
-        d_t = (
-            float(decode_sweep.time_values[-1])
-            if decode_sweep and decode_sweep.time_values
-            else 0.0
-        )
+        p_t = float(prefill_sweep.time_values[-1]) if prefill_sweep and prefill_sweep.time_values else 0.0
+        d_t = float(decode_sweep.time_values[-1]) if decode_sweep and decode_sweep.time_values else 0.0
         weight_sum = p_t + d_t
         if weight_sum <= 0:
             return None
@@ -425,6 +429,7 @@ def _scalar_device_row(
     scale: float = 1.0,
 ) -> TpsRow:
     """Row for a scalar device metric that reads ``obj.attr`` uniformly."""
+
     def _from_run(obj: Any) -> Any:
         v = _get_optional(obj, attr)
         if v is None:
@@ -512,14 +517,10 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "ms",
         _VLM_VISION,
         from_run=lambda obj: (
-            None
-            if getattr(obj, "vision_encode_latency", None) is None
-            else float(obj.vision_encode_latency) * 1000.0
+            None if getattr(obj, "vision_encode_latency", None) is None else float(obj.vision_encode_latency) * 1000.0
         ),
         from_runs_for_summary=lambda runs: [
-            float(v) * 1000.0
-            for r in runs
-            if (v := getattr(r, "vision_encode_latency", None)) is not None
+            float(v) * 1000.0 for r in runs if (v := getattr(r, "vision_encode_latency", None)) is not None
         ],
     ),
     _row(
@@ -532,7 +533,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
             float(v) for r in runs if (v := getattr(r, "vision_fps", None)) is not None
         ],
     ),
-
     # --- LLM throughput/latency (all four LLM sections; llm_ prefix in VLM) ---
     _throughput_row(
         "prefill_tps",
@@ -568,7 +568,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         sweep_values_attr="time_values",
         ms_scale=True,
     ),
-
     # --- Total wall time (measure only; represents phase totals) ---
     _row(
         "total",
@@ -578,36 +577,24 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         from_run=_total_measure_from_run,
         from_runs_for_summary=_list_attr("total_time", scale=1000.0),
     ),
-
     # --- NPU latency ---
     _npu_latency_row("prefill_npu_lat", "prefill_npu_lat", "prefill_npu_latency_pct", "prefill_sweep"),
     _npu_latency_row("decode_npu_lat", "decode_npu_lat", "decode_npu_latency_pct", "decode_sweep"),
     _total_npu_latency_row(),
-
     # --- EAGLE-3 acceptance (LLM measure only) ---
     _accept_row("accept_steps", "accept_steps", "count", "acceptance_steps"),
     _accept_row("accept_tok_sum", "accept_tok_sum", "tok", "acceptance_tokens_sum"),
     _accept_row("accept_tok_avg", "accept_tok_avg", "tok", "acceptance_tokens_avg"),
     _accept_row("accept_ratio", "accept_ratio", "%", "acceptance_ratio", scale=100.0),
-
     # --- Device metrics: power ---
     _scalar_device_row("avg_power", "avg_power", "W", _ALL_LLM, "avg_power_w", llm_prefix=True),
     _scalar_device_row("p99_power", "p99_power", "W", _ALL_LLM, "p99_power_w", llm_prefix=True),
-    _scalar_device_row(
-        "prefill_avg_power", "prefill_avg_power", "W", _ALL_LLM, "prefill_avg_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "prefill_p99_power", "prefill_p99_power", "W", _ALL_LLM, "prefill_p99_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_avg_power", "decode_avg_power", "W", _ALL_LLM, "decode_avg_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_p99_power", "decode_p99_power", "W", _ALL_LLM, "decode_p99_power_w", llm_prefix=True
-    ),
+    _scalar_device_row("prefill_avg_power", "prefill_avg_power", "W", _ALL_LLM, "prefill_avg_power_w", llm_prefix=True),
+    _scalar_device_row("prefill_p99_power", "prefill_p99_power", "W", _ALL_LLM, "prefill_p99_power_w", llm_prefix=True),
+    _scalar_device_row("decode_avg_power", "decode_avg_power", "W", _ALL_LLM, "decode_avg_power_w", llm_prefix=True),
+    _scalar_device_row("decode_p99_power", "decode_p99_power", "W", _ALL_LLM, "decode_p99_power_w", llm_prefix=True),
     _scalar_device_row("vision_avg_power", "vision_avg_power", "W", _VLM_VISION, "vision_avg_power_w"),
     _scalar_device_row("vision_p99_power", "vision_p99_power", "W", _VLM_VISION, "vision_p99_power_w"),
-
     # --- Device metrics: utilization ---
     _scalar_device_row("avg_util", "avg_util", "%", _ALL_LLM, "avg_utilization_pct", llm_prefix=True),
     _scalar_device_row("p99_util", "p99_util", "%", _ALL_LLM, "p99_utilization_pct", llm_prefix=True),
@@ -625,7 +612,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     ),
     _scalar_device_row("vision_avg_util", "vision_avg_util", "%", _VLM_VISION, "vision_avg_utilization_pct"),
     _scalar_device_row("vision_p99_util", "vision_p99_util", "%", _VLM_VISION, "vision_p99_utilization_pct"),
-
     # --- Device metrics: temperature ---
     _scalar_device_row("avg_temp", "avg_temp", "C", _ALL_LLM, "avg_temperature_c", llm_prefix=True),
     _scalar_device_row("p99_temp", "p99_temp", "C", _ALL_LLM, "p99_temperature_c", llm_prefix=True),
@@ -643,14 +629,9 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     ),
     _scalar_device_row("vision_avg_temp", "vision_avg_temp", "C", _VLM_VISION, "vision_avg_temperature_c"),
     _scalar_device_row("vision_p99_temp", "vision_p99_temp", "C", _VLM_VISION, "vision_p99_temperature_c"),
-
     # --- Device metrics: memory (MB) ---
-    _scalar_device_row(
-        "avg_mem_used", "avg_mem_used", "MB", _ALL_LLM, "avg_memory_used_mb", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "p99_mem_used", "p99_mem_used", "MB", _ALL_LLM, "p99_memory_used_mb", llm_prefix=True
-    ),
+    _scalar_device_row("avg_mem_used", "avg_mem_used", "MB", _ALL_LLM, "avg_memory_used_mb", llm_prefix=True),
+    _scalar_device_row("p99_mem_used", "p99_mem_used", "MB", _ALL_LLM, "p99_memory_used_mb", llm_prefix=True),
     _scalar_device_row(
         "prefill_avg_mem_used",
         "prefill_avg_mem_used",
@@ -683,25 +664,13 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "decode_p99_memory_used_mb",
         llm_prefix=True,
     ),
-    _scalar_device_row(
-        "vision_avg_mem_used", "vision_avg_mem_used", "MB", _VLM_VISION, "vision_avg_memory_used_mb"
-    ),
-    _scalar_device_row(
-        "vision_p99_mem_used", "vision_p99_mem_used", "MB", _VLM_VISION, "vision_p99_memory_used_mb"
-    ),
-
+    _scalar_device_row("vision_avg_mem_used", "vision_avg_mem_used", "MB", _VLM_VISION, "vision_avg_memory_used_mb"),
+    _scalar_device_row("vision_p99_mem_used", "vision_p99_mem_used", "MB", _VLM_VISION, "vision_p99_memory_used_mb"),
     # --- Total memory (aggregate; no llm_ prefix; appears in every device section) ---
-    _scalar_device_row(
-        "total_mem", "total_mem", "MB", _ALL_DEVICE_SECTIONS, "total_memory_mb"
-    ),
-
+    _scalar_device_row("total_mem", "total_mem", "MB", _ALL_DEVICE_SECTIONS, "total_memory_mb"),
     # --- Device metrics: memory (%) ---
-    _scalar_device_row(
-        "avg_mem_used_pct", "avg_mem_used_pct", "%", _ALL_LLM, "avg_memory_used_pct", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "p99_mem_used_pct", "p99_mem_used_pct", "%", _ALL_LLM, "p99_memory_used_pct", llm_prefix=True
-    ),
+    _scalar_device_row("avg_mem_used_pct", "avg_mem_used_pct", "%", _ALL_LLM, "avg_memory_used_pct", llm_prefix=True),
+    _scalar_device_row("p99_mem_used_pct", "p99_mem_used_pct", "%", _ALL_LLM, "p99_memory_used_pct", llm_prefix=True),
     _scalar_device_row(
         "prefill_avg_mem_used_pct",
         "prefill_avg_mem_used_pct",
@@ -748,17 +717,10 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _VLM_VISION,
         "vision_p99_memory_used_pct",
     ),
-
     # --- Energy ---
-    _scalar_device_row(
-        "prefill_energy", "prefill_energy", "J", _ALL_LLM, "prefill_energy_j", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_energy", "decode_energy", "J", _ALL_LLM, "decode_energy_j", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "vision_energy", "vision_energy", "J", _VLM_VISION, "vision_energy_j"
-    ),
+    _scalar_device_row("prefill_energy", "prefill_energy", "J", _ALL_LLM, "prefill_energy_j", llm_prefix=True),
+    _scalar_device_row("decode_energy", "decode_energy", "J", _ALL_LLM, "decode_energy_j", llm_prefix=True),
+    _scalar_device_row("vision_energy", "vision_energy", "J", _VLM_VISION, "vision_energy_j"),
     # llm_total_energy: LLM-only aggregate energy in VLM contexts.  Sourced
     # from ``llm_total_energy_j`` so it never accidentally reads the
     # vision+LLM combined ``total_energy_j``.  The label is literal (no
@@ -785,7 +747,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         (SECTION_LLM_MEASURE, SECTION_LLM_SWEEP, SECTION_VLM_MEASURE),
         "total_energy_j",
     ),
-
     # --- Efficiency (per-phase, phase-wide aggregate) ---
     _scalar_device_row(
         "prefill_tps_per_w",
@@ -819,12 +780,8 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "decode_j_per_token",
         llm_prefix=True,
     ),
-    _scalar_device_row(
-        "vision_img_per_j", "vision_img_per_j", "img/J", _VLM_VISION, "vision_img_per_j"
-    ),
-    _scalar_device_row(
-        "vision_j_per_img", "vision_j_per_img", "J/img", _VLM_VISION, "vision_j_per_img"
-    ),
+    _scalar_device_row("vision_img_per_j", "vision_img_per_j", "img/J", _VLM_VISION, "vision_img_per_j"),
+    _scalar_device_row("vision_j_per_img", "vision_j_per_img", "J/img", _VLM_VISION, "vision_j_per_img"),
 ]
 
 
@@ -901,6 +858,21 @@ def emit_table(
         if row.key not in values_by_key:
             continue
         print_summary(label_for(row, section), values_by_key[row.key], row.unit)
+
+
+TEMPERATURE_JSON_KEY = "temperature"
+TEMPERATURE_LABEL = "temperature"
+
+
+def format_temperature_display(temperature: float) -> str:
+    """Return the CLI display string for a sampling temperature.
+
+    Greedy decoding (``temperature == 0.0``) is rendered as ``0.0 (greedy)``
+    so the printed header conveys the semantics without ambiguity.
+    """
+    if float(temperature) == 0.0:
+        return "0.0 (greedy)"
+    return f"{float(temperature):g}"
 
 
 def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[str, str]:

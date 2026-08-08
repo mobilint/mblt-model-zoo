@@ -362,6 +362,10 @@ mblt-model-zoo tps measure --help
 mblt-model-zoo tps sweep --help
 ```
 
+`tps measure` accepts `--temperature FLOAT` (default `0.0`) to sample instead of greedy-decoding.
+A value of `0.0` keeps the current greedy behavior; any value greater than zero enables
+`do_sample=True` with that temperature. `tps sweep` remains greedy so its numbers stay comparable.
+
 Detailed TPS benchmark examples are available in
 [benchmark/transformers/README.md](benchmark/transformers/README.md).
 

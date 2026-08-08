@@ -856,6 +856,7 @@ class TPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        temperature: float = 0.0,
     ) -> SingleMeasurement:
         """Measure batched generation without a streamer and report total throughput."""
         batch_size = _validate_batch_size(int(input_ids.shape[0]))
@@ -863,10 +864,14 @@ class TPSMeasurer:
             input_ids=input_ids,
             min_new_tokens=num_decode if fake_prefill else num_decode + 1,
             max_new_tokens=num_decode if fake_prefill else num_decode + 1,
-            do_sample=False,
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if temperature > 0.0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = float(temperature)
+        else:
+            gen_kwargs["do_sample"] = False
         if past_key_values is not None:
             gen_kwargs["past_key_values"] = past_key_values
         if npu_prefill_chunk_size is not None:
@@ -986,6 +991,7 @@ class TPSMeasurer:
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
         batch_size: int = 1,
+        temperature: float = 0.0,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -1023,6 +1029,7 @@ class TPSMeasurer:
                     on_prefill_end=on_prefill_end,
                     on_decode_start=on_decode_start,
                     on_decode_end=on_decode_end,
+                    temperature=temperature,
                 )
 
             # 2. Setup
@@ -1032,10 +1039,14 @@ class TPSMeasurer:
                 streamer=streamer,
                 min_new_tokens=num_decode + 1,
                 max_new_tokens=num_decode + 1,
-                do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if temperature > 0.0:
+                gen_kwargs["do_sample"] = True
+                gen_kwargs["temperature"] = float(temperature)
+            else:
+                gen_kwargs["do_sample"] = False
             if npu_prefill_chunk_size is not None:
                 gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(self.model)
@@ -1707,6 +1718,7 @@ class VLMTPSMeasurer:
         npu_prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
+        temperature: float = 0.0,
     ) -> SingleMeasurement:
         seq_len = int(inputs_embeds.shape[1])
         lm_for_npu = self._get_language_model()
@@ -1727,10 +1739,14 @@ class VLMTPSMeasurer:
                 position_ids=position_ids,
                 min_new_tokens=num_decode + 1,
                 max_new_tokens=num_decode + 1,
-                do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if temperature > 0.0:
+                gen_kwargs["do_sample"] = True
+                gen_kwargs["temperature"] = float(temperature)
+            else:
+                gen_kwargs["do_sample"] = False
             if npu_prefill_chunk_size is not None:
                 gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
@@ -1819,10 +1835,14 @@ class VLMTPSMeasurer:
             streamer=streamer,
             min_new_tokens=num_decode + 1,
             max_new_tokens=num_decode + 1,
-            do_sample=False,
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if temperature > 0.0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = float(temperature)
+        else:
+            gen_kwargs["do_sample"] = False
         if npu_prefill_chunk_size is not None:
             gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
         npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
@@ -2142,6 +2162,7 @@ class VLMTPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        temperature: float = 0.0,
     ) -> BenchmarkResult:
         full_result = BenchmarkResult()
         batch_size = _validate_batch_size(batch_size)
@@ -2180,6 +2201,7 @@ class VLMTPSMeasurer:
                     npu_prefill_chunk_size=npu_prefill_chunk_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
+                    temperature=temperature,
                 )
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
@@ -2233,6 +2255,7 @@ class VLMTPSMeasurer:
                         npu_prefill_chunk_size=npu_prefill_chunk_size,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
+                        temperature=temperature,
                     )
                 full_result.decode_sweep.x_values.append(cache_len)
                 full_result.decode_sweep.tps_values.append(res.decode_tps)
@@ -2333,6 +2356,7 @@ class VLMTPSMeasurer:
         npu_prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
+        temperature: float = 0.0,
     ) -> list[VLMSingleMeasurement]:
         assert repeat > 0, "repeat must be > 0"
         batch_size = _validate_batch_size(batch_size)
@@ -2350,6 +2374,7 @@ class VLMTPSMeasurer:
                 inputs_embeds=inputs_embeds,
                 num_decode=num_decode,
                 npu_prefill_chunk_size=npu_prefill_chunk_size,
+                temperature=temperature,
             )
             results.append(
                 VLMSingleMeasurement(
