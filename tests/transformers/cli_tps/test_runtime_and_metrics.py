@@ -2683,6 +2683,7 @@ def _trace_scope_args(**overrides):
         prompt_file=None,
         prompt_file_strategy="first",
         prompt_file_seed=0,
+        apply_chat_template=True,
         image_resolution=224,
         image_resolutions=[224],
         llm_resolution=224,
