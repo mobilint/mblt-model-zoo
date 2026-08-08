@@ -793,12 +793,25 @@ def _resolve_text_measure_inputs(
 ) -> tuple[torch.Tensor | None, int, str | None]:
     """Resolve text-measure input ids/prefill length from CLI input-mode options."""
 
+    apply_chat_template = bool(getattr(args, "apply_chat_template", True))
+
     def _tokenize_prompt_text(text: str) -> torch.Tensor:
-        encoded = pipeline.tokenizer(
-            text,
-            return_tensors="pt",
-            add_special_tokens=True,
-        )
+        tokenizer = pipeline.tokenizer
+        template_available = getattr(tokenizer, "chat_template", None) is not None
+        if apply_chat_template and template_available:
+            encoded = tokenizer.apply_chat_template(
+                [{"role": "user", "content": text}],
+                add_generation_prompt=True,
+                return_tensors="pt",
+                return_dict=True,
+                tokenize=True,
+            )
+        else:
+            encoded = tokenizer(
+                text,
+                return_tensors="pt",
+                add_special_tokens=True,
+            )
         return encoded["input_ids"]
 
     selected_prompt_text: str | None = None
@@ -1803,6 +1816,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             "input": {
                 "mode": str(getattr(args, "input_mode", "random")),
                 "prompt_sha256": selected_prompt_sha256,
+                "apply_chat_template": bool(getattr(args, "apply_chat_template", True)),
             },
             "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key),
             "runs": [_llm_measure_run_payload(r) for r in runs],
@@ -3704,6 +3718,18 @@ def add_tps_parser(
         type=int,
         default=0,
         help="random seed used when --prompt-file-strategy is random",
+    )
+    p_measure.add_argument(
+        "--no-chat-template",
+        dest="apply_chat_template",
+        action="store_false",
+        default=True,
+        help=(
+            "disable the default chat-template scaffolding applied to text prompts "
+            "(--input-mode synthetic-text|file); by default the prompt is inserted as a "
+            "single-turn user message with add_generation_prompt=True when the tokenizer "
+            "exposes a chat_template"
+        ),
     )
     p_measure.add_argument(
         "--image-resolution",
