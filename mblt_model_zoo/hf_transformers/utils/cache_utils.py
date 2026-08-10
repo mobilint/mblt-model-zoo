@@ -123,6 +123,14 @@ class MobilintLayer(CacheLayerMixin):
 
 class MobilintCache(Cache):
     def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1):
+        """Create a cache with fresh logical cursors for the shared runtime model.
+
+        qbruntime selects the readable KV prefix from the ``cache_size`` passed
+        to inference; it does not expose the old ``reset_cache_memory`` API.
+        Fresh layers therefore start at sequence length zero, causing the next
+        inference to overwrite cache entries from the beginning rather than
+        making a previous request's KV prefix addressable.
+        """
         self.mxq_model = mxq_model
         self.batch_size = max(1, batch_size)
 

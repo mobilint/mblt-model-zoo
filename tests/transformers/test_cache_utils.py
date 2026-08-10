@@ -76,6 +76,17 @@ def test_dump_cache_memory_roundtrip_restores_seq_length() -> None:
     assert mxq_model.loaded == [(0, [b"cache-0"])]
 
 
+def test_new_cache_for_reused_model_starts_with_fresh_logical_cursors() -> None:
+    """A new request must not inherit the prior request's addressable KV prefix."""
+    mxq_model = _FakeMxqModel()
+    previous_request = MobilintCache(mxq_model, batch_size=2)
+    previous_request.set_seq_length({0: 7, 1: 11})
+
+    next_request = MobilintCache(mxq_model, batch_size=2)
+
+    assert [next_request.get_seq_length(index=i) for i in range(2)] == [0, 0]
+
+
 def test_fake_prefill_sets_seq_length_without_cache_buffer() -> None:
     """Fake prefill should only expose sequence length and clear cache payloads."""
     mxq_model = _FakeMxqModel()
