@@ -3,6 +3,16 @@
 Runs one or more ``model.generate()`` calls on a Mobilint EAGLE-3 causal LM and,
 for every speculative step, dumps the draft tree plus verification result as JSON
 and prints a human-readable ASCII tree.
+
+Example:
+    python scripts/debug_eagle3_tree_trace.py \\
+        --prompt "What is the transformer model?" \\
+        --seed 0 --no-enable-thinking --max-new-tokens 32 --do-sample \\
+        --warmup --output-dir debug/eagle3_run
+
+``--warmup`` (default: on) runs one throwaway ``model.generate(...)`` before the
+traced generate so MXQ backend state reaches steady-state; this makes cross-process
+runs on the same machine deterministic. Pass ``--no-warmup`` to skip it.
 """
 
 from __future__ import annotations
@@ -718,6 +728,18 @@ def _parse_args() -> argparse.Namespace:
             "draft_tree.nodes[i].parent_topk in the JSON trace."
         ),
     )
+    parser.add_argument(
+        "--warmup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run one throwaway model.generate(...) with identical inputs and inference "
+            "settings before the traced generate (default: on). Warms MXQ backend state "
+            "to steady-state so cross-process runs on the same machine are deterministic. "
+            "The warmup runs before tracing wrappers are installed, so its call graph is "
+            "not recorded. Pass --no-warmup to skip."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -801,6 +823,19 @@ def main() -> int:
         do_sample = False
 
     criterion_str = _criterion_string(do_sample, resolved_temperature, resolved_top_k, top_p=0.0)
+
+    if args.warmup:
+        print("warmup generate completed, running measured generate...", file=sys.stderr)
+        torch.manual_seed(int(args.seed))
+        with torch.inference_mode():
+            _ = model.generate(
+                input_ids=input_ids,
+                max_new_tokens=int(args.max_new_tokens),
+                do_sample=do_sample,
+                temperature=resolved_temperature,
+                top_k=resolved_top_k,
+            )
+        print("...warmup done", file=sys.stderr)
 
     torch.manual_seed(int(args.seed))
 
