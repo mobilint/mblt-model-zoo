@@ -53,11 +53,21 @@ class DepthPost(PostBase):
             x = x[0]
         depth = torch.as_tensor(x)
         if depth.ndim == 4:
-            if depth.shape[1] != 1:
-                raise ValueError(f"Depth estimation expects [B, 1, H, W], got {tuple(depth.shape)}.")
-            depth = depth[:, 0]
+            if depth.shape[1] == 1:
+                depth = depth[:, 0]
+            elif depth.shape[-1] == 1:
+                depth = depth[..., 0]
+            else:
+                raise ValueError(
+                    f"Depth estimation expects [B, 1, H, W] or [B, H, W, 1], got {tuple(depth.shape)}."
+                )
+        elif depth.ndim == 3 and depth.shape[-1] == 1 and tuple(depth.shape[:2]) == self.input_shape:
+            depth = depth[..., 0].unsqueeze(0)
         elif depth.ndim != 3:
-            raise ValueError(f"Depth estimation expects [B, H, W] or [B, 1, H, W], got {tuple(depth.shape)}.")
+            raise ValueError(
+                "Depth estimation expects [B, H, W], [B, 1, H, W], [H, W, 1], or [B, H, W, 1], "
+                f"got {tuple(depth.shape)}."
+            )
         depth = depth.to(device=self.device, dtype=torch.float32)
         if tuple(depth.shape[-2:]) == self.input_shape:
             return depth

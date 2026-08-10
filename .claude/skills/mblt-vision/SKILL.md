@@ -39,8 +39,10 @@ Require `pre_cfg.LetterBox` for YOLO detection postprocessors. Semantic preproce
 contains original `img0_shape` and `ratio_pad`; prediction restores spatial logits before `argmax`,
 and validation loaders reuse the same geometry for targets.
 
-Normalize dense MXQ output before inverse letterboxing: depth `[1, H/4, W/4]` maps are bilinearly
-upsampled by four, while Cityscapes semantic `[H, W, 19]` or `[B, H, W, 19]` logits become NCHW
+Normalize dense MXQ output before inverse letterboxing: depth `[B, 1, H/4, W/4]` or
+`[B, H/4, W/4]` maps are bilinearly upsampled by four, while baked-resize `[H, W, 1]` or
+`[B, H, W, 1]` depth maps only move the channel axis and Cityscapes semantic `[H, W, 19]` or
+`[B, H, W, 19]` logits become NCHW
 before bilinear restoration and `argmax`. Keep existing ONNX layouts and baked maps compatible,
 but require baked semantic IDs to be finite, integral, and in-range before casting.
 Define NYU Depth metric validity from targets and reject non-finite predictions at valid target pixels
