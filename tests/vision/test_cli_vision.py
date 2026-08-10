@@ -397,7 +397,7 @@ def test_cli_predict_restores_semantic_logits_with_preprocess_geometry(
 ) -> None:
     """Restore non-square semantic logits before selecting their classes."""
 
-    from mblt_model_zoo.vision.utils.postprocess.semantic_seg_post import SemanticSegPost
+    from mblt_vision.utils.postprocess.semantic_seg_post import SemanticSegPost
 
     source_path = tmp_path / "street.png"
     source_path.write_bytes(b"fake")

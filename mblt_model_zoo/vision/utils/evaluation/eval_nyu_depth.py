@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from mblt_vision.utils.preprocess import build_preprocess
 from tqdm import tqdm
 
 from ..datasets import CustomNYUDepth, get_nyu_depth_loader
-from ..preprocess import build_preprocess
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine

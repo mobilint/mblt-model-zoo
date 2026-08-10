@@ -11,9 +11,9 @@ import cv2
 import numpy as np
 import torch
 from faster_coco_eval import COCO
+from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
 from PIL import Image
 
-from ..preprocess.letterbox import letterbox_semantic_mask
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 
 

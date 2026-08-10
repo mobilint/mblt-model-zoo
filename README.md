@@ -194,7 +194,8 @@ explicit `model_cls`, `model_type`, or `model_path` values.
 
 ## Model List
 
-We provide models quantized with our advanced quantization techniques. You can check whether a model is available in our [configuration directory](mblt_model_zoo/vision/models/).
+We provide models quantized with our advanced quantization techniques. Inspect available models with
+`mblt_vision.list_models()` or the model configurations distributed by `mblt-vision-python`.
 
 ## Optional Extras
 

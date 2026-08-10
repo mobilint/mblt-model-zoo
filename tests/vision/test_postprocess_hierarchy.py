@@ -6,26 +6,25 @@ import warnings
 from typing import Any
 
 import pytest
-
-from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
-from mblt_model_zoo.vision.utils.postprocess.cls_post import ClsPost
-from mblt_model_zoo.vision.utils.postprocess.depth_post import DepthPost
-from mblt_model_zoo.vision.utils.postprocess.semantic_seg_post import SemanticSegPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchor_post import YOLOAnchorDetectionPost, YOLOAnchorSegPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import (
+from mblt_vision.utils.postprocess import build_postprocess
+from mblt_vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
+from mblt_vision.utils.postprocess.cls_post import ClsPost
+from mblt_vision.utils.postprocess.depth_post import DepthPost
+from mblt_vision.utils.postprocess.semantic_seg_post import SemanticSegPost
+from mblt_vision.utils.postprocess.yolo_anchor_post import YOLOAnchorDetectionPost, YOLOAnchorSegPost
+from mblt_vision.utils.postprocess.yolo_anchorless_post import (
     YOLOAnchorlessDetectionPost,
     YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     YOLOAnchorlessSegPost,
 )
-from mblt_model_zoo.vision.utils.postprocess.yolo_dflfree_post import (
+from mblt_vision.utils.postprocess.yolo_dflfree_post import (
     YOLODFLFreeDetectionPost,
     YOLODFLFreeOBBPost,
     YOLODFLFreePosePost,
     YOLODFLFreeSegPost,
 )
-from mblt_model_zoo.vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
+from mblt_vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
 
 
 @pytest.mark.parametrize(

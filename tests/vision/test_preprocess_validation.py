@@ -7,13 +7,12 @@ import sys
 
 import numpy as np
 import pytest
-
-from mblt_model_zoo.vision.utils.preprocess.center_crop import CenterCrop
-from mblt_model_zoo.vision.utils.preprocess.letterbox import LetterBox
-from mblt_model_zoo.vision.utils.preprocess.normalize import Normalize
-from mblt_model_zoo.vision.utils.preprocess.order import SetOrder
-from mblt_model_zoo.vision.utils.preprocess.reader import Reader
-from mblt_model_zoo.vision.utils.preprocess.resize import Resize
+from mblt_vision.utils.preprocess.center_crop import CenterCrop
+from mblt_vision.utils.preprocess.letterbox import LetterBox
+from mblt_vision.utils.preprocess.normalize import Normalize
+from mblt_vision.utils.preprocess.order import SetOrder
+from mblt_vision.utils.preprocess.reader import Reader
+from mblt_vision.utils.preprocess.resize import Resize
 
 
 @pytest.mark.parametrize("operation", [CenterCrop(2), Resize(2, "bilinear"), LetterBox([2, 2])])
@@ -64,7 +63,7 @@ def test_runtime_validation_survives_optimized_python() -> None:
     """Keep configuration checks active under ``python -O``."""
 
     code = """
-from mblt_model_zoo.vision.utils.postprocess import build_postprocess
+from mblt_vision.utils.postprocess import build_postprocess
 try:
     build_postprocess(
         {"LetterBox": {"img_size": [640, 640]}},

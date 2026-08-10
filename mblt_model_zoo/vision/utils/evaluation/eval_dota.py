@@ -11,17 +11,17 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import torch
-from tqdm import tqdm
-
-from ..._tasks import normalize_vision_task
-from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
-from ..letterbox import RatioPad, resolve_ratio_pad
-from ..postprocess.common import (
+from mblt_vision.utils.postprocess.common import (
     batch_probiou,
     rotated_nms,
     xywhr2xyxyxyxy,
     xyxyxyxy2xywhr,
 )
+from tqdm import tqdm
+
+from ..._tasks import normalize_vision_task
+from ..datasets import CustomDOTAv1, get_dota_loader, get_dotav1_class_num, get_dotav1_label
+from ..letterbox import RatioPad, resolve_ratio_pad
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine

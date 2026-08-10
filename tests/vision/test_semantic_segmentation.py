@@ -10,6 +10,8 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from mblt_vision.utils.postprocess import SemanticSegPost
+from mblt_vision.utils.preprocess import build_preprocess
 
 from mblt_model_zoo.vision.utils.datasets import (
     CustomADE20K,
@@ -27,8 +29,6 @@ from mblt_model_zoo.vision.utils.evaluation import (
     eval_ade20k,
     eval_cityscapes,
 )
-from mblt_model_zoo.vision.utils.postprocess import SemanticSegPost
-from mblt_model_zoo.vision.utils.preprocess import build_preprocess
 from mblt_model_zoo.vision.utils.results import Results
 
 

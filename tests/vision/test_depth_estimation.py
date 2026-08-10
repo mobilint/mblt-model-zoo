@@ -8,10 +8,10 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from mblt_vision.utils.postprocess import DepthPost
 
 from mblt_model_zoo.vision.utils.datasets.dataloader import CustomNYUDepth, get_nyu_depth_loader
 from mblt_model_zoo.vision.utils.evaluation import NYUDepthMetricAccumulator, calculate_nyu_depth_metrics
-from mblt_model_zoo.vision.utils.postprocess import DepthPost
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.wrapper import resolve_model_config
 

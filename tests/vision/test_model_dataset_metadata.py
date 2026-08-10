@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mblt_vision
 import yaml
 
 from mblt_model_zoo.vision.wrapper import resolve_model_config
 
-MODEL_CONFIG_DIR = Path(__file__).parents[2] / "mblt_model_zoo" / "vision" / "models"
+MODEL_CONFIG_DIR = Path(mblt_vision.__file__).parent / "models"
 
 DATASETS_BY_TASK = {
     "depth_estimation": {"nyu-depth"},

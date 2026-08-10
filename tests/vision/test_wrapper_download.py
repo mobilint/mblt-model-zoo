@@ -9,14 +9,9 @@ import numpy as np
 import pytest
 import torch
 from huggingface_hub.errors import EntryNotFoundError
-
-import mblt_model_zoo.vision.wrapper as wrapper
-from mblt_model_zoo.vision._compat import create_model_class
-from mblt_model_zoo.vision.utils.datasets import CustomCocodata
-from mblt_model_zoo.vision.utils.letterbox import resolve_ratio_pad
-from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
-from mblt_model_zoo.vision.utils.postprocess.common import (
+from mblt_vision.utils.postprocess import build_postprocess
+from mblt_vision.utils.postprocess.base import YOLODetectionPostBase
+from mblt_vision.utils.postprocess.common import (
     crop_mask,
     dual_topk,
     nmsout2eval,
@@ -25,13 +20,18 @@ from mblt_model_zoo.vision.utils.postprocess.common import (
     scale_coords,
     scale_masks,
 )
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import (
+from mblt_vision.utils.postprocess.yolo_anchorless_post import (
     AnchorlessOutputLayout,
     YOLOAnchorlessDetectionPost,
     YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     _AnchorlessNMSInput,
 )
+
+import mblt_model_zoo.vision.wrapper as wrapper
+from mblt_model_zoo.vision._compat import create_model_class
+from mblt_model_zoo.vision.utils.datasets import CustomCocodata
+from mblt_model_zoo.vision.utils.letterbox import resolve_ratio_pad
 from mblt_model_zoo.vision.utils.results import Results
 from mblt_model_zoo.vision.utils.types import ListTensorLike
 from mblt_model_zoo.vision.wrapper import MBLT_Engine

@@ -11,6 +11,14 @@ from typing import cast
 import cv2
 import numpy as np
 import torch
+from mblt_vision.utils.postprocess.common import (
+    crop_mask,
+    scale_boxes,
+    scale_coords,
+    scale_masks,
+    scale_rboxes,
+    xywhr2xyxyxyxy,
+)
 from PIL import Image
 
 from .._tasks import normalize_vision_task
@@ -27,7 +35,6 @@ from .datasets import (
     get_imagenet_label,
 )
 from .letterbox import LetterBoxGeometry
-from .postprocess.common import crop_mask, scale_boxes, scale_coords, scale_masks, scale_rboxes, xywhr2xyxyxyxy
 from .types import ListTensorLike, NestedListTensorLike, TensorLike
 
 LW = 2  # line width

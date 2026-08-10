@@ -8,11 +8,11 @@ from time import time
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
+from mblt_vision.utils.postprocess.base import YOLODetectionPostBase
 from scipy.io import loadmat
 from tqdm import tqdm
 
 from ..datasets import CustomWiderFaceDataset, get_widerface_loader
-from ..postprocess.base import YOLODetectionPostBase
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine

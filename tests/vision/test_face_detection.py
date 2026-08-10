@@ -8,15 +8,15 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from mblt_vision.utils.postprocess import build_postprocess
+from mblt_vision.utils.postprocess.base import YOLODetectionPostBase
+from mblt_vision.utils.postprocess.yolo_anchor_post import YOLOAnchorDetectionPost
+from mblt_vision.utils.postprocess.yolo_anchorless_post import YOLOAnchorlessDetectionPost
+from mblt_vision.utils.postprocess.yolo_dflfree_post import YOLODFLFreeDetectionPost
+from mblt_vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
 
 from mblt_model_zoo.vision import YOLO11m_face, list_models
 from mblt_model_zoo.vision.face_detection import YOLO11m_face as FaceDetectionYOLO11mFace
-from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess.base import YOLODetectionPostBase
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchor_post import YOLOAnchorDetectionPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_anchorless_post import YOLOAnchorlessDetectionPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_dflfree_post import YOLODFLFreeDetectionPost
-from mblt_model_zoo.vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
 from mblt_model_zoo.vision.utils.results import Results
 
 

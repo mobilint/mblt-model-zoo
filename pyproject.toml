@@ -31,6 +31,7 @@ dependencies = [
     "PyYAML",
     "matplotlib",
     "cityscapesScripts",
+    "mblt-vision-python>=0.0.1",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -108,7 +109,6 @@ version = { attr = "mblt_model_zoo.__version__" }
 "mblt_model_zoo" = [
     "MeloTTS/text/cmudict.rep",
     "MeloTTS/text/cmudict_cache.pickle",
-    "vision/models/*.yaml",
     "vision/datasets/*.yaml",
 ]
 
