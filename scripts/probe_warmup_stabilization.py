@@ -99,6 +99,25 @@ def _parse_args() -> argparse.Namespace:
         default=sys.executable,
         help="Outer mode: Python interpreter path used to launch inner subprocesses.",
     )
+    parser.add_argument(
+        "--set-num-threads",
+        type=int,
+        default=None,
+        help=(
+            "Outer mode: pin torch intra-op parallelism to N threads in every inner subprocess "
+            "(passes --inner-set-num-threads N). Use to isolate torch CPU threading warmup as the "
+            "source of cross-process variance."
+        ),
+    )
+    parser.add_argument(
+        "--inner-set-num-threads",
+        type=int,
+        default=None,
+        help=(
+            "Inner mode only: call torch.set_num_threads(N) (and torch.set_num_interop_threads(N)) "
+            "before any other torch operation, including model registration."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -235,6 +254,8 @@ def _inner_cli_args(args: argparse.Namespace, *, skip_warmup: bool) -> list[str]
     cli.append("--trust-remote-code" if bool(args.trust_remote_code) else "--no-trust-remote-code")
     if skip_warmup:
         cli.append("--skip-warmup")
+    if args.set_num_threads is not None:
+        cli.extend(["--inner-set-num-threads", str(int(args.set_num_threads))])
     return cli
 
 
@@ -291,10 +312,36 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _verdict(baseline: dict[str, Any], warmup: dict[str, Any]) -> str:
-    """Map baseline/warmup uniqueness into the four verdict strings from the docstring."""
+def _verdict(baseline: dict[str, Any], warmup: dict[str, Any], set_num_threads: Optional[int]) -> str:
+    """Map baseline/warmup uniqueness into a verdict string.
+
+    When ``set_num_threads`` is provided (Run B), the verdict discriminates between the two root-cause
+    candidates: torch CPU threading warmup vs. MXQ SDK cold-start. Otherwise it falls back to the four
+    threading-agnostic verdicts.
+    """
     baseline_ok = bool(baseline["all_identical"])
     warmup_ok = bool(warmup["all_identical"])
+    if set_num_threads is not None:
+        n = int(set_num_threads)
+        if baseline_ok and warmup_ok:
+            return (
+                f"Candidate 1 CONFIRMED: torch CPU threading warmup was the cause. "
+                f"`torch.set_num_threads({n})` alone is sufficient — baseline is deterministic without warmup."
+            )
+        if not baseline_ok and warmup_ok:
+            return (
+                f"Candidate 1 REJECTED: `torch.set_num_threads({n})` did NOT stabilize the baseline. "
+                "MXQ SDK cold-start is the primary source; only warmup fixes it."
+            )
+        if not baseline_ok and not warmup_ok:
+            return (
+                f"With `torch.set_num_threads({n})`, warmup does NOT help either; "
+                "state survives across warmup. Escalate to MXQ runtime team."
+            )
+        return (
+            f"With `torch.set_num_threads({n})`, baseline is deterministic but warmup diverges. "
+            "Investigate the warmup path."
+        )
     if baseline_ok and warmup_ok:
         return (
             "INCONCLUSIVE: baseline is already deterministic on this machine. "
@@ -365,13 +412,16 @@ def _run_outer(args: argparse.Namespace) -> int:
         "unique_digests": [],
     }
 
+    threads_label = (
+        f" [torch.num_threads={int(args.set_num_threads)}]" if args.set_num_threads is not None else ""
+    )
     if baseline_results:
-        _print_block("Baseline (no warmup, --skip-warmup)", baseline_results, baseline_summary)
+        _print_block(f"Baseline (no warmup, --skip-warmup){threads_label}", baseline_results, baseline_summary)
     if warmup_results:
-        _print_block("With warmup", warmup_results, warmup_summary)
+        _print_block(f"With warmup{threads_label}", warmup_results, warmup_summary)
 
     if baseline_results and warmup_results:
-        verdict = _verdict(baseline_summary, warmup_summary)
+        verdict = _verdict(baseline_summary, warmup_summary, args.set_num_threads)
     else:
         verdict = "SKIPPED: need both baseline and warmup runs to render a verdict."
     print(f"VERDICT: {verdict}")
@@ -388,6 +438,7 @@ def _run_outer(args: argparse.Namespace) -> int:
         "n_baseline_runs": n_baseline,
         "n_warmup_runs": n_warmup,
         "python": str(args.python),
+        "set_num_threads": (int(args.set_num_threads) if args.set_num_threads is not None else None),
         "baseline": {"summary": baseline_summary, "runs": baseline_results},
         "warmup": {"summary": warmup_summary, "runs": warmup_results},
         "verdict": verdict,
@@ -401,6 +452,14 @@ def _run_outer(args: argparse.Namespace) -> int:
 def main() -> int:
     """Dispatch to the inner runner or the outer orchestrator based on ``--inner``."""
     args = _parse_args()
+    if bool(args.inner) and args.inner_set_num_threads is not None:
+        n = int(args.inner_set_num_threads)
+        torch.set_num_threads(n)
+        try:
+            torch.set_num_interop_threads(n)
+        except RuntimeError:
+            # set_num_interop_threads must be called before any parallel work begins; ignore if too late.
+            pass
     if bool(args.inner):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
