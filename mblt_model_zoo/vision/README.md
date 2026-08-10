@@ -18,5 +18,6 @@ postprocessing, result types, model documentation, and Vision tests. See its
 [Vision API guide](https://github.com/mobilint/mblt-vision-python/tree/main/mblt_vision)
 for supported model families and runtime options.
 
-Model Zoo continues to own its CLI, compilation, benchmark, and dataset-management
-workflows.
+Model Zoo continues to host the `mblt-model-zoo predict`, `val`, and `compile`
+commands for compatibility. Those commands load models, datasets, evaluators, and
+compilation helpers from `mblt_vision` directly.
